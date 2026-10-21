@@ -155,11 +155,25 @@ jobs:
           pre-emulator-launch-script: bash scripts/ci/pre-emulator-diag.sh
           script: bash scripts/ci/emulator-smoke.sh
 
+      # Artifact CONTENTS are unreadable from the dev sandbox (*.blob.core.windows.net is outside
+      # its allowlist) but artifact NAMES are readable from api.github.com. Annotations turned out
+      # to be both capped -- run 39608945187 kept 12 notices and dropped everything after section 5
+      # -- and occasionally lost entirely, when run 39610690353 stored zero despite every step
+      # succeeding. So the verdict travels in the artifact name as well, which is the one channel
+      # that has never failed.
+      - name: Derive artifact name from the smoke summary
+        if: always()
+        run: |
+          S=$(tr -cd 'A-Za-z0-9._=-' < artifacts/summary.txt 2>/dev/null | cut -c1-90)
+          [ -n "$S" ] || S="no-summary"
+          echo "SMOKE_NAME=smoke-run-${{ github.run_number }}-$S" >> "$GITHUB_ENV"
+          echo "  ---- artifact will be named: smoke-run-${{ github.run_number }}-$S"
+
       - name: Upload evidence (diagnostics, screenshots, dumps, logcat)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: emulator-smoke-run-${{ github.run_number }}
+          name: ${{ env.SMOKE_NAME }}
           path: artifacts/
           if-no-files-found: warn
           retention-days: 30

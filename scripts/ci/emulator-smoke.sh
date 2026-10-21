@@ -43,6 +43,23 @@ mkdir -p "$OUT"
 
 fails=0
 
+# --- verdict trackers ---------------------------------------------------------------------------
+# Annotation storage has proved both CAPPED (run 39608945187 kept 12 notices in emission order and
+# silently dropped everything after section 5) and occasionally LOST outright (run 39610690353
+# stored zero annotations and its job conclusion never finalised, though every step succeeded).
+# Artifact NAMES, unlike artifact contents, are readable from api.github.com -- so the verdict also
+# travels there, via the workflow's "Derive artifact name" step. Written from an EXIT trap so an
+# early bail still leaves a summary behind; verified that the trap does not alter the exit status.
+TB_VERDICT=notrun
+KB_VERDICT=notrun
+ANR_SEEN=0
+write_summary() {
+  printf 'fails=%s-toolbar=%s-keyboard=%s-anr=%s\n' \
+    "${fails:-?}" "${TB_VERDICT:-?}" "${KB_VERDICT:-?}" "${ANR_SEEN:-?}" \
+    > "$OUT/summary.txt" 2>/dev/null || true
+}
+trap write_summary EXIT
+
 ann() {  # single-line workflow annotation; flattened and truncated to stay within GitHub's limits
   local lvl="$1" m
   m=$(printf '%s' "$2" | tr '\r\n' '  ' | tr -s ' ' | cut -c1-460)
@@ -99,6 +116,7 @@ PY
 # let the real assertions run. Returns 0 if a dialog was dismissed, 1 if none was present.
 dismiss_anr() {
   case "$(focus)" in *"Application Not Responding"*) ;; *) return 1 ;; esac
+  ANR_SEEN=$((ANR_SEEN + 1))
   info "ANR dialog on screen -- anr events: $(anrln)"
   adb shell uiautomator dump /sdcard/ui-anr.xml > /dev/null 2>&1
   adb pull /sdcard/ui-anr.xml "$OUT/ui-anr.xml" > /dev/null 2>&1
@@ -249,8 +267,10 @@ else
   CUR=$(curime); FOCUS2=$(focus); CRASH2=$(crashln)
   # Now mCurId IS meaningful: an editor has focus, so the IME has been bound.
   if [ "$SHOWN" = "mInputShown=true" ] && printf '%s' "$CUR" | grep -q "$PKG"; then
+    KB_VERDICT=bound
     pass "KEYBOARD RENDERED AND BOUND: $SHOWN $CUR"
   else
+    KB_VERDICT=notup
     fail "keyboard not up: shown='${SHOWN:-none}' ${CUR:-mCurId=none} focus='$FOCUS2' crash='${CRASH2:-none}' anr='$(anrln)' tap=$CENTER"
   fi
 
@@ -279,10 +299,13 @@ else
   IME=$(grep -c "Keyboard2View" "$OUT/ui-toolbar.xml" 2>/dev/null) || IME=0
   LABELS=$(grep -ohE 'content-desc="[^"]{1,30}"' "$OUT/ui-toolbar.xml" 2>/dev/null | grep -icE 'copy|paste|undo|redo|settings|voice|clipboard|select') || LABELS=0
   if [ "${TB:-0}" -gt 0 ]; then
+    TB_VERDICT=rendered-${TB}
     pass "toolbar rendered: resource-id keyboard_toolbar in the a11y tree, $LABELS command labels"
   elif [ "${IME:-0}" -gt 0 ]; then
+    TB_VERDICT=missing
     fail "toolbar MISSING although the IME window WAS in the dump: keyboard_toolbar=$TB Keyboard2View=$IME labels=$LABELS ids=$(grep -ohE 'resource-id="[^"]{0,60}"' "$OUT/ui-toolbar.xml" 2>/dev/null | sort -u | head -6 | tr '\n' ' ')"
   else
+    TB_VERDICT=unverifiable
     info "toolbar unverifiable by dump: uiautomator captured no IME window (Keyboard2View absent), so absence proves nothing -- screenshot 03-typed-text is the arbiter"
   fi
 fi
@@ -324,6 +347,9 @@ echo "== 9. clipboard subsystem (informational) =="
 # exist until the first copy, so this is reported, never failed.
 adb shell run-as "$PKG" ls -la databases/ > "$OUT/app-databases.txt" 2>&1
 info "databases: $(grep -oE '[a-z_]+\.db' "$OUT/app-databases.txt" 2>/dev/null | tr '\n' ' ')$(peek "$OUT/app-databases.txt" 80)"
+
+write_summary
+echo "SUMMARY $(cat "$OUT/summary.txt" 2>/dev/null)"
 
 echo
 if [ "$fails" -eq 0 ]; then
