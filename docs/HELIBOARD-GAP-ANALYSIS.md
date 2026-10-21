@@ -127,13 +127,44 @@ already asserts install → IME selected → launcher foreground → **keyboard 
 text committed → no crashes. Every phase extends that harness with assertions for its own feature,
 so nothing reaches your phone unverified.
 
-**Phase 1 — Toolbar foundation.** *The prerequisite; do this first.*
-Toolbar row + `ToolbarMode` + an ordered/pinnable key list, dispatching to existing `ActionType`s.
-Add the genuinely missing actions (`PAGE_UP`, `PAGE_DOWN`, incognito toggle, autocorrect toggle,
-clear clipboard) and update the two exhaustive `when` sites. Settings screen to choose and reorder
-keys. Reference: `ToolbarUtils.kt` (281), `ToolbarKeysCustomizer.kt` (162), `ToolbarScreen.kt` (156).
-Payoff: undo/redo/copy/paste/arrows/doc-start/doc-end one tap away instead of via long-press menus.
-Testable: assert the toolbar renders, tap a key, assert the effect.
+**Phase 1 — Toolbar foundation.** ✅ **SHIPPED** (commits `a666ea4`→`8612157`; in the released
+debug APKs from 2026-10-21).
+
+What landed, and how it differs from the sketch above:
+
+- `KeyboardToolbar` is a **sibling above `topPane`**, never inside it, so it survives the case where
+  `topPane` collapses to zero height (predictions and swipe typing both off). Built in
+  `SuggestionBarPane.initialize`, surfaced through `SetupResult.toolbar` to
+  `CleverKeysService._keyboardToolbar`, and live-refreshed by `PreferenceUIUpdateHandler.updateToolbar()`.
+- **No `ToolbarMode`, and no new `ActionType`s.** The plan called for adding `PAGE_UP`, `PAGE_DOWN`,
+  an incognito toggle, an autocorrect toggle and `clear_clipboard`; a census of `CommandRegistry`
+  showed `page_up`, `page_down`, `doc_home`, `doc_end`, `select_word`, `clear_clipboard`,
+  `switch_clipboard`, `arrows`, `config`, `voice_typing` and `change_method` **already existed** among
+  its 240 commands, so neither exhaustive `when` site needed touching. Only `incognito` is genuinely
+  missing, and it belongs to Phase 4.
+- Dispatch reuses the existing seam `Keyboard2View.onCustomShortSwipe(ShortSwipeMapping)`, which
+  already handles every command kind — a toolbar button is exactly a short-swipe binding, so it
+  inherits 240 commands instead of implementing a second dispatcher.
+- `ToolbarConfig` holds the ordered list (`toolbar_enabled`, default on; `toolbar_keys`, ten
+  sensible defaults) and its `parse()` drops any name the registry no longer knows, so a command a
+  future upstream merge removes makes its button disappear rather than render dead. Both keys are in
+  `SettingsDefaults` for backup parity.
+- **Settings screen**: `ui/settings/sections/ToolbarSection.kt` — enable, reorder with up/down,
+  remove, add via a searchable picker over the whole catalogue, and reset. Writes go through
+  `saveSetting`, so the change reaches the open keyboard with no IME restart. The picker is *not*
+  `CommandPaletteDialog`: that dialog also offers TEXT/INTENT/TIMESTAMP/TEMPLATE actions a toolbar
+  button cannot store, so reusing it would present choices the screen must then reject. Button labels
+  add no new strings — they come from each command's own `cmd_<id>` resource, already localized in 21
+  locales.
+
+Verification is split, because the two surfaces are not equally observable. **The toolbar itself
+cannot be asserted**: `uiautomator dump` does not capture input-method windows, so the smoke test
+reports `toolbar=unverifiable` unless the dump proves the IME was captured, and the screenshot is the
+arbiter. **The settings screen can be**, and is: smoke §7b navigates the real list, expands the
+section and opens the picker, asserting each layer separately. Run 39686039913 passed with
+`tbui=picker-2`. That check earned its keep immediately — it first failed by tapping the header at
+y=2195 of 2400, inside the gesture nav bar, and again when a launcher ANR dialog went undetected
+because it never took window focus; both are now handled.
 
 **Phase 2 — One-handed mode.** Smallest of the three view modes and the biggest ergonomic win.
 Reference: `KeyboardWrapperView.kt` (166). Hooks: `Keyboard2View`, `InputCoordinator`,
