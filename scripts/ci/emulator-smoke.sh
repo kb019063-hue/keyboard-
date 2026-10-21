@@ -209,6 +209,24 @@ else
     # tree, so this is reported rather than failed -- the screenshot is the arbiter.
     info "typed text unconfirmed in a11y dump: $(grep -ohE 'text="[^"]{0,50}"' "$OUT/ui-typed.xml" 2>/dev/null | tail -3 | tr '\n' ' ')"
   fi
+
+  echo "== 6b. toolbar row rendered (HeliBoard gap analysis phase 1) =="
+  # uiautomator frequently dumps only the focused APPLICATION window and omits the IME window, so
+  # "toolbar absent" is a real failure only when the dump proves the IME WAS captured. That proof
+  # is the Keyboard2View class name -- grepping the package name would prove nothing, because the
+  # app under test is that same package and appears in the dump either way.
+  adb shell uiautomator dump /sdcard/ui-toolbar.xml > /dev/null 2>&1
+  adb pull /sdcard/ui-toolbar.xml "$OUT/ui-toolbar.xml" > /dev/null 2>&1
+  TB=$(grep -c "keyboard_toolbar" "$OUT/ui-toolbar.xml" 2>/dev/null) || TB=0
+  IME=$(grep -c "Keyboard2View" "$OUT/ui-toolbar.xml" 2>/dev/null) || IME=0
+  LABELS=$(grep -ohE 'content-desc="[^"]{1,30}"' "$OUT/ui-toolbar.xml" 2>/dev/null | grep -icE 'copy|paste|undo|redo|settings|voice|clipboard|select') || LABELS=0
+  if [ "${TB:-0}" -gt 0 ]; then
+    pass "toolbar rendered: resource-id keyboard_toolbar in the a11y tree, $LABELS command labels"
+  elif [ "${IME:-0}" -gt 0 ]; then
+    fail "toolbar MISSING although the IME window WAS in the dump: keyboard_toolbar=$TB Keyboard2View=$IME labels=$LABELS ids=$(grep -ohE 'resource-id="[^"]{0,60}"' "$OUT/ui-toolbar.xml" 2>/dev/null | sort -u | head -6 | tr '\n' ' ')"
+  else
+    info "toolbar unverifiable by dump: uiautomator captured no IME window (Keyboard2View absent), so absence proves nothing -- screenshot 03-typed-text is the arbiter"
+  fi
 fi
 
 echo "== 7. settings + keyboard preview render =="

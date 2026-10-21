@@ -445,6 +445,8 @@ object SuggestionBarPane {
         val contentPaneContainer: FrameLayout,
         val scrollView: HorizontalScrollView,
         val topPane: FrameLayout,
+        /** One-tap command row, a sibling ABOVE topPane (see KeyboardToolbar). */
+        val toolbar: KeyboardToolbar,
     )
 
     /**
@@ -491,6 +493,13 @@ object SuggestionBarPane {
             context.resources.displayMetrics
         ).toInt()
 
+        // Toolbar row height. Same 40 dp as the strip so the two read as one unit.
+        val toolbarHeight = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP,
+            KeyboardToolbar.HEIGHT_DP.toFloat(),
+            context.resources.displayMetrics
+        ).toInt()
+
         // Create topPane - a simple FrameLayout that holds the current view
         val topPane = FrameLayout(context)
         topPane.layoutParams = LinearLayout.LayoutParams(
@@ -507,6 +516,18 @@ object SuggestionBarPane {
         // Start with scrollView (suggestion bar)
         topPane.addView(scrollView)
 
+        // Toolbar: a sibling ABOVE topPane, deliberately never inside it. topPane swaps its only
+        // child between the suggestion strip and a content pane, so a toolbar inside it would be
+        // removed the moment the clipboard or emoji pane opens; and with prediction and swipe
+        // typing both off topPane is collapsed to height 0, which would hide the toolbar exactly
+        // when there is no suggestion strip to fall back on.
+        val toolbar = KeyboardToolbar(context, theme)
+        toolbar.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            toolbarHeight
+        )
+        inputViewContainer.addView(toolbar)
+
         // Add topPane to container (keyboard view added by caller)
         inputViewContainer.addView(topPane)
 
@@ -515,7 +536,8 @@ object SuggestionBarPane {
             suggestionBar,
             contentPaneContainer,
             scrollView,
-            topPane
+            topPane,
+            toolbar
         )
     }
 

@@ -2,6 +2,7 @@ package tribixbite.cleverkeys.backup
 
 import tribixbite.cleverkeys.Defaults
 import tribixbite.cleverkeys.KeyboardHeightPrefs
+import tribixbite.cleverkeys.ToolbarConfig
 import tribixbite.cleverkeys.autocorrect.AutocorrectTuning
 
 /**
@@ -146,6 +147,10 @@ internal val SETTINGS_DEFAULTS: Map<String, PrefValue> = mapOf(
     "swipe_on_password_fields" to PrefValue.Bool(Defaults.SWIPE_ON_PASSWORD_FIELDS),
     "word_prediction_enabled" to PrefValue.Bool(Defaults.WORD_PREDICTION_ENABLED),
     "suggestion_bar_opacity" to PrefValue.IntV(Defaults.SUGGESTION_BAR_OPACITY),
+    // Toolbar (HeliBoard gap analysis phase 1). Listed here so backup/restore carries it;
+    // a key present in Config but absent from this map is silently dropped from backups.
+    ToolbarConfig.PREF_ENABLED to PrefValue.Bool(Defaults.TOOLBAR_ENABLED),
+    ToolbarConfig.PREF_KEYS to PrefValue.Str(Defaults.TOOLBAR_KEYS),
     "show_exact_typed_word" to PrefValue.Bool(Defaults.SHOW_EXACT_TYPED_WORD),
     "context_aware_predictions_enabled" to PrefValue.Bool(Defaults.CONTEXT_AWARE_PREDICTIONS_ENABLED),
     "personalized_learning_enabled" to PrefValue.Bool(Defaults.PERSONALIZED_LEARNING_ENABLED),

@@ -48,7 +48,8 @@ class PredictionViewSetup(
         val inputViewContainer: LinearLayout?,
         val contentPaneContainer: android.widget.FrameLayout?,
         val topPane: android.widget.FrameLayout?,
-        val scrollView: android.widget.HorizontalScrollView?
+        val scrollView: android.widget.HorizontalScrollView?,
+        val toolbar: KeyboardToolbar?
     )
 
     /**
@@ -100,6 +101,9 @@ class PredictionViewSetup(
             // because topPane's child changes between scrollView and contentPaneContainer
             var topPane: android.widget.FrameLayout? = existingTopPane
             var scrollView: android.widget.HorizontalScrollView? = existingScrollView
+            // The toolbar just built by SuggestionBarPane.initialize, on the new-hierarchy path
+            // only; the reuse path re-finds it by id in wireToolbar.
+            var createdToolbar: KeyboardToolbar? = null
 
             if (suggestionBar == null) {
                 // Initialize suggestion bar and input view hierarchy
@@ -123,6 +127,7 @@ class PredictionViewSetup(
                 contentPaneContainer = result.contentPaneContainer
                 topPane = result.topPane
                 scrollView = result.scrollView
+                createdToolbar = result.toolbar
 
                 // Register suggestion selection listener
                 suggestionBar?.setOnSuggestionSelectedListener(keyboard2)
@@ -215,7 +220,7 @@ class PredictionViewSetup(
             }
 
             // topPane and scrollView are now tracked throughout the method
-            return SetupResult(inputView, suggestionBar, inputViewContainer, contentPaneContainer, topPane, scrollView)
+            return SetupResult(inputView, suggestionBar, inputViewContainer, contentPaneContainer, topPane, scrollView, wireToolbar(createdToolbar, inputViewContainer))
         } else {
             // #148 (ARC-002): predictions disabled must NOT collapse the whole container to the
             // bare keyboard view. With no contentPaneContainer, every pane opener
@@ -229,6 +234,9 @@ class PredictionViewSetup(
             var contentPaneContainer = existingContentPaneContainer
             var topPane: android.widget.FrameLayout? = existingTopPane
             var scrollView: android.widget.HorizontalScrollView? = existingScrollView
+            // The toolbar just built by SuggestionBarPane.initialize, on the new-hierarchy path
+            // only; the reuse path re-finds it by id in wireToolbar.
+            var createdToolbar: KeyboardToolbar? = null
 
             if (suggestionBar == null) {
                 val theme = keyboardView.getTheme()
@@ -243,6 +251,7 @@ class PredictionViewSetup(
                 contentPaneContainer = result.contentPaneContainer
                 topPane = result.topPane
                 scrollView = result.scrollView
+                createdToolbar = result.toolbar
                 suggestionBar.setOnSuggestionSelectedListener(keyboard2)
 
                 (keyboardView.parent as? android.view.ViewGroup)?.removeView(keyboardView)
@@ -287,8 +296,30 @@ class PredictionViewSetup(
             }
 
             val inputView: View = inputViewContainer ?: keyboardView
-            return SetupResult(inputView, suggestionBar, inputViewContainer, contentPaneContainer, topPane, scrollView)
+            return SetupResult(inputView, suggestionBar, inputViewContainer, contentPaneContainer, topPane, scrollView, wireToolbar(createdToolbar, inputViewContainer))
         }
+    }
+
+    /**
+     * Wire the toolbar for this hierarchy build and return it.
+     *
+     * [created] is the toolbar `SuggestionBarPane.initialize` just built. On the path where the
+     * container already existed there is no new one, so it is re-found by id. Looking it up is
+     * safe *here* specifically because the toolbar is a stable direct child of the container that
+     * is never swapped -- unlike topPane's child, which alternates between the suggestion strip
+     * and a content pane and is the reason this class threads topPane/scrollView as parameters
+     * rather than extracting them from the hierarchy.
+     *
+     * Taps go to `Keyboard2View.onCustomShortSwipe`, the same seam a short-swipe binding uses, so
+     * a toolbar button and a swipe can never disagree about what a command does.
+     */
+    private fun wireToolbar(created: KeyboardToolbar?, container: LinearLayout?): KeyboardToolbar? {
+        val toolbar = created
+            ?: container?.findViewById<KeyboardToolbar>(R.id.keyboard_toolbar)
+            ?: return null
+        toolbar.setCommandDispatcher { mapping -> keyboardView.onCustomShortSwipe(mapping) }
+        toolbar.applyFromConfig(config)
+        return toolbar
     }
 
     /** The suggestion strip's height in enabled mode (the 40 dp row topPane starts with). */

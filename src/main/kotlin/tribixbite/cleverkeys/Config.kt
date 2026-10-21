@@ -194,6 +194,11 @@ object Defaults {
     const val SWIPE_ON_PASSWORD_FIELDS = false  // #39: Reenable swipe typing on password fields
     const val WORD_PREDICTION_ENABLED = true
     const val SUGGESTION_BAR_OPACITY = 80
+    // Toolbar row above the suggestion strip (HeliBoard gap analysis phase 1). Default ON:
+    // every command it exposes already existed and was reachable only by long-press or a
+    // pre-bound short swipe, so there is no migration to wait for.
+    const val TOOLBAR_ENABLED = true
+    const val TOOLBAR_KEYS = ToolbarConfig.DEFAULT_KEYS_STRING
     const val SHOW_EXACT_TYPED_WORD = true  // #42: Show exact typed string as tap-to-add-to-dictionary option
     const val CONTEXT_AWARE_PREDICTIONS_ENABLED = true
     const val PERSONALIZED_LEARNING_ENABLED = true
@@ -911,6 +916,10 @@ class Config private constructor(
     @JvmField var show_exact_typed_word = Defaults.SHOW_EXACT_TYPED_WORD  // #42: Tap-to-add exact typed word to dictionary
     @JvmField var word_prediction_enabled = Defaults.WORD_PREDICTION_ENABLED
     @JvmField var suggestion_bar_opacity = Defaults.SUGGESTION_BAR_OPACITY
+    /** Whether the one-tap command toolbar is shown above the suggestion strip. */
+    @JvmField var toolbar_enabled = Defaults.TOOLBAR_ENABLED
+    /** Ordered, comma-separated CommandRegistry names the toolbar shows. */
+    @JvmField var toolbar_keys = Defaults.TOOLBAR_KEYS
 
     // Word prediction scoring weights
     @JvmField var prediction_context_boost = Defaults.PREDICTION_CONTEXT_BOOST
@@ -1268,6 +1277,8 @@ class Config private constructor(
         show_exact_typed_word = _prefs.getBoolean("show_exact_typed_word", Defaults.SHOW_EXACT_TYPED_WORD)
         word_prediction_enabled = _prefs.getBoolean("word_prediction_enabled", Defaults.WORD_PREDICTION_ENABLED)
         suggestion_bar_opacity = safeGetInt(_prefs, "suggestion_bar_opacity", Defaults.SUGGESTION_BAR_OPACITY)
+        toolbar_enabled = safeGetBoolean(_prefs, ToolbarConfig.PREF_ENABLED, Defaults.TOOLBAR_ENABLED)
+        toolbar_keys = safeGetString(_prefs, ToolbarConfig.PREF_KEYS, Defaults.TOOLBAR_KEYS)
 
         prediction_context_boost = safeGetFloat(_prefs, "prediction_context_boost", Defaults.PREDICTION_CONTEXT_BOOST)
         prediction_frequency_scale = safeGetFloat(_prefs, "prediction_frequency_scale", Defaults.PREDICTION_FREQUENCY_SCALE)

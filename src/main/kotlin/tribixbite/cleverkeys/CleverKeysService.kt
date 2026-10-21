@@ -109,6 +109,8 @@ class CleverKeysService : InputMethodService(),
 
     // UI components (remain in CleverKeysService for view integration)
     private var _suggestionBar: SuggestionBar? = null
+    // Toolbar row above the suggestion strip (HeliBoard gap analysis phase 1).
+    private var _keyboardToolbar: KeyboardToolbar? = null
     private var _inputViewContainer: LinearLayout? = null
 
     // Prediction context tracking (v1.32.342: extracted to PredictionContextTracker)
@@ -837,6 +839,7 @@ class CleverKeysService : InputMethodService(),
         _contentPaneContainer = predictionSetup.contentPaneContainer
         _topPane = predictionSetup.topPane
         _scrollView = predictionSetup.scrollView
+        _keyboardToolbar = predictionSetup.toolbar
         setInputView(predictionSetup.inputView)
 
         // #41 v5: Emoji search manager persists across onStartInputView calls
@@ -1267,7 +1270,8 @@ class CleverKeysService : InputMethodService(),
                 _config,
                 _layoutBridge,
                 { _keyboardView },
-                { _suggestionBar }
+                { _suggestionBar },
+                { _keyboardToolbar }
             )
         }
 

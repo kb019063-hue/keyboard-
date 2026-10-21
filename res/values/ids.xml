@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Stable view ids for keyboard sub-views that must be re-found after a preference change.
+
+      PreferenceUIUpdateHandler deliberately reads its views through providers on every change and
+      never captures them (a captured reference kept applying opacity to a detached suggestion bar
+      for the rest of the service's life — see that class's header note). The toolbar is found the
+      same way, by id, from the input-view container: it is a stable direct child that is never
+      swapped, unlike topPane's child, which alternates between the suggestion strip and a content
+      pane.
+    -->
+    <item name="keyboard_toolbar" type="id" />
+</resources>

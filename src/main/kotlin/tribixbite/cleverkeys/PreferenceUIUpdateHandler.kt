@@ -31,7 +31,8 @@ class PreferenceUIUpdateHandler(
     private val config: Config?,
     private val layoutBridge: LayoutBridge?,
     private val keyboardView: () -> Keyboard2View?,
-    private val suggestionBar: () -> SuggestionBar?
+    private val suggestionBar: () -> SuggestionBar?,
+    private val toolbar: () -> KeyboardToolbar?
 ) {
     /**
      * Handle UI updates for preference changes.
@@ -44,6 +45,9 @@ class PreferenceUIUpdateHandler(
 
         // Update suggestion bar opacity
         updateSuggestionBarOpacity()
+
+        // Update the toolbar (visibility and button set)
+        updateToolbar()
 
         // Re-warm the swipe engine after a dictionary mutation
         rewarmAfterDictionaryEditIfNeeded(key)
@@ -66,6 +70,16 @@ class PreferenceUIUpdateHandler(
         config?.let { cfg ->
             suggestionBar()?.setOpacity(cfg.suggestion_bar_opacity)
         }
+    }
+
+    /**
+     * Re-sync the toolbar with the current config, so toggling it or reordering its buttons in
+     * settings takes effect without restarting the IME. Read through a provider for the reason in
+     * the class header: a theme change rebuilds the hierarchy, and a captured reference would keep
+     * updating the detached original.
+     */
+    private fun updateToolbar() {
+        config?.let { cfg -> toolbar()?.applyFromConfig(cfg) }
     }
 
     /**
@@ -116,6 +130,7 @@ class PreferenceUIUpdateHandler(
          * @param layoutBridge The layout bridge (nullable)
          * @param keyboardView Supplies the CURRENT keyboard view (nullable result)
          * @param suggestionBar Supplies the CURRENT suggestion bar (nullable result)
+     * @param toolbar Supplies the CURRENT toolbar row (nullable result)
          * @return A new PreferenceUIUpdateHandler instance
          */
         @JvmStatic
@@ -123,9 +138,10 @@ class PreferenceUIUpdateHandler(
             config: Config?,
             layoutBridge: LayoutBridge?,
             keyboardView: () -> Keyboard2View?,
-            suggestionBar: () -> SuggestionBar?
+            suggestionBar: () -> SuggestionBar?,
+            toolbar: () -> KeyboardToolbar?
         ): PreferenceUIUpdateHandler {
-            return PreferenceUIUpdateHandler(config, layoutBridge, keyboardView, suggestionBar)
+            return PreferenceUIUpdateHandler(config, layoutBridge, keyboardView, suggestionBar, toolbar)
         }
     }
 }
