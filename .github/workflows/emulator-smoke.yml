@@ -121,7 +121,9 @@ jobs:
           VIRT=$(grep -oE 'vmx|svm' /proc/cpuinfo | sort -u | tr '\n' ' ')
           DIAG="diag: runner=$(nproc)vCPU/$(free -h | awk '/^Mem:/{print $2}') ubuntu$(. /etc/os-release && echo "$VERSION_ID") virt='${VIRT:-NONE}' /dev/kvm=$(stat -c '%A %U:%G' /dev/kvm 2>&1) ANDROID_HOME=$SDK emulator_present=$([ -x "$SDK/emulator/emulator" ] && echo yes || echo no)"
           if [ -n "$VIRT" ]; then
-            echo "::notice::$DIAG"
+            # stdout only: the healthy-path diagnostics were consuming the annotation budget that
+            # the smoke test's own PASS/FAIL results need (see pre-emulator-diag.sh).
+            echo "  ---- $DIAG"
           else
             echo "::error::$DIAG -- NO vmx/svm: nested virtualisation unavailable, the emulator cannot be accelerated"
           fi
