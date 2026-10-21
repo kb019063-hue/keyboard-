@@ -484,7 +484,7 @@
          English only for now. That is consistent with the ~10 strings already untranslated across
          the 21 locale files, and deliberate: TranslationCoverageDriftTest rejects a wholesale copy
          of the English value as "translated", so machine-filling 21 locales would fail it and read
-         worse than an honest fallback. Button labels need no new strings at all -- they come from
+         worse than an honest fallback. Button labels need no new strings at all — they come from
          each command's own cmd_<id> resource, so they are already translated in 21 locales. -->
     <string name="settings_section_toolbar">🧰 Toolbar</string>
     <string name="toolbar_enable_title">Show toolbar</string>

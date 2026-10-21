@@ -59,7 +59,36 @@ jobs:
       # Single-module project rooted at the repo: APKs land in build/outputs/apk/debug/.
       # ABI splits are enabled in build.gradle (armeabi-v7a, arm64-v8a, x86_64; no universal).
       - name: Build debug APKs
-        run: ./gradlew assembleDebug --stacktrace
+        shell: bash
+        run: |
+          # tee keeps the full log for the annotation step below. pipefail matters: bash's default
+          # here is `bash -e` WITHOUT pipefail, so a piped tee would mask a failed Gradle exit and
+          # every build would look green.
+          set -o pipefail
+          ./gradlew assembleDebug --stacktrace 2>&1 | tee build-output.log
+
+      # A failed `assembleDebug` otherwise reports only "Process completed with exit code 1": the
+      # log lives on results-receiver.actions.githubusercontent.com and the report artifacts on
+      # blob storage, neither reachable outside the web UI. Annotations ARE reachable via
+      # api.github.com, so the compiler diagnostics go there. GitHub keeps roughly 20 annotations
+      # per run and errors survive where notices do not, so emit at most a few and prefer the
+      # actual diagnostic lines over Gradle's summary block.
+      - name: Surface build errors as annotations
+        if: failure()
+        shell: bash
+        run: |
+          [ -f build-output.log ] || exit 0
+          # `%` must be escaped or GitHub misparses the annotation; lines arrive one per read.
+          esc() { sed -e 's/%/%25/g' -e 's/\r/%0D/g'; }
+          # Kotlin `e: file:///…:L:C msg`, javac/aapt `path: error: msg`, failing task, Gradle header.
+          grep -E "^e: |: error: |: aapt2? error|^> Task .* FAILED|^FAILURE: " build-output.log \
+            | head -8 | esc | while IFS= read -r line; do echo "::error::${line}"; done
+          # No compiler diagnostic at all (a config/resource/script failure): give the Gradle
+          # "What went wrong" block instead, which names the failing task and its cause.
+          if ! grep -qE "^e: |: error: |: aapt2? error" build-output.log; then
+            sed -n '/What went wrong/,/^\* Try/p' build-output.log | head -12 | esc \
+              | while IFS= read -r line; do echo "::error::${line}"; done
+          fi
 
       - name: Report APK sizes
         run: |
@@ -133,5 +162,6 @@ jobs:
           path: |
             build/reports
             build/outputs/logs
+            build-output.log
           if-no-files-found: ignore
           retention-days: 14
