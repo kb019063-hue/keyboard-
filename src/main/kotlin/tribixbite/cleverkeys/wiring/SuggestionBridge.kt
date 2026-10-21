@@ -1,0 +1,169 @@
+package tribixbite.cleverkeys
+
+import android.content.res.Resources
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
+import tribixbite.cleverkeys.ml.SwipeMLData
+
+/**
+ * Bridge between CleverKeysService and SuggestionHandler for prediction operations.
+ *
+ * This class consolidates all suggestion/prediction delegation logic, handling:
+ * - Input context gathering (InputConnection, EditorInfo, Resources)
+ * - Prediction result handling
+ * - Regular typing and backspace handling
+ * - Suggestion selection with ML data collection
+ *
+ * The bridge pattern simplifies CleverKeysService by centralizing the coordination
+ * between prediction components and reducing repetitive context-gathering code.
+ *
+ * This utility is extracted from CleverKeysService.java as part of Phase 4 refactoring
+ * to reduce the main class size (v1.32.406).
+ *
+ * @since v1.32.406
+ */
+class SuggestionBridge(
+    private val keyboard2: CleverKeysService,
+    private val suggestionHandler: SuggestionHandler?,
+    private val mlDataCollector: MLDataCollector,
+    private val inputCoordinator: InputCoordinator,
+    private val contextTracker: PredictionContextTracker,
+    private val predictionCoordinator: PredictionCoordinator?,
+    private val keyboardViewProvider: () -> Keyboard2View
+) {
+    /**
+     * Audit A-2: late-bound view — theme changes replace the service's view instance, so a
+     * constructor-captured val would fire haptics on (and read the height of) the detached
+     * old view. Pinned by [KeyboardViewLateBindingDriftTest].
+     */
+    private val keyboardView: Keyboard2View get() = keyboardViewProvider()
+
+    /**
+     * Handle regular typing predictions (non-swipe).
+     *
+     * Gathers InputConnection and EditorInfo, then delegates to SuggestionHandler.
+     *
+     * @param text The typed text
+     */
+    fun handleRegularTyping(text: String) {
+        suggestionHandler?.let { handler ->
+            val ic = keyboard2.currentInputConnection
+            val editorInfo = keyboard2.currentInputEditorInfo
+            handler.handleRegularTyping(text, ic, editorInfo)
+        }
+    }
+
+    /**
+     * Handle backspace for prediction tracking.
+     *
+     * Passes the editor so the re-computed bar can apply the space-commit guards
+     * (terminal editor, non-prose token) to its highlighted entry.
+     */
+    fun handleBackspace() {
+        suggestionHandler?.handleBackspace(keyboard2.currentInputConnection, keyboard2.currentInputEditorInfo)
+    }
+
+    /**
+     * A non-text key or command reached the editor; SuggestionHandler ends the typed word
+     * when the editor is a terminal (see [SuggestionHandler.handleNonTextInput]).
+     */
+    fun handleNonTextInput() {
+        suggestionHandler?.handleNonTextInput(keyboard2.currentInputEditorInfo)
+    }
+
+    /**
+     * Smart delete last word - deletes the last auto-inserted word or last typed word.
+     *
+     * Gathers InputConnection and EditorInfo, then delegates to SuggestionHandler.
+     */
+    fun handleDeleteLastWord() {
+        suggestionHandler?.let { handler ->
+            val ic = keyboard2.currentInputConnection
+            val editorInfo = keyboard2.currentInputEditorInfo
+            handler.handleDeleteLastWord(ic, editorInfo)
+        }
+    }
+
+    /**
+     * Called when user selects a suggestion from suggestion bar.
+     *
+     * Handles ML data collection for swipe predictions, then delegates to SuggestionHandler
+     * with gathered input context.
+     *
+     * @param word The selected suggestion word
+     */
+    fun onSuggestionSelected(word: String) {
+        // Trigger haptic feedback for prediction tap
+        keyboardView.triggerHaptic(HapticEvent.PREDICTION_TAP)
+
+        // Store ML data if this was a swipe prediction selection
+        val isSwipeAutoInsert = contextTracker.wasLastInputSwipe()
+        val currentSwipeData = inputCoordinator.getCurrentSwipeData()
+
+        // W8 (learning-system audit 2026-09-26): with swipe_on_password_fields on, the bar can
+        // show swipe alternates in a password field; the trace + chosen word there ARE the
+        // password and are never captured, regardless of collection consent.
+        val inPasswordField = suggestionHandler?.isInPasswordMode() == true ||
+            SuggestionBar.isPasswordField(keyboard2.currentInputEditorInfo)
+        // A tap while an inline panel field owns typing commits into that field: nothing about
+        // it is captured (the inline routes learn nothing — see InlineSwipeInput.kt).
+        val inlineFieldActive = suggestionHandler?.hasActiveInlineField() == true
+        if (isSwipeAutoInsert && currentSwipeData != null && !inPasswordField && !inlineFieldActive &&
+            predictionCoordinator?.getMlDataStore() != null) {
+            mlDataCollector.collectAndStoreSwipeData(
+                word,
+                currentSwipeData,
+                keyboardView.height,
+                predictionCoordinator.getMlDataStore()
+            )
+        }
+
+        // Reset swipe data after ML collection
+        inputCoordinator.resetSwipeData()
+
+        // Delegate to SuggestionHandler
+        // isManualSelection = true because user explicitly tapped a suggestion (issue #63 fix)
+        // This skips final autocorrect which could incorrectly change the word
+        suggestionHandler?.let { handler ->
+            val ic = keyboard2.currentInputConnection
+            val editorInfo = keyboard2.currentInputEditorInfo
+            val resources = keyboard2.resources
+            handler.onSuggestionSelected(word, ic, editorInfo, resources, isManualSelection = true)
+        }
+    }
+
+    companion object {
+        /**
+         * Create a SuggestionBridge.
+         *
+         * @param keyboard2 The CleverKeysService service (for gathering input context)
+         * @param suggestionHandler The suggestion handler (nullable)
+         * @param mlDataCollector The ML data collector
+         * @param inputCoordinator The input coordinator
+         * @param contextTracker The prediction context tracker
+         * @param predictionCoordinator The prediction coordinator
+         * @param keyboardViewProvider Late-bound accessor for the service's CURRENT view (A-2)
+         * @return A new SuggestionBridge instance
+         */
+        @JvmStatic
+        fun create(
+            keyboard2: CleverKeysService,
+            suggestionHandler: SuggestionHandler?,
+            mlDataCollector: MLDataCollector,
+            inputCoordinator: InputCoordinator,
+            contextTracker: PredictionContextTracker,
+            predictionCoordinator: PredictionCoordinator?,
+            keyboardViewProvider: () -> Keyboard2View
+        ): SuggestionBridge {
+            return SuggestionBridge(
+                keyboard2,
+                suggestionHandler,
+                mlDataCollector,
+                inputCoordinator,
+                contextTracker,
+                predictionCoordinator,
+                keyboardViewProvider
+            )
+        }
+    }
+}

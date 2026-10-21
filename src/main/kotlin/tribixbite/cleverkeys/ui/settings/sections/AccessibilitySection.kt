@@ -1,0 +1,173 @@
+package tribixbite.cleverkeys.ui.settings.sections
+
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import tribixbite.cleverkeys.Config
+import tribixbite.cleverkeys.R
+import tribixbite.cleverkeys.SettingsActivity
+import tribixbite.cleverkeys.SettingsRanges
+import tribixbite.cleverkeys.toSliderRange
+import tribixbite.cleverkeys.ui.settings.CollapsibleSettingsSection
+import tribixbite.cleverkeys.ui.settings.SettingsSlider
+import tribixbite.cleverkeys.ui.settings.SettingsSwitch
+import tribixbite.cleverkeys.ui.settings.saveSetting
+import kotlin.math.roundToInt
+
+@Composable
+internal fun SettingsActivity.AccessibilitySection() {
+            CollapsibleSettingsSection(
+                title = stringResource(R.string.settings_section_accessibility),
+                expanded = accessibilitySectionExpanded,
+                onExpandChange = { accessibilitySectionExpanded = it }
+            ) {
+                // TalkBack support is built into the keyboard view (see
+                // a11y/KeyboardAccessibilityHelper) — no toggle required. The
+                // former "Sticky Keys" and "Voice Guidance" switches were dead:
+                // sticky-keys duplicated the shipped modifier-latching, and
+                // voice-guidance was superseded by first-class TalkBack support.
+                Text(
+                    text = stringResource(R.string.settings_screen_reader_note),
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                // v1.2.8: Vibration settings moved to Accessibility section
+                Text(
+                    text = stringResource(R.string.accessibility_haptic_feedback_header),
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+
+                SettingsSwitch(
+                    title = stringResource(R.string.settings_vibration_title),
+                    description = stringResource(R.string.settings_vibration_desc),
+                    checked = vibrationEnabled,
+                    onCheckedChange = {
+                        vibrationEnabled = it
+                        saveSetting("vibration_enabled", it)
+                        // Update haptic_enabled immediately so the IME picks up the change
+                        // without waiting for a full Config reload.
+                        // Do NOT set vibrate_custom here — that flag is only set when the user
+                        // explicitly drags the duration slider. Setting it on toggle was the
+                        // root cause of #154: it forced the slow Vibrator.createOneShot path
+                        // for all users, bypassing the low-latency performHapticFeedback path.
+                        Config.globalConfig().haptic_enabled = it
+                    }
+                )
+
+                if (vibrationEnabled) {
+                    // #154: the explicit way back to the system haptic. ON = vibrate_custom
+                    // false = VibratorCompat's low-latency performHapticFeedback path (the
+                    // default); OFF = the Vibrator one-shot of the duration below. Before
+                    // this switch existed, touching the slider stored vibrate_custom=true and
+                    // no UI path could undo it short of a full settings reset.
+                    SettingsSwitch(
+                        title = stringResource(R.string.accessibility_system_vibration_title),
+                        description = stringResource(R.string.accessibility_system_vibration_desc),
+                        checked = !vibrateCustom,
+                        onCheckedChange = { useSystem ->
+                            vibrateCustom = !useSystem
+                            saveSetting("vibrate_custom", !useSystem)
+                            Config.globalConfig().vibrate_custom = !useSystem
+                        }
+                    )
+
+                    // Visible-but-disabled while the system pattern is in use: the stored
+                    // duration is kept and applies again as soon as the switch is turned off.
+                    SettingsSlider(
+                        title = stringResource(R.string.accessibility_custom_duration_title),
+                        description = stringResource(R.string.accessibility_custom_duration_desc),
+                        value = vibrationDuration.toFloat(),
+                        valueRange = SettingsRanges.VIBRATE_DURATION.toSliderRange(),
+                        increment = 5f,
+                        enabled = vibrateCustom,
+                        onValueChange = {
+                            vibrationDuration = it.roundToInt()
+                            saveSetting("vibrate_duration", vibrationDuration)
+                            // The slider is only enabled in custom mode, so this re-asserts the
+                            // user's explicit choice; the "Use system vibration" switch above
+                            // is the way back to the system pattern (#154).
+                            vibrateCustom = true
+                            saveSetting("vibrate_custom", true)
+                            Config.globalConfig().vibrate_custom = true
+                            Config.globalConfig().vibrate_duration = vibrationDuration.toLong()
+                        },
+                        displayValue = "${vibrationDuration}ms"
+                    )
+
+                    // Per-event haptic feedback controls
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.accessibility_haptic_events_header),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 16.dp, bottom = 4.dp)
+                    )
+
+                    SettingsSwitch(
+                        title = stringResource(R.string.accessibility_key_press_title),
+                        description = stringResource(R.string.accessibility_key_press_desc),
+                        checked = hapticKeyPress,
+                        onCheckedChange = {
+                            hapticKeyPress = it
+                            saveSetting("haptic_key_press", it)
+                            Config.globalConfig().haptic_key_press = it
+                        }
+                    )
+
+                    SettingsSwitch(
+                        title = stringResource(R.string.accessibility_suggestion_tap_title),
+                        description = stringResource(R.string.accessibility_suggestion_tap_desc),
+                        checked = hapticPredictionTap,
+                        onCheckedChange = {
+                            hapticPredictionTap = it
+                            saveSetting("haptic_prediction_tap", it)
+                            Config.globalConfig().haptic_prediction_tap = it
+                        }
+                    )
+
+                    SettingsSwitch(
+                        title = stringResource(R.string.accessibility_trackpoint_title),
+                        description = stringResource(R.string.accessibility_trackpoint_desc),
+                        checked = hapticTrackpointActivate,
+                        onCheckedChange = {
+                            hapticTrackpointActivate = it
+                            saveSetting("haptic_trackpoint_activate", it)
+                            Config.globalConfig().haptic_trackpoint_activate = it
+                        }
+                    )
+
+                    SettingsSwitch(
+                        title = stringResource(R.string.accessibility_long_press_title),
+                        description = stringResource(R.string.accessibility_long_press_desc),
+                        checked = hapticLongPress,
+                        onCheckedChange = {
+                            hapticLongPress = it
+                            saveSetting("haptic_long_press", it)
+                            Config.globalConfig().haptic_long_press = it
+                        }
+                    )
+
+                    SettingsSwitch(
+                        title = stringResource(R.string.accessibility_swipe_complete_title),
+                        description = stringResource(R.string.accessibility_swipe_complete_desc),
+                        checked = hapticSwipeComplete,
+                        onCheckedChange = {
+                            hapticSwipeComplete = it
+                            saveSetting("haptic_swipe_complete", it)
+                            Config.globalConfig().haptic_swipe_complete = it
+                        }
+                    )
+                }
+            }
+}

@@ -1,0 +1,512 @@
+package tribixbite.cleverkeys
+
+import android.content.res.Resources
+import android.os.Handler
+import android.text.InputType
+import android.util.Log
+import android.view.KeyEvent
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
+import com.google.common.truth.Truth.assertWithMessage
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.mockkObject
+import io.mockk.mockkStatic
+import io.mockk.unmockkAll
+import io.mockk.verify
+import org.junit.After
+import org.junit.Before
+import org.junit.Test
+import org.objenesis.ObjenesisStd
+
+/**
+ * Terminal typed-word tracking (Seeker/Termux report, 2026-10-07): "the suggestion bar keeps
+ * showing stale words … it's constantly trying to autocorrect words and just keeps appending
+ * newly typed letters."
+ *
+ * A terminal exposes no readable text buffer — `getTextBeforeCursor` returns "" — so every
+ * editor-sync path reads nothing and the keystroke tracker in [PredictionContextTracker] is
+ * the only record of the word being typed. That tracker only ever ended a word on a typed
+ * non-letter character. Enter, Tab, Esc, arrows, Home/End and Ctrl chords are KEY EVENTS:
+ * they never reach `handle_text_typed`, and in an ordinary editor the selection callback
+ * that follows them re-syncs the tracker — a terminal sends none. So after `ls` Enter, typing
+ * `cd` tracked `lscd`; the bar showed corrections of the phantom word and a tapped suggestion
+ * deleted four characters.
+ *
+ * # Harness
+ *
+ * Mock tier. REAL: [SuggestionHandler] (Objenesis-allocated production bodies), the tracker,
+ * and [KeyEventHandler] for the routing pins. The editor is a terminal double: package
+ * `com.termux`, an InputConnection whose reads always return "" (the Termux contract).
+ *
+ * RED (2026-10-07, hook plumbing present but SuggestionHandler.handleNonTextInput empty and
+ * KeyEventHandler not yet calling it): 10 of 12 failed — `ls`/Enter/`cd` tracked "lscd";
+ * Ctrl+C gave "foobar"; delete-last-word gave "foox"; a tap after Enter sent 4 backspaces
+ * instead of 2; predictions for "abc"/"ab"/"a" repainted the bar after the line was emptied
+ * ([ax], [abx], [abcx], [abx], [ax]); swipe final autocorrect committed "is " for "ls"; the key
+ * routing reported no non-text key. Already green: space autocorrect skips terminals, and an
+ * ordinary editor keeps its tracker.
+ *
+ * RED (2026-10-15, Saga D2/D4 replays — taps that delete what the IME cannot see): 8 of 20
+ * failed before [TerminalSuggestionPolicy] — `hel`→`hello` sent 3 Backspaces (and `Hel` 3),
+ * `cd`→`cdx` 2, `+foocbar` 7; `foodborne` was committed over the stale `foocbar`; the bar for
+ * `ecx` offered `except`/`excuse`, for `HEl` `Hello`/`Help`/`Hex`, for `foocbar`
+ * `foolhardy`/`foodborne`. Already green: an ordinary editor's bar still offers corrections.
+ */
+class TerminalTypedWordTrackingTest {
+
+    private val objenesis = ObjenesisStd()
+
+    private lateinit var config: Config
+    private lateinit var tracker: PredictionContextTracker
+    private lateinit var predictor: WordPredictor
+    private lateinit var coordinator: PredictionCoordinator
+    private lateinit var bar: SuggestionBar
+    private lateinit var keyevents: KeyEventHandler
+    private lateinit var ic: InputConnection
+    private lateinit var handler: SuggestionHandler
+
+    /** Prediction tasks submitted and not yet run (so a test can order them against keys). */
+    private val pendingTasks = ArrayList<Runnable>()
+
+    /** Every word list the handler pushed to the bar, in order. */
+    private val barPosts = ArrayList<List<String>>()
+
+    /** Per-partial predictor output; a partial not listed predicts "<partial>x". */
+    private val predictions = HashMap<String, List<String>>()
+
+    @Before
+    fun setup() {
+        mockkStatic(Log::class)
+        every { Log.d(any(), any<String>()) } returns 0
+        every { Log.d(any(), any<String>(), any()) } returns 0
+        every { Log.i(any(), any<String>()) } returns 0
+        every { Log.w(any(), any<String>()) } returns 0
+        every { Log.w(any(), any<String>(), any()) } returns 0
+        every { Log.e(any(), any<String>()) } returns 0
+        every { Log.e(any(), any<String>(), any()) } returns 0
+
+        mockkObject(Config.Companion)
+        config = mockk(relaxed = true)
+        config.word_prediction_enabled = true
+        config.autocorrect_enabled = true
+        config.swipe_final_autocorrect_enabled = true
+        config.auto_space_after_suggestion = true
+        config.auto_space_before_suggestion = false
+        config.autocapitalize_i_words = true
+        config.next_word_prediction_enabled = false
+        config.on_device_learning_enabled = false
+        config.custom_terminal_packages = emptySet()
+        config.primary_language = "en"
+        config.show_exact_typed_word = false
+        every { Config.globalConfig() } returns config
+        every { Config.globalConfigOrNull() } returns config
+
+        tracker = PredictionContextTracker()
+
+        predictor = mockk(relaxed = true)
+        every { predictor.predictWordsWithContext(any(), any()) } answers {
+            val partial = firstArg<String>()
+            val words = predictions[partial] ?: listOf("${partial}x")
+            WordPredictor.PredictionResult(words, words.map { 100 })
+        }
+        // A shell token is "corrected" to prose if autocorrect is allowed to run.
+        every { predictor.autoCorrect(any()) } answers {
+            when (firstArg<String>()) { "ls" -> "is"; "cd" -> "ce"; else -> firstArg() }
+        }
+        every { predictor.isInDictionary(any()) } returns true
+        every { predictor.isInDictionary(any(), any()) } returns true
+        coordinator = mockk(relaxed = true)
+        every { coordinator.getWordPredictor() } returns predictor
+
+        bar = mockk(relaxed = true)
+        every { bar.getMetaForSuggestion(any()) } returns null
+        every { bar.setSuggestionsWithScores(any(), any(), any(), any()) } answers {
+            barPosts.add(firstArg<List<String>>().toList())
+        }
+
+        ic = mockk(relaxed = true)
+        every { ic.getTextBeforeCursor(any(), any()) } returns ""
+        every { ic.getTextAfterCursor(any(), any()) } returns ""
+        every { ic.commitText(any(), any()) } returns true
+        every { ic.getCursorCapsMode(any()) } returns 0
+
+        val contractions = mockk<ContractionManager>(relaxed = true)
+        every { contractions.isKnownContraction(any()) } returns false
+        every { contractions.isContractionKey(any()) } returns false
+        every { contractions.getNonPairedMapping(any()) } returns null
+        every { contractions.generatePossessive(any()) } returns null
+
+        pendingTasks.clear()
+        barPosts.clear()
+        predictions.clear()
+        val tasks = mockk<PredictionTaskRunner>(relaxed = true)
+        every { tasks.cancelAndSubmit(any()) } answers { pendingTasks.add(firstArg()) }
+        val main = mockk<Handler>(relaxed = true)
+        every { main.post(any()) } answers { firstArg<Runnable>().run(); true }
+
+        keyevents = mockk(relaxed = true)
+        handler = objenesis.newInstance(SuggestionHandler::class.java)
+        handler.setField("contextTracker", tracker)
+        handler.setField("predictionCoordinator", coordinator)
+        handler.setField("suggestionBar", bar)
+        handler.setField("config", config)
+        handler.setField("contractionManager", contractions)
+        handler.setField("keyeventhandler", keyevents)
+        handler.setField("predictionTasks", tasks)
+        handler.setField("mainHandler", main)
+        handler.setField("fieldAllowsPersonalizedLearning", true)
+        // Objenesis skips field initializers: the space-commit memo (2026-10-11) must exist.
+        handler.setField("autocorrectMemo", tribixbite.cleverkeys.autocorrect.AutocorrectMemo())
+        // The exact-add confirmation reads its message from resources.
+        handler.setField("context", mockk<android.content.Context>(relaxed = true))
+    }
+
+    @After
+    fun teardown() = unmockkAll()
+
+    // ------------------------------------------------------------------ fixtures
+
+    private fun editor(pkg: String = "com.termux"): EditorInfo = objenesis.newInstance(EditorInfo::class.java).apply {
+        packageName = pkg
+        inputType = InputType.TYPE_CLASS_TEXT
+    }
+
+    private fun type(word: String, editor: EditorInfo) {
+        for (c in word) handler.handleRegularTyping(c.toString(), ic, editor)
+    }
+
+    /** Runs the prediction tasks queued so far, in submission order (each posts inline). */
+    private fun runPredictions() {
+        val queued = pendingTasks.toList()
+        pendingTasks.clear()
+        queued.forEach { it.run() }
+    }
+
+    private fun tracked() = tracker.getCurrentWord()
+
+    private fun tap(word: String, editor: EditorInfo): String? =
+        handler.onSuggestionSelected(word, ic, editor, mockk<Resources>(relaxed = true), isManualSelection = true)
+
+    // ------------------------------------------------------------------ word boundaries
+
+    @Test
+    fun enterInATerminalEndsTheTypedWord() {
+        val termux = editor()
+        type("ls", termux)
+        handler.handleNonTextInput(termux)
+        type("cd", termux)
+        assertWithMessage("ls, Enter, cd must track only the new word").that(tracked()).isEqualTo("cd")
+    }
+
+    @Test
+    fun ctrlCAndAnyOtherNonTextKeyEndTheTypedWord() {
+        val termux = editor()
+        type("foo", termux)
+        handler.handleNonTextInput(termux)
+        type("bar", termux)
+        assertWithMessage("foo, Ctrl+C, bar").that(tracked()).isEqualTo("bar")
+    }
+
+    @Test
+    fun theNonTextKeyClearsTheBarAndCancelsItsPendingPrediction() {
+        val termux = editor()
+        type("ls", termux)
+        handler.handleNonTextInput(termux)
+        verify(atLeast = 1) { bar.clearSuggestions() }
+        // The prediction for "ls" was computed against a line the shell has since taken.
+        runPredictions()
+        assertWithMessage("no suggestion for the submitted word may reach the bar")
+            .that(barPosts).isEmpty()
+    }
+
+    @Test
+    fun backspaceShrinksTheTrackedWordAndAnEmptyWordShowsNothing() {
+        val termux = editor()
+        type("abc", termux)
+        repeat(3) { handler.handleBackspace() }
+        assertWithMessage("abc, backspace x3").that(tracked()).isEmpty()
+        // Predictions queued for "abc"/"ab"/"a" complete after the line is empty.
+        runPredictions()
+        assertWithMessage("a prediction for a deleted word must not repaint the bar")
+            .that(barPosts).isEmpty()
+        type("x", termux)
+        assertWithMessage("abc, backspace x3, x").that(tracked()).isEqualTo("x")
+        runPredictions()
+        assertWithMessage("the bar reflects the current tracked word only")
+            .that(barPosts.last()).containsExactly("xx")
+    }
+
+    @Test
+    fun aTappedSuggestionAfterEnterCompletesOnlyTheNewWord() {
+        val termux = editor()
+        type("ls", termux)
+        handler.handleNonTextInput(termux)
+        type("cd", termux)
+        tap("cdx", termux)
+        verify(exactly = 0) { keyevents.send_key_down_up(KeyEvent.KEYCODE_DEL, any()) }
+        verify(exactly = 1) { ic.commitText("x ", 1) }
+    }
+
+    // ------------------------------------------------------------------ edits the IME cannot see
+
+    /*
+     * Saga/Termux 0.118.3, 2026-10-15 (D2): `foo`, Termux's own extra-keys CTRL, CleverKeys `c`,
+     * then `bar`. Termux applies its latched toolbar CTRL inside `commitText` (TerminalView
+     * `sendTextToTerminal` → `inputCodePoint` reads `readControlKey()`), so the shell got ^C and a
+     * fresh prompt while the IME saw an ordinary, successful commit of "c". The tracker therefore
+     * held `foocbar` over a line that showed `bar`, and tapping `foodborne` sent seven Backspaces.
+     * Nothing the IME can observe distinguishes that "c" from a typed letter, so the guard is on
+     * the tap: in a terminal it never deletes.
+     */
+
+    @Test
+    fun aTerminalTapAppendsTheRemainderAndDeletesNothing() {
+        val termux = editor()
+        type("hel", termux)
+        tap("hello", termux)
+        verify(exactly = 0) { keyevents.send_key_down_up(KeyEvent.KEYCODE_DEL, any()) }
+        verify(exactly = 0) { ic.deleteSurroundingText(any(), any()) }
+        verify(exactly = 1) { ic.commitText("lo ", 1) }
+        assertWithMessage("tracked word after the tap").that(tracked()).isEmpty()
+    }
+
+    @Test
+    fun aTerminalTapKeepsTheCaseTheUserTyped() {
+        val termux = editor()
+        type("Hel", termux)
+        tap("hello", termux)
+        verify(exactly = 0) { keyevents.send_key_down_up(KeyEvent.KEYCODE_DEL, any()) }
+        verify(exactly = 1) { ic.commitText("lo ", 1) }
+    }
+
+    @Test
+    fun aSuggestionThatDoesNotExtendTheTrackedWordIsRefusedInATerminal() {
+        val termux = editor()
+        type("foo", termux)
+        type("c", termux) // Termux's toolbar CTRL turned it into ^C; the IME cannot tell
+        type("bar", termux)
+        assertWithMessage("the tracker cannot see the ^C").that(tracked()).isEqualTo("foocbar")
+        val committed = tap("foodborne", termux)
+        assertWithMessage("tap result").that(committed).isNull()
+        verify(exactly = 0) { keyevents.send_key_down_up(KeyEvent.KEYCODE_DEL, any()) }
+        verify(exactly = 0) { ic.commitText(match { it.contains("foodborne") || it.contains("rne") }, any()) }
+    }
+
+    @Test
+    fun theTerminalBarOffersOnlyWordsThatExtendTheTrackedWord() {
+        val termux = editor()
+        predictions["ecx"] = listOf("except", "excuse", "ecxs")
+        type("ecx", termux)
+        runPredictions()
+        assertWithMessage("bar for the stale word 'ecx' (shell completed 'echo ' unseen)")
+            .that(barPosts.last()).containsExactly("ecxs")
+    }
+
+    @Test
+    fun theTerminalBarShowsTheTypedCaseOfAnExtension() {
+        val termux = editor()
+        predictions["HEl"] = listOf("hello", "help", "hex")
+        type("HEl", termux)
+        runPredictions()
+        assertWithMessage("an extension is shown as what the tap will produce")
+            .that(barPosts.last()).containsExactly("HEllo", "HElp").inOrder()
+    }
+
+    @Test
+    fun theTerminalBarIsNotPaintedWhenNothingExtendsTheWord() {
+        val termux = editor()
+        predictions["foocbar"] = listOf("foolhardy", "foodborne")
+        type("foocbar", termux)
+        val before = barPosts.size
+        io.mockk.clearMocks(bar, answers = false, recordedCalls = true)
+        pendingTasks.toList().also { pendingTasks.clear() }.last().run()
+        assertWithMessage("no non-extending word may reach the bar").that(barPosts.drop(before)).isEmpty()
+        // Nor may the previous word's chips stay up, offering a tap that would be refused.
+        verify(exactly = 1) { bar.clearSuggestions() }
+    }
+
+    @Test
+    fun anOrdinaryEditorBarStillOffersCorrections() {
+        val notes = editor("com.example.notes")
+        predictions["foocbar"] = listOf("foolhardy", "foodborne")
+        type("foocbar", notes)
+        pendingTasks.toList().also { pendingTasks.clear() }.last().run()
+        assertWithMessage("ordinary editor bar").that(barPosts.last()).containsExactly("foolhardy", "foodborne")
+    }
+
+    /**
+     * Saga 2026-10-17 (release d8be659b): after Termux's toolbar Ctrl+C the tracked word was the
+     * stale `foocbar`, the bar offered `+foocbar`, and tapping it added that word to the user's
+     * dictionary. A terminal's tracked word cannot be verified, so it is never offered for adding.
+     */
+    @Test
+    fun aTerminalNeverOffersTheTrackedWordForTheDictionary() {
+        config.show_exact_typed_word = true
+        every { predictor.isInDictionary(any()) } returns false
+        every { predictor.isInDictionary(any(), any()) } returns false
+        val termux = editor()
+        predictions["foocbar"] = listOf("foocbars")
+        type("foocbar", termux)
+        runPredictions()
+        assertWithMessage("terminal bar for the unverifiable word 'foocbar'")
+            .that(barPosts.flatten().filter { it.startsWith(Suggestion.EXACT_ADD_PREFIX) }).isEmpty()
+    }
+
+    @Test
+    fun anOrdinaryEditorStillOffersTheTypedWordForTheDictionary() {
+        config.show_exact_typed_word = true
+        every { predictor.isInDictionary(any()) } returns false
+        every { predictor.isInDictionary(any(), any()) } returns false
+        val notes = editor("com.example.notes")
+        predictions["foocbar"] = listOf("foocbars")
+        type("foocbar", notes)
+        runPredictions()
+        assertWithMessage("ordinary editor bar").that(barPosts.last())
+            .contains(Suggestion.ExactAdd("foocbar").wire)
+    }
+
+    @Test
+    fun spaceAfterAnUnknownTerminalWordNeverPromptsToAddIt() {
+        every { predictor.isInDictionary(any()) } returns false
+        every { predictor.isInDictionary(any(), any()) } returns false
+        val termux = editor()
+        type("foocbar", termux)
+        runPredictions()
+        barPosts.clear()
+        handler.handleRegularTyping(" ", ic, termux)
+        runPredictions()
+        assertWithMessage("bar after space in a terminal")
+            .that(barPosts.flatten().filter { it.startsWith(Suggestion.DICT_ADD_PREFIX) }).isEmpty()
+        assertWithMessage("add-to-dictionary prompt armed").that(handler.getField("specialPromptActive")).isEqualTo(false)
+    }
+
+    @Test
+    fun exactAddInATerminalDeletesNothing() {
+        val termux = editor()
+        type("foocbar", termux)
+        tap(Suggestion.ExactAdd("foocbar").wire, termux)
+        verify(exactly = 0) { keyevents.send_key_down_up(KeyEvent.KEYCODE_DEL, any()) }
+        verify(exactly = 0) { ic.commitText(match { it.contains("foocbar") }, any()) }
+        verify(exactly = 1) { ic.commitText(" ", 1) }
+    }
+
+    @Test
+    fun deleteLastWordInATerminalEndsTheTypedWord() {
+        val termux = editor()
+        type("foo", termux)
+        handler.handleDeleteLastWord(ic, termux)
+        type("x", termux)
+        assertWithMessage("foo, Ctrl+W (delete-last-word), x").that(tracked()).isEqualTo("x")
+    }
+
+    // ------------------------------------------------------------------ shared predicate
+
+    @Test
+    fun aCustomTerminalPackageGetsTheSameReset() {
+        config.custom_terminal_packages = setOf("org.custom.shell")
+        val shell = editor("org.custom.shell")
+        type("ls", shell)
+        handler.handleNonTextInput(shell)
+        type("cd", shell)
+        assertWithMessage("custom terminal package").that(tracked()).isEqualTo("cd")
+    }
+
+    @Test
+    fun anOrdinaryEditorKeepsItsTrackerForCursorSync() {
+        // Ordinary editors report the selection change that follows the key and re-sync from
+        // their real buffer; the key itself must not pre-empt that.
+        val notes = editor("com.example.notes")
+        type("ls", notes)
+        handler.handleNonTextInput(notes)
+        assertWithMessage("non-terminal editor").that(tracked()).isEqualTo("ls")
+    }
+
+    // ------------------------------------------------------------------ autocorrect
+
+    @Test
+    fun spaceAutocorrectNeverRewritesATerminalWord() {
+        val termux = editor()
+        type("ls", termux)
+        handler.handleRegularTyping(" ", ic, termux)
+        verify(exactly = 0) { ic.deleteSurroundingText(any(), any()) }
+        verify(exactly = 0) { ic.commitText(match { it.toString().startsWith("is") }, any()) }
+    }
+
+    @Test
+    fun swipeFinalAutocorrectNeverRewritesATerminalWord() {
+        val termux = editor()
+        tracker.setWasLastInputSwipe(true)
+        handler.onSuggestionSelected("ls", ic, termux, mockk<Resources>(relaxed = true), isManualSelection = false)
+        verify(exactly = 0) { ic.commitText(match { it.toString().startsWith("is") }, any()) }
+        verify { ic.commitText(match { it.toString().startsWith("ls") }, any()) }
+    }
+
+    // ------------------------------------------------------------------ key routing
+
+    private fun keyHandler(): Pair<KeyEventHandler, KeyEventHandler.IReceiver> {
+        val recv = mockk<KeyEventHandler.IReceiver>(relaxed = true)
+        every { recv.getHandler() } returns mockk(relaxed = true)
+        every { recv.isClipboardTagMode() } returns false
+        every { recv.isClipboardEditMode() } returns false
+        every { recv.isClipboardSearchMode() } returns false
+        every { recv.isEmojiPaneOpen() } returns false
+        every { recv.isGifPaneOpen() } returns false
+        every { recv.getLastAutocorrectOriginalWord() } returns null
+        every { recv.getLastAutoInsertedWord() } returns null
+        // A null connection makes sendKeyevent return before constructing an android KeyEvent.
+        every { recv.getCurrentInputConnection() } returns null
+        return KeyEventHandler(recv) to recv
+    }
+
+    @Test
+    fun everyNonTextKeyIsReportedAndTextAndBackspaceAreNot() {
+        val (keys, recv) = keyHandler()
+        KeyModifier.set_modmap(null)
+        val ctrlC = KeyModifier.modify(KeyValue.makeCharKey('c'), KeyValue.Modifier.CTRL)
+        val nonText = listOf("enter", "tab", "esc", "up", "down", "left", "right", "home", "end", "page_up")
+            .map { KeyValue.getKeyByName(it) } + ctrlC
+        for (key in nonText) keys.key_up(key, Pointers.Modifiers.EMPTY, false)
+        verify(exactly = nonText.size) { recv.handle_non_text_input() }
+
+        keys.key_up(KeyValue.getKeyByName("backspace"), Pointers.Modifiers.EMPTY, false)
+        verify(exactly = nonText.size) { recv.handle_non_text_input() }
+        verify(exactly = 1) { recv.handle_backspace() }
+    }
+
+    @Test
+    fun theImeActionEditingCommandsAndCursorSlidersAreReported() {
+        val (keys, recv) = keyHandler()
+        keys.key_up(KeyValue.getKeyByName("action"), Pointers.Modifiers.EMPTY, false)
+        keys.key_up(KeyValue.getKeyByName("pasteAsPlainText"), Pointers.Modifiers.EMPTY, false)
+        keys.key_up(KeyValue.getKeyByName("cursor_left"), Pointers.Modifiers.EMPTY, false)
+        verify(exactly = 3) { recv.handle_non_text_input() }
+    }
+
+    private fun Any.setField(name: String, value: Any?) {
+        var cls: Class<*>? = javaClass
+        while (cls != null) {
+            val field = cls.declaredFields.firstOrNull { it.name == name }
+            if (field != null) {
+                field.isAccessible = true
+                field.set(this, value)
+                return
+            }
+            cls = cls.superclass
+        }
+        throw AssertionError("field '$name' not found on ${javaClass.simpleName}")
+    }
+
+    private fun Any.getField(name: String): Any? {
+        var cls: Class<*>? = javaClass
+        while (cls != null) {
+            val field = cls.declaredFields.firstOrNull { it.name == name }
+            if (field != null) {
+                field.isAccessible = true
+                return field.get(this)
+            }
+            cls = cls.superclass
+        }
+        throw AssertionError("field '$name' not found on ${javaClass.simpleName}")
+    }
+}

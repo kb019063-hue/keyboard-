@@ -1,0 +1,2416 @@
+package tribixbite.cleverkeys
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.content.ContextWrapper
+import android.graphics.Canvas
+import android.graphics.Insets
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.PointF
+import android.graphics.Rect
+import android.graphics.RectF
+import android.inputmethodservice.InputMethodService
+import android.os.Build.VERSION
+import android.util.AttributeSet
+import android.util.DisplayMetrics
+import android.util.Log
+import android.util.LruCache
+import android.view.KeyEvent
+import android.view.MotionEvent
+import android.view.View
+import android.view.Window
+import android.view.WindowInsets
+import android.view.accessibility.AccessibilityManager
+import android.view.inputmethod.InputMethodManager
+import androidx.core.view.ViewCompat
+import tribixbite.cleverkeys.a11y.KeyLabels
+import tribixbite.cleverkeys.a11y.KeyboardAccessibilityHelper
+import tribixbite.cleverkeys.a11y.KeyboardGeometry
+import tribixbite.cleverkeys.customization.CommandRouting
+import tribixbite.cleverkeys.customization.ActionType
+import tribixbite.cleverkeys.customization.AvailableCommand
+import tribixbite.cleverkeys.customization.CommandRegistry
+import tribixbite.cleverkeys.customization.CustomShortSwipeExecutor
+import tribixbite.cleverkeys.customization.ShortSwipeCustomizationManager
+import tribixbite.cleverkeys.customization.ShortSwipeMapping
+import tribixbite.cleverkeys.customization.SwipeDirection
+import tribixbite.cleverkeys.popover.SubkeyAssignActivity
+import tribixbite.cleverkeys.popover.SubkeyAssignRequest
+import tribixbite.cleverkeys.popover.SubkeyPopoverMetrics
+import tribixbite.cleverkeys.popover.SubkeyPopoverRenderer
+import tribixbite.cleverkeys.popover.SubkeyPopoverState
+import tribixbite.cleverkeys.prefs.ConfigSnapshot
+import tribixbite.cleverkeys.theme.ThemeProvider
+import java.util.ArrayList
+
+/**
+ * Custom View that renders and manages the keyboard interface.
+ *
+ * This view is responsible for:
+ * - **Rendering**: Draws keyboard keys, labels, modifiers, and visual feedback
+ * - **Touch Handling**: Processes multi-touch input via [Pointers] system
+ * - **Swipe Gestures**: Recognizes swipe typing gestures through [EnhancedSwipeGestureRecognizer]
+ * - **Visual Feedback**: Shows swipe trails, key press animations, and modifier states
+ * - **Layout Management**: Positions keys based on screen size and [KeyboardData] layout
+ * - **Theme Support**: Applies colors and styles from [Theme] configuration
+ * - **Modifier States**: Displays and manages Shift, Fn, Ctrl, Alt, and Meta key states
+ *
+ * ## Touch Processing Flow
+ * 1. [onTouch] receives raw MotionEvent
+ * 2. [Pointers] tracks individual finger positions and gestures
+ * 3. [EnhancedSwipeGestureRecognizer] detects swipe typing patterns
+ * 4. [IPointerEventHandler] callbacks notify parent ([CleverKeysService]) of key events
+ *
+ * ## Swipe Typing
+ * When swipe typing is enabled, the view:
+ * - Captures touch trajectory as [List]<[PointF]> coordinates
+ * - Visualizes swipe trail in real-time during gesture
+ * - Sends completed gesture to the swipe pipeline for decoding
+ * - Clears trail and resets state after prediction
+ *
+ * ## Performance Optimizations
+ * - Reuses [Path] objects for swipe trail rendering (zero allocation during draw)
+ * - Caches [Theme.Computed] instances in [LruCache] for fast theme lookups
+ * - Batches canvas draw calls for efficient rendering
+ * - Handles system insets (notches, nav bars) for proper key positioning
+ *
+ * @param context Android context for accessing resources and system services
+ * @param attrs XML attributes for view inflation (nullable for programmatic creation)
+ * @since v1.0 (migrated to Kotlin in v1.32.874)
+ */
+class Keyboard2View @JvmOverloads constructor(
+    context: Context,
+    attrs: AttributeSet? = null
+) : View(context, attrs), View.OnTouchListener, Pointers.IPointerEventHandler {
+
+    private var _keyboard: KeyboardData? = null
+
+    /** The key holding the shift key is used to set shift state from autocapitalisation. */
+    private var _shift_kv: KeyValue? = null
+    private var _shift_key: KeyboardData.Key? = null
+
+    /** Used to add fake pointers. */
+    private var _compose_kv: KeyValue? = null
+    private var _compose_key: KeyboardData.Key? = null
+
+    private lateinit var _pointers: Pointers
+
+    /**
+     * TalkBack virtual-view tree. Constructed and installed in [init]. Cheap
+     * no-op when no accessibility service is enabled (its event sends are
+     * manager-gated by the platform).
+     */
+    private lateinit var _a11yHelper: KeyboardAccessibilityHelper
+
+    /** Cached at construction; touch-exploration state is polled per hover event. */
+    private val _a11yManager: AccessibilityManager? =
+        context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
+
+    /**
+     * Sentinel pointer id for accessibility-driven key activation. Must not
+     * collide with real touch ids (always >= 0) or the `-1` fake-latch pointer id
+     * that [Pointers] assigns to latched keys (Pointers.kt:607). `-2` is unused by
+     * any other Pointers code path, so getPtr(-2) only ever matches our own tap.
+     */
+    private val a11yPointerId = A11Y_POINTER_ID
+
+    private var _mods: Pointers.Modifiers = Pointers.Modifiers.EMPTY
+
+    private lateinit var _config: Config
+
+    private var _swipeRecognizer: EnhancedSwipeGestureRecognizer? = null
+    private var _swipeTrailPaint: Paint? = null
+    // Reusable Path object for swipe trail rendering (to avoid allocation every frame)
+    private val _swipeTrailPath = Path()
+
+    private var _keyboard2: CleverKeysService? = null
+
+    // Custom short swipe executor for user-defined gesture mappings
+    private val _customSwipeExecutor = CustomShortSwipeExecutor(context)
+
+    // Custom short swipe mappings manager for visual display
+    private val _shortSwipeManager: ShortSwipeCustomizationManager by lazy {
+        ShortSwipeCustomizationManager.getInstance(context)
+    }
+
+    /**
+     * Redraws the custom short-swipe labels after the mappings change while this view stays on
+     * screen ("Reset all" in the customization screen left the deleted labels drawn, Saga
+     * 2026-10-21). The manager calls it on its saving thread; [post] hops to the UI thread.
+     */
+    private val _shortSwipeMappingsChanged: () -> Unit = { post { invalidate() } }
+    private var _shortSwipeListenerRegistered = false
+
+    /**
+     * Per-key cache of the main key's lowercased identifier, keyed by identity of the laid-out
+     * [KeyboardData.Key] instance. Rebuilt once in [setKeyboard]; read (never mutated) in
+     * [drawCustomMappings] to avoid a `mainKey.getString().lowercase()` String allocation per key
+     * per frame (R2, ui-layer audit). Absent/empty entries are stored so custom-mapping candidacy
+     * can be decided without re-deriving the code. Identity keys are safe because [onDraw] walks
+     * the very same `_keyboard.rows` Key instances captured here.
+     */
+    private val _keyCodeLowerCache = java.util.IdentityHashMap<KeyboardData.Key, String>()
+
+    // Reused by onLayout for systemGestureExclusionRects (avoid layout-time allocation)
+    private val _gestureExclusionRect = Rect()
+
+    private var _keyWidth = 0f
+    private var _mainLabelSize = 0f
+    private var _subLabelSize = 0f
+    private var _marginRight = 0f
+    private var _marginLeft = 0f
+    private var _marginBottom = 0f
+    private var _insets_left = 0
+    private var _insets_right = 0
+    private var _insets_bottom = 0
+
+    private lateinit var _theme: Theme
+    private var _tc: Theme.Computed? = null
+    private lateinit var _themeCache: LruCache<String, Theme.Computed>
+
+    // ---------------------------------------------------------------------------------
+    // Theme-editor preview mode (roadmap §4.1). The DIY theme creator renders THIS view —
+    // not a look-alike — so every colour is judged with the real draw loop. Preview mode
+    // makes the instance inert: no touch/a11y activation, no IME handler callbacks (the
+    // settings activity shares the IME's process, so Config.handler may be the live
+    // keyboard's), no window-inset margins and no global adjacency push.
+    // ---------------------------------------------------------------------------------
+
+    /** True once [enterThemePreviewMode] ran; never reverts for this instance. */
+    private var _previewMode = false
+
+    /** Static sample trail drawn in preview mode (view coordinates), or null. */
+    private var _previewTrail: List<PointF>? = null
+
+    /** Trail colour override from the edited scheme (preview mode only), or null. */
+    private var _previewTrailColor: Int? = null
+
+    enum class Vertical {
+        TOP, CENTER, BOTTOM
+    }
+
+    // reset() runs during construction, so cancellation state must exist before init.
+    private var continuousSegmenter: tribixbite.cleverkeys.gesture.ContinuousSwipe<KeyboardData.Key>? = null
+    private var continuousQueue: tribixbite.cleverkeys.gesture.ContinuousSwipeQueue<tribixbite.cleverkeys.gesture.ContinuousSwipe.Segment<KeyboardData.Key>>? = null
+    private var continuousExpected: EditorReadback? = null
+    private var continuousEpoch = 0L
+    private var continuousWasCancelled = false
+    private val continuousGate = tribixbite.cleverkeys.gesture.ContinuousSelectionGate()
+    private var continuousSpaceBounds: KeyboardGeometry.KeyBounds? = null
+    private var continuousInsideSpace = false
+    private val continuousTimer = android.os.Handler(android.os.Looper.getMainLooper())
+    private var continuousDwell: Runnable? = null
+    private var continuousAbort: (() -> Unit)? = null
+    private var continuousSpaceCache: Triple<KeyboardData, KeyboardGeometry.Params, KeyboardGeometry.KeyBounds?>? = null
+
+    init {
+        // The ONE acquisition of the live Config in this file (ARC-072). A View inflated
+        // from XML has no constructor to inject one into, so the static accessor is the
+        // seam; everything downstream reads either the captured snapshot or the two
+        // members the read-model deliberately excludes (`handler`, a dispatch callback).
+        _config = Config.globalConfig()
+        val snap = _config.snapshot
+        // Load theme: use ThemeProvider for runtime themes (decorative/custom),
+        // otherwise use XML-based Theme constructor
+        _theme = if (snap.isRuntimeTheme) {
+            ThemeProvider.getInstance(context).getTheme(snap.themeName)
+        } else {
+            Theme(getContext(), attrs)
+        }
+        // Fix #92: For runtime themes (custom/decorative), the XML attribute
+        // ?attr/colorKeyboard resolves to the hardcoded base style (CleverKeysDark).
+        // Override with the actual keyboard background from the Theme's color scheme.
+        if (snap.isRuntimeTheme && _theme.colorKeyboardBackground != 0) {
+            setBackgroundColor(_theme.colorKeyboardBackground)
+        }
+
+        _pointers = Pointers(this, _config, getContext())
+        _swipeRecognizer = _pointers._swipeRecognizer // Share the recognizer
+        _themeCache = LruCache(5)
+
+        // Install the TalkBack virtual-view tree. Must use
+        // ViewCompat.setAccessibilityDelegate (NOT an override of
+        // getAccessibilityNodeProvider) — the delegate bridges the helper's
+        // provider to the platform. Node data is supplied via lambdas so the
+        // geometry/labeller stay decoupled from this view's private state.
+        _a11yHelper = KeyboardAccessibilityHelper(
+            host = this,
+            rectsProvider = ::computeAccessibilityKeyRects,
+            // Live modifier transform so a latched Shift announces "A", not "a".
+            describe = { kr ->
+                val effective = KeyModifier.modify(kr.kv, _mods) ?: kr.kv
+                KeyLabels.describe(effective) { id -> context.getString(id) }
+            },
+            // Route through Pointers (NOT the handler) so modifier latching works.
+            onActivate = ::activateKeyForAccessibility,
+            checkedState = ::accessibilityCheckedState,
+        )
+        ViewCompat.setAccessibilityDelegate(this, _a11yHelper)
+
+        refresh_navigation_bar(context)
+        setOnTouchListener(this)
+        val layout_id = attrs?.getAttributeResourceValue(null, "layout", 0) ?: 0
+        if (layout_id != 0) {
+            val kw = KeyboardData.load(resources, layout_id)
+            if (kw != null)
+                setKeyboard(kw)
+        } else {
+            reset()
+        }
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        if (!_shortSwipeListenerRegistered) {
+            _shortSwipeManager.addChangeListener(_shortSwipeMappingsChanged)
+            _shortSwipeListenerRegistered = true
+        }
+        // Request insets callback
+        requestApplyInsets()
+
+        // FIX: If insets are 0, get nav bar height from system resources as fallback
+        // This ensures keyboard is positioned correctly even before WindowInsets callback.
+        // Preview mode (§4.1): the theme editor's preview is hosted in a settings window, so
+        // the nav bar must not add a bottom margin once it attaches (enterThemePreviewMode
+        // zeroed the insets; this fallback used to re-add them on attach).
+        if (!_previewMode && _insets_bottom == 0) {
+            val navBarHeight = getNavigationBarHeight()
+            if (navBarHeight > 0) {
+                _insets_bottom = navBarHeight
+                post { requestLayout() }
+            }
+        }
+    }
+
+    /**
+     * #167 residual (the staleness half): a navigation-mode switch (3-button bar →
+     * gesture pill) or rotation changes the system-bar insets while this view stays
+     * attached — the IME window survives hide/show. The cached `_insets_bottom` had only
+     * `== 0`-guarded recoveries (onAttachedToWindow, onMeasure), so a stale NONZERO value
+     * was never corrected: the last key row stayed melded into, or floating above, the
+     * nav bar until full window recreation (the reporter's back-gesture "fix").
+     *
+     * View.onConfigurationChanged is the platform hook that fires on exactly those
+     * transitions (a nav-mode switch is an RRO overlay change → configuration change
+     * dispatched down the attached view tree). Re-derive synchronously from the live root
+     * window so the very next measure uses fresh values, and request a fresh dispatch —
+     * onApplyWindowInsets remains the authoritative corrector if rootWindowInsets lags.
+     */
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration?) {
+        super.onConfigurationChanged(newConfig)
+        WindowLayoutUtils.refreshSystemBarInsets(this)?.let { applySystemBarInsets(it) }
+    }
+
+    /**
+     * Applies freshly derived system-bar insets to the cached fields; requests a
+     * re-layout only when a value actually changed (Window.requestLayout on every
+     * dispatch would thrash — the framework re-dispatches identical insets often).
+     * CRITICAL: without the requestLayout on change, the keyboard may appear below
+     * the nav bar on first load.
+     */
+    private fun applySystemBarInsets(insets: SystemBarInsets) {
+        // Preview mode: the host is an ordinary settings view, not the IME window — the
+        // activity's nav bar must not add a bottom margin to the scaled preview.
+        if (_previewMode) return
+        if (insets.left == _insets_left &&
+            insets.right == _insets_right &&
+            insets.bottom == _insets_bottom
+        ) return
+        _insets_left = insets.left
+        _insets_right = insets.right
+        _insets_bottom = insets.bottom
+        requestLayout()
+    }
+
+    /**
+     * Get navigation bar height from system resources.
+     * Fallback for when WindowInsets aren't available yet.
+     */
+    // Intentional resource reflection: this is the pre-WindowInsets fallback for
+    // positioning the IME above the nav bar. The framework exposes no public API for
+    // the nav-bar height, so reading the internal "config_showNavigationBar" bool and
+    // "navigation_bar_height" dimen via getIdentifier is the established technique.
+    // The primary path is onApplyWindowInsets(); this only runs when insets are 0.
+    @SuppressLint("DiscouragedApi", "InternalInsetResource")
+    private fun getNavigationBarHeight(): Int {
+        // Check if device has navigation bar
+        val hasNavBar = resources.getIdentifier("config_showNavigationBar", "bool", "android")
+            .let { id -> id > 0 && resources.getBoolean(id) }
+
+        // Also check for gesture navigation (no visible nav bar)
+        val isGestureNav = if (android.os.Build.VERSION.SDK_INT >= 29) {
+            val navMode = android.provider.Settings.Secure.getInt(
+                context.contentResolver,
+                "navigation_mode",
+                0 // 0 = 3-button, 2 = gesture
+            )
+            navMode == 2
+        } else false
+
+        // If gesture nav, nav bar height is smaller (pill only)
+        // If no nav bar at all, return 0
+        if (!hasNavBar && !isGestureNav) {
+            // Try to get height anyway - some devices report false but have nav bar
+        }
+
+        val resourceId = resources.getIdentifier("navigation_bar_height", "dimen", "android")
+        return if (resourceId > 0) {
+            resources.getDimensionPixelSize(resourceId)
+        } else {
+            0
+        }
+    }
+
+    private fun initSwipeTrailPaint() {
+        // One capture for the whole paint build: colour, width, effect and glow radius must
+        // describe the same configuration or the trail can end up (say) a "solid" alpha with
+        // a glow mask filter.
+        val snap = _config.snapshot
+        val density = resources.displayMetrics.density
+
+        _swipeTrailPaint = Paint().apply {
+            color = _previewTrailColor ?: snap.swipe_trail_color
+            strokeWidth = snap.swipe_trail_width * density
+            style = Paint.Style.STROKE
+            isAntiAlias = true
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+
+            // Apply effect based on setting
+            when (effectiveTrailEffect(snap)) {
+                "glow" -> {
+                    // GPU-efficient glow using blur mask filter
+                    // Use SOLID blur type for crisp center with soft edges
+                    val glowRadius = snap.swipe_trail_glow_radius * density * 0.5f
+                    maskFilter = android.graphics.BlurMaskFilter(
+                        glowRadius.coerceAtLeast(1f),
+                        android.graphics.BlurMaskFilter.Blur.SOLID // SOLID gives crisp center
+                    )
+                    alpha = 240 // More opaque for better visibility
+                }
+                "sparkle" -> {
+                    // Sparkle effect uses glow base + particles
+                    val glowRadius = snap.swipe_trail_glow_radius * density * 0.5f
+                    maskFilter = android.graphics.BlurMaskFilter(
+                        glowRadius.coerceAtLeast(1f),
+                        android.graphics.BlurMaskFilter.Blur.SOLID
+                    )
+                    alpha = 220
+                }
+                "solid" -> {
+                    maskFilter = null
+                    alpha = 255 // Fully opaque
+                }
+                "fade" -> {
+                    maskFilter = null
+                    alpha = 140 // More transparent
+                }
+                "rainbow" -> {
+                    // Rainbow uses shader - will cycle colors during draw
+                    maskFilter = null
+                    alpha = 200
+                }
+                "none" -> {
+                    alpha = 0 // Invisible
+                }
+                else -> {
+                    maskFilter = null
+                    alpha = 180
+                }
+            }
+        }
+    }
+
+    private fun getParentWindow(context: Context): Window? {
+        return when (context) {
+            is InputMethodService -> context.window?.window
+            is ContextWrapper -> getParentWindow(context.baseContext)
+            else -> null
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    fun refresh_navigation_bar(context: Context) {
+        // minSdk 24: no lower SDK guard needed here.
+        val w = getParentWindow(context) ?: return
+
+        // KEY FIX: Allow IME window to draw behind system bars
+        // This is required for truly transparent nav bar in InputMethodService
+        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(w, false)
+
+        // FIX #1116: On Android 8-9 (API 26-28), transparent nav bar with light theme
+        // causes white-on-white icons. Use theme's nav bar color instead.
+        // The whole decision table is pure — see [NavBarAppearance.decide].
+        val appearance = NavBarAppearance.decide(VERSION.SDK_INT, _theme.isLightNavBar)
+
+        w.navigationBarColor =
+            if (appearance.useThemeNavBarColor) _theme.colorNavBar else android.graphics.Color.TRANSPARENT
+
+        // Legacy (API 26-28) light-navigation-bar flag: set for dark icons on a light bar,
+        // cleared for light icons on a dark/transparent bar, untouched where the flag does
+        // not exist (< 26) or the insets controller owns it (>= 29).
+        appearance.legacyLightNavBarFlag?.let { wantLight ->
+            val decorView = w.decorView
+            val flags = decorView.systemUiVisibility
+            decorView.systemUiVisibility = if (wantLight) {
+                flags or android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+            } else {
+                flags and android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
+            }
+        }
+
+        // Disable navigation bar contrast enforcement on API 29+. The decision field
+        // already encodes sdkInt >= 29; the explicit check restates it in the form
+        // lint's NewApi detector can see (it cannot trace through NavBarAppearance).
+        if (VERSION.SDK_INT >= 29 && appearance.disableContrastEnforcement) {
+            w.isNavigationBarContrastEnforced = false
+        }
+
+        // Use modern WindowInsetsController for API 30+ (API 26-28 handled above with legacy flags)
+        if (appearance.useInsetsController) {
+            val controller = androidx.core.view.ViewCompat.getWindowInsetsController(w.decorView)
+            controller?.isAppearanceLightNavigationBars = _theme.isLightNavBar
+        }
+    }
+
+    /** Get the current keyboard layout data (#9: used for swipe support check). */
+    fun getKeyboard(): KeyboardData? = _keyboard
+
+    fun setKeyboard(kw: KeyboardData) {
+        cancelContinuousSwipe()
+        _keyboard = kw
+        rebuildKeyCodeLowerCache(kw)
+        val shiftKv = KeyValue.getKeyByName("shift")
+        _shift_kv = shiftKv
+        _shift_key = kw.findKeyWithValue(shiftKv)
+        val composeKv = KeyValue.getKeyByName("compose")
+        _compose_kv = composeKv
+        _compose_key = kw.findKeyWithValue(composeKv)
+        // ARC-088: null is a real layout transition, not "leave the previous modmap active".
+        // It also invalidates KeyModifier's per-(key, modifiers) render memo.
+        // Preview mode (§4.1): the modmap is process-global and the IME may share this
+        // process — a theme-editor preview must not swap the live keyboard's modmap.
+        if (!_previewMode) KeyModifier.set_modmap(kw.modmap)
+        // Autocorrect adjacency for the letters the built-in QWERTY table cannot position
+        // (Hebrew, Cyrillic, Greek …): without it every substitution on those boards cost the
+        // maximum and neighbour-key typos were not corrected (Saga, Hebrew, 2026-10-08).
+        // Process-global like the modmap, so never from a preview. Here and not in onLayout:
+        // the grid depends only on the layout, and onLayout skips unchanged-size passes —
+        // a layout switch at the same size would never reach it.
+        if (!_previewMode) {
+            tribixbite.cleverkeys.autocorrect.KeyAdjacency.setLayoutLetters(
+                tribixbite.cleverkeys.autocorrect.LayoutLetterGrid.of(kw)
+            )
+        }
+
+        // Refresh swipe trail paint with latest config settings
+        initSwipeTrailPaint()
+
+        // CRITICAL FIX: Pre-calculate key width based on screen width
+        // This ensures getKeyAtPosition works immediately for swipes before onMeasure() runs
+        // Always recalculate because layout or screen dims might have changed (view reuse)
+        run {
+            // One capture for this geometry pass: the margins and the cache generation must
+            // describe the same configuration, or a layout computed from new margins gets
+            // filed (and later served) under the previous generation's key.
+            val snap = _config.snapshot
+            val dm = resources.displayMetrics
+            val screenWidth = dm.widthPixels
+            val marginLeft = maxOf(snap.margin_left, _insets_left.toFloat())
+            val marginRight = maxOf(snap.margin_right, _insets_right.toFloat())
+            _keyWidth = (screenWidth - marginLeft - marginRight) / kw.keysWidth
+
+            // Ensure theme cache is initialized for key detection
+            // Include config.version to invalidate cache when any config changes (e.g., keyboard height)
+            val cacheKey = "${kw.name ?: ""}_${_keyWidth}_${snap.version}"
+            _tc = _themeCache.get(cacheKey) ?: run {
+                val computed = Theme.Computed(_theme, _config, _keyWidth, kw)
+                _themeCache.put(cacheKey, computed)
+                computed
+            }
+        }
+
+        // Initialize swipe recognizer if not already created
+        if (_swipeRecognizer == null) {
+            _swipeRecognizer = EnhancedSwipeGestureRecognizer()
+        }
+
+        // ENABLE PROBABILISTIC DETECTION:
+        // Pass the keyboard layout to the recognizer so it can find "nearest keys"
+        // instead of failing on gaps/misalignment (crucial for startup race condition)
+        // NOTE: width is just the key area (excluding margins), marginLeft offsets key positions
+        _swipeRecognizer?.let { recognizer ->
+            val keyAreaWidth = _keyWidth * kw.keysWidth
+            val estimatedHeight = _tc?.row_height?.times(kw.keysHeight) ?: 0f
+            recognizer.setKeyboard(kw, keyAreaWidth, estimatedHeight, _marginLeft)
+        }
+
+        reset()
+        // Layout changed → rebuild the TalkBack virtual-view tree.
+        invalidateAccessibilityRoot()
+    }
+
+    fun reset() {
+        cancelContinuousSwipe()
+        _mods = Pointers.Modifiers.EMPTY
+        _pointers.clear()
+        requestLayout()
+        invalidate()
+    }
+
+    /**
+     * Clear swipe typing state after suggestion selection
+     */
+    fun clearSwipeState() {
+        // Clear any ongoing swipe gestures
+        _pointers.clear()
+        invalidate()
+    }
+
+    /**
+     * Roadmap §4.1: turn this instance into an inert theme-editor preview. Touch and
+     * accessibility activation are disabled, IME handler callbacks are suppressed, and
+     * window insets / adjacency side effects are skipped (see the field block above).
+     * Idempotent; there is no way back — a preview instance is never used for typing.
+     */
+    fun enterThemePreviewMode() {
+        if (_previewMode) return
+        _previewMode = true
+        setOnTouchListener(null)
+        isClickable = false
+        isFocusable = false
+        // The host summarises the preview; per-key virtual views would invite activation.
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+        // Drop any insets that were applied before the switch.
+        _insets_left = 0
+        _insets_right = 0
+        _insets_bottom = 0
+        initSwipeTrailPaint()
+        requestLayout()
+        invalidate()
+    }
+
+    /**
+     * Roadmap §4.1: render with [theme] (built from the editor's scheme by
+     * [tribixbite.cleverkeys.theme.ThemeEditorPreview.themeFor]) and draw the preview trail
+     * in [trailColor]. Everything else — opacity, borders, label sizes, trail width/effect
+     * — still comes from the user's real configuration, exactly as on the keyboard.
+     */
+    fun applyPreviewTheme(theme: Theme, trailColor: Int) {
+        check(_previewMode) { "applyPreviewTheme requires enterThemePreviewMode()" }
+        _theme = theme
+        _previewTrailColor = trailColor
+        // Cached frames hold the previous theme's paints.
+        _themeCache.evictAll()
+        if (theme.colorKeyboardBackground != 0) setBackgroundColor(theme.colorKeyboardBackground)
+        val kw = _keyboard
+        _tc = if (kw != null && _keyWidth > 0f) Theme.Computed(_theme, _config, _keyWidth, kw) else null
+        initSwipeTrailPaint()
+        requestLayout()
+        invalidate()
+    }
+
+    /** Roadmap §4.1: static sample trail (view coordinates) for preview mode; null clears. */
+    fun setPreviewTrail(points: List<PointF>?) {
+        check(_previewMode) { "setPreviewTrail requires enterThemePreviewMode()" }
+        _previewTrail = points?.takeIf { it.size >= 2 }
+        invalidate()
+    }
+
+    /** Effect used for the trail; preview mode keeps a disabled/"none" trail visible. */
+    private fun effectiveTrailEffect(snap: ConfigSnapshot): String =
+        if (_previewMode) {
+            tribixbite.cleverkeys.theme.ThemePreviewScene.previewTrailEffect(
+                snap.swipe_trail_enabled, snap.swipe_trail_effect
+            )
+        } else {
+            snap.swipe_trail_effect
+        }
+
+    fun set_fake_ptr_latched(key: KeyboardData.Key?, kv: KeyValue?, latched: Boolean, lock: Boolean) {
+        if (_keyboard == null || key == null || kv == null)
+            return
+        _pointers.set_fake_pointer_state(key, kv, latched, lock)
+    }
+
+    /** Called by auto-capitalisation. */
+    fun set_shift_state(latched: Boolean, lock: Boolean) {
+        val shiftKv = _shift_kv
+        set_fake_ptr_latched(_shift_key, shiftKv, latched, lock)
+        // CRITICAL: Update _mods so swipe typing can detect shift state
+        _mods = _pointers.getModifiers()
+        invalidate() // Redraw keyboard to show shift state
+    }
+
+    /**
+     * Clears latched modifier state (e.g., shift) after swipe word insertion.
+     * Called from InputCoordinator when a swipe word is committed.
+     */
+    fun clearLatchedModifiers() {
+        _pointers.clearLatched()
+        _mods = _pointers.getModifiers()
+        _config.handler?.mods_changed(_mods)
+        invalidate()
+    }
+
+    /**
+     * Check if shift is currently locked (caps lock mode, not just latched).
+     * Used for ALL CAPS swipe typing: caps lock + swipe = ENTIRE WORD UPPERCASE.
+     * @return true if shift is locked (caps lock), false if just latched or not active
+     */
+    override fun isShiftLocked(): Boolean {
+        val shiftKv = _shift_kv ?: return false
+        val flags = _pointers.getKeyFlags(shiftKv)
+        return flags != -1 && (flags and Pointers.FLAG_P_LOCKED) != 0
+    }
+
+    /** Called from [KeyEventHandler]. */
+    fun set_compose_pending(pending: Boolean) {
+        val composeKv = _compose_kv
+        set_fake_ptr_latched(_compose_key, composeKv, pending, false)
+    }
+
+    /** Called from [CleverKeysService.onUpdateSelection]. */
+    fun set_selection_state(selection_state: Boolean) {
+        val selectionModeKv = KeyValue.getKeyByName("selection_mode")
+        set_fake_ptr_latched(
+            KeyboardData.Key.EMPTY,
+            selectionModeKv,
+            selection_state,
+            true
+        )
+    }
+
+    override fun modifyKey(k: KeyValue?, mods: Pointers.Modifiers): KeyValue? {
+        return KeyModifier.modify(k, mods)
+    }
+
+    override fun onPointerDown(k: KeyValue?, isSwipe: Boolean) {
+        updateFlags()
+        _config.handler?.key_down(k, isSwipe)
+        invalidate()
+        vibrate()
+    }
+
+    override fun onPointerUp(k: KeyValue?, mods: Pointers.Modifiers) {
+        // [key_up] must be called before [updateFlags]. The latter might disable flags.
+        _config.handler?.key_up(k, mods)
+        updateFlags()
+        invalidate()
+    }
+
+    override fun onPointerHold(k: KeyValue, mods: Pointers.Modifiers) {
+        _config.handler?.key_up(k, mods, isKeyRepeat = true)
+        updateFlags()
+    }
+
+    override fun onPointerFlagsChanged(hapticEvent: HapticEvent?) {
+        updateFlags()
+        invalidate()
+        if (hapticEvent != null) {
+            vibrate(hapticEvent)
+        }
+    }
+
+    private fun updateFlags() {
+        _mods = _pointers.getModifiers()
+        // Preview mode: the latched/locked sample state must never reach the live IME.
+        if (!_previewMode) _config.handler?.mods_changed(_mods)
+        // Latched Shift changes every letter's spoken label ("a" -> "A") and the
+        // Shift key's checked state — refresh the a11y tree. Cheap no-op when no
+        // a11y service is enabled; kept out of onDraw/onTouch for that reason.
+        invalidateAccessibilityRoot()
+    }
+
+    /**
+     * Cancels pending segments; already accepted words remain in the editor. Every caller
+     * that supersedes a phrase (next touch-down, typed key, explicit edit, layout or field
+     * change, second finger) comes through here, so a segment that was still waiting or
+     * decoding — typically the final word right after lift — is reported, not lost silently.
+     */
+    fun cancelContinuousSwipe() = stopContinuousSwipe(reportLoss = true)
+
+    private fun stopContinuousSwipe(reportLoss: Boolean) {
+        val segmenter = continuousSegmenter
+        val lost = segmenter?.hasBoundary == true || continuousQueue?.hasOutstandingWork == true
+        // Only a phrase (a deliberate boundary was crossed) discards the rest of its gesture.
+        // Without a boundary the gesture is an ordinary swipe and still commits its word at lift.
+        if (segmenter?.hasBoundary == true) continuousWasCancelled = true
+        continuousEpoch++
+        continuousDwell?.let { continuousTimer.removeCallbacks(it) }; continuousDwell = null
+        segmenter?.cancel(); continuousSegmenter = null
+        continuousQueue?.cancel(); continuousQueue = null
+        continuousExpected = null; continuousInsideSpace = false
+        continuousAbort = null
+        continuousGate.reset()
+        if (reportLoss && lost) _keyboard2?.showSuggestionBarMessage(context.getString(R.string.continuous_swipe_stopped))
+    }
+    override fun onSwipeCancel() = cancelContinuousSwipe()
+    fun onContinuousSelectionChanged(start: Int, end: Int) {
+        val expected = continuousExpected ?: return
+        if (continuousGate.onSelection(start, end, expected.start) != tribixbite.cleverkeys.gesture.ContinuousSelectionGate.Decision.CANCEL) return
+        // A foreign selection change. While phrase work is pending, stop it like any other
+        // rejected commit (with feedback); a finished phrase just ends.
+        val abort = continuousAbort
+        if (abort != null && (continuousSegmenter?.hasBoundary == true || continuousQueue?.hasOutstandingWork == true)) abort()
+        else stopContinuousSwipe(reportLoss = false)
+    }
+
+    /** Space-key bounds per (layout, geometry); recomputed only when either changes. */
+    private fun continuousSpaceBoundsFor(layout: KeyboardData, params: KeyboardGeometry.Params): KeyboardGeometry.KeyBounds? {
+        continuousSpaceCache?.let { (cachedLayout, cachedParams, bounds) ->
+            if (cachedLayout === layout && cachedParams == params) return bounds
+        }
+        val bounds = KeyboardGeometry.computeKeyRects(layout, params)
+            .firstOrNull { it.kv.getKind() == KeyValue.Kind.Char && it.kv.getChar() == ' ' }?.bounds
+        continuousSpaceCache = Triple(layout, params, bounds)
+        return bounds
+    }
+
+    override fun onSwipeStart(x: Float, y: Float, key: KeyboardData.Key, snapshot: ConfigSnapshot, recognizer: ImprovedSwipeGestureRecognizer) {
+        cancelContinuousSwipe()
+        continuousWasCancelled = false
+        if (!snapshot.swipe_typing_enabled || !snapshot.continuous_swipe_enabled || _config.handler?.canUseEditorActions() != true) return
+        // Word swipes only start on letters (Seeker 2026-10-07). Pointers enforces that for the
+        // single-word routes; a phrase session dispatches segments itself at spacebar dwells,
+        // so it must apply the same start-key rule or a swipe from Backspace/Space could still
+        // commit words through this path.
+        if (!tribixbite.cleverkeys.swipe.KeyLetter.startsWordSwipe(key)) return
+        val service = _keyboard2 ?: return
+        val ic = service.currentInputConnection ?: return
+        val editor = service.currentInputEditorInfo ?: return
+        if (SuggestionBar.isPasswordField(editor)) return
+        val layout = _keyboard ?: return
+        val params = geometryParams() ?: return
+        val spaceBounds = continuousSpaceBoundsFor(layout, params) ?: return
+        val epoch = continuousEpoch
+        val language = snapshot.primary_language
+        val mode = snapshot.swipe_engine_mode
+        // Audit M7: the session's language identity is the snapshot's ACTIVE secondary (what the
+        // decoders use), not a SharedPreferences read per ownership check.
+        val secondary = snapshot.active_secondary_language
+        continuousSpaceBounds = spaceBounds
+        var first = true
+        val shiftAtStart = recognizer.wasShiftActiveAtStart()
+        val capsAtStart = recognizer.wasShiftLockedAtStart()
+        fun ownsSession(): Boolean {
+            val current = _config.snapshot
+            return continuousEpoch == epoch && _keyboard === layout && current.version == snapshot.version &&
+                current.primary_language == language && current.swipe_engine_mode == mode &&
+                current.active_secondary_language == secondary &&
+                current.continuous_swipe_enabled && current.swipe_typing_enabled && _config.handler?.canUseEditorActions() == true &&
+                service.currentInputConnection === ic && service.currentInputEditorInfo === editor
+        }
+        fun valid(): Boolean = ownsSession() && continuousExpected?.matches(ic) == true
+        fun abort() {
+            if (ownsSession()) service.onContinuousCommitRejected()
+            stopContinuousSwipe(reportLoss = false)
+            service.showSuggestionBarMessage(context.getString(R.string.continuous_swipe_stopped))
+        }
+        continuousAbort = ::abort
+        val queue = tribixbite.cleverkeys.gesture.ContinuousSwipeQueue<tribixbite.cleverkeys.gesture.ContinuousSwipe.Segment<KeyboardData.Key>>(
+            valid = ::valid,
+            aborted = ::abort,
+            dispatch = { segment, current, done ->
+                val shift = first && shiftAtStart; first = false
+                val old = continuousExpected
+                // Segment samples are already unsmoothed, so both engines keep receiving them;
+                // the CTC copy additionally carries the final segment's lift sample.
+                val ctcSamples = segment.ctcSamples
+                val ctcTrace = RawSwipeTrace.withLift(
+                    ctcSamples.map { android.graphics.PointF(it.x, it.y) }, ctcSamples.map { it.timestamp }, null)
+                service.handleSwipeTyping(segment.keys, segment.samples.map { android.graphics.PointF(it.x, it.y) }, segment.samples.map { it.timestamp }, shift, capsAtStart,
+                    InputCoordinator.SwipeCommitControl(current, complete = { word ->
+                        if (continuousEpoch != epoch) { done(false); return@SwipeCommitControl }
+                        // One readback serves every candidate spelling of the insertion.
+                        var now = EditorReadback.capture(ic)
+                        var accepted = word != null && old != null && now != null &&
+                            listOf(word, "$word ", " $word", " $word ").any { inserted ->
+                                EditorReadback.isReplacement(now!!, old, inserted, old.rangeStart + inserted.length)
+                            }
+                        // The deliberate boundary means one separator, even when automatic space is off.
+                        if (accepted && segment.endedBySpace && now?.before?.endsWith(" ") != true) {
+                            accepted = word != null && service.appendContinuousSeparator(ic, editor, word, ::ownsSession)
+                            now = EditorReadback.capture(ic)
+                        }
+                        accepted = continuousGate.complete(accepted, old?.start, now?.start)
+                        continuousExpected = if (accepted) now else null
+                        done(accepted)
+                    }, prepareCommit = { continuousGate.prepareCommit() },
+                        commitGuard = old?.let { EditorCommitGuard(it, ::ownsSession) }),
+                    ctcTrace = ctcTrace,
+                )
+            }
+        )
+        continuousQueue = queue
+        continuousSegmenter = tribixbite.cleverkeys.gesture.ContinuousSwipe(
+            emit = { segment ->
+                // The editor baseline is read lazily at the first deliberate boundary, so a
+                // gesture that never dwells on the spacebar costs no InputConnection round-trip.
+                // An unreadable or selected editor keeps the gesture an ordinary swipe, exactly
+                // as an eager touch-down read used to; later dispatches re-verify it (valid()).
+                if (continuousExpected == null) continuousExpected = EditorReadback.capture(ic)?.takeIf { it.collapsed }
+                if (continuousExpected == null) {
+                    if (continuousEpoch == epoch) disableContinuousForGesture()
+                } else {
+                    recognizer.confirmContinuousSwipe(); queue.enqueue(segment)
+                }
+            }, overflow = ::abort
+        )
+        continuousSegmenter?.sample(x, y, System.currentTimeMillis(), android.os.SystemClock.uptimeMillis(), key.takeIf { tribixbite.cleverkeys.swipe.KeyLetter.centreLetterOf(it.keys[0]) != null }, false)
+    }
+
+    /** Silent fallback: this gesture is an ordinary single swipe (no phrase, nothing lost). */
+    private fun disableContinuousForGesture() {
+        continuousEpoch++
+        continuousDwell?.let { continuousTimer.removeCallbacks(it) }; continuousDwell = null
+        continuousSegmenter?.cancel(); continuousSegmenter = null
+        continuousQueue?.cancel(); continuousQueue = null
+        continuousExpected = null; continuousInsideSpace = false; continuousAbort = null
+        continuousGate.reset()
+    }
+
+    private fun sampleContinuousSwipe(x: Float, y: Float, key: KeyboardData.Key?) {
+        val segmenter = continuousSegmenter ?: return
+        val bounds = continuousSpaceBounds ?: return
+        // Stay away from the physical key edges; touch slop and subkey geometry do not count.
+        val insetX = (bounds.right - bounds.left) * 0.1f
+        val insetY = (bounds.bottom - bounds.top) * 0.1f
+        val inside = x >= bounds.left + insetX && x <= bounds.right - insetX && y >= bounds.top + insetY && y <= bounds.bottom - insetY
+        val physicalSpace = x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom
+        val wasInside = continuousInsideSpace
+        continuousInsideSpace = inside
+        segmenter.sample(x, y, System.currentTimeMillis(), android.os.SystemClock.uptimeMillis(), key?.takeIf { tribixbite.cleverkeys.swipe.KeyLetter.centreLetterOf(it.keys[0]) != null }, physicalSpace, inside)
+        if (!inside) {
+            continuousDwell?.let { continuousTimer.removeCallbacks(it) }; continuousDwell = null
+        } else if (!wasInside) {
+            val epoch = continuousEpoch
+            continuousDwell = Runnable {
+                if (continuousEpoch == epoch && continuousInsideSpace) continuousSegmenter?.dwell(android.os.SystemClock.uptimeMillis())
+            }.also { continuousTimer.postDelayed(it, tribixbite.cleverkeys.gesture.ContinuousSwipe.DWELL_MS) }
+        }
+    }
+
+    override fun onSwipeMove(x: Float, y: Float, recognizer: ImprovedSwipeGestureRecognizer) {
+        val key = getKeyAtPosition(x, y)
+        sampleContinuousSwipe(x, y, key)
+        recognizer.addPoint(x, y, key)
+        // Always invalidate to show visual trail, even before swipe typing confirmed
+        invalidate()
+    }
+
+    override fun onSwipeEnd(recognizer: ImprovedSwipeGestureRecognizer) {
+        if (continuousWasCancelled) { recognizer.endSwipe(); recognizer.reset(); invalidate(); return }
+        continuousDwell?.let { continuousTimer.removeCallbacks(it) }; continuousDwell = null
+        if (continuousSegmenter?.hasBoundary == true) {
+            continuousSegmenter?.finish(recognizer.liftSample()); continuousSegmenter = null
+            recognizer.endSwipe(); recognizer.reset(); invalidate()
+            return
+        }
+        // With no deliberate boundary the original recognizer/path owns the entire swipe.
+        cancelContinuousSwipe()
+        if (recognizer.isSwipeTyping()) {
+            val result = recognizer.endSwipe()
+            if (_keyboard2 != null && result.keys != null && result.keys.isNotEmpty() &&
+                result.path != null && result.timestamps != null) {
+                // v1.2.8: Use shift state captured at swipe START, not END
+                // This ensures autocap after period works correctly - shift was active when swipe began
+                val wasShiftActive = recognizer.wasShiftActiveAtStart()
+                val wasShiftLocked = recognizer.wasShiftLockedAtStart()
+
+                // Pass full swipe data for ML collection
+                // path/timestamps are SMOOTHED (geometric + ML capture); rawTrace is the CTC input.
+                _keyboard2!!.handleSwipeTyping(result.keys, result.path, result.timestamps, wasShiftActive, wasShiftLocked,
+                    ctcTrace = result.rawTrace)
+            }
+        } else {
+            recognizer.endSwipe() // Clean up even if not swipe typing
+        }
+        recognizer.reset()
+        invalidate() // Clear the trail
+    }
+
+    override fun isPointWithinKey(x: Float, y: Float, key: KeyboardData.Key): Boolean {
+        return isPointWithinKeyWithTolerance(x, y, key, 0.0f)
+    }
+
+    override fun isPointWithinKeyWithTolerance(x: Float, y: Float, key: KeyboardData.Key, tolerance: Float): Boolean {
+        if (_keyboard == null) {
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                android.util.Log.d("Keyboard2View", "isPointWithinKeyWithTolerance: key or keyboard is null")
+            }
+            return false
+        }
+
+        // Find the row containing this key
+        var targetRow: KeyboardData.Row? = null
+        for (row in _keyboard!!.rows) {
+            for (k in row.keys) {
+                if (k == key) {
+                    targetRow = row
+                    break
+                }
+            }
+            if (targetRow != null) break
+        }
+
+        if (targetRow == null) {
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                android.util.Log.d("Keyboard2View", "isPointWithinKeyWithTolerance: targetRow not found")
+            }
+            return false
+        }
+
+        // Calculate key bounds
+        var keyX = _marginLeft
+        for (k in targetRow.keys) {
+            if (k == key) {
+                val xLeft = keyX + key.shift * _keyWidth
+                val xRight = xLeft + key.width * _keyWidth
+
+                // Calculate row bounds - MUST use _tc.row_height to scale like rendering does
+                val tc = _tc
+                if (tc == null) {
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                        android.util.Log.d("Keyboard2View", "isPointWithinKeyWithTolerance: _tc is null")
+                    }
+                    return false
+                }
+
+                var rowTop = _config.snapshot.marginTop
+                for (row in _keyboard!!.rows) {
+                    if (row == targetRow) break
+                    rowTop += (row.height + row.shift) * tc.row_height
+                }
+                val rowBottom = rowTop + targetRow.height * tc.row_height
+
+                // FIXED: Use radial (circular) tolerance instead of rectangular
+                val keyWidth = key.width * _keyWidth
+                val keyHeight = targetRow.height * tc.row_height
+
+                // Calculate key center
+                val keyCenterX = (xLeft + xRight) / 2
+                val keyCenterY = (rowTop + rowBottom) / 2
+
+                // Calculate distance from touch point to key center
+                val dx = x - keyCenterX
+                val dy = y - keyCenterY
+                val distanceFromCenter = kotlin.math.sqrt(dx * dx + dy * dy)
+
+                // Calculate max allowed distance
+                val maxHorizontal = keyWidth * (0.5f + tolerance)
+                val maxVertical = keyHeight * (0.5f + tolerance)
+                val maxDistance = kotlin.math.sqrt(maxHorizontal * maxHorizontal + maxVertical * maxVertical)
+
+                return distanceFromCenter <= maxDistance
+            }
+            keyX += k.width * _keyWidth
+        }
+
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+            android.util.Log.d("Keyboard2View", "isPointWithinKeyWithTolerance: key not found in targetRow")
+        }
+        return false
+    }
+
+    override fun getKeyHypotenuse(key: KeyboardData.Key): Float {
+        val keyboard = _keyboard ?: return 0f
+        val tc = _tc ?: return 0f  // Need theme computed for actual pixel scaling
+
+        // Find the row containing this key to get normalized height
+        var normalizedRowHeight = 0f
+        for (row in keyboard.rows) {
+            for (k in row.keys) {
+                if (k == key) {
+                    normalizedRowHeight = row.height
+                    break
+                }
+            }
+            if (normalizedRowHeight > 0) break
+        }
+
+        if (normalizedRowHeight == 0f) return 0f
+
+        // Convert to actual pixels: normalized * row_height scaling factor
+        val keyHeightPx = normalizedRowHeight * tc.row_height
+        val keyWidthPx = key.width * _keyWidth
+
+        // Calculate hypotenuse in pixels: sqrt(width² + height²)
+        return kotlin.math.sqrt(keyWidthPx * keyWidthPx + keyHeightPx * keyHeightPx)
+    }
+
+    override fun getKeyWidth(key: KeyboardData.Key): Float {
+        return key.width * _keyWidth
+    }
+
+    // ---- Subkey popover (docs/specs/subkey-popover.md) ----
+
+    /** The open popover, drawn over the keys at the end of [onDraw]; null when closed. */
+    private var _subkeyPopover: SubkeyPopoverState? = null
+    private val _subkeyPopoverRenderer = SubkeyPopoverRenderer()
+
+    override fun subkeyPopoverMetrics(key: KeyboardData.Key): SubkeyPopoverMetrics? {
+        val keyboard = _keyboard ?: return null
+        val tc = _tc ?: return null
+        val row = keyboard.rows.firstOrNull { r -> r.keys.any { it === key } } ?: return null
+        val cellW = key.width * _keyWidth
+        val cellH = row.height * tc.row_height
+        if (cellW <= 0f || cellH <= 0f || width == 0 || height == 0) return null
+        return SubkeyPopoverMetrics(cellW, cellH, width.toFloat(), height.toFloat())
+    }
+
+    override fun onSubkeyPopoverShow(state: SubkeyPopoverState) {
+        _subkeyPopover = state
+        invalidate()
+    }
+
+    override fun onSubkeyPopoverUpdate(state: SubkeyPopoverState) {
+        invalidate()
+    }
+
+    override fun onSubkeyPopoverDismiss() {
+        _subkeyPopover = null
+        invalidate()
+    }
+
+    override fun onSubkeyAssignRequested(request: SubkeyAssignRequest) {
+        SubkeyAssignActivity.launch(context, request)
+    }
+
+    /** TalkBack's touch exploration: the subkey popover stays closed (it has no a11y nodes). */
+    override fun isTouchExplorationEnabled(): Boolean = _a11yManager?.isTouchExplorationEnabled == true
+
+    /**
+     * Execute a custom short swipe mapping defined by the user.
+     * This is called from Pointers when a custom mapping is found for a short swipe gesture.
+     */
+    override fun onCustomShortSwipe(mapping: ShortSwipeMapping) {
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Keyboard2View", "Executing custom short swipe: ${mapping.keyCode}:${mapping.direction} -> ${mapping.actionType}")
+
+        val service = _keyboard2
+        if (service == null) {
+            Log.w("Keyboard2View", "Cannot execute custom swipe: no service reference")
+            return
+        }
+
+        val inputConnection = service.currentInputConnection
+        val editorInfo = service.currentInputEditorInfo
+
+        // A TYPED mapping — single-character TEXT (an apostrophe flick, "€") or a catalogue
+        // command naming a character key (nbsp) — is the same input as a key: route it through
+        // KeyEventHandler for smart punctuation, inline editors/search, autocap, automatic
+        // space and typed-text bookkeeping (CommandRouting). Pointers already emits these
+        // through the key pipeline; this covers any caller that reaches the view directly.
+        // Multi-character TEXT macros stay literal: splitting "'s" into keys would change
+        // existing macro semantics without providing a reversible possessive edit.
+        // Explicit suffix commands below use verified attachment and suffix-only undo.
+        val typedValue = CommandRouting.typedValue(mapping)
+        val typedHandler = if (typedValue != null) _config.handler else null
+        if (mapping.actionType == ActionType.COMMAND && mapping.actionValue in setOf("append_possessive", "append_apostrophe")) {
+            val suffix = if (mapping.actionValue == "append_possessive") "'s" else "'"
+            if (_config.handler?.execute_suffix(suffix) == true) performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+            return
+        }
+        if (mapping.actionType == ActionType.TEMPLATE) {
+            val executed = _config.handler?.execute_template(mapping.actionValue) == true
+            if (executed) performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+            return // A rejected template must never fall back to typing its payload.
+        }
+        // Editing commands (copy, paste, undo, clear, text assist, private copy, clear clipboard
+        // …, catalogue or legacy AvailableCommand spelling) have ONE implementation:
+        // KeyEventHandler.handleEditingKey, reached exactly as a layout key presses it. It owns
+        // inline clipboard-editor routing, terminal paste and typed-word bookkeeping, which the
+        // executor's own copies and the old executeEditingCommand skipped (todo 12, 2026-10-12;
+        // EditingCommandParityTest). Like every executed custom swipe, it vibrates.
+        val editingValue = CommandRouting.editingValue(mapping)
+        if (editingValue != null) {
+            val handler = _config.handler
+            if (handler == null) {
+                Log.w("Keyboard2View", "Cannot execute editing command ${mapping.actionValue}: no key handler")
+                return
+            }
+            handler.key_up(editingValue, Pointers.Modifiers.EMPTY)
+            performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+            return
+        }
+        val executed = if (typedHandler != null && typedValue != null) {
+            typedHandler.key_up(typedValue, Pointers.Modifiers.EMPTY)
+            true
+        } else {
+            _customSwipeExecutor.execute(mapping, inputConnection, editorInfo)
+        }
+
+        if (!executed) {
+            // Executor couldn't handle it - try KeyValue-based execution
+            // This handles Event-type keys (settings, clipboard, voice, numeric) that require
+            // service/system handling. Editing-type keys never get here (see editingValue above).
+            val actionValue = mapping.actionValue
+            val keyValue = KeyValue.getKeyByName(actionValue)
+
+            // v1.2.0 custom commands - check before KeyValue to prevent String fallback interception
+            val customCommandHandled = when (actionValue) {
+                "primaryLangToggle" -> { togglePrimaryLanguage(); true }
+                "secondaryLangToggle" -> { toggleSecondaryLanguage(); true }
+                "showTextMenu" -> { showTextContextMenu(inputConnection); true }
+                else -> false
+            }
+
+            // Audit H-7: no early return here — the success haptic at the bottom of this
+            // function must fire for the custom text-action commands too (they used
+            // to `return` past it and succeed silently while every other successful
+            // custom swipe vibrated).
+            //
+            // Audit H-1: the KeyValue branch and the legacy AvailableCommand block are
+            // EXCLUSIVE. `switch_forward`/`switch_backward` are both a KeyValue name and
+            // an AvailableCommand name; dispatching via Kind.Event and then falling into
+            // the legacy `getCommand()` block executed the layout switch TWICE per swipe
+            // (with two layouts enabled the switch wrapped back and looked dead).
+            // (getKeyByName is total — unknown names come back as String keys, which is
+            // what the Kind.String fall-through below exists for.)
+            var keyValueHandled = false
+            if (!customCommandHandled) {
+                when (keyValue.getKind()) {
+                    KeyValue.Kind.Event -> {
+                        // Event-type commands require keyboard service handling
+                        val event = keyValue.getEvent()
+                        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Keyboard2View", "Executing Event command via service: $actionValue -> $event")
+                        service.triggerKeyboardEvent(event)
+                        keyValueHandled = true
+                    }
+                    KeyValue.Kind.String -> {
+                        // String keys that aren't our custom commands - fall through to legacy handling
+                        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Keyboard2View", "String KeyValue, falling through to legacy handler")
+                    }
+                    else -> {
+                        Log.w("Keyboard2View", "Unhandled KeyValue kind for custom swipe: ${keyValue.getKind()}")
+                    }
+                }
+            }
+
+            // Fallback to legacy AvailableCommand handling for backward compatibility.
+            // Only reached when neither the custom-command nor the KeyValue branch
+            // handled the action (H-1: never after a successful Event/Editing dispatch).
+            // TODO(audit 2026-10-08): AvailableCommand dispatch is split between
+            // CustomShortSwipeExecutor.executeCommand (editing/navigation commands it can run on
+            // the InputConnection) and this block (the ones that need the service). Unifying
+            // them means one dispatcher with access to both the InputConnection and the
+            // service; not done here because every legacy name is pinned by
+            // Keyboard2ViewCustomSwipeDispatchTest/CommandRoutingTest and a merge risks
+            // re-introducing H-1's double execution for names present on both sides.
+            val command = if (customCommandHandled || keyValueHandled) null else mapping.getCommand()
+            when (command) {
+                AvailableCommand.SWITCH_IME -> {
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Keyboard2View", "Executing SWITCH_IME via InputMethodManager")
+                    val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                    imm?.showInputMethodPicker()
+                }
+                AvailableCommand.VOICE_INPUT -> {
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Keyboard2View", "Executing VOICE_INPUT via keyboard service")
+                    service.triggerKeyboardEvent(KeyValue.Event.SWITCH_VOICE_TYPING)
+                }
+                AvailableCommand.SWITCH_FORWARD -> {
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Keyboard2View", "Executing SWITCH_FORWARD via keyboard service")
+                    service.triggerKeyboardEvent(KeyValue.Event.SWITCH_FORWARD)
+                }
+                AvailableCommand.SWITCH_BACKWARD -> {
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Keyboard2View", "Executing SWITCH_BACKWARD via keyboard service")
+                    service.triggerKeyboardEvent(KeyValue.Event.SWITCH_BACKWARD)
+                }
+                AvailableCommand.SHOW_TEXT_MENU -> {
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Keyboard2View", "Executing SHOW_TEXT_MENU")
+                    showTextContextMenu(inputConnection)
+                }
+                AvailableCommand.PRIMARY_LANG_TOGGLE -> {
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Keyboard2View", "Executing PRIMARY_LANG_TOGGLE")
+                    togglePrimaryLanguage()
+                }
+                AvailableCommand.SECONDARY_LANG_TOGGLE -> {
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Keyboard2View", "Executing SECONDARY_LANG_TOGGLE")
+                    toggleSecondaryLanguage()
+                }
+                else -> {
+                    if (command != null) {
+                        Log.w("Keyboard2View", "Custom swipe command failed to execute: ${mapping.actionValue}")
+                    }
+                }
+            }
+        }
+
+        // Provide haptic feedback for successful gesture
+        performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+    }
+
+    /**
+     * Show text context menu by selecting the word under cursor.
+     * This triggers the native floating toolbar with cut/copy/paste/translate options.
+     */
+    private fun showTextContextMenu(inputConnection: android.view.inputmethod.InputConnection?) {
+        if (inputConnection == null) {
+            Log.w("Keyboard2View", "Cannot show text menu: no input connection")
+            return
+        }
+
+        try {
+            // Check if there's already a selection
+            val existingSelection = inputConnection.getSelectedText(0)?.toString()
+            if (!existingSelection.isNullOrEmpty()) {
+                // Already have selection, show message indicating menu should appear
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Keyboard2View", "Text already selected, toolbar should be visible")
+                _keyboard2?.showSuggestionBarMessage(context.getString(R.string.keyboard_text_menu_available))
+                return
+            }
+
+            // No selection - try to select the word at cursor to trigger toolbar
+            // Get text around cursor
+            val textBefore = inputConnection.getTextBeforeCursor(50, 0)?.toString() ?: ""
+            val textAfter = inputConnection.getTextAfterCursor(50, 0)?.toString() ?: ""
+
+            if (textBefore.isEmpty() && textAfter.isEmpty()) {
+                _keyboard2?.showSuggestionBarMessage(context.getString(R.string.keyboard_text_menu_no_text))
+                return
+            }
+
+            // Find word boundaries (pure scan — see TextActionPolicy.wordAtCursor)
+            val span = TextActionPolicy.wordAtCursor(textBefore, textAfter)
+
+            // Calculate selection offsets relative to cursor
+            val selectBackward = span.backward
+            val selectForward = span.forward
+
+            if (span.isEmpty) {
+                _keyboard2?.showSuggestionBarMessage(context.getString(R.string.keyboard_text_menu_no_word))
+                return
+            }
+
+            // Get extracted text to find cursor position
+            val extracted = inputConnection.getExtractedText(android.view.inputmethod.ExtractedTextRequest(), 0)
+            if (extracted != null) {
+                val cursorPos = extracted.selectionStart
+                val wordStart = cursorPos - selectBackward
+                val wordEnd = cursorPos + selectForward
+
+                // Select the word using absolute positions
+                inputConnection.setSelection(wordStart, wordEnd)
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Keyboard2View", "Selected word at positions: $wordStart to $wordEnd")
+                _keyboard2?.showSuggestionBarMessage(context.getString(R.string.keyboard_text_menu_word_selected))
+            } else {
+                // Fallback: try double-tap simulation via ctrl+shift+left then shift+right
+                // Send Ctrl+Shift+Left to select word left
+                val downTime = System.currentTimeMillis()
+                val selectWordEvent = android.view.KeyEvent(
+                    downTime, downTime,
+                    android.view.KeyEvent.ACTION_DOWN,
+                    android.view.KeyEvent.KEYCODE_DPAD_LEFT,
+                    0,
+                    android.view.KeyEvent.META_CTRL_ON or android.view.KeyEvent.META_SHIFT_ON
+                )
+                inputConnection.sendKeyEvent(selectWordEvent)
+                inputConnection.sendKeyEvent(android.view.KeyEvent(
+                    downTime, downTime,
+                    android.view.KeyEvent.ACTION_UP,
+                    android.view.KeyEvent.KEYCODE_DPAD_LEFT,
+                    0,
+                    android.view.KeyEvent.META_CTRL_ON or android.view.KeyEvent.META_SHIFT_ON
+                ))
+                _keyboard2?.showSuggestionBarMessage(context.getString(R.string.keyboard_text_menu_selection_attempted))
+            }
+        } catch (e: Exception) {
+            Log.e("Keyboard2View", "Failed to show text menu", e)
+            _keyboard2?.showSuggestionBarMessage(context.getString(R.string.keyboard_text_menu_failed))
+        }
+    }
+
+    /**
+     * Toggle between two primary languages.
+     * Swaps the current primary language with the alternate primary language.
+     */
+    private fun togglePrimaryLanguage() {
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Keyboard2View", "togglePrimaryLanguage() called")
+        if (explainLayoutLanguageBinding()) return
+        try {
+            val prefs = DirectBootAwarePreferences.get_shared_preferences(context)
+            val currentPrimary = prefs.getString("pref_primary_language", Defaults.PRIMARY_LANGUAGE) ?: Defaults.PRIMARY_LANGUAGE
+            val alternatePrimary = prefs.getString("pref_primary_language_alt", Defaults.PRIMARY_LANGUAGE_ALT) ?: Defaults.PRIMARY_LANGUAGE_ALT
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Keyboard2View", "Toggle primary: $currentPrimary -> $alternatePrimary")
+
+            // Swap the languages
+            prefs.edit()
+                .putString("pref_primary_language", alternatePrimary)
+                .putString("pref_primary_language_alt", currentPrimary)
+                // apply() is sufficient: the result isn't inspected and the
+                // language switch is driven by the OnSharedPreferenceChangeListener
+                // in CleverKeysService, which fires for apply() writes too. apply()
+                // also flushes on process stop, so the swap survives IME teardown.
+                .apply()
+
+            // Show feedback in suggestion bar (Toast suppressed on Android 13+ IME)
+            val langName = getLanguageDisplayName(alternatePrimary)
+            _keyboard2?.showSuggestionBarMessage(context.getString(R.string.keyboard_lang_primary_toggled, langName))
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Keyboard2View", "Primary language toggled to: $langName")
+        } catch (t: Throwable) {
+            // Catch Throwable (not just Exception) to prevent OOM/Error from killing IME
+            Log.e("Keyboard2View", "Failed to toggle primary language", t)
+            _keyboard2?.showSuggestionBarMessage(context.getString(R.string.keyboard_lang_toggle_failed))
+        }
+    }
+
+    /**
+     * Toggle between two secondary languages.
+     * Swaps the current secondary language with the alternate secondary language.
+     */
+    private fun toggleSecondaryLanguage() {
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Keyboard2View", "toggleSecondaryLanguage() called")
+        if (explainLayoutLanguageBinding()) return
+        try {
+            val prefs = DirectBootAwarePreferences.get_shared_preferences(context)
+            val currentSecondary = prefs.getString("pref_secondary_language", Defaults.SECONDARY_LANGUAGE) ?: Defaults.SECONDARY_LANGUAGE
+            val alternateSecondary = prefs.getString("pref_secondary_language_alt", Defaults.SECONDARY_LANGUAGE_ALT) ?: Defaults.SECONDARY_LANGUAGE_ALT
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Keyboard2View", "Toggle secondary: $currentSecondary -> $alternateSecondary")
+
+            // Swap the languages
+            prefs.edit()
+                .putString("pref_secondary_language", alternateSecondary)
+                .putString("pref_secondary_language_alt", currentSecondary)
+                .apply()
+
+            // Show feedback in suggestion bar (Toast suppressed on Android 13+ IME)
+            val langName = getLanguageDisplayName(alternateSecondary)
+            _keyboard2?.showSuggestionBarMessage(context.getString(R.string.keyboard_lang_secondary_toggled, langName))
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Keyboard2View", "Secondary language toggled to: $langName")
+            // PreferenceUIUpdateHandler will automatically reload dictionaries on preference change
+        } catch (t: Throwable) {
+            // Catch Throwable (not just Exception) to prevent OOM/Error from killing IME
+            Log.e("Keyboard2View", "Failed to toggle secondary language", t)
+            _keyboard2?.showSuggestionBarMessage(context.getString(R.string.keyboard_lang_toggle_failed))
+        }
+    }
+
+    /**
+     * GH #186/#61: while the current layout has a language binding, that binding decides the
+     * language, so a primary/secondary toggle would change nothing the user can see. The
+     * service says so (it owns the live Config; this view reads only its snapshot) and the
+     * toggle leaves the preferences alone.
+     *
+     * @return true when the toggle was handled (a binding is active).
+     */
+    private fun explainLayoutLanguageBinding(): Boolean =
+        _keyboard2?.explainLayoutLanguageBinding() == true
+
+    /**
+     * Display name for a language code in the keyboard's UI language (the "none" sentinel is
+     * the translated "None"); see [LanguageDisplayNames].
+     */
+    private fun getLanguageDisplayName(langCode: String): String =
+        if (langCode == LanguageDisplayNames.NONE) context.getString(R.string.common_none)
+        else LanguageDisplayNames.displayName(langCode, context.resources.configuration.locales[0])
+
+    // This view routes actions through the service; it never queries the predictor. Keep
+    // the wiring signature, but do not retain dictionaries through retired keyboard views.
+    fun setSwipeTypingComponents(@Suppress("UNUSED_PARAMETER") predictor: Predictor?, keyboard2: CleverKeysService?) {
+        _keyboard2 = keyboard2
+    }
+
+    /**
+     * Extract real key positions for accurate coordinate mapping
+     * Returns map of character to actual center coordinates
+     */
+    fun getRealKeyPositions(): Map<Char, PointF> {
+        val keyPositions = mutableMapOf<Char, PointF>()
+
+        val keyboard = _keyboard
+        val tc = _tc
+        if (keyboard == null || tc == null) {
+            android.util.Log.w("Keyboard2View", "Cannot extract key positions - layout not ready")
+            return keyPositions
+        }
+
+        var y = _config.snapshot.marginTop
+
+        for (row in keyboard.rows) {
+            var x = _marginLeft
+
+            for (key in row.keys) {
+                val xLeft = x + key.shift * _keyWidth
+                val xRight = xLeft + key.width * _keyWidth
+                val yTop = y + row.shift * tc.row_height
+                val yBottom = yTop + row.height * tc.row_height
+
+                // Calculate center coordinates
+                val centerX = (xLeft + xRight) / 2f
+                val centerY = (yTop + yBottom) / 2f
+
+                // The key's centre letter, by the shared single-letter rule (Locale.ROOT
+                // folding, one code unit). Until 2026-10-08 this read `key.toString()`, which
+                // for the `KeyboardData.Key` data class is "Key(keys=…)" — never one
+                // character — so the map was ALWAYS empty: the theme editor preview drew no
+                // sample trail (caught by the native ThemeKeyboardPreviewViewTest).
+                tribixbite.cleverkeys.swipe.KeyLetter.centreLetterOf(key.keys[0])?.let { keyChar ->
+                    keyPositions[keyChar] = PointF(centerX, centerY)
+                }
+
+                x = xRight
+            }
+
+            y += (row.shift + row.height) * tc.row_height
+        }
+
+        return keyPositions
+    }
+
+    override fun onTouch(v: View?, event: MotionEvent?): Boolean {
+        if (event == null) return false
+
+        val action = event.actionMasked
+
+        when (action) {
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
+                // The release position feeds the CTC trace's single lift sample.
+                val p = event.actionIndex
+                _pointers.onTouchUp(event.getPointerId(p), event.getX(p), event.getY(p))
+            }
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
+                val p = event.actionIndex
+                val tx = event.getX(p)
+                val ty = event.getY(p)
+                val key = getKeyAtPosition(tx, ty)
+                if (key != null)
+                    _pointers.onTouchDown(tx, ty, event.getPointerId(p), key)
+            }
+            MotionEvent.ACTION_MOVE -> {
+                for (p in 0 until event.pointerCount)
+                    _pointers.onTouchMove(event.getX(p), event.getY(p), event.getPointerId(p))
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                _pointers.onTouchCancel()
+            }
+            else -> return false
+        }
+        return true
+    }
+
+    /**
+     * Current hit-test geometry parameters, or null until the layout is measured.
+     * Single source of truth shared by [getKeyAtPosition] and the accessibility
+     * helper. marginLeft is computed dynamically (matching the historical
+     * getKeyAtPosition fix) to avoid a stale [_marginLeft] from a delayed
+     * onMeasure; marginTop uses the raw [Config.marginTop] (not tc.margin_top).
+     */
+    // WP9 R-1 step 8: `internal` (was private) so GeometricEngineAdapter can build
+    // LayoutGeometry from the exact same rect math the a11y tree and hit-testing use.
+    internal fun geometryParams(): KeyboardGeometry.Params? {
+        val tc = _tc ?: return null
+        // One capture per hit-test query: marginTop and marginLeft must come from the same
+        // configuration or a tap can be resolved against a rect that never existed.
+        val snap = _config.snapshot
+        return KeyboardGeometry.Params(
+            keyWidth = _keyWidth,
+            rowHeight = tc.row_height,
+            marginTop = snap.marginTop,
+            marginLeft = maxOf(snap.margin_left, _insets_left.toFloat()),
+        )
+    }
+
+    /**
+     * Find the key at the given coordinates. Thin wrapper over
+     * [KeyboardGeometry.keyAt] (the verbatim-extracted hit-test geometry) so tap
+     * and swipe hit-testing share one code path with the a11y virtual-view tree.
+     */
+    private fun getKeyAtPosition(tx: Float, ty: Float): KeyboardData.Key? {
+        val keyboard = _keyboard ?: return null
+        val params = geometryParams() ?: return null
+        return KeyboardGeometry.keyAt(keyboard, params, tx, ty)
+    }
+
+    // ── Accessibility (TalkBack) ─────────────────────────────────────────────
+
+    /**
+     * Per-key hit-test rects for the a11y virtual-view tree. Empty until the
+     * layout is measured. Uses the SAME [KeyboardGeometry] the tap/swipe path
+     * uses, so the box TalkBack highlights equals the tappable area.
+     */
+    private fun computeAccessibilityKeyRects(): List<KeyboardGeometry.KeyRect> {
+        val keyboard = _keyboard ?: return emptyList()
+        val params = geometryParams() ?: return emptyList()
+        return KeyboardGeometry.computeAccessibilityKeyRects(keyboard, params, width.toFloat())
+    }
+
+    /**
+     * Test hook: the exact virtual-view ids currently exposed to the accessibility
+     * tree (one per real key). Instrumented tests must enumerate these rather than
+     * probing ids 0..N — [ExploreByTouchHelper] returns a defensive dummy node (not
+     * null) for unknown ids, so a null-terminated scan never ends.
+     */
+    @androidx.annotation.VisibleForTesting
+    fun accessibilityVirtualViewIdsForTest(): List<Int> =
+        computeAccessibilityKeyRects().map { it.virtualId }
+
+    /**
+     * `(isCheckable, isChecked)` for Shift/CapsLock so TalkBack announces their
+     * toggle state; null for every other key. "Checked" means the key currently
+     * has a latched or locked pointer.
+     */
+    private fun accessibilityCheckedState(kr: KeyboardGeometry.KeyRect): Pair<Boolean, Boolean>? {
+        val kv = kr.kv
+        val isShift = kv.getKind() == KeyValue.Kind.Modifier &&
+            kv.getModifier() == KeyValue.Modifier.SHIFT
+        val isCapsLock = kv.getKind() == KeyValue.Kind.Event &&
+            kv.getEvent() == KeyValue.Event.CAPS_LOCK
+        if (!isShift && !isCapsLock) return null
+        val flags = _pointers.getKeyFlags(kv)
+        val checked = flags != -1 &&
+            (flags and (Pointers.FLAG_P_LATCHED or Pointers.FLAG_P_LOCKED)) != 0
+        return true to checked
+    }
+
+    /**
+     * Perform an accessibility ACTION_CLICK as a zero-movement tap at the key's
+     * center. Routes through [Pointers] (NOT `Config.handler.key_down/key_up`
+     * directly) because ALL modifier latching lives in Pointers —
+     * `KeyEventHandler.key_up` no-ops modifiers. This gives byte-identical tap
+     * behavior: key_down/up, latching, haptics, modifier application all for free.
+     */
+    private fun activateKeyForAccessibility(kr: KeyboardGeometry.KeyRect) {
+        if (_previewMode) return // read-only preview: never type
+        val cx = (kr.bounds.left + kr.bounds.right) / 2f
+        val cy = (kr.bounds.top + kr.bounds.bottom) / 2f
+        _pointers.onTouchDown(cx, cy, a11yPointerId, kr.key)
+        _pointers.onTouchUp(a11yPointerId)
+    }
+
+    /**
+     * Rebuild the virtual-view tree (labels/bounds change on layout, shift, and
+     * modifier changes). Cheap no-op when no a11y service is enabled — safe to
+     * call from hot paths like [updateFlags]. Guarded until [_a11yHelper] is
+     * initialized (some setup calls fire during the constructor, before init
+     * completes).
+     */
+    private fun invalidateAccessibilityRoot() {
+        if (::_a11yHelper.isInitialized) {
+            _a11yHelper.invalidateRoot()
+        }
+    }
+
+    // public (widened from View's protected) so instrumented tests can drive the
+    // hover-routing gate directly.
+    public override fun dispatchHoverEvent(event: MotionEvent): Boolean {
+        // Only route hover events to the helper when touch-exploration is on. When
+        // TalkBack is off the platform never synthesizes hover events, but the
+        // explicit gate makes the fast-path guarantee greppable and defensive.
+        if (_a11yManager?.isTouchExplorationEnabled == true &&
+            _a11yHelper.dispatchHoverEvent(event)
+        ) {
+            return true
+        }
+        return super.dispatchHoverEvent(event)
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // ExploreByTouchHelper consumes d-pad/Tab keys only while a virtual view
+        // holds accessibility focus (switch-access navigation). It leaves all
+        // other key events — including IME hardware-key input — untouched.
+        return _a11yHelper.dispatchKeyEvent(event) || super.dispatchKeyEvent(event)
+    }
+
+    override fun onFocusChanged(gainFocus: Boolean, direction: Int, previouslyFocusedRect: Rect?) {
+        super.onFocusChanged(gainFocus, direction, previouslyFocusedRect)
+        _a11yHelper.onFocusChanged(gainFocus, direction, previouslyFocusedRect)
+    }
+
+    private fun vibrate(event: HapticEvent = HapticEvent.KEY_PRESS) {
+        VibratorCompat.vibrate(this, _config, event)
+    }
+
+    /**
+     * Trigger haptic feedback from external components (e.g., SuggestionBridge).
+     * @param event The haptic event type to trigger
+     */
+    fun triggerHaptic(event: HapticEvent) {
+        vibrate(event)
+    }
+
+    // DrawAllocation: onMeasure runs only on size/config changes (not per frame).
+    // The two flagged allocations are structurally required and cannot be
+    // preallocated: (1) WindowInsets.getInsets()/systemWindowInsets return a fresh
+    // Insets object owned by the platform, and (2) the theme-cache key is a String
+    // derived from mutable geometry (keyWidth/config.version) used for HashMap
+    // lookup. Both are dwarfed by the Theme.Computed build on a cache miss.
+    @SuppressLint("DrawAllocation")
+    override fun onMeasure(wSpec: Int, hSpec: Int) {
+        val keyboard = _keyboard
+        if (keyboard == null) {
+            // CRITICAL: Must call setMeasuredDimension even when keyboard is null
+            // to prevent IllegalStateException crash during theme changes
+            setMeasuredDimension(0, 0)
+            return
+        }
+
+        // ARC-072 FRAME-SCOPED CAPTURE. Every config-derived dimension this measure pass
+        // produces — margins, the theme-cache generation, the label sizes, the measured
+        // height — comes from one immutable copy, so a Config.refresh() landing halfway
+        // through cannot size the labels from the new configuration and the keyboard from
+        // the old one. It applies from the next measure instead.
+        val snap = _config.snapshot
+
+        var width = MeasureSpec.getSize(wSpec)
+
+        // CRITICAL FIX: If measure returns 0, preserve existing valid keyWidth
+        if (width == 0 && _keyWidth > 0) {
+            // Reconstruct width from existing keyWidth
+            width = (_keyWidth * keyboard.keysWidth + _marginLeft + _marginRight).toInt()
+        }
+
+        // FIX: If insets haven't been applied yet, try to get them from root window.
+        // This fixes keyboard appearing behind nav bar on very first load. Same ladder
+        // as onApplyWindowInsets (WindowLayoutUtils.readSystemBarInsets) — the two used
+        // to disagree on API 30+ (systemBars-only here vs systemBars|displayCutout there),
+        // so the recovered value could jump when the real dispatch landed (#167 residual).
+        // No requestLayout here: we are inside onMeasure and consume the values below.
+        if (!_previewMode && _insets_bottom == 0 && android.os.Build.VERSION.SDK_INT >= 23) {
+            rootWindowInsets?.let { wi ->
+                val insets = WindowLayoutUtils.readSystemBarInsets(wi)
+                _insets_bottom = insets.bottom
+                _insets_left = insets.left
+                _insets_right = insets.right
+            }
+        }
+
+        _marginLeft = maxOf(snap.margin_left, _insets_left.toFloat())
+        _marginRight = maxOf(snap.margin_right, _insets_right.toFloat())
+        _marginBottom = snap.margin_bottom + _insets_bottom.toFloat()
+
+        // Only recalculate keyWidth if we have a valid new width
+        if (width > 0) {
+            _keyWidth = (width - _marginLeft - _marginRight) / keyboard.keysWidth
+        }
+
+        // Include config.version to invalidate cache when any config changes (e.g., keyboard height)
+        val cacheKey = "${keyboard.name ?: ""}_${_keyWidth}_${snap.version}"
+        _tc = _themeCache.get(cacheKey) ?: run {
+            val computed = Theme.Computed(_theme, _config, _keyWidth, keyboard)
+            _themeCache.put(cacheKey, computed)
+            computed
+        }
+
+        val tc = _tc!!
+
+        // Compute the size of labels
+        val labelBaseSize = minOf(
+            tc.row_height - tc.vertical_margin,
+            (width / 10 - tc.horizontal_margin) * 3 / 2
+        ) * snap.characterSize
+        _mainLabelSize = labelBaseSize * snap.labelTextSize
+        // #133: secondary (flick) labels scale independently of the primary
+        // label via secondary_label_size_scale (default 1.0 = unchanged).
+        _subLabelSize = labelBaseSize * snap.sublabelTextSize * snap.secondary_label_size_scale
+
+        val height = (tc.row_height * keyboard.keysHeight + snap.marginTop + _marginBottom).toInt()
+        setMeasuredDimension(width, height)
+        // Key geometry (bounds) just changed — rebuild the a11y virtual-view tree.
+        invalidateAccessibilityRoot()
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        if (!changed)
+            return
+        // Preview mode: no back-gesture exclusion and, above all, no push of the preview's
+        // geometry into the process-global autocorrect adjacency model.
+        if (_previewMode)
+            return
+        if (VERSION.SDK_INT >= 29) {
+            // Disable the back-gesture on the keyboard area (reused Rect — onLayout
+            // is a layout op, lint DrawAllocation applies)
+            _gestureExclusionRect.set(
+                left + _marginLeft.toInt(),
+                top + _config.snapshot.marginTop.toInt(),
+                right - _marginRight.toInt(),
+                bottom - _marginBottom.toInt()
+            )
+            systemGestureExclusionRects = listOf(_gestureExclusionRect)
+        }
+
+        // Autocorrect adjacency keeps its default US-QWERTY (+ accents) table for Latin letters
+        // (letters outside it are positioned from the layout grid in setKeyboard), which is what
+        // every release so far has actually used: this block used to push
+        // getRealKeyPositions(), but that map was always empty (see its comment), so
+        // KeyAdjacency.setLayout always fell back to the default. Fixing the map must not
+        // silently switch autocorrect to pixel-space live geometry (no accent rows, row
+        // stagger in the distances) without measurement.
+        // TODO(2026-10-08): evaluate live layout adjacency (AZERTY/QWERTZ/Dvorak/Colemak and
+        // accent coverage) on the autocorrect replay before pushing getRealKeyPositions() here.
+        tribixbite.cleverkeys.autocorrect.KeyAdjacency.resetLayout()
+    }
+
+    override fun onApplyWindowInsets(wi: WindowInsets?): WindowInsets? {
+        if (wi == null) return wi
+        // Preview mode: leave the host window's insets alone (neither applied nor consumed).
+        if (_previewMode) return wi
+
+        // #167 residual: the API ladder lives in WindowLayoutUtils.readSystemBarInsets —
+        // ONE ladder shared with the onMeasure recovery and the onConfigurationChanged
+        // re-derivation, so every path derives the same value for the same WindowInsets.
+        applySystemBarInsets(WindowLayoutUtils.readSystemBarInsets(wi))
+
+        // Consume the insets so child views don't re-apply them.
+        // WindowInsets.CONSUMED is API 30; consumeSystemWindowInsets() is the API 24-29
+        // equivalent (deprecated but functional — returns a fully-consumed WindowInsets).
+        return if (VERSION.SDK_INT >= 30) {
+            WindowInsets.CONSUMED
+        } else {
+            @Suppress("DEPRECATION")
+            wi.consumeSystemWindowInsets()
+        }
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val keyboard = _keyboard ?: return
+        val tc = _tc ?: return
+
+        // ARC-072 FRAME-SCOPED CAPTURE. One snapshot for the whole frame, threaded into
+        // every helper that needs a config value (sub-label padding, the swipe trail), so a
+        // Config.refresh() landing mid-frame cannot draw the first rows at one opacity or
+        // padding and the rest at another. It applies from the next frame.
+        val snap = _config.snapshot
+
+        // Set keyboard background opacity
+        background?.alpha = snap.keyboardOpacity
+        // R2: only walk the custom-short-swipe overlay when any mapping exists (the common case
+        // has none). Hoisted out of the per-key loop so the whole drawCustomMappings pass — call +
+        // index lookup per key — is skipped entirely when the feature is unused.
+        val hasCustomMappings = _shortSwipeManager.hasCustomMappings
+        var y = tc.margin_top
+
+        for (row in keyboard.rows) {
+            y += row.shift * tc.row_height
+            var x = _marginLeft + tc.margin_left
+            val keyH = row.height * tc.row_height - tc.vertical_margin
+
+            for (k in row.keys) {
+                x += k.shift * _keyWidth
+                // Audit H-8 (#77 residual): the pane loc-strip can null EVERY slot of a
+                // key (numeric's `loc switch_greekmath` cell with the checkbox off).
+                // Such a cell must render as empty space, not a blank dead key frame —
+                // no shipped layout has an intentionally key0-less cell, so this is
+                // exactly the strip artefact. Geometry is preserved (x advances by the
+                // cell's width), keeping every other key in place.
+                if (keyCellIsEmpty(k)) {
+                    x += _keyWidth * k.width
+                    continue
+                }
+                val keyW = _keyWidth * k.width - tc.horizontal_margin
+                val isKeyDown = _pointers.isKeyDown(k)
+                // Audit H-4: role-aware frame selection so the Theme-Creator's
+                // Key Locked / Key Modifier / Key Special colours render. For XML
+                // themes every role colour equals the old default, so this draws
+                // pixel-identically to the previous activated/normal split.
+                val kv0 = k.keys[0]
+                val isLocked = isKeyDown && kv0 != null &&
+                    _pointers.getKeyFlags(kv0).let {
+                        it != -1 && (it and Pointers.FLAG_P_LOCKED) != 0
+                    }
+                val tc_key = tc.keyForRole(
+                    Theme.Computed.roleOf(kv0?.getKind(), isKeyDown, isLocked)
+                )
+
+                drawKeyFrame(canvas, x, y, keyW, keyH, tc_key)
+                // The main label's drawn width bounds the W/E sublabel slots (SubLabelSizing).
+                val mainLabelW = if (k.keys[0] != null)
+                    drawLabel(canvas, k.keys[0]!!, keyW / 2f + x, y, keyH, isKeyDown, tc_key)
+                else 0f
+                // #171: a custom short-swipe mapping REPLACES the default sublabel in its
+                // slot — suppress the default glyph wherever a mapping covers the slot, or
+                // the two render overlaid. Mask is 0 (draw everything) for the common
+                // no-custom-mappings case and for non-candidate keys (empty-string cache
+                // sentinel -> empty mapping set).
+                val coveredSubLabels = if (hasCustomMappings)
+                    SwipeDirection.coveredSubLabelMask(
+                        _shortSwipeManager.getMappingsForKey(_keyCodeLowerCache[k] ?: "").keys
+                    )
+                else 0
+                for (i in 1..8) {
+                    if (k.keys[i] != null && (coveredSubLabels and (1 shl i)) == 0)
+                        drawSubLabel(canvas, k.keys[i]!!, x, y, keyW, keyH, i, isKeyDown, tc_key, snap, mainLabelW)
+                }
+                // Draw custom short swipe mappings (they own their slots — see above).
+                // Skip the whole overlay when no custom mappings are configured (R2 early-out).
+                if (hasCustomMappings)
+                    drawCustomMappings(canvas, k, x, y, keyW, keyH, tc, snap, mainLabelW)
+                drawIndication(canvas, k, x, y, keyW, keyH, tc)
+                x += _keyWidth * k.width
+            }
+            y += row.height * tc.row_height
+        }
+
+        // Draw swipe trail if swipe typing is enabled and active
+        val previewTrail = _previewTrail
+        if (previewTrail != null) {
+            drawSwipeTrail(canvas, snap, previewTrail)
+        } else if (snap.swipe_typing_enabled && _swipeRecognizer != null && _swipeRecognizer!!.isSwipeTyping()) {
+            if (snap.swipe_trail_enabled) drawSwipeTrail(canvas, snap, _swipeRecognizer!!.getSwipePath())
+        }
+
+        // Subkey popover on top of everything; keep frames coming while it animates.
+        _subkeyPopover?.let { popover ->
+            if (_subkeyPopoverRenderer.draw(canvas, popover, SubkeyPopoverState.now(), _theme, tc.key)) {
+                postInvalidateOnAnimation()
+            }
+        }
+    }
+
+    /**
+     * Draw swipe trail without allocations.
+     * Reuses _swipeTrailPath and directly accesses swipe path to avoid copying.
+     * Supports glow, solid, fade, rainbow, and none effects.
+     */
+    private fun drawSwipeTrail(canvas: Canvas, snap: ConfigSnapshot, swipePath: List<PointF>) {
+        val effect = effectiveTrailEffect(snap)
+        if (swipePath.size < 2)
+            return
+
+        // Reuse the path object - reset it instead of allocating new one
+        _swipeTrailPath.rewind()
+
+        val firstPoint = swipePath[0]
+        _swipeTrailPath.moveTo(firstPoint.x, firstPoint.y)
+
+        for (i in 1 until swipePath.size) {
+            val point = swipePath[i]
+            _swipeTrailPath.lineTo(point.x, point.y)
+        }
+
+        val paint = _swipeTrailPaint ?: return
+
+        // Handle rainbow effect with cycling colors
+        if (effect == "rainbow") {
+            val hue = (System.currentTimeMillis() % 3600) / 10f // 0-360 cycling
+            paint.color = android.graphics.Color.HSVToColor(200, floatArrayOf(hue, 0.8f, 1.0f))
+        }
+
+        canvas.drawPath(_swipeTrailPath, paint)
+
+        // Handle sparkle effect
+        if (effect == "sparkle") {
+            val time = System.currentTimeMillis()
+            val originalColor = paint.color
+            val originalStrokeWidth = paint.strokeWidth
+            val originalAlpha = paint.alpha
+            
+            paint.color = android.graphics.Color.WHITE
+            paint.style = Paint.Style.FILL
+            
+            // Draw sparkles along the path ("Twinkly fairy dust")
+            // High density on trail, fading out to create "emanating" effect
+            val maxSpread = 40 // Max reach, but heavily concentrated at center
+            
+            for (i in 0 until swipePath.size) {
+                val point = swipePath[i]
+                
+                // Draw 3 particles per point for dense core
+                for (j in 0..2) {
+                    // Stable position based on index so particles stick to trail
+                    val posSeed = (i * 31337) + (j * 719)
+                    
+                    // Generate pseudo-random -1.0 to 1.0
+                    val rX = ((posSeed % 200) - 100) / 100f
+                    val rY = (((posSeed / 100) % 200) - 100) / 100f
+                    
+                    // Apply concentration (signed square): pushes values much closer to 0 (center)
+                    // This ensures "mostly present on the trail" while allowing occasional outliers
+                    val offsetX = rX * kotlin.math.abs(rX) * maxSpread
+                    val offsetY = rY * kotlin.math.abs(rY) * maxSpread
+                    
+                    // Calculate distance factor (0.0 at center, 1.0 at edge)
+                    val distFactor = (kotlin.math.abs(rX) + kotlin.math.abs(rY)) / 2f
+                    
+                    // Pulse animation (Slower)
+                    val pulseSpeed = 0.002f
+                    val pulsePhase = (i * 5 + j * 100).toFloat()
+                    val pulse = (kotlin.math.sin(time * pulseSpeed + pulsePhase) + 1f) / 2f
+                    
+                    // Size: Larger at center (up to ~3.5px), tiny at edges (~0.5px)
+                    val baseSize = 2.8f * (1f - distFactor * 0.8f)
+                    val size = (baseSize * (0.7f + pulse * 0.6f)).coerceAtLeast(0.5f)
+                    
+                    // Alpha: High at center (core), fading out edges to avoid "heavy footprint"
+                    val baseAlpha = 220 * (1f - distFactor) 
+                    paint.alpha = (baseAlpha * (0.5f + pulse * 0.5f)).toInt().coerceIn(0, 255)
+                    
+                    canvas.drawCircle(point.x + offsetX, point.y + offsetY, size, paint)
+                }
+            }
+            
+            // Restore paint
+            paint.color = originalColor
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = originalStrokeWidth
+            paint.alpha = originalAlpha
+        }
+    }
+
+    override fun onDetachedFromWindow() {
+        cancelContinuousSwipe()
+        super.onDetachedFromWindow()
+        if (_shortSwipeListenerRegistered) {
+            _shortSwipeManager.removeChangeListener(_shortSwipeMappingsChanged)
+            _shortSwipeListenerRegistered = false
+        }
+        // R-6: cancel the Pointers-owned coroutine scope so the one-shot short-swipe
+        // startup load doesn't leak an uncancelled scope when this view is detached or
+        // replaced (theme change re-creates the whole Keyboard2View via
+        // CleverKeysService.onThemeChanged / stale-theme rebuild in onStartInputView).
+        // A Keyboard2View is never re-attached after its replacement; the mappings are
+        // held in the ShortSwipeCustomizationManager singleton, so cancelling the (idempotent,
+        // already-guarded) load here loses nothing.
+        if (::_pointers.isInitialized) {
+            _pointers.close()
+        }
+    }
+
+    /** Draw borders and background of the key. */
+    private fun drawKeyFrame(canvas: Canvas, x: Float, y: Float, keyW: Float, keyH: Float, tc: Theme.Computed.Key) {
+        val r = tc.border_radius
+        val w = tc.border_width
+        val padding = w / 2f
+        _tmpRect.set(x + padding, y + padding, x + keyW - padding, y + keyH - padding)
+        canvas.drawRoundRect(_tmpRect, r, r, tc.bg_paint)
+        if (w > 0f) {
+            canvas.drawRoundRect(_tmpRect, r, r, tc.border_paint)
+        }
+    }
+
+    private fun labelColor(k: KeyValue, isKeyDown: Boolean, sublabel: Boolean): Int {
+        if (isKeyDown) {
+            val flags = _pointers.getKeyFlags(k)
+            if (flags != -1) {
+                if ((flags and Pointers.FLAG_P_LOCKED) != 0)
+                    return _theme.lockedColor
+                return _theme.activatedColor
+            }
+        }
+        if (k.hasFlagsAny(KeyValue.FLAG_SECONDARY or KeyValue.FLAG_GREYED)) {
+            if (k.hasFlagsAny(KeyValue.FLAG_GREYED))
+                return _theme.greyedLabelColor
+            return _theme.secondaryLabelColor
+        }
+        return if (sublabel) _theme.subLabelColor else _theme.labelColor
+    }
+
+    /** Draws [kv] centred on [x]; returns the drawn label's width (0 when nothing is drawn). */
+    private fun drawLabel(canvas: Canvas, kv: KeyValue, x: Float, y: Float, keyH: Float, isKeyDown: Boolean, tc: Theme.Computed.Key): Float {
+        val modifiedKv = modifyKey(kv, _mods) ?: return 0f
+        val textSize = scaleTextSize(modifiedKv, true)
+        val p = tc.label_paint(modifiedKv.hasFlagsAny(KeyValue.FLAG_KEY_FONT), labelColor(modifiedKv, isKeyDown, false), textSize)
+        val label = modifiedKv.getString()
+        canvas.drawText(label, x, (keyH - p.ascent() - p.descent()) / 2f + y, p)
+        return p.measureText(label)
+    }
+
+    /**
+     * [snap] is the frame's captured configuration — see [onDraw]. [mainLabelW] is the key's
+     * drawn main-label width, which bounds the W/E slots ([SubLabelSizing.maxWidth]).
+     */
+    private fun drawSubLabel(canvas: Canvas, kv: KeyValue, x: Float, y: Float, keyW: Float, keyH: Float, sub_index: Int, isKeyDown: Boolean, tc: Theme.Computed.Key, snap: ConfigSnapshot, mainLabelW: Float) {
+        val a = LABEL_POSITION_H[sub_index]
+        val v = LABEL_POSITION_V[sub_index]
+        val modifiedKv = modifyKey(kv, _mods) ?: return
+        // SubLabelSizing is shared with drawCustomSubLabel, KeyMagnifierView and the popover:
+        // FLAG_SMALLER_FONT / colour-emoji scale, then shrink-to-fit the slot's width.
+        val textSize = _subLabelSize * SubLabelSizing.scaleFor(modifiedKv)
+        val p = tc.sublabel_paint(modifiedKv.hasFlagsAny(KeyValue.FLAG_KEY_FONT), labelColor(modifiedKv, isKeyDown, true), textSize, a)
+        val subPadding = snap.keyPadding
+        val label = modifiedKv.getString()
+        var label_len = label.length
+        // Limit the label of string keys to 3 characters
+        if (label_len > 3 && modifiedKv.getKind() == KeyValue.Kind.String)
+            label_len = 3
+        p.textSize = SubLabelSizing.fitToWidth(
+            textSize, p.measureText(label, 0, label_len), SubLabelSizing.maxWidth(keyW, subPadding, sub_index, mainLabelW))
+        var yPos = y
+        var xPos = x
+
+        yPos += when (v) {
+            Vertical.CENTER -> (keyH - p.ascent() - p.descent()) / 2f
+            Vertical.TOP -> subPadding - p.ascent()
+            Vertical.BOTTOM -> keyH - subPadding - p.descent()
+        }
+
+        xPos += when (a) {
+            Paint.Align.CENTER -> keyW / 2f
+            Paint.Align.LEFT -> subPadding
+            Paint.Align.RIGHT -> keyW - subPadding
+        }
+
+        canvas.drawText(label, 0, label_len, xPos, yPos, p)
+    }
+
+    /**
+     * Rebuild [_keyCodeLowerCache] for the given layout. Called once per [setKeyboard] so the
+     * per-frame [drawCustomMappings] path never re-derives the lowercased key code.
+     *
+     * Stores, per laid-out [KeyboardData.Key], its main key's lowercased identifier — but ONLY
+     * when it is a valid custom-mapping candidate (non-empty and at most 4 chars, matching the
+     * former inline guard). Non-candidates (null main key, empty, or too long / special keys) are
+     * cached as the empty-string sentinel so the draw path can early-return without a lookup.
+     */
+    private fun rebuildKeyCodeLowerCache(kw: KeyboardData) {
+        _keyCodeLowerCache.clear()
+        for (row in kw.rows) {
+            for (k in row.keys) {
+                val code = k.keys[0]?.getString()?.lowercase() ?: ""
+                // Empty or too long (likely a special key) → sentinel: not a candidate.
+                _keyCodeLowerCache[k] = if (ShortSwipeCustomizationManager.isMappableKeyCode(code)) code else ""
+            }
+        }
+    }
+
+    /**
+     * Draw custom short swipe mappings for a key.
+     * Custom mappings are drawn with accent color to distinguish from built-in mappings.
+     */
+    private fun drawCustomMappings(
+        canvas: Canvas,
+        k: KeyboardData.Key,
+        x: Float,
+        y: Float,
+        keyW: Float,
+        keyH: Float,
+        tc: Theme.Computed,
+        /** The frame's captured configuration — see [onDraw]. */
+        snap: ConfigSnapshot,
+        /** The key's drawn main-label width — bounds the W/E slots. */
+        mainLabelW: Float
+    ) {
+        // Get the pre-lowercased key identifier (cached per Key in setKeyboard) instead of
+        // allocating a String via mainKey.getString().lowercase() every frame. Empty string is
+        // the cached sentinel for "no eligible main key / not a custom-mapping candidate".
+        val keyCode = _keyCodeLowerCache[k]
+        if (keyCode.isNullOrEmpty()) return
+
+        // Get custom mappings for this key (O(1), zero-alloc lookup)
+        val customMappings = _shortSwipeManager.getMappingsForKey(keyCode)
+        if (customMappings.isEmpty()) return
+
+        // Use same color as default sublabels for visual consistency
+        val sublabelColor = _theme.subLabelColor
+
+        for ((direction, mapping) in customMappings) {
+            val subIndex = directionToSubIndex(direction)
+            if (subIndex < 1 || subIndex > 8) continue
+
+            // Size parity with built-ins (v1.1.98, 2026-09-03, 2026-10-08): a mapping showing its
+            // command's default label is sized exactly like that command's KeyValue on a layout
+            // (FLAG_SMALLER_FONT, colour-emoji scale), whatever its typeface; typed labels are
+            // plain text. SubLabelSizing caches the per-command lookup (draw path, per frame).
+            drawCustomSubLabel(
+                canvas,
+                mapping.displayText,
+                x, y, keyW, keyH,
+                subIndex,
+                sublabelColor,
+                tc.key,
+                snap,
+                mapping.useKeyFont,
+                SubLabelSizing.scaleFor(mapping),
+                mainLabelW
+            )
+        }
+    }
+
+    /**
+     * Convert SwipeDirection to sublabel index (1-8).
+     * Layout: 1=NW, 2=NE, 3=SW, 4=SE, 5=W, 6=E, 7=N, 8=S.
+     * Delegates to [SwipeDirection.subLabelIndex] — the same source the
+     * default-sublabel suppression in [onDraw] reads, so the overlay and the
+     * suppression can never disagree about which slot a mapping occupies (#171).
+     */
+    private fun directionToSubIndex(direction: SwipeDirection): Int = direction.subLabelIndex
+
+    /**
+     * Draw a custom sublabel with specific color (for custom short swipe mappings).
+     * @param useKeyFont Whether to use the special keyboard icon font
+     * @param sizeScale [SubLabelSizing.scaleFor] of the mapping — the size rule shared with
+     *     layout sublabels ([drawSubLabel])
+     * @param mainLabelW The key's drawn main-label width — bounds the W/E slots
+     */
+    private fun drawCustomSubLabel(
+        canvas: Canvas,
+        label: String,
+        x: Float,
+        y: Float,
+        keyW: Float,
+        keyH: Float,
+        sub_index: Int,
+        color: Int,
+        tc_key: Theme.Computed.Key,
+        /** The frame's captured configuration — see [onDraw]. */
+        snap: ConfigSnapshot,
+        useKeyFont: Boolean = false,
+        sizeScale: Float = 1f,
+        mainLabelW: Float = 0f
+    ) {
+        val a = LABEL_POSITION_H[sub_index]
+        val v = LABEL_POSITION_V[sub_index]
+        // Same base and factors as layout sublabels (drawSubLabel); useKeyFont only selects
+        // the typeface, never the size.
+        val textSize = _subLabelSize * sizeScale
+
+        // Use the theme's sublabel_paint for consistent font selection
+        val paint = tc_key.sublabel_paint(useKeyFont, color, textSize, a)
+
+        val subPadding = snap.keyPadding
+        // Limit label length for display, then keep it inside its slot (never over the main label)
+        val displayLen = minOf(label.length, 4)
+        paint.textSize = SubLabelSizing.fitToWidth(
+            textSize, paint.measureText(label, 0, displayLen), SubLabelSizing.maxWidth(keyW, subPadding, sub_index, mainLabelW))
+        var yPos = y
+        var xPos = x
+
+        yPos += when (v) {
+            Vertical.CENTER -> (keyH - paint.ascent() - paint.descent()) / 2f
+            Vertical.TOP -> subPadding - paint.ascent()
+            Vertical.BOTTOM -> keyH - subPadding - paint.descent()
+        }
+
+        xPos += when (a) {
+            Paint.Align.CENTER -> keyW / 2f
+            Paint.Align.LEFT -> subPadding
+            Paint.Align.RIGHT -> keyW - subPadding
+        }
+
+        canvas.drawText(label, 0, displayLen, xPos, yPos, paint)
+    }
+
+    private fun drawIndication(canvas: Canvas, k: KeyboardData.Key, x: Float, y: Float, keyW: Float, keyH: Float, tc: Theme.Computed) {
+        if (k.indication.isNullOrEmpty())
+            return
+        val p = tc.indication_paint
+        p.textSize = _subLabelSize
+        canvas.drawText(k.indication, 0, k.indication.length,
+            x + keyW / 2f, (keyH - p.ascent() - p.descent()) * 4 / 5 + y, p)
+    }
+
+    private fun scaleTextSize(k: KeyValue, main_label: Boolean): Float {
+        val smaller_font = if (k.hasFlagsAny(KeyValue.FLAG_SMALLER_FONT)) 0.75f else 1f
+        val label_size = if (main_label) _mainLabelSize else _subLabelSize
+        return label_size * smaller_font
+    }
+
+    fun getTheme(): Theme {
+        return _theme
+    }
+
+    // ARC-084 (2026-08-29): the CGR prediction chain lived here — storeCGRPredictions /
+    // clearCGRPredictions plus the two getters KeyboardDimensionsHelper polled. Nothing ever
+    // CALLED the store, so `_cgrPredictions` was permanently empty and every consumer was
+    // dead; only the blanket `-keep class ... {*;}` rule kept R8 from noticing, so it shipped
+    // in every release while CLAUDE.md and ADR-011 state the project has no CGR. Swipe
+    // predictions reach the bar through InputCoordinator.handlePredictionResults →
+    // SuggestionHandler.handleSwipePredictionResults; there is no second path.
+    // Pinned by DeadPlumbingDriftTest.
+
+    companion object {
+        private var _currentWhat = 0
+        private val _tmpRect = RectF()
+
+        /**
+         * Audit H-8: whether a key cell has nothing to render — all nine slots null and
+         * no indication string. Only the #77 pane loc-strip produces such cells (no
+         * shipped layout has a key0-less cell); onDraw skips the key frame for them so
+         * the stripped cell reads as empty space instead of a blank dead key.
+         */
+        @JvmStatic
+        internal fun keyCellIsEmpty(key: KeyboardData.Key): Boolean =
+            key.indication == null && key.keys.all { it == null }
+
+        /**
+         * Pointer id for accessibility ACTION_CLICK taps. `-2` is deliberately
+         * distinct from real touch ids (>= 0) and the `-1` latched-pointer id
+         * Pointers assigns at Pointers.kt:607, so it never collides with the
+         * fake-pointer special-cases around Pointers.kt:506.
+         */
+        private const val A11Y_POINTER_ID = -2
+
+        /** Horizontal and vertical position of the 9 indexes. */
+        val LABEL_POSITION_H = arrayOf(
+            Paint.Align.CENTER, Paint.Align.LEFT, Paint.Align.RIGHT, Paint.Align.LEFT,
+            Paint.Align.RIGHT, Paint.Align.LEFT, Paint.Align.RIGHT,
+            Paint.Align.CENTER, Paint.Align.CENTER
+        )
+
+        val LABEL_POSITION_V = arrayOf(
+            Vertical.CENTER, Vertical.TOP, Vertical.TOP, Vertical.BOTTOM,
+            Vertical.BOTTOM, Vertical.CENTER, Vertical.CENTER, Vertical.TOP,
+            Vertical.BOTTOM
+        )
+    }
+}
+
+/**
+ * Pure policy behind the selection-driven text-action commands announced in v1.1.99
+ * ("textAssist and replaceText actions now work — uses ACTION_PROCESS_TEXT intent instead of
+ * unsupported context menu / shows app chooser / falls back gracefully if no text selected")
+ * and v1.2.0 ("Show Text Menu selects the word at the cursor and triggers the native toolbar";
+ * "Text Assist and Replace Text now show No text selected when no selection exists").
+ *
+ * Extracted from [Keyboard2View] verbatim so those shipped promises are pinnable off-device:
+ * the surrounding methods reach `Intent`, `InputConnection` and `Window`, none of which are
+ * constructible under the JVM test tiers (`android.jar` stubs throw `RuntimeException("Stub!")`),
+ * but every *decision* they make — which intent action, which chooser title, whether the target
+ * app may rewrite the selection, which message the user sees, and which characters form the word
+ * under the cursor — is ordinary string and index arithmetic.
+ */
+internal object TextActionPolicy {
+
+    /**
+     * `android.content.Intent.ACTION_PROCESS_TEXT`, spelled out so this object stays
+     * Android-free (same idiom as `clipboard.PrivateCopyIntentParser.ACTION_PROCESS_TEXT`).
+     * `ReleaseClaimTextActionsTest` asserts it still equals the framework constant.
+     */
+    const val ACTION_PROCESS_TEXT = "android.intent.action.PROCESS_TEXT"
+
+    /** MIME type advertised to the chooser; plain text is what an IME can offer. */
+    const val MIME_TEXT_PLAIN = "text/plain"
+
+    /**
+     * The two selection-driven actions a short swipe can dispatch. User-visible text is carried
+     * as string-resource ids (translated in all 21 locales) and resolved by the caller, so this
+     * object stays Android-free.
+     */
+    enum class TextAction(
+        /** Name used in the user-facing "no selection" message. */
+        @androidx.annotation.StringRes val nameRes: Int,
+        /** Title of the app chooser (v1.1.99: "Shows app chooser"). */
+        @androidx.annotation.StringRes val chooserTitleRes: Int
+    ) {
+        ASSIST(R.string.text_action_assist_name, R.string.text_action_assist_chooser),
+        REPLACE(R.string.text_action_replace_name, R.string.text_action_replace_chooser)
+    }
+
+    /**
+     * The `ACTION_PROCESS_TEXT` dispatch for [selectedText], fully described as data.
+     *
+     * @property readOnly always `false`: the chosen app is allowed to hand back replacement
+     *   text, which is what makes `replaceText` a replacement rather than a lookup.
+     */
+    data class ProcessTextRequest(
+        val action: String,
+        val mimeType: String,
+        val text: String,
+        val readOnly: Boolean,
+        @androidx.annotation.StringRes val chooserTitleRes: Int
+    )
+
+    fun processTextRequest(selectedText: String, action: TextAction): ProcessTextRequest =
+        ProcessTextRequest(
+            action = ACTION_PROCESS_TEXT,
+            mimeType = MIME_TEXT_PLAIN,
+            text = selectedText,
+            readOnly = false,
+            chooserTitleRes = action.chooserTitleRes
+        )
+
+    /**
+     * v1.2.0: shown in the suggestion bar when the action fires with nothing selected.
+     * [getString] resolves a string resource with format args (`Context::getString` on device,
+     * a map in tests): the message is [R.string.text_action_no_selection] naming the action.
+     */
+    fun noTextSelectedMessage(
+        action: TextAction,
+        getString: (id: Int, args: Array<out Any>) -> String
+    ): String = getString(R.string.text_action_no_selection, arrayOf(getString(action.nameRes, emptyArray())))
+
+    /**
+     * How far either side of the cursor the word under it extends.
+     *
+     * @property backward characters BEFORE the cursor that belong to the word.
+     * @property forward characters AFTER the cursor that belong to the word.
+     */
+    data class WordSpan(val backward: Int, val forward: Int) {
+        /** No word touches the cursor — the caller reports "No word at cursor". */
+        val isEmpty: Boolean get() = backward == 0 && forward == 0
+    }
+
+    /**
+     * The word touching the cursor, given the text on either side of it.
+     *
+     * A word character is a letter, a digit, or an apostrophe — the apostrophe is included so
+     * `don't` and `qu'est` select whole rather than splitting at the elision mark.
+     */
+    fun wordAtCursor(textBefore: String, textAfter: String): WordSpan {
+        var startOffset = textBefore.length
+        for (i in textBefore.lastIndex downTo 0) {
+            if (!isWordChar(textBefore[i])) break
+            startOffset = i
+        }
+
+        var endOffset = 0
+        for (i in textAfter.indices) {
+            if (!isWordChar(textAfter[i])) break
+            endOffset = i + 1
+        }
+
+        return WordSpan(backward = textBefore.length - startOffset, forward = endOffset)
+    }
+
+    private fun isWordChar(c: Char): Boolean = c.isLetterOrDigit() || c == '\''
+}
+
+/**
+ * Pure decision table for the navigation-bar appearance, published as
+ * "Nav bar icons on Android 8-9 light themes (#1116)" in v1.2.6 and v1.2.8.
+ *
+ * The bug: an IME window that draws behind the system bars with a TRANSPARENT nav-bar colour
+ * leaves a light theme rendering white icons on a white background. API 29+ fixes itself
+ * (contrast enforcement off + `isAppearanceLightNavigationBars`), but API 26-28 has only the
+ * legacy `SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR` bit, and below API 26 not even that — so on
+ * 8.0-9.0 the window must fall back to the theme's own nav-bar colour AND ask for dark icons.
+ *
+ * Extracted from `Keyboard2View.refresh_navigation_bar`, which cannot run off-device
+ * (`Window`, `decorView`, `systemUiVisibility`).
+ */
+internal object NavBarAppearance {
+
+    /**
+     * @property useThemeNavBarColor paint the nav bar with the theme colour instead of
+     *   `Color.TRANSPARENT`.
+     * @property legacyLightNavBarFlag `true` set `SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR` (dark
+     *   icons), `false` clear it (light icons), `null` leave the legacy flags alone — either
+     *   the flag does not exist yet (< API 26) or the insets controller owns the decision
+     *   (>= API 29).
+     * @property disableContrastEnforcement turn off the framework's scrim (API 29+).
+     * @property useInsetsController drive the appearance through `WindowInsetsController`
+     *   (API 30+).
+     */
+    data class Decision(
+        val useThemeNavBarColor: Boolean,
+        val legacyLightNavBarFlag: Boolean?,
+        val disableContrastEnforcement: Boolean,
+        val useInsetsController: Boolean
+    )
+
+    /** First API level with `SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR` (Android 8.0 Oreo). */
+    const val FIRST_LEGACY_LIGHT_NAV_BAR_API = 26
+
+    /** First API level that handles nav-bar contrast itself (Android 10). */
+    const val FIRST_SELF_CONTRASTING_API = 29
+
+    /** First API level with `WindowInsetsController` (Android 11). */
+    const val FIRST_INSETS_CONTROLLER_API = 30
+
+    fun decide(sdkInt: Int, isLightNavBar: Boolean): Decision {
+        val legacyEra = sdkInt in FIRST_LEGACY_LIGHT_NAV_BAR_API until FIRST_SELF_CONTRASTING_API
+        val useThemeColor = sdkInt < FIRST_SELF_CONTRASTING_API && isLightNavBar
+        return Decision(
+            useThemeNavBarColor = useThemeColor,
+            legacyLightNavBarFlag = when {
+                // #1116: light theme on 8.0-9.0 — theme-coloured bar plus DARK icons.
+                useThemeColor && sdkInt >= FIRST_LEGACY_LIGHT_NAV_BAR_API -> true
+                // Transparent bar on 8.0-9.0 — make sure a stale light flag is cleared.
+                !useThemeColor && legacyEra -> false
+                else -> null
+            },
+            disableContrastEnforcement = sdkInt >= FIRST_SELF_CONTRASTING_API,
+            useInsetsController = sdkInt >= FIRST_INSETS_CONTROLLER_API
+        )
+    }
+}

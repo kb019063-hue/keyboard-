@@ -1,0 +1,1367 @@
+{
+  "aije": [
+    "ai-je"
+  ],
+  "aimentelles": [
+    "aiment-elles"
+  ],
+  "aimentils": [
+    "aiment-ils"
+  ],
+  "aimestu": [
+    "aimes-tu"
+  ],
+  "aimetelle": [
+    "aime-t-elle"
+  ],
+  "aimetil": [
+    "aime-t-il"
+  ],
+  "aimeton": [
+    "aime-t-on"
+  ],
+  "aimezvous": [
+    "aimez-vous"
+  ],
+  "allaitelle": [
+    "allait-elle"
+  ],
+  "allaitil": [
+    "allait-il"
+  ],
+  "allaiton": [
+    "allait-on"
+  ],
+  "allezvous": [
+    "allez-vous"
+  ],
+  "allonsnous": [
+    "allons-nous"
+  ],
+  "arrivetelle": [
+    "arrive-t-elle"
+  ],
+  "arrivetil": [
+    "arrive-t-il"
+  ],
+  "arriveton": [
+    "arrive-t-on"
+  ],
+  "astu": [
+    "as-tu"
+  ],
+  "atelle": [
+    "a-t-elle"
+  ],
+  "atil": [
+    "a-t-il"
+  ],
+  "aton": [
+    "a-t-on"
+  ],
+  "attendelle": [
+    "attend-elle"
+  ],
+  "attendezvous": [
+    "attendez-vous"
+  ],
+  "attendil": [
+    "attend-il"
+  ],
+  "attendon": [
+    "attend-on"
+  ],
+  "attendstu": [
+    "attends-tu"
+  ],
+  "auraitelle": [
+    "aurait-elle"
+  ],
+  "auraitil": [
+    "aurait-il"
+  ],
+  "auraiton": [
+    "aurait-on"
+  ],
+  "auratelle": [
+    "aura-t-elle"
+  ],
+  "auratil": [
+    "aura-t-il"
+  ],
+  "auraton": [
+    "aura-t-on"
+  ],
+  "avaitelle": [
+    "avait-elle"
+  ],
+  "avaitil": [
+    "avait-il"
+  ],
+  "avaiton": [
+    "avait-on"
+  ],
+  "avezvous": [
+    "avez-vous"
+  ],
+  "avonsnous": [
+    "avons-nous"
+  ],
+  "comprendelle": [
+    "comprend-elle"
+  ],
+  "comprendil": [
+    "comprend-il"
+  ],
+  "comprendon": [
+    "comprend-on"
+  ],
+  "comprendstu": [
+    "comprends-tu"
+  ],
+  "comprenezvous": [
+    "comprenez-vous"
+  ],
+  "connaissezvous": [
+    "connaissez-vous"
+  ],
+  "connaistu": [
+    "connais-tu"
+  ],
+  "connaitelle": [
+    "connaît-elle"
+  ],
+  "connaitil": [
+    "connaît-il"
+  ],
+  "connaiton": [
+    "connaît-on"
+  ],
+  "croientelles": [
+    "croient-elles"
+  ],
+  "croientils": [
+    "croient-ils"
+  ],
+  "croisje": [
+    "crois-je"
+  ],
+  "croistu": [
+    "crois-tu"
+  ],
+  "croitelle": [
+    "croit-elle"
+  ],
+  "croitil": [
+    "croit-il"
+  ],
+  "croiton": [
+    "croit-on"
+  ],
+  "croyezvous": [
+    "croyez-vous"
+  ],
+  "dada": [
+    "d'ada"
+  ],
+  "dal": [
+    "d'al"
+  ],
+  "dale": [
+    "d'ale"
+  ],
+  "daller": [
+    "d'aller"
+  ],
+  "dalton": [
+    "d'alton"
+  ],
+  "damas": [
+    "d'amas"
+  ],
+  "damer": [
+    "d'amer"
+  ],
+  "damon": [
+    "d'amon"
+  ],
+  "dan": [
+    "d'an"
+  ],
+  "dana": [
+    "d'ana"
+  ],
+  "dandy": [
+    "d'andy"
+  ],
+  "dangers": [
+    "d'angers"
+  ],
+  "dans": [
+    "d'ans"
+  ],
+  "danse": [
+    "d'anse"
+  ],
+  "danses": [
+    "d'anses"
+  ],
+  "dante": [
+    "d'ante"
+  ],
+  "danton": [
+    "d'anton"
+  ],
+  "dard": [
+    "d'ard"
+  ],
+  "daria": [
+    "d'aria"
+  ],
+  "daron": [
+    "d'aron"
+  ],
+  "daube": [
+    "d'aube"
+  ],
+  "davantage": [
+    "d'avantage"
+  ],
+  "davis": [
+    "d'avis"
+  ],
+  "dax": [
+    "d'ax"
+  ],
+  "demi": [
+    "d'emi"
+  ],
+  "dentier": [
+    "d'entier"
+  ],
+  "denver": [
+    "d'enver"
+  ],
+  "deux": [
+    "d'eux"
+  ],
+  "devaitelle": [
+    "devait-elle"
+  ],
+  "devaitil": [
+    "devait-il"
+  ],
+  "devaiton": [
+    "devait-on"
+  ],
+  "devezvous": [
+    "devez-vous"
+  ],
+  "devonsnous": [
+    "devons-nous"
+  ],
+  "devraitelle": [
+    "devrait-elle"
+  ],
+  "devraitil": [
+    "devrait-il"
+  ],
+  "devraiton": [
+    "devrait-on"
+  ],
+  "devratelle": [
+    "devra-t-elle"
+  ],
+  "devratil": [
+    "devra-t-il"
+  ],
+  "devraton": [
+    "devra-t-on"
+  ],
+  "dina": [
+    "d'ina"
+  ],
+  "dinde": [
+    "d'inde"
+  ],
+  "dindes": [
+    "d'indes"
+  ],
+  "diode": [
+    "d'iode"
+  ],
+  "diraitelle": [
+    "dirait-elle"
+  ],
+  "diraitil": [
+    "dirait-il"
+  ],
+  "diraiton": [
+    "dirait-on"
+  ],
+  "diratelle": [
+    "dira-t-elle"
+  ],
+  "diratil": [
+    "dira-t-il"
+  ],
+  "diraton": [
+    "dira-t-on"
+  ],
+  "disaitelle": [
+    "disait-elle"
+  ],
+  "disaitil": [
+    "disait-il"
+  ],
+  "disaiton": [
+    "disait-on"
+  ],
+  "dise": [
+    "d'ise"
+  ],
+  "disentelles": [
+    "disent-elles"
+  ],
+  "disentils": [
+    "disent-ils"
+  ],
+  "disje": [
+    "dis-je"
+  ],
+  "disonsnous": [
+    "disons-nous"
+  ],
+  "distu": [
+    "dis-tu"
+  ],
+  "ditelle": [
+    "dit-elle"
+  ],
+  "ditesvous": [
+    "dites-vous"
+  ],
+  "ditil": [
+    "dit-il"
+  ],
+  "diton": [
+    "dit-on"
+  ],
+  "divan": [
+    "d'ivan"
+  ],
+  "dive": [
+    "d'ive"
+  ],
+  "do": [
+    "d'o"
+  ],
+  "doisje": [
+    "dois-je"
+  ],
+  "doistu": [
+    "dois-tu"
+  ],
+  "doitelle": [
+    "doit-elle"
+  ],
+  "doitil": [
+    "doit-il"
+  ],
+  "doiton": [
+    "doit-on"
+  ],
+  "doiventelles": [
+    "doivent-elles"
+  ],
+  "doiventils": [
+    "doivent-ils"
+  ],
+  "don": [
+    "d'on"
+  ],
+  "dores": [
+    "d'ores"
+  ],
+  "dorme": [
+    "d'orme"
+  ],
+  "dors": [
+    "d'ors"
+  ],
+  "dos": [
+    "d'os"
+  ],
+  "doser": [
+    "d'oser"
+  ],
+  "douche": [
+    "d'ouche"
+  ],
+  "doum": [
+    "d'oum"
+  ],
+  "dune": [
+    "d'une"
+  ],
+  "dur": [
+    "d'ur"
+  ],
+  "durée": [
+    "d'urée"
+  ],
+  "dus": [
+    "d'us"
+  ],
+  "dut": [
+    "d'ut"
+  ],
+  "débats": [
+    "d'ébats"
+  ],
+  "débauche": [
+    "d'ébauche"
+  ],
+  "déchéance": [
+    "d'échéance"
+  ],
+  "découler": [
+    "d'écouler"
+  ],
+  "décrire": [
+    "d'écrire"
+  ],
+  "décrit": [
+    "d'écrit"
+  ],
+  "décrits": [
+    "d'écrits"
+  ],
+  "déjections": [
+    "d'éjections"
+  ],
+  "délire": [
+    "d'élire"
+  ],
+  "démission": [
+    "d'émission"
+  ],
+  "démissions": [
+    "d'émissions"
+  ],
+  "dénoncer": [
+    "d'énoncer"
+  ],
+  "dénonciation": [
+    "d'énonciation"
+  ],
+  "dénonciations": [
+    "d'énonciations"
+  ],
+  "dénoncé": [
+    "d'énoncé"
+  ],
+  "dénoncés": [
+    "d'énoncés"
+  ],
+  "détendre": [
+    "d'étendre"
+  ],
+  "détendue": [
+    "d'étendue"
+  ],
+  "dévaluation": [
+    "d'évaluation"
+  ],
+  "dévier": [
+    "d'évier"
+  ],
+  "entendelle": [
+    "entend-elle"
+  ],
+  "entendezvous": [
+    "entendez-vous"
+  ],
+  "entendil": [
+    "entend-il"
+  ],
+  "entendon": [
+    "entend-on"
+  ],
+  "entendstu": [
+    "entends-tu"
+  ],
+  "estelle": [
+    "est-elle"
+  ],
+  "estil": [
+    "est-il"
+  ],
+  "eston": [
+    "est-on"
+  ],
+  "estu": [
+    "es-tu"
+  ],
+  "etaitelle": [
+    "était-elle"
+  ],
+  "etaitil": [
+    "était-il"
+  ],
+  "etaiton": [
+    "était-on"
+  ],
+  "etesvous": [
+    "êtes-vous"
+  ],
+  "existetelle": [
+    "existe-t-elle"
+  ],
+  "existetil": [
+    "existe-t-il"
+  ],
+  "existeton": [
+    "existe-t-on"
+  ],
+  "faisaitelle": [
+    "faisait-elle"
+  ],
+  "faisaitil": [
+    "faisait-il"
+  ],
+  "faisaiton": [
+    "faisait-on"
+  ],
+  "faisje": [
+    "fais-je"
+  ],
+  "faisonsnous": [
+    "faisons-nous"
+  ],
+  "faistu": [
+    "fais-tu"
+  ],
+  "faitelle": [
+    "fait-elle"
+  ],
+  "faitesvous": [
+    "faites-vous"
+  ],
+  "faitil": [
+    "fait-il"
+  ],
+  "faiton": [
+    "fait-on"
+  ],
+  "fallaitil": [
+    "fallait-il"
+  ],
+  "faudraitil": [
+    "faudrait-il"
+  ],
+  "faudratil": [
+    "faudra-t-il"
+  ],
+  "fautil": [
+    "faut-il"
+  ],
+  "feraitelle": [
+    "ferait-elle"
+  ],
+  "feraitil": [
+    "ferait-il"
+  ],
+  "feraiton": [
+    "ferait-on"
+  ],
+  "feratelle": [
+    "fera-t-elle"
+  ],
+  "feratil": [
+    "fera-t-il"
+  ],
+  "feraton": [
+    "fera-t-on"
+  ],
+  "fontelles": [
+    "font-elles"
+  ],
+  "fontils": [
+    "font-ils"
+  ],
+  "importetil": [
+    "importe-t-il"
+  ],
+  "iraitelle": [
+    "irait-elle"
+  ],
+  "iraitil": [
+    "irait-il"
+  ],
+  "iraiton": [
+    "irait-on"
+  ],
+  "iratelle": [
+    "ira-t-elle"
+  ],
+  "iratil": [
+    "ira-t-il"
+  ],
+  "iraton": [
+    "ira-t-on"
+  ],
+  "jaime": [
+    "j'aime"
+  ],
+  "la": [
+    "l'a"
+  ],
+  "lace": [
+    "l'ace"
+  ],
+  "lactée": [
+    "l'actée"
+  ],
+  "lad": [
+    "l'ad"
+  ],
+  "lai": [
+    "l'ai"
+  ],
+  "laide": [
+    "l'aide"
+  ],
+  "laides": [
+    "l'aides"
+  ],
+  "laie": [
+    "l'aie"
+  ],
+  "laine": [
+    "l'aine"
+  ],
+  "lait": [
+    "l'ait"
+  ],
+  "lamas": [
+    "l'amas"
+  ],
+  "lame": [
+    "l'ame"
+  ],
+  "lana": [
+    "l'ana"
+  ],
+  "lance": [
+    "l'ance"
+  ],
+  "lange": [
+    "l'ange"
+  ],
+  "langevin": [
+    "l'angevin"
+  ],
+  "laps": [
+    "l'aps"
+  ],
+  "lara": [
+    "l'ara"
+  ],
+  "lard": [
+    "l'ard"
+  ],
+  "largue": [
+    "l'argue"
+  ],
+  "larme": [
+    "l'arme"
+  ],
+  "lars": [
+    "l'ars"
+  ],
+  "larve": [
+    "l'arve"
+  ],
+  "lasse": [
+    "l'asse"
+  ],
+  "laura": [
+    "l'aura"
+  ],
+  "lavaient": [
+    "l'avaient"
+  ],
+  "lavait": [
+    "l'avait"
+  ],
+  "laval": [
+    "l'aval"
+  ],
+  "lavant": [
+    "l'avant"
+  ],
+  "lave": [
+    "l'ave"
+  ],
+  "lavent": [
+    "l'avent"
+  ],
+  "lavez": [
+    "l'avez"
+  ],
+  "lavis": [
+    "l'avis"
+  ],
+  "lavoir": [
+    "l'avoir"
+  ],
+  "lego": [
+    "l'ego"
+  ],
+  "lena": [
+    "l'ena"
+  ],
+  "lens": [
+    "l'ens"
+  ],
+  "les": [
+    "l'es"
+  ],
+  "lest": [
+    "l'est"
+  ],
+  "leste": [
+    "l'este"
+  ],
+  "lester": [
+    "l'ester"
+  ],
+  "lia": [
+    "l'ia"
+  ],
+  "libère": [
+    "l'ibère"
+  ],
+  "lice": [
+    "l'ice"
+  ],
+  "ligue": [
+    "l'igue"
+  ],
+  "limage": [
+    "l'image"
+  ],
+  "limita": [
+    "l'imita"
+  ],
+  "limitaient": [
+    "l'imitaient"
+  ],
+  "limitait": [
+    "l'imitait"
+  ],
+  "limitant": [
+    "l'imitant"
+  ],
+  "limitation": [
+    "l'imitation"
+  ],
+  "limite": [
+    "l'imite"
+  ],
+  "limitent": [
+    "l'imitent"
+  ],
+  "limiter": [
+    "l'imiter"
+  ],
+  "limitera": [
+    "l'imitera"
+  ],
+  "lina": [
+    "l'ina"
+  ],
+  "linné": [
+    "l'inné"
+  ],
+  "lion": [
+    "l'ion"
+  ],
+  "lira": [
+    "l'ira"
+  ],
+  "lire": [
+    "l'ire"
+  ],
+  "lis": [
+    "l'is"
+  ],
+  "lisa": [
+    "l'isa"
+  ],
+  "lisle": [
+    "l'isle"
+  ],
+  "lob": [
+    "l'ob"
+  ],
+  "lol": [
+    "l'ol"
+  ],
+  "long": [
+    "l'ong"
+  ],
+  "lorient": [
+    "l'orient"
+  ],
+  "loua": [
+    "l'oua"
+  ],
+  "louche": [
+    "l'ouche"
+  ],
+  "loutre": [
+    "l'outre"
+  ],
+  "louvre": [
+    "l'ouvre"
+  ],
+  "luc": [
+    "l'uc"
+  ],
+  "lue": [
+    "l'ue"
+  ],
+  "luit": [
+    "l'uit"
+  ],
+  "lune": [
+    "l'une"
+  ],
+  "lut": [
+    "l'ut"
+  ],
+  "lx": [
+    "l'x"
+  ],
+  "là": [
+    "l'à"
+  ],
+  "légal": [
+    "l'égal"
+  ],
+  "légale": [
+    "l'égale"
+  ],
+  "légalisation": [
+    "l'égalisation"
+  ],
+  "légalité": [
+    "l'égalité"
+  ],
+  "léon": [
+    "l'éon"
+  ],
+  "létale": [
+    "l'étale"
+  ],
+  "ma": [
+    "m'a"
+  ],
+  "mai": [
+    "m'ai"
+  ],
+  "mas": [
+    "m'as"
+  ],
+  "mes": [
+    "m'es"
+  ],
+  "meut": [
+    "m'eut"
+  ],
+  "mont": [
+    "m'ont"
+  ],
+  "na": [
+    "n'a"
+  ],
+  "navale": [
+    "n'avale"
+  ],
+  "ontelles": [
+    "ont-elles"
+  ],
+  "ontils": [
+    "ont-ils"
+  ],
+  "parlentelles": [
+    "parlent-elles"
+  ],
+  "parlentils": [
+    "parlent-ils"
+  ],
+  "parlestu": [
+    "parles-tu"
+  ],
+  "parletelle": [
+    "parle-t-elle"
+  ],
+  "parletil": [
+    "parle-t-il"
+  ],
+  "parleton": [
+    "parle-t-on"
+  ],
+  "parlezvous": [
+    "parlez-vous"
+  ],
+  "pensentelles": [
+    "pensent-elles"
+  ],
+  "pensentils": [
+    "pensent-ils"
+  ],
+  "pensestu": [
+    "penses-tu"
+  ],
+  "pensetelle": [
+    "pense-t-elle"
+  ],
+  "pensetil": [
+    "pense-t-il"
+  ],
+  "penseton": [
+    "pense-t-on"
+  ],
+  "pensezvous": [
+    "pensez-vous"
+  ],
+  "peutelle": [
+    "peut-elle"
+  ],
+  "peutil": [
+    "peut-il"
+  ],
+  "peuton": [
+    "peut-on"
+  ],
+  "peuventelles": [
+    "peuvent-elles"
+  ],
+  "peuventils": [
+    "peuvent-ils"
+  ],
+  "peuxtu": [
+    "peux-tu"
+  ],
+  "pleutil": [
+    "pleut-il"
+  ],
+  "pourraitelle": [
+    "pourrait-elle"
+  ],
+  "pourraitil": [
+    "pourrait-il"
+  ],
+  "pourraiton": [
+    "pourrait-on"
+  ],
+  "pourratelle": [
+    "pourra-t-elle"
+  ],
+  "pourratil": [
+    "pourra-t-il"
+  ],
+  "pourraton": [
+    "pourra-t-on"
+  ],
+  "pouvaitelle": [
+    "pouvait-elle"
+  ],
+  "pouvaitil": [
+    "pouvait-il"
+  ],
+  "pouvaiton": [
+    "pouvait-on"
+  ],
+  "pouvezvous": [
+    "pouvez-vous"
+  ],
+  "pouvonsnous": [
+    "pouvons-nous"
+  ],
+  "prendelle": [
+    "prend-elle"
+  ],
+  "prendil": [
+    "prend-il"
+  ],
+  "prendon": [
+    "prend-on"
+  ],
+  "prendstu": [
+    "prends-tu"
+  ],
+  "prenezvous": [
+    "prenez-vous"
+  ],
+  "prennentelles": [
+    "prennent-elles"
+  ],
+  "prennentils": [
+    "prennent-ils"
+  ],
+  "prenonsnous": [
+    "prenons-nous"
+  ],
+  "prudhomme": [
+    "prud'homme"
+  ],
+  "prudhommes": [
+    "prud'hommes"
+  ],
+  "puisje": [
+    "puis-je"
+  ],
+  "qua": [
+    "qu'a"
+  ],
+  "quai": [
+    "qu'ai"
+  ],
+  "quantiques": [
+    "qu'antiques"
+  ],
+  "quart": [
+    "qu'art"
+  ],
+  "quelle": [
+    "qu'elle"
+  ],
+  "quelles": [
+    "qu'elles"
+  ],
+  "queux": [
+    "qu'eux"
+  ],
+  "restetelle": [
+    "reste-t-elle"
+  ],
+  "restetil": [
+    "reste-t-il"
+  ],
+  "resteton": [
+    "reste-t-on"
+  ],
+  "saborde": [
+    "s'aborde"
+  ],
+  "saborder": [
+    "s'aborder"
+  ],
+  "sagace": [
+    "s'agace"
+  ],
+  "saisje": [
+    "sais-je"
+  ],
+  "saistu": [
+    "sais-tu"
+  ],
+  "saitelle": [
+    "sait-elle"
+  ],
+  "saitil": [
+    "sait-il"
+  ],
+  "saiton": [
+    "sait-on"
+  ],
+  "sarment": [
+    "s'arment"
+  ],
+  "sauraitelle": [
+    "saurait-elle"
+  ],
+  "sauraitil": [
+    "saurait-il"
+  ],
+  "sauraiton": [
+    "saurait-on"
+  ],
+  "sauratelle": [
+    "saura-t-elle"
+  ],
+  "sauratil": [
+    "saura-t-il"
+  ],
+  "sauraton": [
+    "saura-t-on"
+  ],
+  "savaitelle": [
+    "savait-elle"
+  ],
+  "savaitil": [
+    "savait-il"
+  ],
+  "savaiton": [
+    "savait-on"
+  ],
+  "saventelles": [
+    "savent-elles"
+  ],
+  "saventils": [
+    "savent-ils"
+  ],
+  "savezvous": [
+    "savez-vous"
+  ],
+  "savonsnous": [
+    "savons-nous"
+  ],
+  "saxe": [
+    "s'axe"
+  ],
+  "sembletelle": [
+    "semble-t-elle"
+  ],
+  "sembletil": [
+    "semble-t-il"
+  ],
+  "sembleton": [
+    "semble-t-on"
+  ],
+  "sen": [
+    "s'en"
+  ],
+  "seraitelle": [
+    "serait-elle"
+  ],
+  "seraitil": [
+    "serait-il"
+  ],
+  "seraiton": [
+    "serait-on"
+  ],
+  "seratelle": [
+    "sera-t-elle"
+  ],
+  "seratil": [
+    "sera-t-il"
+  ],
+  "seraton": [
+    "sera-t-on"
+  ],
+  "sils": [
+    "s'ils"
+  ],
+  "sommesnous": [
+    "sommes-nous"
+  ],
+  "sontelles": [
+    "sont-elles"
+  ],
+  "sontils": [
+    "sont-ils"
+  ],
+  "suffitelle": [
+    "suffit-elle"
+  ],
+  "suffitil": [
+    "suffit-il"
+  ],
+  "suffiton": [
+    "suffit-on"
+  ],
+  "suisje": [
+    "suis-je"
+  ],
+  "ta": [
+    "t'a"
+  ],
+  "tas": [
+    "t'as"
+  ],
+  "tes": [
+    "t'es"
+  ],
+  "test": [
+    "t'est"
+  ],
+  "trouventelles": [
+    "trouvent-elles"
+  ],
+  "trouventils": [
+    "trouvent-ils"
+  ],
+  "trouvestu": [
+    "trouves-tu"
+  ],
+  "trouvetelle": [
+    "trouve-t-elle"
+  ],
+  "trouvetil": [
+    "trouve-t-il"
+  ],
+  "trouveton": [
+    "trouve-t-on"
+  ],
+  "trouvezvous": [
+    "trouvez-vous"
+  ],
+  "vaisje": [
+    "vais-je"
+  ],
+  "vastu": [
+    "vas-tu"
+  ],
+  "vatelle": [
+    "va-t-elle"
+  ],
+  "vatil": [
+    "va-t-il"
+  ],
+  "vaton": [
+    "va-t-on"
+  ],
+  "venaitelle": [
+    "venait-elle"
+  ],
+  "venaitil": [
+    "venait-il"
+  ],
+  "venaiton": [
+    "venait-on"
+  ],
+  "venezvous": [
+    "venez-vous"
+  ],
+  "venonsnous": [
+    "venons-nous"
+  ],
+  "veulentelles": [
+    "veulent-elles"
+  ],
+  "veulentils": [
+    "veulent-ils"
+  ],
+  "veutelle": [
+    "veut-elle"
+  ],
+  "veutil": [
+    "veut-il"
+  ],
+  "veuton": [
+    "veut-on"
+  ],
+  "veuxtu": [
+    "veux-tu"
+  ],
+  "viendraitelle": [
+    "viendrait-elle"
+  ],
+  "viendraitil": [
+    "viendrait-il"
+  ],
+  "viendraiton": [
+    "viendrait-on"
+  ],
+  "viendratelle": [
+    "viendra-t-elle"
+  ],
+  "viendratil": [
+    "viendra-t-il"
+  ],
+  "viendraton": [
+    "viendra-t-on"
+  ],
+  "viennentelles": [
+    "viennent-elles"
+  ],
+  "viennentils": [
+    "viennent-ils"
+  ],
+  "vienstu": [
+    "viens-tu"
+  ],
+  "vientelle": [
+    "vient-elle"
+  ],
+  "vientil": [
+    "vient-il"
+  ],
+  "vienton": [
+    "vient-on"
+  ],
+  "voientelles": [
+    "voient-elles"
+  ],
+  "voientils": [
+    "voient-ils"
+  ],
+  "voisje": [
+    "vois-je"
+  ],
+  "voistu": [
+    "vois-tu"
+  ],
+  "voitelle": [
+    "voit-elle"
+  ],
+  "voitil": [
+    "voit-il"
+  ],
+  "voiton": [
+    "voit-on"
+  ],
+  "vontelles": [
+    "vont-elles"
+  ],
+  "vontils": [
+    "vont-ils"
+  ],
+  "voudraitelle": [
+    "voudrait-elle"
+  ],
+  "voudraitil": [
+    "voudrait-il"
+  ],
+  "voudraiton": [
+    "voudrait-on"
+  ],
+  "voudratelle": [
+    "voudra-t-elle"
+  ],
+  "voudratil": [
+    "voudra-t-il"
+  ],
+  "voudraton": [
+    "voudra-t-on"
+  ],
+  "voulaitelle": [
+    "voulait-elle"
+  ],
+  "voulaitil": [
+    "voulait-il"
+  ],
+  "voulaiton": [
+    "voulait-on"
+  ],
+  "voulezvous": [
+    "voulez-vous"
+  ],
+  "voulonsnous": [
+    "voulons-nous"
+  ],
+  "voyezvous": [
+    "voyez-vous"
+  ],
+  "voyonsnous": [
+    "voyons-nous"
+  ],
+  "yen": [
+    "y'en"
+  ]
+}

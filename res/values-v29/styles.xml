@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- Launcher activity theme with edge-to-edge support (API 29+) -->
+  <!-- ARC-111: DayNight so the launcher follows the system theme; bar-icon
+       appearance is set at runtime in LauncherActivity from the current uiMode. -->
+  <style name="launcherTheme" parent="Theme.Material3.DayNight.NoActionBar">
+    <item name="android:windowBackground">@android:color/transparent</item>
+    <item name="android:statusBarColor">@android:color/transparent</item>
+    <item name="android:navigationBarColor">@android:color/transparent</item>
+    <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+    <item name="android:windowTranslucentStatus">false</item>
+    <item name="android:windowTranslucentNavigation">false</item>
+    <item name="android:enforceStatusBarContrast">false</item>
+    <item name="android:enforceNavigationBarContrast">false</item>
+  </style>
+</resources>

@@ -1,0 +1,347 @@
+package tribixbite.cleverkeys.swipe.ctc
+
+import java.util.Locale
+
+/**
+ * THE table of languages the CTC swipe engine serves, and where each one's lexicon
+ * comes from. Pure (no Android) so both the adapter and `runPureTests` read the same
+ * source of truth; `CtcScoringParams.presetFor` keys its λ off [LexiconSource].
+ *
+ * ## Why a table and not a single constant
+ *
+ * The Latin encoder (`models/ctc_swipe_encoder.onnx`) is layout- and language-agnostic
+ * — it emits posteriors over whatever key geometry it is handed — so a LATIN language is
+ * "supported" exactly when BOTH of these exist for it:
+ *
+ *  1. **Model-level validation**: an alt-layout accuracy bar from the training campaign
+ *     (CleverKeys-ML `ctc/MODELS_TABLE.md:113`). For the model we actually ship
+ *     (`phaseM_kd_fresh_w1_s1234_fp16w`): azerty **84.53**, qwertz **83.97**, german
+ *     **81.30**, spanish **89.53** top-1 (euro-mean 84.83) — i.e. fr / de / es, plus en
+ *     on the QWERTY family. These CLEAR the campaign bars, which are a separate set of
+ *     numbers: azerty 83.60 / qwertz 82.50 / german 79.64 / spanish 88.28
+ *     (`MODELS_TABLE.md:132-136`).
+ *
+ *     Measured on the **`az26` arm** — only the 26 a–z keys are given to the model, mask
+ *     26 — which is exactly what `CtcEngineAdapter.buildMappedLayout` builds. The `full`
+ *     arm (27 slots for dvorak/azerty/spanish, 29 for german) was measured and buys
+ *     nothing: +0.05 / +0.10 / 0.00 / −0.23 (`ctc/ALT_LAYOUT_EVAL.md:303-311`).
+ *
+ *     Until 2026-08-18 this KDoc quoted 83.81 / 83.01 / 80.64 / 88.45. Those belong to
+ *     `sw2345` (`MODELS_TABLE.md:139`), a superseded Phase-J model that was **never
+ *     decoded on test** — the citation named the wrong model, and understated ours.
+ *  2. **A decoder preset validated on THIS language's lexicon scale**: the λ sweep in
+ *     `docs/eval/2026-08-15-ctc-per-language-lambda.md`.
+ *
+ * `it`, `pt` and `sv` have (2) by scale transfer but not (1) — no corpus exists to measure a
+ * bar against. They were enabled anyway on 2026-08-18 and are flagged [PROVISIONAL]: the
+ * fallback they would otherwise sit on (geometric) has no per-language bar EITHER and is
+ * 15–22 points worse wherever both engines were measured, so withholding CTC was protecting
+ * an evidence standard the alternative never met. Read [PROVISIONAL] before quoting any
+ * number for these three.
+ *
+ * ## Non-Latin languages need a third thing, and it is not negotiable
+ *
+ * A SCRIPT language additionally needs its own encoder, because a Latin-trained model does not
+ * zero-shot another script well enough on its own — motor statistics and the learned
+ * character-transition prior are trained even though geometry is an input. The rule
+ * (`memory/HANDOFF.md` rule 4, guide §7.4) is all three of a per-script **model**, a per-script
+ * **trie on the app's own lexicon at the app's own frequency scale**, and a **golden fixture at
+ * the preset that will actually ship**. Two of three is a silently wrong decode, not a partial
+ * feature. That rule is enforced by [CtcScriptSupport], which is where a script's alphabet,
+ * layout, artifacts and status live; this table only records the LEXICON, which is the leg of
+ * rule 4 that is language-shaped rather than script-shaped.
+ *
+ * `ru` is the first, added 2026-08-29 and flagged [VAL_ONLY]. Its lexicon is
+ * [LexiconSource.CKDT_LANGPACK] — the importable `langpack-ru` pack, which is the EXACT lexicon
+ * every published Russian number was measured on, so it is served when that pack is installed
+ * and not otherwise.
+ *
+ * ## The table is no longer the whole membership
+ *
+ * [SUPPORTED] is the STATIC half. Since 2026-08-29 an **imported Latin language pack** (`nl`,
+ * `id`, `ms`, … — any code the user brings) can also be served, decided per device by
+ * [CtcImportedPackSupport] and reached through [sourceFor], which consults the static table FIRST
+ * and the installed packs only on a miss. Read [CtcImportedPackSupport]'s KDoc before touching
+ * either: it carries the precedent (the encoder never sees a language; λ calibrates to the
+ * lexicon's frequency SCALE, and an imported pack is the same CKDT v2 scale as the bundled six),
+ * the a–z-projectability measurement that gates it, and why `en` and every scripted language are
+ * refused on that path.
+ *
+ * Consequence for anything that ENUMERATES served languages: `SUPPORTED.keys` is now a lower
+ * bound, not the answer. Use [isSupported] to ask about one language; a UI that lists them must
+ * add the device's eligible packs (`swipe.CtcInstalledPacks.servedCodes`) or it will tell a Dutch
+ * user with a pack installed that CTC does not serve Dutch while CTC is serving it.
+ */
+object CtcLanguageSupport {
+
+    /** Where a language's CTC lexicon is read from — and therefore its frequency scale. */
+    enum class LexiconSource {
+        /**
+         * `dictionaries/en_enhanced.json` — flat `{word: byteScore}` on the COMPRESSED
+         * 134–255 AOSP-like scale (`ln f ∈ [4.9, 5.54]`). Loaded a–z-STRIPPING, without
+         * accent folding, exactly as it shipped and was validated (test-2400, 89.31 t1).
+         */
+        EN_JSON,
+
+        /**
+         * `dictionaries/<lang>_enhanced.bin` — CKDT v2, read at `freq = max(1, 255 − rank)`
+         * ([CtcCkdtLexicon]), an INVERTED full-range 1–255 scale, then projected onto a–z
+         * with the canonical accented form retained for display ([CtcAzProjection]).
+         */
+        CKDT_BIN,
+
+        /**
+         * `langpacks/<code>/dictionary.bin` in the app's files dir — the SAME CKDT v2 container
+         * and the SAME `freq = max(1, 255 − rank)` scale as [CKDT_BIN], read by the same
+         * [tribixbite.cleverkeys.swipe.geometric.CkdtDictionaryReader], but delivered by the
+         * user's language-pack import rather than bundled in the APK.
+         *
+         * **Why a separate constant rather than "asset, else langpack".** Two reasons, both
+         * load-bearing:
+         *
+         *  1. It keeps the existing six CKDT languages on the BUNDLED asset. The geometric
+         *     engine already prefers an installed pack over the asset; CTC does not, and
+         *     silently switching fr/de/es/it/pt/sv over would change the decode vocabulary for
+         *     every user who has imported one of those packs — a behaviour change with no
+         *     measurement behind it, smuggled in under a multi-script commit.
+         *  2. It makes "the lexicon may be absent" a property of the TABLE rather than a
+         *     surprise. A langpack-sourced language is CTC-supported only while its pack is
+         *     installed, so the dispatcher has to consult
+         *     `CtcEngineAdapter.hasLexiconSource` before routing — see its KDoc.
+         *
+         * `en` is deliberately NOT eligible for this: an installed en langpack stores the
+         * inverted 255−rank scale, and en's tuned λ = 4.0 was fitted on `en_enhanced.json`'s
+         * compressed 134–255 byte scores. Same container, wrong scale.
+         */
+        CKDT_LANGPACK,
+    }
+
+    /**
+     * Language code → lexicon source, for every language the CTC engine may decode.
+     * Insertion-ordered so the set reads as "en first, then the 2026-08-15 additions".
+     */
+    val SUPPORTED: Map<String, LexiconSource> = linkedMapOf(
+        "en" to LexiconSource.EN_JSON,
+        "fr" to LexiconSource.CKDT_BIN,
+        "de" to LexiconSource.CKDT_BIN,
+        "es" to LexiconSource.CKDT_BIN,
+        // 2026-08-18, PROVISIONAL — see [PROVISIONAL] for the evidence tier and why these
+        // are enabled anyway.
+        "it" to LexiconSource.CKDT_BIN,
+        "pt" to LexiconSource.CKDT_BIN,
+        "sv" to LexiconSource.CKDT_BIN,
+        // 2026-08-29, the first NON-LATIN language — see [VAL_ONLY] before quoting any number
+        // for it, and [CtcScriptSupport] for the alphabet, the layout and the model.
+        "ru" to LexiconSource.CKDT_LANGPACK,
+        // 2026-08-30, the second script language. Greek has NO real-swipe probe at any tier:
+        // PROVISIONAL means scale-transferred serving, not measured accuracy. Its lexicon is
+        // the imported langpack-el on the same CKDT scale as ru and the bundled binaries.
+        "el" to LexiconSource.CKDT_LANGPACK,
+        // 2026-09-03, the remaining four script languages, unblocked by ARC-056's langpacks
+        // (2026-09-01). Same shape as el in every respect: imported CKDT langpack on the
+        // 255−rank scale, PROVISIONAL because none of the four has a real-swipe probe at any
+        // tier — only ru does, and ru's is val-only. See [CtcScriptSupport] for each one's
+        // alphabet, layout, model and fixture.
+        "uk" to LexiconSource.CKDT_LANGPACK,
+        "bg" to LexiconSource.CKDT_LANGPACK,
+        "mk" to LexiconSource.CKDT_LANGPACK,
+        "he" to LexiconSource.CKDT_LANGPACK,
+    )
+
+    /**
+     * Languages served on SCALE-TRANSFERRED evidence rather than their own measured bar.
+     *
+     * ## Why these are enabled without a per-language accuracy bar
+     *
+     * The honest position: no swipe corpus exists for it/pt/sv (HuggingFace
+     * `futo-org/swipe.futo.org` `swipe-5` returns `num_rows_total = 0` for all three), so no
+     * per-language bar can be produced and none is claimed here.
+     *
+     * What DOES transfer is the preset, by the project's own stated principle: λ is calibrated
+     * against the LEXICON'S FREQUENCY SCALE, not against the language ([presetFor]'s KDoc).
+     * These three read the same CKDT `.bin` scale as fr/de/es, where λ 2.0 won the tune half in
+     * 3 of 4 corpora and was independently confirmed by a Cyrillic sweep around a different
+     * base preset. The encoder itself is language-agnostic — it emits a–z posteriors from
+     * geometry, and never sees a language.
+     *
+     * The alternative was NOT "wait for evidence". It was geometric, which has no per-language
+     * bar either and which CTC beat by 15–22 points on every language where both were measured
+     * (test-2400: CTC 89.31 vs geometric 67.50). Declining to enable would have kept these
+     * users on the measurably worse engine in the name of an evidence standard the fallback
+     * does not meet.
+     *
+     * It also fixes a real defect: geometric has NO contraction-alias injection, so after the
+     * neural engine's removal only 18 of 21,214 Italian alias keys were reachable —
+     * `dell'acqua`, `un'altra` and `l'ago` could not be swiped at all. CTC injects
+     * ([CtcContractionKeys]), so enabling restores them.
+     *
+     * **Consequence to respect:** anything measured on these languages is val-tier at best and
+     * may never be quoted beside en/fr/de/es's test-validated numbers. Promote a language out
+     * of this set only by adding its own bar, never by familiarity.
+     *
+     * This set is the STATIC membership of the tier. Every imported-pack language is provisional
+     * too and can never leave the tier — see [isProvisional] and [CtcImportedPackSupport].
+     */
+    val PROVISIONAL: Set<String> = setOf("it", "pt", "sv", "el", "uk", "bg", "mk", "he")
+
+    /**
+     * True when [language] is served on SCALE-TRANSFERRED evidence rather than its own measured
+     * accuracy bar — the static [PROVISIONAL] three, plus every language served from an imported
+     * pack.
+     *
+     * An imported pack is provisional **by construction and permanently**: the lexicon is a file
+     * the user supplied, so there is no corpus, no bar, and no fixed vocabulary to measure one
+     * against. Any surface that distinguishes evidence tiers must call this rather than testing
+     * `in PROVISIONAL`, which would silently report a dynamic language as validated.
+     */
+    fun isProvisional(language: String?): Boolean {
+        val code = normalize(language)
+        return code in PROVISIONAL ||
+            (SUPPORTED[code] == null && CtcImportedPackSupport.servesImportedPack(code))
+    }
+
+    /**
+     * Languages whose accuracy evidence is **val-only and can never be upgraded**, as distinct
+     * from [PROVISIONAL] (no evidence at all, enabled by scale transfer).
+     *
+     * ## ru, and exactly what may be said about it
+     *
+     * Russian is the first non-Latin language the CTC engine serves, and it is the ONLY script
+     * with a real-swipe probe of any kind. Its number is **85.07 in-dict top-1**, and every
+     * clause of the following matters:
+     *
+     *  * It was measured on the **Yandex valid-10k**, the only real non-Latin swipe corpus in
+     *    existence, which is **eval-only by licence** — no training row, distilled teacher,
+     *    fine-tune, or artifact whose pipeline touched it may ever ship (HANDOFF rule 1). The
+     *    corpus is a protected database under ГК РФ ст. 1334 whose ст. 1335.1 research carve-out
+     *    does not cover a shipped product.
+     *  * It is therefore **val-only, permanently**. The test-2400 seal is spent and no Cyrillic
+     *    model was ever decoded on it, so no Russian number may be called "test-validated" —
+     *    that phrase means decoded on a sealed split whose read was spent from the ledger.
+     *  * The model was trained on **license-clean synthesis only** (a learned generator fitted to
+     *    MIT data — FUTO t3 + HWS — and conditioned on pure geometry). It saw zero real Cyrillic
+     *    rows. A sealed twin fitted to Yandex residuals put the upper bound at 85.95 and produced
+     *    one number and no bytes; if an accuracy for Russian sounds too good, check whether it is
+     *    that model or the permanently-unusable 89.64 `ru-real`.
+     *  * The **model** is three seeds (real-probe 85.30 ± 0.207; the shipped s1234 bytes are the
+     *    LOWEST of the three, so 85.07 is not a favourable pick). The generator, the synthesis
+     *    caches and the ceiling arms are single-seed.
+     *  * **Nothing on-device has ever been measured** — no latency number, no memory number, for
+     *    any script model. The graphs are a fifth of the Latin encoder's bytes so the expectation
+     *    is favourable, and expectation is not measurement.
+     *
+     * The decode constants carry their own caveat: λ = 2.0 was fitted against a greedy-37 model
+     * while the generation-4 decoder reads greedy 66, a **measured, unconfirmed −0.63 t1
+     * shortfall**; γ, β and the prune terms are E1's, carried. See [CtcScoringParams.tunedRuCkdt].
+     */
+    val VAL_ONLY: Set<String> = setOf("ru")
+
+    /**
+     * Bundled-dictionary languages CTC does not serve. **Empty since 2026-08-18** — every
+     * bundled dictionary now has a [SUPPORTED] row, the last three ([PROVISIONAL]) on
+     * scale-transferred evidence.
+     *
+     * Kept as a named concept rather than deleted, because the distinction it encodes is
+     * still the one that matters when a NEW language is added: a bundled dictionary alone is
+     * not sufficient, and the entry belongs here until someone decides which tier it enters
+     * [SUPPORTED] at.
+     *
+     * **The missing evidence is DATA, not effort (verified 2026-08-16).** A per-language bar
+     * needs a real swipe corpus, and the only multi-layout human-swipe source this project has
+     * — HuggingFace `futo-org/swipe.futo.org`, config `swipe-5` — contains **zero rows** for
+     * `it`, `pt`, `sv` and `nl` (datasets-server `/filter`, against en 47,364 / fr 3,124). Do
+     * not re-attempt that sweep expecting to find data. That is why it/pt/sv shipped
+     * provisional rather than measured — see [PROVISIONAL] for why waiting was the worse
+     * option.
+     */
+    val NEEDS_VALIDATION: Set<String> = emptySet()
+
+    /**
+     * Canonical lookup key for [language]: lowercased, region subtag dropped
+     * (`"fr-CA"` / `"es_MX"` → `"fr"` / `"es"`). Blank/null → `""`, which matches nothing.
+     */
+    fun normalize(language: String?): String {
+        if (language.isNullOrBlank()) return ""
+        val lower = language.trim().lowercase(Locale.ROOT)
+        val cut = lower.indexOfFirst { it == '-' || it == '_' }
+        return if (cut >= 0) lower.substring(0, cut) else lower
+    }
+
+    /**
+     * The lexicon source for [language], or null when CTC does not serve it.
+     *
+     * **THE membership function**, and the only place the static table and the dynamic
+     * imported-pack path meet. [isSupported], [assetFor], [langpackRelativePath],
+     * `CtcScoringParams.presetFor` and `CtcEngineAdapter.hasLexiconSource` all resolve through it,
+     * so there is exactly one answer to "does CTC serve this language" no matter who asks.
+     *
+     * Order is load-bearing: the STATIC row wins. An imported `fr` pack must not displace the
+     * bundled `fr_enhanced.bin` — the tuned decode was validated on that vocabulary, and swapping
+     * it under a user who imported a pack for the geometric engine would be an unmeasured
+     * behaviour change (the reasoning is in [LexiconSource.CKDT_LANGPACK]).
+     */
+    fun sourceFor(language: String?): LexiconSource? {
+        val code = normalize(language)
+        SUPPORTED[code]?.let { return it }
+        return if (CtcImportedPackSupport.servesImportedPack(code)) {
+            LexiconSource.CKDT_LANGPACK
+        } else {
+            null
+        }
+    }
+
+    /** True when the CTC engine may decode [language]. */
+    fun isSupported(language: String?): Boolean = sourceFor(language) != null
+
+    /**
+     * The BUNDLED asset path holding [language]'s CTC lexicon, or null when the language is
+     * unsupported **or** its lexicon is not bundled ([LexiconSource.CKDT_LANGPACK]).
+     * Keeping the path here (rather than in the adapter) is what makes adding a language
+     * a single table edit.
+     *
+     * A null return is therefore no longer equivalent to "unsupported" — use [isSupported] for
+     * that question and [langpackRelativePath] for the other source.
+     */
+    fun assetFor(language: String?): String? {
+        val code = normalize(language)
+        return when (sourceFor(code)) {
+            LexiconSource.EN_JSON -> "dictionaries/${code}_enhanced.json"
+            LexiconSource.CKDT_BIN -> "dictionaries/${code}_enhanced.bin"
+            LexiconSource.CKDT_LANGPACK, null -> null
+        }
+    }
+
+    /**
+     * The files-dir-relative path of [language]'s imported language pack dictionary, or null
+     * when [language] does not read one. The same layout `LanguagePackManager` installs and
+     * `GeometricEngineAdapter.dictionaryFor` reads, so both engines see one file.
+     *
+     * Covers both langpack-sourced kinds — the static `ru` row and any dynamically eligible
+     * imported Latin pack — because both resolve to [LexiconSource.CKDT_LANGPACK] through
+     * [sourceFor]. This function is also what makes the path a single constant: the eligibility
+     * check, the trie build and the geometric engine must all agree on one file, and they do
+     * because they all ask here.
+     */
+    fun langpackRelativePath(language: String?): String? {
+        val code = normalize(language)
+        return if (sourceFor(code) == LexiconSource.CKDT_LANGPACK) {
+            "langpacks/$code/dictionary.bin"
+        } else {
+            null
+        }
+    }
+
+    /**
+     * The files-dir-relative dictionary path a pack for [language] WOULD occupy, whether or not
+     * that language is currently served.
+     *
+     * [langpackRelativePath] deliberately answers only for a language CTC serves, which makes it
+     * useless to the eligibility check — that has to open the file of a language that is not yet
+     * eligible in order to decide whether it becomes so. Split rather than relaxed, so the
+     * serving path can never accidentally read a pack for a language it does not serve.
+     */
+    fun candidateLangpackRelativePath(language: String?): String? {
+        val code = normalize(language)
+        return if (code.isEmpty()) null else "langpacks/$code/dictionary.bin"
+    }
+}

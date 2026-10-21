@@ -1,0 +1,543 @@
+package tribixbite.cleverkeys.clipboard
+
+import android.util.Log
+import com.google.common.truth.Truth.assertThat
+import com.google.common.truth.Truth.assertWithMessage
+import io.mockk.every
+import io.mockk.just
+import io.mockk.mockk
+import io.mockk.mockkClass
+import io.mockk.mockkStatic
+import io.mockk.runs
+import io.mockk.spyk
+import io.mockk.unmockkAll
+import io.mockk.verify
+import org.junit.After
+import org.junit.Before
+import org.junit.Test
+import org.objenesis.ObjenesisStd
+import tribixbite.cleverkeys.ClipboardEntry
+import tribixbite.cleverkeys.ClipboardHistoryService
+import tribixbite.cleverkeys.ClipboardHistoryView
+import tribixbite.cleverkeys.ClipboardTab
+import tribixbite.cleverkeys.EditEntryResult
+
+/**
+ * 2026-09-06 comprehensive-audit fixes D-10, D-3 and D-7 — state-level guards on
+ * ClipboardHistoryView, driven directly on a real instance (Objenesis + reflection,
+ * the ClipboardMediaDeleteAffordanceTest idiom) without inflating any row views.
+ *
+ * D-10 — row-action handlers must bounds-guard `paginatedHistory[pos]`: an async reload
+ *   (expiry cleanup, foreign delete, filter change) can shrink the paginated list between
+ *   a row's render and its click dispatch; a tap on a formerly-last row then arrives with
+ *   a stale out-of-range position. `edit_entry` always had the guard — pin/todo/delete/
+ *   paste threw IndexOutOfBoundsException and crashed the IME.
+ *
+ * D-3 — `hasActiveFilters()` must report the TODOS status filter truthfully: the default
+ *   state (active=T, planned=F, completed=F) HIDES planned/completed rows — applyFilter's
+ *   own hasStatusFilter calls it a filter — yet hasActiveFilters() returned false for
+ *   exactly that state, leaving the filter icon untinted while data was hidden (cycling a
+ *   todo to planned made it vanish looking like deletion).
+ *
+ * D-7 — `save_edit()` on a non-Success result must KEEP the edit session: it used to
+ *   Toast (invisible inside the IME window — see ime-visual-feedback.md) and then
+ *   unconditionally cancelEdit(), silently discarding the user's in-progress edit.
+ */
+class ClipboardHistoryViewStateGuardsTest {
+
+    private val objenesis = ObjenesisStd()
+
+    private lateinit var service: ClipboardHistoryService
+    private lateinit var view: ClipboardHistoryView
+
+    @Before
+    fun setup() {
+        mockkStatic(Log::class)
+        every { Log.d(any(), any<String>()) } returns 0
+        every { Log.i(any(), any<String>()) } returns 0
+        every { Log.w(any(), any<String>()) } returns 0
+        every { Log.e(any(), any<String>()) } returns 0
+        every { Log.e(any(), any<String>(), any()) } returns 0
+        service = mockk(relaxed = true)
+    }
+
+    @After
+    fun teardown() = unmockkAll()
+
+    private fun buildView(
+        entries: List<ClipboardEntry> = emptyList(),
+        tab: ClipboardTab = ClipboardTab.HISTORY,
+    ) {
+        view = spyk(objenesis.newInstance(ClipboardHistoryView::class.java))
+        every { view.context } returns mockk(relaxed = true)
+        view.setField("service", service)
+        view.setField("paginatedHistory", entries)
+        view.setField("currentTab", tab)
+        // Objenesis skips initializers — restore the collection fields the code paths touch.
+        view.setField("expandedStates", mutableMapOf<Long, Boolean>())
+        view.setField("tagFilterSelected", emptySet<String>())
+        val cacheClass = Class.forName("tribixbite.cleverkeys.ClipboardHistoryView\$thumbnailCache\$1")
+        val cache = mockkClass(cacheClass.kotlin, relaxed = true)
+        view.setField("thumbnailCache", cache)
+        view.setField("animatedCache", mutableMapOf<Long, Any>())
+        // A real inner adapter whose notifyDataSetChanged is stubbed (the BaseAdapter
+        // observable was never constructed under Objenesis).
+        val adapterClass = Class.forName(
+            "tribixbite.cleverkeys.ClipboardHistoryView\$ClipboardEntriesAdapter"
+        )
+        val adapter = spyk(objenesis.newInstance(adapterClass) as android.widget.BaseAdapter)
+        every { adapter.notifyDataSetChanged() } just runs
+        adapter.setField("this\$0", view)
+        view.setField("clipboardAdapter", adapter)
+    }
+
+    private fun entry(content: String, ts: Long = 1700000000000L) =
+        ClipboardEntry(content = content, timestamp = ts)
+
+    // ─────────────────────────────────────────────── D-10: stale-position clicks
+
+    @Test
+    fun pinEntryWithStalePositionReturnsCleanlyWithoutServiceCall() {
+        buildView(entries = listOf(entry("only")), tab = ClipboardTab.HISTORY)
+
+        view.pin_entry(1)  // list shrank to 1 between render and click dispatch
+
+        verify(exactly = 0) { service.pinEntry(any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { service.unpinEntry(any()) }
+    }
+
+    @Test
+    fun todoEntryWithStalePositionReturnsCleanlyWithoutServiceCall() {
+        buildView(entries = listOf(entry("only")), tab = ClipboardTab.HISTORY)
+
+        view.todo_entry(1)
+
+        verify(exactly = 0) { service.addToTodo(any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { service.removeFromTodo(any()) }
+    }
+
+    @Test
+    fun deleteEntryWithStalePositionReturnsCleanlyWithoutServiceCall() {
+        buildView(entries = listOf(entry("only")), tab = ClipboardTab.HISTORY)
+
+        view.delete_entry(1)
+
+        verify(exactly = 0) { service.removeHistoryEntry(any()) }
+        verify(exactly = 0) { service.unpinEntry(any()) }
+        verify(exactly = 0) { service.removeFromTodo(any()) }
+    }
+
+    @Test
+    fun pasteEntryWithStalePositionReturnsCleanly() {
+        buildView(entries = emptyList(), tab = ClipboardTab.HISTORY)
+
+        // Red today: IndexOutOfBoundsException from paginatedHistory[0].
+        view.paste_entry(0)
+    }
+
+    @Test
+    fun deleteEntryWithValidPositionStillRoutesToTheService() {
+        // Guard must not swallow legitimate clicks.
+        buildView(entries = listOf(entry("victim")), tab = ClipboardTab.HISTORY)
+
+        view.delete_entry(0)
+
+        verify(exactly = 1) { service.removeHistoryEntry("victim") }
+    }
+
+    // ────────────────────────────────── D-3: status-filter tint tells the truth
+
+    private fun buildTodoViewWithStatusFilter(active: Boolean, planned: Boolean, completed: Boolean) {
+        buildView(tab = ClipboardTab.TODOS)
+        view.setField("statusFilterActive", active)
+        view.setField("statusFilterPlanned", planned)
+        view.setField("statusFilterCompleted", completed)
+    }
+
+    @Test
+    fun defaultActiveOnlyStatusStateReportsAnActiveFilter() {
+        // The default (active-only) state hides planned/completed rows — applyFilter's own
+        // hasStatusFilter treats it as a filter, so the icon tint must agree.
+        buildTodoViewWithStatusFilter(active = true, planned = false, completed = false)
+
+        assertWithMessage(
+            "active-only hides planned/completed todos; hasActiveFilters() must say so " +
+                "or the untinted icon makes a status-cycled todo look deleted"
+        ).that(view.hasActiveFilters()).isTrue()
+    }
+
+    @Test
+    fun allThreeStatusesEnabledReportsNoFilter() {
+        buildTodoViewWithStatusFilter(active = true, planned = true, completed = true)
+
+        assertThat(view.hasActiveFilters()).isFalse()
+    }
+
+    @Test
+    fun anyHiddenStatusReportsAnActiveFilter() {
+        // Every non-show-all combination hides rows and must tint.
+        for (mask in 0..6) {  // 7 == all three shown == the no-filter case
+            buildTodoViewWithStatusFilter(
+                active = mask and 4 != 0,
+                planned = mask and 2 != 0,
+                completed = mask and 1 != 0,
+            )
+            assertWithMessage("status combination mask=$mask hides at least one status")
+                .that(view.hasActiveFilters()).isTrue()
+        }
+    }
+
+    @Test
+    fun statusStateNeverTintsOutsideTheTodosTab() {
+        buildView(tab = ClipboardTab.HISTORY)
+        view.setField("statusFilterActive", true)
+        view.setField("statusFilterPlanned", false)
+        view.setField("statusFilterCompleted", false)
+
+        assertThat(view.hasActiveFilters()).isFalse()
+    }
+
+    // ──────────────────────── D-7: failed save keeps the edit session (no Toast)
+
+    private fun buildEditingView(result: EditEntryResult?) {
+        buildView(entries = listOf(entry("old")), tab = ClipboardTab.HISTORY)
+        view.setField("editingOriginalContent", "old")
+        view.setField("editingInProgressText", "new")
+        every { service.editEntryContent("old", "new", ClipboardTab.HISTORY) } returns
+            (result ?: EditEntryResult.Error("boom"))
+    }
+
+    @Test
+    fun saveEditOnDuplicateConflictKeepsTheEditSessionOpen() {
+        buildEditingView(EditEntryResult.DuplicateConflict)
+
+        view.save_edit()
+
+        assertWithMessage(
+            "DuplicateConflict must not discard the user's in-progress edit — the old " +
+                "path Toasted (invisible in the IME window) then cancelEdit()ed"
+        ).that(view.isEditing()).isTrue()
+    }
+
+    @Test
+    fun saveEditOnInvalidContentKeepsTheEditSessionOpen() {
+        buildEditingView(EditEntryResult.InvalidContent)
+
+        view.save_edit()
+
+        assertThat(view.isEditing()).isTrue()
+    }
+
+    @Test
+    fun saveEditOnDbErrorKeepsTheEditSessionOpen() {
+        buildEditingView(EditEntryResult.Error("disk full"))
+
+        view.save_edit()
+
+        assertThat(view.isEditing()).isTrue()
+    }
+
+    @Test
+    fun saveEditOnSuccessExitsEditMode() {
+        buildEditingView(EditEntryResult.Success)
+
+        view.save_edit()
+
+        assertThat(view.isEditing()).isFalse()
+    }
+
+    // Release-record anchor (v2.0.0 "clipboard size filter and filtered delete"): the name
+    // predates the selection model. Deleting filtered results is now "select all matching"
+    // + "delete selected", and this still pins the claim — every page is covered and the
+    // confirmed scope stays frozen when a new matching clipping arrives afterwards.
+    @Test
+    fun sizeSearchSnapshotIncludesAllPagesAndStaysFrozenAfterNewCapture() {
+        val entries = (1..205).map { ClipboardEntry("bulk-fixture-$it", it.toLong(), rowId = it.toLong(), sizeBytes = 2048) } +
+            ClipboardEntry("bulk-fixture-small", 900, rowId = 900, sizeBytes = 10) +
+            ClipboardEntry("unrelated-large", 901, rowId = 901, sizeBytes = 2048)
+        buildReadyView(entries)
+        view.setSearchFilter("bulk-fixture")
+        view.setSizeFilter(1024, 4096)
+        assertThat(view.getTotalPages()).isEqualTo(3)
+        assertThat(view.startSelection()).isTrue()
+        assertThat(view.selectAllMatching()).isEqualTo(205)
+        val frozen = view.selectionSnapshot()!!
+        assertThat(frozen.entries).hasSize(205)
+        assertThat(frozen.totalBytes).isEqualTo(205 * 2048L)
+        view.acceptLoadedHistory(entries + ClipboardEntry("bulk-fixture-new", 902, rowId = 902, sizeBytes = 2048))
+        // The new capture matches the filter but was never selected.
+        assertThat(view.selectedCount()).isEqualTo(205)
+        assertThat(view.matchingCoverage()).isEqualTo(ClipboardSelection.Coverage.PARTIAL)
+        assertThat(view.selectionSnapshot()!!.entries).hasSize(205)
+        assertThat(frozen.entries).hasSize(205)
+        view.clearAllFilters()
+        assertThat(view.getSizeFilter()).isEqualTo(0L to null)
+        assertThat(view.resultSummary().first).isEqualTo(207)
+    }
+
+    @Test
+    fun deletionDisabledForUnloadedEditingEmptyAndInvalidRegexResults() {
+        val fixture = ClipboardEntry("fixture", 1, rowId = 1)
+        buildView()
+        every { view.invalidate() } just runs
+        view.setField("history", listOf(fixture))
+        view.setField("searchFilter", "")
+        view.setSearchFilter("fixture")
+        view.startSelection()
+        // Results that are still loading cannot be selected wholesale or deleted.
+        assertThat(view.selectAllMatching()).isEqualTo(0)
+        assertThat(view.selectionSnapshot()).isNull()
+        view.setField("dataReady", true)
+        assertThat(view.selectAllMatching()).isEqualTo(1)
+        assertThat(view.selectionSnapshot()).isNotNull()
+        view.setField("editingOriginalContent", "fixture")
+        assertThat(view.selectionSnapshot()).isNull()
+        view.setField("editingOriginalContent", null)
+        view.clearSelection()
+        assertThat(view.selectionSnapshot()).isNull()
+        view.setRegexMode(true)
+        view.setSearchFilter("[")
+        assertThat(view.hasRegexError()).isTrue()
+        assertThat(view.selectAllMatching()).isEqualTo(0)
+        assertThat(view.selectionSnapshot()).isNull()
+    }
+
+    // ─────────────────────────────────── persistent selection (2026-10-07)
+
+    @Test
+    fun selectionPersistsAcrossSearchSizeAndPageChanges() {
+        val large = (1..150).map { ClipboardEntry("log-$it", it.toLong(), rowId = it.toLong(), sizeBytes = 50_000) }
+        val small = (151..160).map { ClipboardEntry("log-$it", it.toLong(), rowId = it.toLong(), sizeBytes = 100) }
+        val photos = (161..170).map { ClipboardEntry("photo-$it", it.toLong(), rowId = it.toLong(), sizeBytes = 900_000) }
+        buildReadyView(large + small + photos)
+        view.startSelection()
+
+        view.setSearchFilter("log")
+        view.setSizeFilter(10_000, null)
+        view.nextPage()
+        assertThat(view.selectAllMatching()).isEqualTo(150)  // both pages, not the visible one
+        view.setSearchFilter("photo")
+        assertThat(view.selectedCount()).isEqualTo(150)
+        assertThat(view.matchingCoverage()).isEqualTo(ClipboardSelection.Coverage.NONE)
+        assertThat(view.selectAllMatching()).isEqualTo(10)
+        view.toggleSelection(photos[0])
+        view.setSearchFilter("")
+        view.setSizeFilter(0, 1_000)
+        assertThat(view.deselectAllMatching()).isEqualTo(0)  // the small logs were never selected
+        view.setSizeFilter(0, null)
+        assertThat(view.selectedCount()).isEqualTo(159)
+        assertThat(view.isEntrySelected(photos[0])).isFalse()
+        assertThat(view.selectionSnapshot()!!.entries.map { it.rowId }.toSet())
+            .isEqualTo(((1L..150L) + (162L..170L)).toSet())
+    }
+
+    @Test
+    fun reloadDropsVanishedAndChangedRowsFromTheSelection() {
+        val rows = (1..4).map { ClipboardEntry("row-$it", it.toLong(), rowId = it.toLong()) }
+        buildReadyView(rows)
+        view.startSelection()
+        view.selectAllMatching()
+        view.acceptLoadedHistory(listOf(rows[0], ClipboardEntry("row-2 edited", 2, rowId = 2), rows[3]))
+        assertThat(view.selectedCount()).isEqualTo(2)
+        assertThat(view.selectionSnapshot()!!.entries.map { it.rowId }).containsExactly(1L, 4L)
+    }
+
+    @Test
+    fun tabSwitchAndExplicitExitEndSelection() {
+        val rows = listOf(ClipboardEntry("a", 1, rowId = 1))
+        buildReadyView(rows)
+        assertThat(view.startSelection()).isTrue()
+        view.selectAllMatching()
+        view.setTab(ClipboardTab.PINNED)
+        assertThat(view.isSelecting()).isFalse()
+        assertThat(view.selectedCount()).isEqualTo(0)
+
+        view.acceptLoadedHistory(rows)
+        view.startSelection()
+        view.selectAllMatching()
+        view.endSelection()
+        assertThat(view.isSelecting()).isFalse()
+        // Re-entering starts empty: nothing leaks from the previous session.
+        view.startSelection()
+        assertThat(view.selectedCount()).isEqualTo(0)
+    }
+
+    @Test
+    fun reopeningOnTheSelectionsOwnTabKeepsTheSelection() {
+        // Reopening the pane re-targets the list at the selection's tab (resetSearchOnShow):
+        // that must restore the selection, not end it.
+        val rows = (1..3).map { ClipboardEntry("keep-$it", it.toLong(), rowId = it.toLong()) }
+        buildReadyView(rows)
+        view.startSelection()
+        view.selectAllMatching()
+
+        view.setTab(ClipboardTab.HISTORY)
+        view.acceptLoadedHistory(rows)
+
+        assertThat(view.isSelecting()).isTrue()
+        assertThat(view.selectedCount()).isEqualTo(3)
+    }
+
+    @Test
+    fun selectionSurvivesViewRecreationThroughTheServiceScopedHolder() {
+        // Theme rebuilds re-inflate the pane, rotation and app switches close it: a NEW list
+        // view must come back with the same selection, checkboxes and count.
+        val rows = (1..3).map { ClipboardEntry("persist-$it", it.toLong(), rowId = it.toLong()) }
+        val holder = ClipboardSelectionHolder()
+        buildReadyView(rows)
+        view.attachSelectionHolder(holder)
+        view.startSelection()
+        view.toggleSelection(rows[0])
+        view.toggleSelection(rows[2])
+
+        buildReadyView(emptyList())          // a freshly inflated view, nothing loaded yet
+        view.attachSelectionHolder(holder)
+        assertThat(view.isSelecting()).isTrue()
+        view.acceptLoadedHistory(rows + ClipboardEntry("persist-new", 9, rowId = 9))
+
+        assertThat(view.selectedCount()).isEqualTo(2)
+        assertThat(view.isEntrySelected(rows[0])).isTrue()
+        assertThat(view.isEntrySelected(rows[1])).isFalse()
+        assertThat(view.selectionSnapshot()!!.entries.map { it.rowId }).containsExactly(1L, 3L)
+    }
+
+    @Test
+    fun aLoadForAnotherTabNeverReconcilesTheSelection() {
+        // A re-inflated view first loads History before it is pointed at the selection's tab;
+        // reconciling Pinned row ids against History rows would silently empty the selection.
+        val pinned = (1..2).map { ClipboardEntry("pin-$it", it.toLong(), rowId = it.toLong()) }
+        val holder = ClipboardSelectionHolder()
+        holder.start(ClipboardTab.PINNED).selectAll(pinned)
+        buildReadyView(emptyList())
+        view.attachSelectionHolder(holder)
+
+        view.acceptLoadedHistory(listOf(ClipboardEntry("history", 5, rowId = 5)), ClipboardTab.HISTORY)
+
+        assertThat(holder.selection!!.size).isEqualTo(2)
+    }
+
+    @Test
+    fun bulkCopyRunsOnTheHolderAndEndsTheSelectionWhenItCommits() {
+        val rows = (1..2).map { ClipboardEntry("copy-$it", it.toLong(), rowId = it.toLong()) }
+        val holder = ClipboardSelectionHolder(kotlinx.coroutines.Dispatchers.Unconfined, kotlinx.coroutines.Dispatchers.Unconfined)
+        buildReadyView(rows)
+        view.attachSelectionHolder(holder)
+        view.startSelection()
+        view.selectAllMatching()
+        every { service.copyEntriesTo(ClipboardTab.PINNED, any()) } returns
+            Result.success(ClipboardCopyResult(added = 2, alreadyPresent = 0, failed = 0))
+        var reported: ClipboardCopyResult? = null
+
+        val snapshot = view.selectionSnapshot()!!
+        view.copySelectionTo(ClipboardTab.PINNED, snapshot) { reported = it.getOrNull() }
+
+        verify(exactly = 1) { service.copyEntriesTo(ClipboardTab.PINNED, snapshot.entries) }
+        assertThat(reported).isEqualTo(ClipboardCopyResult(2, 0, 0))
+        assertThat(view.isSelecting()).isFalse()
+    }
+
+    @Test
+    fun bulkCleanAndMergeGoThroughTheServiceAndAFailureKeepsTheSelection() {
+        val rows = listOf(ClipboardEntry("a  ", 1, rowId = 1), ClipboardEntry("b", 2, rowId = 2))
+        val holder = ClipboardSelectionHolder(kotlinx.coroutines.Dispatchers.Unconfined, kotlinx.coroutines.Dispatchers.Unconfined)
+        buildReadyView(rows)
+        view.attachSelectionHolder(holder)
+        view.startSelection()
+        view.selectAllMatching()
+        val plan = ClipboardBulkPlans.planClean(view.selectionSnapshot()!!.entries)
+        every { service.applyClean(ClipboardTab.HISTORY, plan) } returns Result.failure(IllegalStateException("x"))
+
+        view.cleanSelection(ClipboardTab.HISTORY, plan) { }
+        assertThat(view.selectedCount()).isEqualTo(2)  // kept for a retry
+
+        val merge = (ClipboardBulkPlans.planMerge(view.selectionSnapshot()!!.entries, null)
+            as ClipboardBulkPlans.MergeDecision.Ready).plan
+        every { service.addMergedClip(merge) } returns Result.success(Unit)
+        view.mergeSelection(merge) { }
+        verify(exactly = 1) { service.addMergedClip(merge) }
+        assertThat(view.isSelecting()).isFalse()
+    }
+
+    @Test
+    fun selectionCannotStartDuringEditAndSelectionChangesNotifyTheChrome() {
+        buildReadyView(listOf(ClipboardEntry("a", 1, rowId = 1)))
+        var notified = 0
+        view.onResultsChanged = { notified++ }
+        view.setField("editingOriginalContent", "a")
+        assertThat(view.startSelection()).isFalse()
+        view.setField("editingOriginalContent", null)
+        assertThat(view.startSelection()).isTrue()
+        val before = notified
+        view.selectAllMatching()
+        view.clearSelection()
+        view.endSelection()
+        assertThat(notified - before).isAtLeast(3)
+    }
+
+    /**
+     * 2026-10-08 audit gap: history-change callbacks (fired from a running action's IO thread
+     * and by the clipboard listener) must be inert while a confirmed bulk action runs — no
+     * reload, no "loading" flip, no chrome notification — and live again once it finishes.
+     */
+    @Test
+    fun historyChangeCallbacksAreInertWhileABulkActionRuns() {
+        val rows = (1..2).map { ClipboardEntry("inert-$it", it.toLong(), rowId = it.toLong()) }
+        val holder = ClipboardSelectionHolder()
+        buildReadyView(rows)
+        view.attachSelectionHolder(holder)
+        // "Attached": a scope whose dispatcher never runs, so a load that starts is observable
+        // (dataReady flips, the job exists) without touching the database.
+        val parked = object : kotlinx.coroutines.CoroutineDispatcher() {
+            override fun dispatch(context: kotlin.coroutines.CoroutineContext, block: Runnable) = Unit
+        }
+        view.setField("viewScope", kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + parked))
+        var notified = 0
+        view.onResultsChanged = { notified++ }
+
+        holder.setField("running", true)
+        view.on_clipboard_history_change()
+        assertThat(notified).isEqualTo(0)
+        assertThat(view.getField("dataReady")).isEqualTo(true)
+        assertThat(view.getField("loadJob")).isNull()
+
+        holder.setField("running", false)
+        view.on_clipboard_history_change()
+        assertWithMessage("the same callback reloads once the action is over").that(notified).isEqualTo(1)
+        assertThat(view.getField("dataReady")).isEqualTo(false)
+        assertThat(view.getField("loadJob")).isNotNull()
+    }
+
+    private fun buildReadyView(entries: List<ClipboardEntry>) {
+        buildView()
+        every { view.invalidate() } just runs
+        view.setField("searchFilter", "")
+        view.acceptLoadedHistory(entries)
+    }
+
+    // ------------------------------------------------------------------ helpers
+
+    private fun Any.getField(name: String): Any? {
+        var cls: Class<*>? = javaClass
+        while (cls != null) {
+            cls.declaredFields.firstOrNull { it.name == name }?.let { it.isAccessible = true; return it.get(this) }
+            cls = cls.superclass
+        }
+        throw AssertionError("field '$name' not found on ${javaClass.name}")
+    }
+
+    private fun Any.setField(name: String, value: Any?) {
+        var cls: Class<*>? = javaClass
+        while (cls != null) {
+            val field = cls.declaredFields.firstOrNull { it.name == name }
+            if (field != null) {
+                field.isAccessible = true
+                field.set(this, value)
+                return
+            }
+            cls = cls.superclass
+        }
+        throw AssertionError(
+            "field '$name' not found on ${javaClass.name} — renamed or removed; re-point this test"
+        )
+    }
+}

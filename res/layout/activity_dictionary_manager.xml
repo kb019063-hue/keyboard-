@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"><!-- Overdraw: window (settingsTheme=AppCompat) already paints ?android:colorBackground; root bg removed to avoid double-paint. -->
+
+    <!-- Toolbar -->
+    <androidx.appcompat.widget.Toolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        android:background="?attr/colorPrimary"
+        android:theme="@style/ThemeOverlay.AppCompat.ActionBar" />
+
+    <!-- Search and Filter Header (single-row: EditText + Spinner + Reset).
+         Merged the former outer vertical wrapper into this row — it added only
+         padding + background around this one child (fixes UselessParent). -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:padding="16dp"
+        android:background="@color/dict_mgr_header_bg">
+
+            <!-- Search Input -->
+            <EditText
+                android:id="@+id/search_input"
+                android:layout_width="0dp"
+                android:layout_height="56dp"
+                android:layout_weight="1"
+                android:hint="@string/dict_search_hint"
+                android:textColorHint="@color/dict_mgr_text_hint"
+                android:textColor="@color/dict_mgr_text_primary"
+                android:background="@color/dict_mgr_field_bg"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:singleLine="true"
+                android:inputType="text"
+                android:importantForAutofill="no"
+                android:imeOptions="actionSearch" />
+
+            <!-- Filter Dropdown -->
+            <Spinner
+                android:id="@+id/filter_spinner"
+                android:layout_width="wrap_content"
+                android:layout_height="56dp"
+                android:layout_marginStart="8dp"
+                android:background="@color/dict_mgr_field_bg"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp" />
+
+            <!-- Reset Button -->
+            <Button
+                android:id="@+id/reset_button"
+                android:layout_width="wrap_content"
+                android:layout_height="56dp"
+                android:layout_marginStart="8dp"
+                android:text="@string/dict_reset"
+                android:background="@color/dict_mgr_button_bg"
+                android:textColor="@color/dict_mgr_button_text" />
+    </LinearLayout>
+
+    <!-- Tab Layout -->
+    <com.google.android.material.tabs.TabLayout
+        android:id="@+id/tab_layout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/dict_mgr_header_bg"
+        app:tabTextColor="@color/dict_mgr_text_secondary"
+        app:tabSelectedTextColor="@color/dict_mgr_text_primary"
+        app:tabIndicatorColor="?attr/colorPrimary" />
+
+    <!-- ViewPager2 for tabs -->
+    <androidx.viewpager2.widget.ViewPager2
+        android:id="@+id/view_pager"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+</LinearLayout>

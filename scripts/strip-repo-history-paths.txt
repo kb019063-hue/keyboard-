@@ -1,0 +1,24 @@
+.gradle
+release_apks
+github_apk
+check_apks
+local_apk
+build
+tribixbite
+REVIEW_PROGRESS-four-of-four.md
+TestOnnxPrediction.jar
+tools/gif_pipeline/discord_processed
+tools/gif_pipeline/gifs.db
+tools/gif_pipeline/test_pack.db
+tools/aapt2_official
+tools/aapt2-arm64
+src/main/assets/models/swipe_decoder_web.onnx
+src/main/assets/models/swipe_encoder_web.onnx
+test_onnx_cli.jar
+tools/gif_pipeline/raw_data
+tools/gif_pipeline/assets
+tools/gif_pipeline/packs
+tools/gif_pipeline/processed
+tribixbite main debug_apk
+cli-test/test_onnx_cli.jar
+s5.png

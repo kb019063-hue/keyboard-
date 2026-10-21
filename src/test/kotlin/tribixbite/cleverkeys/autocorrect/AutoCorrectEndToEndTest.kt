@@ -1,0 +1,524 @@
+package tribixbite.cleverkeys.autocorrect
+
+import android.util.Log
+import io.mockk.every
+import io.mockk.mockkStatic
+import io.mockk.unmockkStatic
+import org.junit.AfterClass
+import org.junit.Assert.assertEquals
+import org.junit.Before
+import org.junit.BeforeClass
+import org.junit.Test
+import tribixbite.cleverkeys.Config
+import tribixbite.cleverkeys.ShippedTapDictionary
+import tribixbite.cleverkeys.WordPredictor
+import java.util.concurrent.atomic.AtomicReference
+
+/**
+ * End-to-end JVM tests for `WordPredictor.autoCorrect` against the REAL
+ * bundled English dictionary (98k words) + real contraction aliases.
+ *
+ * # Why a MockK-harness test (runMockTests, not runPureTests)
+ *
+ * `autoCorrect` calls `android.util.Log` unconditionally, so it cannot run on
+ * the pure runner (no android.jar). The mock runner has android.jar stubs and
+ * MockK intercepts `Log` before the stubs throw. The `WordPredictor` instance
+ * is created via Objenesis (constructor skipped — it would build an
+ * `AsyncDictionaryLoader` → `Handler(Looper)` android stub chain) and its
+ * private fields are reflection-injected, mirroring `DictionaryManagerTest`.
+ *
+ * # Dictionary fidelity
+ *
+ * The dictionary is [ShippedTapDictionary]: `en_enhanced.bin`, the file the device's tap
+ * predictor loads, parsed by the production `BinaryDictionaryParser` (V2 rank →
+ * `1_000_000 - rank * 3900`), so the FrequencyFloor fraction math, frequency tiebreaks and
+ * DD-M margin behave exactly as on-device. (Until 2026-10-12 this header claimed a
+ * `255 - byte` conversion of `en_enhanced.json` was equivalent. It was not: the JSON is the
+ * CTC swipe lexicon's compressed 134..255 scale, and 98,139 of 98,140 words differ.)
+ * Contraction aliases are injected with the same `dict[apo] ?: dict[bare] ?: 5000` rule as
+ * `loadContractionKeysIntoMaps`.
+ *
+ * Covers AC-4 (possessive-typo base correction) and TEST-1 leftovers
+ * ("gamees" elongation, capitalized "Hadnr" alias, frequency-floor
+ * suppression end-to-end).
+ */
+class AutoCorrectEndToEndTest {
+
+    companion object {
+        private lateinit var predictor: WordPredictor
+        private lateinit var config: Config
+
+        @JvmStatic
+        @BeforeClass
+        fun setUpClass() {
+            mockkStatic(Log::class)
+            every { Log.d(any(), any()) } returns 0
+            every { Log.i(any(), any()) } returns 0
+            every { Log.w(any(), any<String>()) } returns 0
+            every { Log.e(any(), any()) } returns 0
+            every { Log.e(any(), any(), any()) } returns 0
+
+            // The device's tap dictionary (en_enhanced.bin via the production parser) plus the
+            // real contraction aliases, as loadContractionKeysIntoMaps merges them.
+            val loaded = ShippedTapDictionary.withContractionAliases()
+            val dict = loaded.dictionary
+            val aliases = loaded.aliases
+
+            config = org.objenesis.ObjenesisStd().newInstance(Config::class.java)
+
+            predictor = org.objenesis.ObjenesisStd().newInstance(WordPredictor::class.java)
+            setField("dictionary", AtomicReference(dict))
+            setField("contractionAliases", aliases)
+            setField("customAndUserWords", emptySet<String>())
+            setField("disabledWords", mutableSetOf<String>())
+            setField("config", config)
+            setField("cachedMaxFreqForSize", -1)
+        }
+
+        @JvmStatic
+        @AfterClass
+        fun tearDownClass() {
+            unmockkStatic(Log::class)
+        }
+
+        private fun setField(name: String, value: Any?) {
+            val field = WordPredictor::class.java.getDeclaredField(name)
+            field.isAccessible = true
+            field.set(predictor, value)
+        }
+
+    }
+
+    @Before
+    fun resetConfig() {
+        // Same knob lockdown as the instrumented AutocorrectTest.
+        config.autocorrect_enabled = true
+        config.autocorrect_min_word_length = 2
+        config.autocorrect_char_match_threshold = 0.65f
+        config.autocorrect_max_length_diff = 2
+        config.autocorrect_confidence_min_frequency = FrequencyFloor.SLIDER_MIN
+        config.autocorrect_prefix_length = 0
+        config.swipe_debug_detailed_logging = false
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // AC-4: possessive-typo — correct the BASE, re-append the suffix
+    // ─────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun possessiveTypo_baseCorrected_suffixPreserved() {
+        // "embeer" is a doubled-letter typo of "ember"; the possessive suffix
+        // must survive. Pre-AC-4 the full token was swept against the
+        // apostrophe-free dictionary and produced "rivers".
+        assertEquals("ember's", predictor.autoCorrect("embeer's"))
+    }
+
+    @Test
+    fun possessiveTypo_typographicApostrophe_preserved() {
+        // U+2019 in, U+2019 out — the original apostrophe char is re-appended.
+        assertEquals("ember’s", predictor.autoCorrect("embeer’s"))
+    }
+
+    @Test
+    fun possessiveTypo_pluralPossessive_baseCorrected() {
+        // Trailing-apostrophe plural possessive with a doubled-letter base
+        // typo: base "embeers" collapses to "embers", suffix "'" preserved.
+        assertEquals("embers'", predictor.autoCorrect("embeers'"))
+    }
+
+    @Test
+    fun possessiveTypo_baseCorrectsViaSweep_tehs() {
+        // Chosen behavior for "teh's": the base is corrected exactly as the
+        // bare token would be ("teh" → "the") and the suffix is re-appended —
+        // "the's". Rule-consistency beats second-guessing whether the user
+        // "really" wanted a possessive of "the".
+        assertEquals("the's", predictor.autoCorrect("teh's"))
+    }
+
+    @Test
+    fun possessiveTypo_uncorrectableBase_leftUntouched() {
+        // No plausible correction for the base — the token must be returned
+        // unchanged, never stripped of its suffix.
+        assertEquals("zqjxvqz's", predictor.autoCorrect("zqjxvqz's"))
+    }
+
+    @Test
+    fun possessiveTypo_capitalizedBase_preservesCase() {
+        assertEquals("Ember's", predictor.autoCorrect("Embeer's"))
+    }
+
+    @Test
+    fun possessive_ofKnownNoun_unchanged_regression() {
+        // The original possessive guard (da78b98e2) must keep holding.
+        assertEquals("ember's", predictor.autoCorrect("ember's"))
+        assertEquals("dog's", predictor.autoCorrect("dog's"))
+        assertEquals("rivers'", predictor.autoCorrect("rivers'"))
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // TEST-1: "gamees" — doubled-letter elongation vs morphology guard
+    // ─────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun elongation_gamees_correctsToGames() {
+        // Pre-fix, the morphology guard misread "gamees" as a valid -es
+        // inflection of "game" and froze it; without the guard the adjacency
+        // sweep preferred the 1-substitution lookalike "gamers". The
+        // elongation-collapse step must recognize the doubled 'e' and correct
+        // to the exact-letters dictionary word "games".
+        assertEquals("games", predictor.autoCorrect("gamees"))
+    }
+
+    @Test
+    fun elongation_doesNotFire_whenCollapseIsNotAWord() {
+        // "broight" has no doubled letter; sweep behavior is untouched.
+        assertEquals("brought", predictor.autoCorrect("broight"))
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Step 1.45 DD-M: dropped doubled letter, frequency margin M = 64
+    // (docs/eval/2026-10-11-dropped-double-margin.md §5, tuned on the device
+    // dictionary). The re-inserted word D beats the sweep's word W only when D
+    // is at most 64 steps of maxFreq/255 (≈ .bin ranks) rarer.
+    // ─────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun droppedDouble_helo_correctsToHello() {
+        // Device report: "helo" committed "help" (one adjacent sub, score 0.96)
+        // while the bar showed "hello". On the device dictionary hello (rank 114)
+        // is 39 ranks rarer than help (rank 75): within the margin, so the
+        // doubled reading wins. (At the old M = 32 the phone kept "help".)
+        assertEquals("hello", predictor.autoCorrect("helo"))
+        assertEquals("Hello", predictor.autoCorrect("Helo"))
+    }
+
+    @Test
+    fun droppedDouble_longWords_fixedWhereTheSweepPickedALookalike() {
+        assertEquals("tomorrow", predictor.autoCorrect("tomorow"))   // was follow
+        assertEquals("address", predictor.autoCorrect("adress"))     // was across
+        assertEquals("success", predictor.autoCorrect("sucess"))     // was access
+        // Runs before the morphology guard, which froze this as begin + -ing.
+        assertEquals("beginning", predictor.autoCorrect("begining"))
+    }
+
+    @Test
+    fun droppedDouble_doesNotHijackSlipsOfCommonWords() {
+        // The six cases that failed the unconditional rule's G3: the doubled
+        // word is more than 64 steps rarer than the intended one (see/seed 66,
+        // very/berry 77, one/knee 81, many/nanny 88, from/groom 114, the/ghee 191).
+        val expected = linkedMapOf(
+            "bery" to "very", "grom" to "from", "ghe" to "the",
+            "sed" to "see", "kne" to "one", "nany" to "many",
+        )
+        for ((typo, want) in expected) assertEquals(typo, want, predictor.autoCorrect(typo))
+    }
+
+    /**
+     * The margin's meaning on the device dictionary, independent of the sweep: every named
+     * hijack pair's doubled word lies MORE than DROPPED_DOUBLE_MARGIN_STEPS steps below the
+     * intended word, and hello lies within it of help. If the bundled `.bin` is rebuilt and a
+     * gap crosses the margin, this fails before the behaviour silently flips.
+     */
+    @Test
+    fun droppedDouble_marginSeparatesNamedPairsOnTheDeviceDictionary() {
+        @Suppress("UNCHECKED_CAST")
+        val dict = (WordPredictor::class.java.getDeclaredField("dictionary")
+            .apply { isAccessible = true }.get(predictor) as AtomicReference<Map<String, Int>>).get()
+        val step = dict.values.max() / 255.0
+        fun gap(intended: String, doubled: String) = (dict.getValue(intended) - dict.getValue(doubled)) / step
+        val m = WordPredictor.DROPPED_DOUBLE_MARGIN_STEPS
+        for ((intended, doubled) in listOf("see" to "seed", "very" to "berry", "one" to "knee",
+            "many" to "nanny", "from" to "groom", "the" to "ghee")) {
+            val g = gap(intended, doubled)
+            org.junit.Assert.assertTrue("$intended/$doubled gap $g must exceed M=$m", g > m)
+        }
+        val helo = gap("help", "hello")
+        org.junit.Assert.assertTrue("help/hello gap $helo must be within M=$m", helo <= m)
+    }
+
+    @Test
+    fun droppedDouble_validWordsUntouched() {
+        for (w in listOf("hello", "help", "tomorrow", "berry", "seed")) {
+            assertEquals(w, predictor.autoCorrect(w))
+        }
+    }
+
+    @Test
+    fun droppedDouble_disabledTargetNeverOffered() {
+        setField("disabledWords", mutableSetOf("hello"))
+        try {
+            org.junit.Assert.assertNotEquals("hello", predictor.autoCorrect("helo"))
+        } finally {
+            setField("disabledWords", mutableSetOf<String>())
+        }
+    }
+
+    @Test
+    fun droppedDouble_customSweepWinnerOutranksTheInsertion() {
+        // A sweep winner the user added by hand is kept over the structural guess.
+        setField("customAndUserWords", setOf("help"))
+        try {
+            assertEquals("help", predictor.autoCorrect("helo"))
+        } finally {
+            setField("customAndUserWords", emptySet<String>())
+        }
+    }
+
+    @Test
+    fun droppedDouble_respectsSameLengthOnlyConfig() {
+        // autocorrect_max_length_diff = 0 forbids length-changing corrections.
+        config.autocorrect_max_length_diff = 0
+        assertEquals("help", predictor.autoCorrect("helo"))
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // TEST-1: capitalized contraction-alias correction
+    // ─────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun capitalizedAliasTypo_HadnrToHadnt() {
+        // Sweep winner is the alias key "hadnt" (t→r adjacent), re-routed to
+        // "hadn't"; preserveCapitalization must keep the leading capital.
+        assertEquals("Hadn't", predictor.autoCorrect("Hadnr"))
+    }
+
+    @Test
+    fun lowercaseAliasTypo_hadnrToHadnt_regression() {
+        assertEquals("hadn't", predictor.autoCorrect("hadnr"))
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // TEST-1: frequency-floor strictness — end-to-end suppression
+    // ─────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun frequencyFloor_rareCorrection_succeedsAtDefault_suppressedAtStrict() {
+        // "bathmat" is a rare word (json byte 140 → device freq 551,500 —
+        // below MAX_STRICTNESS(0.6) × maxFreq(1M) = 600,000). "bathmst" is a
+        // single adjacent-key typo (a↔s) of it.
+        config.autocorrect_confidence_min_frequency = FrequencyFloor.SLIDER_MIN
+        assertEquals(
+            "at the default floor the rare correction must apply",
+            "bathmat", predictor.autoCorrect("bathmst")
+        )
+
+        config.autocorrect_confidence_min_frequency = FrequencyFloor.SLIDER_MAX
+        assertEquals(
+            "at max slider strictness the rare correction must be suppressed",
+            "bathmst", predictor.autoCorrect("bathmst")
+        )
+    }
+
+    @Test
+    fun frequencyFloor_commonCorrection_neverSuppressed() {
+        // MAX_STRICTNESS < 1 guarantees top words always clear the floor.
+        config.autocorrect_confidence_min_frequency = FrequencyFloor.SLIDER_MAX
+        assertEquals("the", predictor.autoCorrect("teh"))
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // UT-8: a typed word the user DISABLED must be treated as a typo.
+    // Reverse direction of the AC-2 guard (disabled words are never OFFERED
+    // as targets): here the typed token ITSELF is disabled, so the step-1
+    // "already in dictionary" short-circuit must not freeze it.
+    // ─────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun disabledTypedWord_ans_correctsToAnd() {
+        // "ans" IS in the bundled dictionary (byte 172 → device freq
+        // 676,300), so pre-fix the validity short-circuit returned it
+        // unchanged even after the user disabled it in Dictionary Manager.
+        // Disabling must make it correctable like any typo: s↔d adjacent,
+        // 2/3 exact positions → "and". The injected `disabledWords` field is
+        // the SAME field reloadDisabledWords() populates in production.
+        setField("disabledWords", mutableSetOf("ans"))
+        try {
+            assertEquals("and", predictor.autoCorrect("ans"))
+        } finally {
+            setField("disabledWords", mutableSetOf<String>())
+        }
+    }
+
+    @Test
+    fun disabledTypedWord_customWordOverride_staysUnchanged() {
+        // isWordDisabled contract: custom/user words override the disabled
+        // set. A word both disabled AND explicitly re-added by the user is
+        // valid and must not be corrected.
+        setField("disabledWords", mutableSetOf("ans"))
+        setField("customAndUserWords", setOf("ans"))
+        try {
+            assertEquals("ans", predictor.autoCorrect("ans"))
+        } finally {
+            setField("disabledWords", mutableSetOf<String>())
+            setField("customAndUserWords", emptySet<String>())
+        }
+    }
+
+    @Test
+    fun enabledDictionaryWord_ans_neverCorrected_regression() {
+        // Without the disable, "ans" is a valid dictionary word: unchanged.
+        assertEquals("ans", predictor.autoCorrect("ans"))
+    }
+
+    @Test
+    fun disabledWord_stillNeverOfferedAsTarget_regression() {
+        // The AC-2 direction must keep holding alongside the UT-8 fix:
+        // disabling "the" removes it as a correction TARGET, so "teh" must
+        // resolve to something else (or stay), never to "the".
+        setField("disabledWords", mutableSetOf("the"))
+        try {
+            org.junit.Assert.assertNotEquals("the", predictor.autoCorrect("teh"))
+        } finally {
+            setField("disabledWords", mutableSetOf<String>())
+        }
+    }
+
+    @Test
+    fun disabledTypedWord_inflectionGuardDoesNotFreezeIt() {
+        // "games" is a valid -s inflection of "game" (stem length 4), so the
+        // morphology guard would freeze it — but the user explicitly disabled
+        // "games", which outranks the inflection heuristic. The exact sweep
+        // winner is a tiebreak detail (empirically "makes" under this
+        // config's prefix_length=0); the contract under test is that the
+        // DISABLED word is never returned — neither frozen by the guard nor
+        // re-offered by the sweep.
+        setField("disabledWords", mutableSetOf("games"))
+        try {
+            org.junit.Assert.assertNotEquals("games", predictor.autoCorrect("games"))
+        } finally {
+            setField("disabledWords", mutableSetOf<String>())
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // C-5 (2026-09-06 audit): contraction guard #4 on the AUTOCORRECT path.
+    // `.claude/skills/contraction-system.md` §5 — a REPLACE-mode mapping takes
+    // the typed word's slot, so it must never fire on a word the user added by
+    // hand. SuggestionHandler.replaceModeContractionFor enforces this for the
+    // suggestion bar; autoCorrect's step 0 (and the two alias reroutes) run the
+    // SAME rewrite on commit and must honor the same guard. The user-word set
+    // here is `customAndUserWords` — the lowercase custom + platform-provider
+    // words, the predictor's own view of the personal dictionary.
+    // ─────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun userWordThatIsAnAliasKey_isNotRewrittenOnCommit() {
+        // en shape of the skill's fr example (`dangle` → `d'angle`): the user
+        // added "dont" as a personal word; committing it must keep THEIR word,
+        // not destroy it in its own slot with `don't`.
+        setField("customAndUserWords", setOf("dont"))
+        try {
+            assertEquals("dont", predictor.autoCorrect("dont"))
+            assertEquals(
+                "guard #4 is case-total: any typed casing of a claimed word is protected",
+                "Dont", predictor.autoCorrect("Dont")
+            )
+        } finally {
+            setField("customAndUserWords", emptySet<String>())
+        }
+    }
+
+    @Test
+    fun elongationCollapse_toAUserWord_doesNotRerouteThroughTheAlias() {
+        // "doont" collapses to the user's own "dont" — the collapse target is
+        // the user's word, so the alias reroute must not rewrite it.
+        setField("customAndUserWords", setOf("dont"))
+        try {
+            assertEquals("dont", predictor.autoCorrect("doont"))
+        } finally {
+            setField("customAndUserWords", emptySet<String>())
+        }
+    }
+
+    @Test
+    fun sweepWinner_thatIsAUserWord_doesNotRerouteThroughTheAlias() {
+        // "donr" sweeps to the alias key "dont" (r→t adjacent, alias privilege)
+        // — but "dont" is the user's word here, so the winner is offered as-is.
+        setField("customAndUserWords", setOf("dont"))
+        try {
+            assertEquals("dont", predictor.autoCorrect("donr"))
+        } finally {
+            setField("customAndUserWords", emptySet<String>())
+        }
+    }
+
+    @Test
+    fun aliasRewrite_stillFires_whenNobodyClaimedTheKey_regression() {
+        // The guard must not suppress contractions for everyone else.
+        assertEquals("don't", predictor.autoCorrect("dont"))
+    }
+
+    @Test
+    fun disabledPossessiveBase_notFrozenByPossessiveGuard() {
+        // Possessive guard accepts "X's" when base X is a known word — but a
+        // DISABLED base is no longer known. "ans's" must correct its base via
+        // the AC-4 recursive path and re-append the suffix: "and's".
+        setField("disabledWords", mutableSetOf("ans"))
+        try {
+            assertEquals("and's", predictor.autoCorrect("ans's"))
+        } finally {
+            setField("disabledWords", mutableSetOf<String>())
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 2026-10-18 report: `devixe` → decide, `shated` uncorrected
+    // (docs/eval/2026-10-18-channel-autocorrect-ranking.md)
+    // ─────────────────────────────────────────────────────────────────────
+
+    private val band = AutocorrectTuning.DEFAULT.copy(ranking = AutocorrectRanking.BAND)
+    private val channel = AutocorrectTuning.DEFAULT.copy(ranking = AutocorrectRanking.CHANNEL)
+
+    @Test
+    fun bandRanking_devixe_staysDecide_documentedBaseline() {
+        // The shipped default: device (1 neighbour sub, rank 115) and decide (2 subs, rank 111)
+        // fall inside the 0.10 band, so frequency picks decide. Pinned so a change to the
+        // default ranking is a deliberate, visible decision.
+        assertEquals("decide", predictor.autoCorrect("devixe", band))
+        assertEquals("shated", predictor.autoCorrect("shated", band))
+    }
+
+    @Test
+    fun channelRanking_devixe_prefersTheSingleWrongKey() {
+        assertEquals("device", predictor.autoCorrect("devixe", channel))
+    }
+
+    @Test
+    fun channelRanking_alwaysKeepGuard_leavesShated() {
+        // γ = ∞ ("Always keep") keeps `shat` + -ed exactly like the band guard.
+        val alwaysKeep = channel.copy(channel = channel.channel.copy(inflectionCost = Float.POSITIVE_INFINITY))
+        assertEquals("shated", predictor.autoCorrect("shated", alwaysKeep))
+    }
+
+    @Test
+    fun channelRanking_shippedWeights_coverTheReportAndTheRound2Fixes() {
+        // Round-2 DEV choice (eval doc §4) as shipped in Defaults.
+        assertEquals("device", predictor.autoCorrect("devixe", channel))
+        assertEquals("shared", predictor.autoCorrect("shated", channel))
+        assertEquals("spamming", predictor.autoCorrect("spaming", channel))   // re-doubling bypass
+        assertEquals("don't", predictor.autoCorrect("donr", channel))         // alias bonus
+        assertEquals("hello", predictor.autoCorrect("helo", channel))
+        assertEquals("immunizations", predictor.autoCorrect("immunizations", channel))
+    }
+
+    @Test
+    fun channelRanking_finiteInflectionCost_correctsShated() {
+        val tuning = channel.copy(channel = channel.channel.copy(inflectionCost = 1f))
+        assertEquals("shared", predictor.autoCorrect("shated", tuning))
+        // A real unlisted inflection of a long stem is still kept at the same γ.
+        assertEquals("immunizations", predictor.autoCorrect("immunizations", tuning))
+    }
+
+    @Test
+    fun liveTuningComesFromConfig_nullMeansDefault() {
+        // Null tuning = DEFAULT, which is the channel ranking since 2026-10-19 (eval doc §6).
+        config.autocorrect_tuning = null
+        try {
+            assertEquals("device", predictor.autoCorrect("devixe"))
+            config.autocorrect_tuning = band
+            assertEquals("decide", predictor.autoCorrect("devixe"))
+        } finally {
+            config.autocorrect_tuning = null
+        }
+    }
+}

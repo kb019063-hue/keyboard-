@@ -1,0 +1,105 @@
+package tribixbite.cleverkeys
+
+import android.content.Context
+
+/**
+ * Handles cleanup of keyboard managers and services on destroy.
+ *
+ * This class centralizes all cleanup logic when the keyboard service is destroyed:
+ * - Closes fold state tracker
+ * - Shuts down clipboard service and manager
+ * - Shuts down prediction coordinator
+ * - Unregisters debug mode receiver and closes log writer
+ *
+ * The cleanup handler pattern simplifies onDestroy() by consolidating all
+ * cleanup operations into a single, well-tested utility.
+ *
+ * This utility is extracted from CleverKeysService.java as part of Phase 4 refactoring
+ * to reduce the main class size (v1.32.404).
+ *
+ * @since v1.32.404
+ */
+class CleanupHandler(
+    private val context: Context,
+    private val configManager: ConfigurationManager?,
+    private val clipboardManager: ClipboardManager?,
+    private val predictionCoordinator: PredictionCoordinator?,
+    private val debugLoggingManager: DebugLoggingManager?,
+    private val inputCoordinator: InputCoordinator? = null,
+    private val suggestionHandler: SuggestionHandler? = null
+) {
+    /**
+     * Perform all cleanup operations.
+     *
+     * Executes cleanup in this order:
+     * 1. Close fold state tracker
+     * 2. Shutdown clipboard service
+     * 3. Cleanup clipboard manager
+     * 4. Shutdown prediction coordinator
+     * 5. Unregister debug receiver and close log writer
+     */
+    fun cleanup() {
+        // Close fold state tracker
+        configManager?.getFoldStateTracker()?.close()
+
+        // Cleanup clipboard listener (static service)
+        ClipboardHistoryService.on_shutdown()
+
+        // R-6: cancel the emoji-keyword prewarm coroutine (owned by the service, started in
+        // onCreate) so its background load scope isn't left running past service death.
+        // Idempotent no-op when nothing is loading.
+        EmojiKeywordIndex.cancel()
+
+        // Cleanup clipboard manager
+        clipboardManager?.cleanup()
+
+        // Shut down executor-owning coordinators BEFORE the prediction coordinator, so no
+        // in-flight prediction task references engines that shutdown() is about to release.
+        inputCoordinator?.shutdown()
+        suggestionHandler?.shutdown()
+
+        // Cleanup prediction coordinator
+        predictionCoordinator?.shutdown()
+
+        // Unregister debug mode receiver and close log writer
+        debugLoggingManager?.let {
+            it.unregisterDebugModeReceiver(context)
+            it.close()
+        }
+    }
+
+    companion object {
+        /**
+         * Create a CleanupHandler.
+         *
+         * @param context The context (typically CleverKeysService service)
+         * @param configManager The configuration manager (nullable)
+         * @param clipboardManager The clipboard manager (nullable)
+         * @param predictionCoordinator The prediction coordinator (nullable)
+         * @param debugLoggingManager The debug logging manager (nullable)
+         * @param inputCoordinator The input coordinator whose prediction executor to shut down (nullable)
+         * @param suggestionHandler The suggestion handler whose prediction executor to shut down (nullable)
+         * @return A new CleanupHandler instance
+         */
+        @JvmStatic
+        fun create(
+            context: Context,
+            configManager: ConfigurationManager?,
+            clipboardManager: ClipboardManager?,
+            predictionCoordinator: PredictionCoordinator?,
+            debugLoggingManager: DebugLoggingManager?,
+            inputCoordinator: InputCoordinator? = null,
+            suggestionHandler: SuggestionHandler? = null
+        ): CleanupHandler {
+            return CleanupHandler(
+                context,
+                configManager,
+                clipboardManager,
+                predictionCoordinator,
+                debugLoggingManager,
+                inputCoordinator,
+                suggestionHandler
+            )
+        }
+    }
+}

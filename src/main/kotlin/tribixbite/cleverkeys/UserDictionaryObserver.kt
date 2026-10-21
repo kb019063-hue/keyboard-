@@ -1,0 +1,424 @@
+package tribixbite.cleverkeys
+
+import android.content.Context
+import android.content.SharedPreferences
+import android.database.ContentObserver
+import android.database.Cursor
+import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import android.provider.UserDictionary
+import android.util.Log
+import org.json.JSONObject
+
+/**
+ * Observes changes to UserDictionary and custom words, providing incremental updates.
+ *
+ * OPTIMIZATION: Eliminates need for periodic reload checks
+ * - ContentObserver detects UserDictionary changes immediately
+ * - SharedPreferences listener detects custom word changes
+ * - Caches data to avoid repeated content provider queries and JSON parsing
+ * - Provides incremental word sets (added/removed) for efficient updates
+ *
+ * Usage:
+ * ```
+ * val observer = UserDictionaryObserver(context)
+ * observer.setChangeListener(object : UserDictionaryObserver.ChangeListener {
+ *   override fun onUserDictionaryChanged(addedWords: Map<String, Int>, removedWords: Set<String>) {
+ *     // Update predictor incrementally
+ *   }
+ *
+ *   override fun onCustomWordsChanged(addedWords: Map<String, Int>,
+ *                                      removedWords: Set<String>) {
+ *     // Update predictor incrementally
+ *   }
+ * })
+ * observer.start()
+ *
+ * // When done:
+ * observer.stop()
+ * ```
+ */
+class UserDictionaryObserver(private val context: Context) : ContentObserver(Handler(Looper.getMainLooper())) {
+    companion object {
+        private const val TAG = "UserDictionaryObserver"
+    }
+
+    private val handler = Handler(Looper.getMainLooper())
+
+    // v1.1.91: Current language for filtering UserDictionary queries
+    // Only words matching this language (or null locale) will be tracked
+    private var currentLanguage: String = "en"
+
+    // Cached user dictionary words (for detecting changes)
+    private val cachedUserWords: MutableMap<String, Int> = mutableMapOf()
+
+    // Cached custom words from SharedPreferences
+    private val cachedCustomWords: MutableMap<String, Int> = mutableMapOf()
+
+    // SharedPreferences listener
+    // v1.1.92: Listen for language-specific custom words key (custom_words_${lang})
+    private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        val expectedKey = LanguagePreferenceKeys.customWordsKey(currentLanguage)
+        if (key == expectedKey) {
+            Log.d(TAG, "Custom words changed for '$currentLanguage' in SharedPreferences")
+            checkCustomWordsChanges()
+        }
+    }
+
+    // Change notification listener
+    private var changeListener: ChangeListener? = null
+
+    /**
+     * A tracked word: the spelling exactly as stored (provider row / pref JSON key) and its
+     * stored frequency. Diff identity is the lowercase-folded key the maps below use; the
+     * spelling rides along so deliveries can carry it (Issue #72 case recording).
+     */
+    private data class StoredWord(val spelling: String, val frequency: Int)
+
+    /**
+     * Listener interface for dictionary change events.
+     *
+     * Delivery contract (mirrors WordPredictor's full-load semantics): the added/modified
+     * maps are keyed by the spelling AS STORED, so the consumer can fold it for its
+     * lowercase serving maps AND record original case (`userWordOriginalCase`) from it.
+     * The removed sets carry lowercase-folded serving keys.
+     */
+    interface ChangeListener {
+        /**
+         * Called when UserDictionary words are added or removed.
+         *
+         * @param addedWords Words added to UserDictionary (stored spelling -> frequency)
+         * @param removedWords Words removed from UserDictionary (lowercase-folded)
+         */
+        fun onUserDictionaryChanged(addedWords: Map<String, Int>, removedWords: Set<String>)
+
+        /**
+         * Called when custom words are added, removed, or modified.
+         *
+         * @param addedOrModified Words added or with frequency changed (stored spelling -> frequency)
+         * @param removed Words removed from custom dictionary (lowercase-folded)
+         */
+        fun onCustomWordsChanged(addedOrModified: Map<String, Int>, removed: Set<String>)
+    }
+
+    /**
+     * Set the change listener for dictionary updates.
+     */
+    fun setChangeListener(listener: ChangeListener) {
+        changeListener = listener
+    }
+
+    /**
+     * Set the current language for filtering UserDictionary queries.
+     * Only words matching this language (or null locale) will be tracked.
+     *
+     * Call this when the keyboard language changes to ensure only
+     * relevant words are included in change notifications.
+     *
+     * @param language Language code (e.g., "en", "fr", "de")
+     * @since v1.1.91
+     * @since v1.1.92 Also reloads custom words cache for language-specific key
+     */
+    fun setLanguage(language: String) {
+        if (currentLanguage != language) {
+            currentLanguage = language
+            Log.d(TAG, "Language set to: $language - reloading caches")
+            // Reload caches with new language filter
+            loadUserDictionaryCache()
+            loadCustomWordsCache()  // v1.1.92: Custom words are now language-specific
+        }
+    }
+
+    /**
+     * Start observing dictionary changes.
+     * Registers ContentObserver and SharedPreferences listener.
+     */
+    fun start() {
+        // Register ContentObserver for UserDictionary
+        context.contentResolver.registerContentObserver(
+            UserDictionary.Words.CONTENT_URI,
+            true,
+            this
+        )
+
+        // Register SharedPreferences listener
+        val prefs = DirectBootAwarePreferences.get_shared_preferences(context)
+        prefs.registerOnSharedPreferenceChangeListener(prefsListener)
+
+        // Initial load of cached data
+        loadUserDictionaryCache()
+        loadCustomWordsCache()
+
+        UserDictionaryWords.onObserverStarted()
+
+        Log.d(TAG, "Started observing dictionary changes")
+    }
+
+    /**
+     * Stop observing dictionary changes.
+     * Unregisters all observers and listeners.
+     */
+    fun stop() {
+        try {
+            context.contentResolver.unregisterContentObserver(this)
+        } finally {
+            try {
+                val prefs = DirectBootAwarePreferences.get_shared_preferences(context)
+                prefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
+            } finally {
+                // Cache safety wins even if a ROM throws while unregistering: after stop was
+                // requested we can no longer promise that a future provider edit is observed.
+                UserDictionaryWords.onObserverStopped()
+            }
+        }
+
+        Log.d(TAG, "Stopped observing dictionary changes")
+    }
+
+    /**
+     * Called when UserDictionary content changes.
+     */
+    override fun onChange(selfChange: Boolean, uri: Uri?) {
+        Log.d(TAG, "UserDictionary changed: $uri")
+        // Invalidate BEFORE the slower diff query so a concurrent lexicon build cannot reuse
+        // rows known to predate this provider notification.
+        UserDictionaryWords.onProviderChanged()
+        checkUserDictionaryChanges()
+    }
+
+    /**
+     * Load UserDictionary into cache.
+     *
+     * v1.1.91: Filters by currentLanguage to prevent cross-language contamination.
+     * Matches exact language code, locale prefix (e.g., fr_FR), or null locale (global).
+     */
+    private fun loadUserDictionaryCache() {
+        cachedUserWords.clear()
+
+        try {
+            // v1.1.91: Filter by locale to prevent English contamination
+            // Match: exact language code, locale starting with language (e.g., fr_FR), or null (global)
+            val selection = "${UserDictionary.Words.LOCALE} = ? OR ${UserDictionary.Words.LOCALE} LIKE ? OR ${UserDictionary.Words.LOCALE} IS NULL"
+            val selectionArgs = arrayOf(currentLanguage, "$currentLanguage%")
+
+            val cursor: Cursor? = context.contentResolver.query(
+                UserDictionary.Words.CONTENT_URI,
+                arrayOf(
+                    UserDictionary.Words.WORD,
+                    UserDictionary.Words.FREQUENCY
+                ),
+                selection,
+                selectionArgs,
+                null
+            )
+
+            cursor?.use {
+                val wordIndex = it.getColumnIndex(UserDictionary.Words.WORD)
+                val freqIndex = it.getColumnIndex(UserDictionary.Words.FREQUENCY)
+
+                while (it.moveToNext()) {
+                    val word = it.getString(wordIndex).lowercase()
+                    val frequency = if (freqIndex >= 0) it.getInt(freqIndex) else 1000
+                    cachedUserWords[word] = frequency
+                }
+
+                Log.d(TAG, "Loaded ${cachedUserWords.size} user dictionary words for locale '$currentLanguage' into cache")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load user dictionary cache", e)
+        }
+    }
+
+    /**
+     * Read and parse the custom words pref for [currentLanguage].
+     *
+     * The `custom_words_<lang>` JSON stores its keys AS TYPED — exact-case membership is a
+     * pinned invariant of the user's word set (see ContractionUserWordGuardTest) — while every
+     * serving map downstream is lowercase-keyed. So the frequency MUST be read with the key
+     * exactly as stored, and only the resulting map key is folded. Lowercasing before the
+     * `optInt` lookup misses every cased entry ({"LaTeX":200} probed as "latex") and silently
+     * substitutes the 1000 default for any word containing an uppercase letter.
+     *
+     * Two stored spellings folding to the same word ("LaTeX" + "latex") collapse last-wins in
+     * document order — the same semantics as WordPredictor's full-load parser.
+     *
+     * v1.1.92: Uses language-specific key (custom_words_${lang}) instead of legacy global key.
+     *
+     * @return folded key -> stored spelling + frequency
+     */
+    private fun readCustomWords(): MutableMap<String, StoredWord> {
+        val words = mutableMapOf<String, StoredWord>()
+
+        val prefs = DirectBootAwarePreferences.get_shared_preferences(context)
+        val customWordsKey = LanguagePreferenceKeys.customWordsKey(currentLanguage)
+        val customWordsJson = prefs.getString(customWordsKey, "{}") ?: "{}"
+
+        if (customWordsJson != "{}") {
+            val jsonObj = JSONObject(customWordsJson)
+            val keys = jsonObj.keys()
+
+            while (keys.hasNext()) {
+                val storedWord = keys.next()
+                val frequency = jsonObj.optInt(storedWord, 1000)
+                words[storedWord.lowercase()] = StoredWord(storedWord, frequency)
+            }
+        }
+
+        return words
+    }
+
+    /**
+     * Load custom words from SharedPreferences into cache.
+     */
+    private fun loadCustomWordsCache() {
+        cachedCustomWords.clear()
+
+        try {
+            for ((folded, stored) in readCustomWords()) {
+                cachedCustomWords[folded] = stored.frequency
+            }
+            if (cachedCustomWords.isNotEmpty()) {
+                Log.d(TAG, "Loaded ${cachedCustomWords.size} custom words for '$currentLanguage' into cache")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load custom words cache", e)
+        }
+    }
+
+    /**
+     * Check for UserDictionary changes and notify listener.
+     *
+     * v1.1.91: Filters by currentLanguage to prevent cross-language contamination.
+     */
+    private fun checkUserDictionaryChanges() {
+        try {
+            // Folded key -> stored spelling + frequency: the diff runs on the folded keys
+            // (matching the lowercase cache) while additions are DELIVERED under the row's
+            // spelling as stored (Issue #72 — see the ChangeListener contract).
+            val currentWords = mutableMapOf<String, StoredWord>()
+
+            // v1.1.91: Filter by locale to prevent English contamination
+            // Match: exact language code, locale starting with language (e.g., fr_FR), or null (global)
+            val selection = "${UserDictionary.Words.LOCALE} = ? OR ${UserDictionary.Words.LOCALE} LIKE ? OR ${UserDictionary.Words.LOCALE} IS NULL"
+            val selectionArgs = arrayOf(currentLanguage, "$currentLanguage%")
+
+            val cursor: Cursor? = context.contentResolver.query(
+                UserDictionary.Words.CONTENT_URI,
+                arrayOf(
+                    UserDictionary.Words.WORD,
+                    UserDictionary.Words.FREQUENCY
+                ),
+                selection,
+                selectionArgs,
+                null
+            )
+
+            cursor?.use {
+                val wordIndex = it.getColumnIndex(UserDictionary.Words.WORD)
+                val freqIndex = it.getColumnIndex(UserDictionary.Words.FREQUENCY)
+
+                while (it.moveToNext()) {
+                    val storedWord = it.getString(wordIndex)
+                    val frequency = if (freqIndex >= 0) it.getInt(freqIndex) else 1000
+                    currentWords[storedWord.lowercase()] = StoredWord(storedWord, frequency)
+                }
+            }
+
+            // Compute differences
+            val addedWords = mutableMapOf<String, Int>()
+            val removedWords = mutableSetOf<String>()
+
+            // Find added words
+            for ((folded, stored) in currentWords) {
+                if (!cachedUserWords.containsKey(folded)) {
+                    addedWords[stored.spelling] = stored.frequency
+                }
+            }
+
+            // Find removed words
+            for (word in cachedUserWords.keys) {
+                if (!currentWords.containsKey(word)) {
+                    removedWords.add(word)
+                }
+            }
+
+            // Update cache (folded keys, like loadUserDictionaryCache)
+            cachedUserWords.clear()
+            for ((folded, stored) in currentWords) {
+                cachedUserWords[folded] = stored.frequency
+            }
+
+            // Notify listener if there are changes
+            if (addedWords.isNotEmpty() || removedWords.isNotEmpty()) {
+                Log.i(TAG, "UserDictionary changed: +${addedWords.size} words, -${removedWords.size} words")
+
+                changeListener?.onUserDictionaryChanged(addedWords, removedWords)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to check user dictionary changes", e)
+        }
+    }
+
+    /**
+     * Check for custom words changes and notify listener.
+     *
+     * The diff is computed over lowercase-folded keys with the STORED frequencies (see
+     * [readCustomWords]) — so a cased word's frequency edit is delivered, and a case-only
+     * respelling with an unchanged frequency is a no-op for the lowercase serving maps.
+     */
+    private fun checkCustomWordsChanges() {
+        try {
+            val currentWords = readCustomWords()
+
+            // Compute differences
+            val addedOrModified = mutableMapOf<String, Int>()
+            val removed = mutableSetOf<String>()
+
+            // Find added or modified words — diffed on the folded key + frequency, delivered
+            // under the spelling as stored (see the ChangeListener contract).
+            for ((folded, stored) in currentWords) {
+                val cachedFreq = cachedCustomWords[folded]
+                if (cachedFreq == null || cachedFreq != stored.frequency) {
+                    addedOrModified[stored.spelling] = stored.frequency
+                }
+            }
+
+            // Find removed words
+            for (word in cachedCustomWords.keys) {
+                if (!currentWords.containsKey(word)) {
+                    removed.add(word)
+                }
+            }
+
+            // Update cache (folded keys, like loadCustomWordsCache)
+            cachedCustomWords.clear()
+            for ((folded, stored) in currentWords) {
+                cachedCustomWords[folded] = stored.frequency
+            }
+
+            // Notify listener if there are changes
+            if (addedOrModified.isNotEmpty() || removed.isNotEmpty()) {
+                Log.i(TAG, "Custom words changed: +${addedOrModified.size} words, -${removed.size} words")
+
+                changeListener?.onCustomWordsChanged(addedOrModified, removed)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to check custom words changes", e)
+        }
+    }
+
+    /**
+     * Get current cached user dictionary words.
+     */
+    fun getCachedUserWords(): Map<String, Int> {
+        return cachedUserWords.toMap()
+    }
+
+    /**
+     * Get current cached custom words.
+     */
+    fun getCachedCustomWords(): Map<String, Int> {
+        return cachedCustomWords.toMap()
+    }
+}

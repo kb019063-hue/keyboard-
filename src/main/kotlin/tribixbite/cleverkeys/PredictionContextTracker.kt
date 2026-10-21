@@ -1,0 +1,926 @@
+package tribixbite.cleverkeys
+
+import android.text.InputType
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
+import java.text.Normalizer
+
+/**
+ * Tracks typing context for word predictions.
+ *
+ * Maintains state about:
+ * - Current partial word being typed (prefix before cursor)
+ * - Current word suffix (after cursor, for mid-word editing)
+ * - Previous words for context (n-gram support)
+ * - Whether last input was a swipe or tap
+ * - Last auto-inserted word (for smart deletion)
+ * - Source of last committed text (for context-aware deletion)
+ *
+ * v1.2.6: Added cursor-aware prediction support for mid-word editing.
+ * When cursor moves within existing text, synchronizeWithCursor() reads
+ * the actual text and rebuilds prefix/suffix state for proper prediction
+ * and deletion behavior.
+ *
+ * This class is extracted from CleverKeysService.java for better separation of concerns
+ * and testability (v1.32.342).
+ */
+class PredictionContextTracker {
+    companion object {
+        // ≤23 chars for Log tag (Android limit); shortened from "PredictionContextTracker".
+        private const val TAG = "PredictionCtxTracker"
+
+        // Maximum number of previous words to track for context
+        private const val MAX_CONTEXT_WORDS = 2
+
+        // Maximum chars to read from InputConnection for word detection
+        private const val MAX_TEXT_READ = 50
+
+        // #151 TSR: how many unmatched cursor callbacks a trailing-space watch survives
+        // before it expires. 1 stale deletion callback was observed on-device (Chrome
+        // omnibox); 3 leaves headroom without letting a cursor jump keep it alive long.
+        private const val TRAILING_SPACE_WATCH_BUDGET = 3
+
+        // CJK Unicode blocks that don't use space-based word boundaries.
+        // Character.UnicodeScript (HAN/HIRAGANA/…) requires API 24; Character.UnicodeBlock
+        // is available on all supported APIs (21+) and covers the same scripts, so we key
+        // detection off blocks instead. Each script maps to its primary block(s):
+        //   HAN      → CJK_UNIFIED_IDEOGRAPHS (+ common extensions/compat)
+        //   HIRAGANA → HIRAGANA;  KATAKANA → KATAKANA
+        //   THAI     → THAI;      HANGUL   → HANGUL_SYLLABLES (+ jamo)
+        private val CJK_BLOCKS = setOf(
+            Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS,
+            Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_A,
+            Character.UnicodeBlock.CJK_COMPATIBILITY_IDEOGRAPHS,
+            Character.UnicodeBlock.CJK_SYMBOLS_AND_PUNCTUATION,
+            Character.UnicodeBlock.HIRAGANA,
+            Character.UnicodeBlock.KATAKANA,
+            Character.UnicodeBlock.THAI,
+            Character.UnicodeBlock.HANGUL_SYLLABLES,
+            Character.UnicodeBlock.HANGUL_JAMO,
+            Character.UnicodeBlock.HANGUL_COMPATIBILITY_JAMO
+        )
+
+        // Word boundary characters (not including apostrophe, which is context-dependent)
+        private val WORD_BOUNDARIES = setOf(
+            ' ', '\t', '\n', '\r',           // Whitespace
+            '.', ',', ';', ':', '!', '?',    // Sentence punctuation
+            '(', ')', '[', ']', '{', '}',    // Brackets
+            '"', '"', '"', '„', '«', '»',    // Quotation marks
+            '-', '—', '–',                   // Dashes (word-breaking)
+            '/', '\\', '@', '#', '$', '%',   // Symbols
+            '&', '*', '+', '=', '<', '>',    // Math/logic
+            '|', '~', '`', '^'               // Technical
+        )
+
+        /**
+         * SAS-1: current absolute cursor position, or -1 when unknown (editor
+         * without ExtractedText support). Shared by SuggestionHandler /
+         * InputCoordinator (stamp capture at auto-space commit time) and
+         * KeyEventHandler (stamp validation at punctuation time).
+         */
+        fun currentCursorPosition(ic: InputConnection?): Int {
+            return currentSelection(ic)?.first ?: -1
+        }
+
+        /** Absolute UTF-16 selection endpoints, or null when the editor cannot report them. */
+        fun currentSelection(ic: InputConnection?): Pair<Int, Int>? {
+            if (ic == null) return null
+            return try {
+                val extracted = ic.getExtractedText(
+                    android.view.inputmethod.ExtractedTextRequest(), 0
+                ) ?: return null
+                if (extracted.selectionStart < 0 || extracted.selectionEnd < 0 || extracted.startOffset < 0) null
+                else (extracted.startOffset + extracted.selectionStart) to
+                    (extracted.startOffset + extracted.selectionEnd)
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+
+    // Current partial word being typed (not yet committed to input)
+    // Example: User types "hel" → currentWord = "hel"
+    // v1.2.6: This is the PREFIX (chars before cursor)
+    private val currentWord = StringBuilder()
+
+    // v1.2.6: Word suffix (chars after cursor when editing mid-word)
+    // Example: User moves cursor to "hel|lo" → suffix = "lo"
+    private val currentWordSuffix = StringBuilder()
+
+    // v1.2.6: Raw text for deletion (preserves accents/diacritics for accurate char count)
+    // Normalized text is used for prediction lookup, raw for deletion
+    private var rawPrefixForDeletion: String = ""
+    private var rawSuffixForDeletion: String = ""
+
+    // v1.2.6: Flag to skip cursor sync during programmatic text changes
+    // Set to true before deleteSurroundingText/commitText, reset after onUpdateSelection
+    @Volatile
+    var expectingSelectionUpdate = false
+
+    // v1.2.6: Track if current prefix/suffix came from cursor sync (vs typing)
+    // Used to determine deletion behavior in onSuggestionSelected
+    private var wasSyncedFromCursor = false
+
+    // Previous completed words for context (n-gram prediction)
+    // Example: ["the", "quick"] for predicting next word
+    // Limited to MAX_CONTEXT_WORDS (currently 2) for bigram support
+    private val contextWords = mutableListOf<String>()
+
+    // Track if last input was a swipe gesture (vs tap typing)
+    // Used for context-aware deletion and prediction selection
+    private var wasLastInputSwipeFlag = false
+
+    // Last word that was auto-inserted by prediction system
+    // Used for smart deletion: if user taps suggestion, we can delete it cleanly
+    private var lastAutoInsertedWord: String? = null
+
+    // Source of last committed text (swipe, typing, candidate selection, etc.)
+    // Used for context-aware deletion behavior
+    private var lastCommitSource = PredictionSource.UNKNOWN
+
+    // v1.2.7: Track whether last space was auto-inserted (swipe/suggestion) vs manually typed
+    // Used by smart punctuation to respect manual spaces (user typed space then punctuation)
+    var lastSpaceWasAutoInserted: Boolean = false
+
+    // SAS-1: cursor position expected immediately after the auto-space commit,
+    // captured at commit time (pre-commit cursor position + committed length).
+    // -1 = unknown (editor without ExtractedText support) → swallow eligibility
+    // degrades to the legacy flag+space verify-at-use check.
+    // Together with lastSpaceWasAutoInserted this forms the position-stamped
+    // transient state validated by SmartAutoSpace.isSwallowEligible — never
+    // trusted blindly (the actual editor text is re-read at punctuation time).
+    var autoSpaceStampedPosition: Int = -1
+        private set
+
+    /**
+     * SAS-1: mark that an automatic trailing space was just committed.
+     *
+     * @param expectedCursorPosition Absolute cursor position the commit left the
+     *   cursor at (pre-commit position + committed text length), or -1 if unknown.
+     */
+    fun markAutoSpacePending(expectedCursorPosition: Int) {
+        lastSpaceWasAutoInserted = true
+        autoSpaceStampedPosition = expectedCursorPosition
+    }
+
+    /**
+     * SAS-1: invalidate the pending auto-space swallow. Called on any other
+     * key/char input, backspace, field switch (clearAll), and cursor movement
+     * away from the stamped position.
+     */
+    fun invalidateAutoSpacePending() {
+        lastSpaceWasAutoInserted = false
+        autoSpaceStampedPosition = -1
+    }
+
+    /**
+     * SAS-1: cursor-movement invalidation hook (fed by InputCoordinator.onCursorMoved
+     * ← CleverKeysService.onUpdateSelection). The auto-space commit's OWN selection
+     * callback reports exactly the stamped position and keeps the pending state
+     * alive; any other position means the user moved the cursor. When the stamp is
+     * unknown (-1) the flag is left alone — the verify-at-use check in
+     * SmartAutoSpace.isSwallowEligible still guards against eating a manual space.
+     */
+    fun onCursorPositionChanged(newPosition: Int) {
+        if (lastSpaceWasAutoInserted &&
+            autoSpaceStampedPosition >= 0 &&
+            newPosition != autoSpaceStampedPosition
+        ) {
+            invalidateAutoSpacePending()
+        }
+        // #151 TSR: independent of SAS-1 — the dropped-space callback (stamp−1) that
+        // invalidates the auto-space above is exactly the signature that ARMS the
+        // trailing-space repair.
+        resolveTrailingSpaceWatch(newPosition)
+    }
+
+    // ==================== #151 TSR: trailing-space repair state ====================
+    // Some composing-less editors (URL bars, GPTAssist-class fields) drop the TRAILING
+    // space of a committed "word " app-side. The SAS-1 state can't drive a repair:
+    // the post-commit selection callback reports exactly stamp−1 there, which
+    // onCursorPositionChanged (correctly) treats as invalidation. So the repair gets
+    // its own three-phase state: ARM at suggestion-commit time (watch stamp + the
+    // committed text minus its trailing space), RESOLVE on the next cursor callback
+    // (stamp → editor kept the space, clear; stamp−1 → dropped-space signature, a
+    // space is OWED; anything else → clear), CONSUME on the next keystroke
+    // (takeOwedTrailingSpace — KeyEventHandler inserts the owed space before an
+    // alphanumeric char after re-verifying the editor text; any keystroke clears).
+
+    /** #151 TSR: expected post-commit cursor position while awaiting resolution; -1 = not watching. */
+    private var trailingSpaceWatchStamp: Int = -1
+
+    /** #151 TSR: the committed text minus its trailing space (verify-at-use key). */
+    private var trailingSpaceWatchText: String = ""
+
+    /** #151 TSR: cursor position where the dropped space is owed (stamp−1); -1 = nothing owed. */
+    private var owedSpacePosition: Int = -1
+
+    /**
+     * #151 TSR: unmatched-callback budget while watching. Editors deliver STALE
+     * selection callbacks for edits issued before the commit (device-observed: Chrome's
+     * omnibox reports the partial-word deletion's pos AFTER the commit, before the
+     * dropped-space callback) — the watch must survive a few strangers, but a genuine
+     * cursor jump's stream of unrelated positions must still kill it.
+     */
+    private var trailingSpaceWatchBudget: Int = 0
+
+    /**
+     * #151 TSR phase 1 (ARM): a suggestion commit whose text ended in a space just
+     * happened. Watch the next cursor callback for the dropped-space signature.
+     *
+     * @param expectedCursorPosition pre-commit cursor position + committed length, or
+     *   -1 when the editor has no ExtractedText support — then the signature cannot be
+     *   discriminated from a cursor move and the watch is NOT armed (documented
+     *   degradation: no repair, but never a spurious space).
+     * @param committedTextWithoutSpace the committed text minus the trailing space
+     *   (may include a leading auto-space) — re-verified against the editor at use.
+     */
+    fun markTrailingSpaceWatch(expectedCursorPosition: Int, committedTextWithoutSpace: String) {
+        if (expectedCursorPosition < 1 || committedTextWithoutSpace.isEmpty()) {
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                android.util.Log.d(
+                    TAG,
+                    "TSR: watch NOT armed (stamp=$expectedCursorPosition, " +
+                        "wordLen=${committedTextWithoutSpace.length})"
+                )
+            }
+            clearTrailingSpaceWatch()
+            return
+        }
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+            android.util.Log.d(
+                TAG,
+                "TSR: watch armed (stamp=$expectedCursorPosition, " +
+                    "wordLen=${committedTextWithoutSpace.length})"
+            )
+        }
+        trailingSpaceWatchStamp = expectedCursorPosition
+        trailingSpaceWatchText = committedTextWithoutSpace
+        owedSpacePosition = -1
+        trailingSpaceWatchBudget = TRAILING_SPACE_WATCH_BUDGET
+    }
+
+    /** #151 TSR: drop both the pending watch and any owed space. */
+    fun clearTrailingSpaceWatch() {
+        trailingSpaceWatchStamp = -1
+        trailingSpaceWatchText = ""
+        owedSpacePosition = -1
+        trailingSpaceWatchBudget = 0
+    }
+
+    /**
+     * #151 TSR phase 3 (CONSUME): called by KeyEventHandler on EVERY keystroke.
+     * Returns the committed text (minus its trailing space) when a dropped space is
+     * owed at the current position — the caller re-verifies it against the editor and
+     * prepends the owed space to an alphanumeric commit. ALWAYS clears the state:
+     * whatever the keystroke was, the repair window is one keystroke wide.
+     */
+    fun takeOwedTrailingSpace(): String? {
+        val owed = if (owedSpacePosition >= 0) trailingSpaceWatchText else null
+        clearTrailingSpaceWatch()
+        return owed
+    }
+
+    /**
+     * #151 TSR phase 2 (RESOLVE), fed by [onCursorPositionChanged]: discriminate the
+     * post-commit callback. Exactly the stamp → the editor kept the space; stamp−1 →
+     * the dropped-space signature (owed); anything else → a real cursor move, clear.
+     * Once owed, any callback away from the owed position clears (cursor jump /
+     * late-applied space — both must disarm so the repair can never double-space).
+     */
+    private fun resolveTrailingSpaceWatch(newPosition: Int) {
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING &&
+            (trailingSpaceWatchStamp >= 0 || owedSpacePosition >= 0)
+        ) {
+            android.util.Log.d(
+                TAG,
+                "TSR: resolve(pos=$newPosition) watchStamp=$trailingSpaceWatchStamp " +
+                    "owedPos=$owedSpacePosition"
+            )
+        }
+        if (trailingSpaceWatchStamp >= 0) {
+            when (newPosition) {
+                trailingSpaceWatchStamp -> clearTrailingSpaceWatch()
+                trailingSpaceWatchStamp - 1 -> {
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                        android.util.Log.d(
+                            TAG,
+                            "TSR: dropped-space signature (cursor $newPosition = stamp " +
+                                "${trailingSpaceWatchStamp}−1) — space owed at next keystroke"
+                        )
+                    }
+                    owedSpacePosition = newPosition
+                    trailingSpaceWatchStamp = -1
+                }
+                else -> {
+                    // Stale intermediate callback (pre-commit edits reported late) or a
+                    // genuine cursor jump — tolerate the former, expire on the latter.
+                    trailingSpaceWatchBudget--
+                    if (trailingSpaceWatchBudget <= 0) clearTrailingSpaceWatch()
+                }
+            }
+        } else if (owedSpacePosition >= 0 && newPosition != owedSpacePosition) {
+            clearTrailingSpaceWatch()
+        }
+    }
+
+    // Original word that was autocorrected (for undo functionality)
+    // When user types "subkeys" and it's autocorrected to "surveys",
+    // this stores "subkeys" so tapping it can replace "surveys" with "subkeys"
+    private var lastAutocorrectOriginalWord: String? = null
+
+    /**
+     * Appends text to the current partial word.
+     * Used when user types individual characters.
+     *
+     * @param text Text to append (usually single character)
+     *
+     * Example:
+     * - appendToCurrentWord("h") → currentWord = "h"
+     * - appendToCurrentWord("e") → currentWord = "he"
+     * - appendToCurrentWord("l") → currentWord = "hel"
+     */
+    fun appendToCurrentWord(text: String) {
+        currentWord.append(text)
+    }
+
+    /**
+     * Gets the current partial word being typed.
+     *
+     * @return Current word string (never null, may be empty)
+     */
+    fun getCurrentWord(): String {
+        return currentWord.toString()
+    }
+
+    /**
+     * Gets the length of current partial word.
+     * Useful for checking if user is currently typing.
+     *
+     * @return Number of characters in current word
+     */
+    fun getCurrentWordLength(): Int {
+        return currentWord.length
+    }
+
+    /**
+     * Clears the current partial word.
+     * Called when word is completed or prediction is selected.
+     */
+    fun clearCurrentWord() {
+        currentWord.setLength(0)
+    }
+
+    /**
+     * Commits a completed word and updates context.
+     *
+     * This method:
+     * 1. Adds word to context history (for n-gram predictions)
+     * 2. Maintains max context size (removes oldest if needed)
+     * 3. Clears current partial word
+     * 4. Tracks the source and auto-insert status
+     *
+     * @param word Completed word to commit
+     * @param source Source of the word (swipe, typing, candidate, etc.)
+     * @param autoInserted Whether this word was auto-inserted by prediction
+     */
+    fun commitWord(word: String, source: PredictionSource, autoInserted: Boolean) {
+        // Update context for n-gram predictions
+        contextWords.add(word.lowercase())
+
+        // Maintain max context size (oldest words removed first)
+        while (contextWords.size > MAX_CONTEXT_WORDS) {
+            contextWords.removeAt(0)
+        }
+
+        // Clear current word (it's now committed)
+        clearCurrentWord()
+
+        // Track for smart deletion
+        lastCommitSource = source
+        lastAutoInsertedWord = if (autoInserted) word else null
+    }
+
+    /**
+     * Undo [commitWord] for a word the user rejected (replaced from the suggestion bar,
+     * backspace-undone, autocorrect reverted): drop it from the context history so the
+     * replacement is not predicted as following the rejected word. Only the NEWEST entry
+     * is removed, and only when it is [word] (case-insensitive) — if anything was committed
+     * after it, the history is left alone rather than guessing.
+     *
+     * @return true when the rejected word was removed
+     */
+    fun rollbackLastWord(word: String): Boolean {
+        if (contextWords.isEmpty() || contextWords.last() != word.lowercase()) return false
+        contextWords.removeAt(contextWords.size - 1)
+        return true
+    }
+
+    /**
+     * Gets the context words for prediction.
+     * Returns a copy to prevent external modification.
+     *
+     * @return List of previous words (max MAX_CONTEXT_WORDS)
+     */
+    fun getContextWords(): List<String> {
+        return contextWords.toList()
+    }
+
+    /**
+     * Sets whether the last input was a swipe gesture.
+     *
+     * @param wasSwipe true if last input was swipe, false if tap typing
+     */
+    fun setWasLastInputSwipe(wasSwipe: Boolean) {
+        wasLastInputSwipeFlag = wasSwipe
+    }
+
+    /**
+     * Checks if the last input was a swipe gesture.
+     *
+     * @return true if last input was swipe, false if tap typing
+     */
+    fun wasLastInputSwipe(): Boolean {
+        return wasLastInputSwipeFlag
+    }
+
+    /**
+     * Gets the last auto-inserted word.
+     * Used for smart deletion: if user taps backspace after auto-insert,
+     * we can delete the entire word + space.
+     *
+     * @return Last auto-inserted word, or null if none
+     */
+    fun getLastAutoInsertedWord(): String? {
+        return lastAutoInsertedWord
+    }
+
+    /**
+     * Clears the last auto-inserted word tracking.
+     * Called after word is deleted or new input begins.
+     */
+    fun clearLastAutoInsertedWord() {
+        lastAutoInsertedWord = null
+    }
+
+    /**
+     * Sets the last auto-inserted word.
+     * Used in special cases where auto-insertion happens outside commitWord().
+     *
+     * @param word The word that was auto-inserted
+     */
+    fun setLastAutoInsertedWord(word: String) {
+        lastAutoInsertedWord = word
+    }
+
+    /**
+     * Gets the source of the last committed text.
+     *
+     * @return PredictionSource enum value
+     */
+    fun getLastCommitSource(): PredictionSource {
+        return lastCommitSource
+    }
+
+    /**
+     * Sets the source of the last committed text.
+     *
+     * @param source PredictionSource enum value
+     */
+    fun setLastCommitSource(source: PredictionSource) {
+        lastCommitSource = source
+    }
+
+    /**
+     * Gets the original word before autocorrect was applied.
+     * Used for autocorrect undo: when user taps the original word in suggestions,
+     * we can detect it and replace the corrected word.
+     *
+     * @return Original word before autocorrect, or null if no autocorrect occurred
+     */
+    fun getLastAutocorrectOriginalWord(): String? {
+        return lastAutocorrectOriginalWord
+    }
+
+    /**
+     * Sets the original word before autocorrect.
+     * Called when autocorrect replaces a typed word.
+     *
+     * @param word The original word that was autocorrected
+     */
+    fun setLastAutocorrectOriginalWord(word: String?) {
+        lastAutocorrectOriginalWord = word
+    }
+
+    /**
+     * Clears autocorrect tracking.
+     * Called when autocorrect undo is performed or new word is started.
+     */
+    fun clearAutocorrectTracking() {
+        lastAutocorrectOriginalWord = null
+    }
+
+    /**
+     * Clears all tracking state.
+     * Useful for resetting state when switching input fields.
+     */
+    fun clearAll() {
+        clearCurrentWord()
+        clearCurrentWordSuffix()
+        contextWords.clear()
+        wasLastInputSwipeFlag = false
+        lastAutoInsertedWord = null
+        lastCommitSource = PredictionSource.UNKNOWN
+        lastAutocorrectOriginalWord = null
+        rawPrefixForDeletion = ""
+        rawSuffixForDeletion = ""
+        wasSyncedFromCursor = false
+        expectingSelectionUpdate = false
+        // SAS-1: field switch invalidates the pending auto-space swallow
+        invalidateAutoSpacePending()
+        // #151 TSR: field switch also drops any trailing-space watch / owed space
+        clearTrailingSpaceWatch()
+    }
+
+    /**
+     * Deletes the last character from the current word.
+     * Used when user taps backspace during typing.
+     * Does nothing if current word is empty.
+     */
+    fun deleteLastChar() {
+        if (currentWord.isNotEmpty()) {
+            currentWord.deleteCharAt(currentWord.length - 1)
+        }
+    }
+
+    /**
+     * Gets a debug string showing current state.
+     * Useful for logging and troubleshooting.
+     *
+     * @return Human-readable state description
+     */
+    fun getDebugState(): String {
+        return "PredictionContextTracker{prefix='${getCurrentWord()}', suffix='${getCurrentWordSuffix()}', " +
+            "contextWords=$contextWords, wasSwipe=$wasLastInputSwipeFlag, " +
+            "lastAutoInsert='$lastAutoInsertedWord', lastSource=$lastCommitSource, " +
+            "autocorrectOriginal='$lastAutocorrectOriginalWord', wasSynced=$wasSyncedFromCursor}"
+    }
+
+    // ==================== v1.2.6: Cursor-Aware Prediction Methods ====================
+
+    /**
+     * Gets the current word suffix (chars after cursor when editing mid-word).
+     *
+     * @return Suffix string (may be empty if cursor at end of word)
+     */
+    fun getCurrentWordSuffix(): String {
+        return currentWordSuffix.toString()
+    }
+
+    /**
+     * Gets the length of current word suffix.
+     *
+     * @return Number of characters after cursor in current word
+     */
+    fun getCurrentWordSuffixLength(): Int {
+        return currentWordSuffix.length
+    }
+
+    /**
+     * Clears the current word suffix.
+     * Called when prediction is selected or word is completed.
+     */
+    fun clearCurrentWordSuffix() {
+        currentWordSuffix.setLength(0)
+    }
+
+    /**
+     * Returns the number of characters to delete for prediction selection.
+     * When cursor is mid-word, returns both prefix and suffix lengths.
+     *
+     * @return Pair of (beforeCursor, afterCursor) delete counts
+     */
+    fun getCharsToDeleteForPrediction(): Pair<Int, Int> {
+        return Pair(rawPrefixForDeletion.length, rawSuffixForDeletion.length)
+    }
+
+    /**
+     * Gets the raw (non-normalized) prefix for capitalization checks.
+     * v1.2.6: Used to preserve original capitalization in cursor-synced predictions.
+     *
+     * @return Raw prefix as extracted from text (preserves case and apostrophes)
+     */
+    fun getRawPrefix(): String = rawPrefixForDeletion
+
+    /**
+     * Gets the raw (non-normalized) suffix.
+     * v1.2.6: Used for full word reconstruction in cursor-synced predictions.
+     *
+     * @return Raw suffix as extracted from text
+     */
+    fun getRawSuffix(): String = rawSuffixForDeletion
+
+    /**
+     * Checks if current state was synchronized from cursor position.
+     * Used to determine if we need dual-side deletion in onSuggestionSelected.
+     *
+     * @return true if prefix/suffix came from cursor sync, false if from typing
+     */
+    fun wasSyncedFromCursor(): Boolean {
+        return wasSyncedFromCursor
+    }
+
+    /**
+     * Synchronizes prediction context with actual cursor position in input field.
+     * Called when cursor moves (tap, arrow keys, cut/paste) to read the word
+     * surrounding the new cursor position.
+     *
+     * This method:
+     * 1. Reads text before and after cursor from InputConnection
+     * 2. Extracts the word prefix (before cursor) and suffix (after cursor)
+     * 3. Updates currentWord and currentWordSuffix
+     * 4. Tracks raw text for accurate deletion character counts
+     *
+     * @param ic InputConnection to read text from
+     * @param language Primary language code (for CJK detection)
+     * @param editorInfo Editor info for input type checks
+     */
+    fun synchronizeWithCursor(
+        ic: InputConnection?,
+        language: String = "en",
+        editorInfo: EditorInfo? = null
+    ) {
+        ic ?: return
+
+        // Skip sync during programmatic text changes
+        if (expectingSelectionUpdate) {
+            expectingSelectionUpdate = false
+            return
+        }
+
+        // Skip for input types where prediction is inappropriate
+        if (!shouldSyncForInputType(editorInfo)) return
+
+        // Terminal-style editors (terminals and BLIND remote fields, TerminalUtils.editorKind):
+        // the readback is not the user's text — a terminal reads "", RustDesk's hidden field
+        // reads 1024 '1' placeholders plus everything typed this session — so a sync would
+        // replace the keystroke-tracked word with "" or a 1000-char digit run, and a later
+        // suggestion tap would delete that many characters on the remote (2026-10-13). The
+        // keystroke tracker is the only record of the word there; keep it.
+        if (editorInfo != null &&
+            TerminalUtils.isTerminalApp(editorInfo, Config.globalConfigOrNull()?.custom_terminal_packages)
+        ) return
+
+        // Skip for CJK text (no space-based word boundaries)
+        if (isCJKLanguage(language)) return
+
+        val beforeText = ic.getTextBeforeCursor(MAX_TEXT_READ, 0)?.toString() ?: ""
+        val afterText = ic.getTextAfterCursor(MAX_TEXT_READ, 0)?.toString() ?: ""
+
+        // Check if we're in CJK text based on surrounding chars
+        if (containsCJKCharacters(beforeText) || containsCJKCharacters(afterText)) {
+            clearCurrentWord()
+            clearCurrentWordSuffix()
+            rawPrefixForDeletion = ""
+            rawSuffixForDeletion = ""
+            wasSyncedFromCursor = false
+            return
+        }
+
+        // Extract word prefix (before cursor) and suffix (after cursor)
+        // v1.2.6: Pass afterText to prefix extraction and beforeText to suffix extraction
+        // to properly handle apostrophes at cursor boundary (e.g., "don'|t")
+        val (normalizedPrefix, rawPrefix) = extractWordPrefix(beforeText, afterText)
+        val (normalizedSuffix, rawSuffix) = extractWordSuffix(afterText, beforeText)
+
+        // Update state
+        // Issue #72: Use rawPrefix/rawSuffix to preserve original case for add-to-dictionary prompts
+        // Normalization (lowercasing) is done at the point of prediction lookup, not storage
+        currentWord.clear()
+        currentWord.append(rawPrefix)
+        currentWordSuffix.clear()
+        currentWordSuffix.append(rawSuffix)
+        rawPrefixForDeletion = rawPrefix
+        rawSuffixForDeletion = rawSuffix
+        wasSyncedFromCursor = true
+
+        // NOTE: Do NOT clear autocorrect tracking here!
+        // Autocorrect tracking must persist after cursor moves (e.g., after space insertion)
+        // so the suggestion bar can still show the original word for undo/add-to-dictionary.
+        // Autocorrect tracking is cleared separately when user starts typing a new word.
+
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+            android.util.Log.d(TAG, "synchronizeWithCursor: prefix='$normalizedPrefix', suffix='$normalizedSuffix', " +
+                "rawPrefix='$rawPrefix', rawSuffix='$rawSuffix'")
+        }
+    }
+
+    /**
+     * Resets the cursor sync flag.
+     * Called when user starts typing normally (not from cursor movement).
+     */
+    fun resetCursorSyncState() {
+        wasSyncedFromCursor = false
+        rawSuffixForDeletion = ""
+        currentWordSuffix.setLength(0)
+    }
+
+    /**
+     * Extracts the word prefix from text before cursor.
+     * Walks backwards from end of text until a word boundary is found.
+     *
+     * @param beforeText Text before cursor
+     * @param afterText Text after cursor (for apostrophe boundary check)
+     * @return Pair of (normalizedPrefix, rawPrefix) - normalized for lookup, raw for deletion
+     */
+    private fun extractWordPrefix(beforeText: String, afterText: String = ""): Pair<String, String> {
+        if (beforeText.isEmpty()) return Pair("", "")
+
+        var startIndex = beforeText.length
+        for (i in beforeText.length - 1 downTo 0) {
+            val char = beforeText[i]
+            // v1.2.6: Special handling for apostrophe at cursor boundary
+            // If char is apostrophe at end of beforeText, check afterText for letter
+            if (isApostrophe(char) && i == beforeText.length - 1) {
+                val before = beforeText.getOrNull(i - 1)
+                val after = afterText.getOrNull(0) // First char after cursor
+                if (before?.isLetter() == true && after?.isLetter() == true) {
+                    startIndex = i
+                    continue
+                } else {
+                    break
+                }
+            }
+            if (isWordChar(char, beforeText, i)) {
+                startIndex = i
+            } else {
+                break
+            }
+        }
+
+        val rawPrefix = beforeText.substring(startIndex)
+        val normalizedPrefix = normalizeForPrediction(rawPrefix)
+        return Pair(normalizedPrefix, rawPrefix)
+    }
+
+    /**
+     * Extracts the word suffix from text after cursor.
+     * Walks forwards from start of text until a word boundary is found.
+     *
+     * @param afterText Text after cursor
+     * @param beforeText Text before cursor (for apostrophe boundary check)
+     * @return Pair of (normalizedSuffix, rawSuffix) - normalized for lookup, raw for deletion
+     */
+    private fun extractWordSuffix(afterText: String, beforeText: String = ""): Pair<String, String> {
+        if (afterText.isEmpty()) return Pair("", "")
+
+        var endIndex = 0
+        for (i in afterText.indices) {
+            val char = afterText[i]
+            // v1.2.6: Special handling for apostrophe at cursor boundary
+            // If char is apostrophe at start of afterText, check beforeText for letter
+            if (isApostrophe(char) && i == 0) {
+                val before = beforeText.lastOrNull() // Last char before cursor
+                val after = afterText.getOrNull(1)
+                if (before?.isLetter() == true && after?.isLetter() == true) {
+                    endIndex = 1
+                    continue
+                } else {
+                    break
+                }
+            }
+            if (isWordChar(char, afterText, i)) {
+                endIndex = i + 1
+            } else {
+                break
+            }
+        }
+
+        val rawSuffix = afterText.substring(0, endIndex)
+        val normalizedSuffix = normalizeForPrediction(rawSuffix)
+        return Pair(normalizedSuffix, rawSuffix)
+    }
+
+    /**
+     * Checks if character is an apostrophe (straight or curly).
+     */
+    private fun isApostrophe(char: Char): Boolean {
+        return char == '\'' || char == '\u2019' || char == '\u2018'
+    }
+
+    /**
+     * Checks if a character is part of a word (not a boundary).
+     * Handles apostrophes specially: they're word chars only when between letters.
+     *
+     * @param char Character to check
+     * @param text Full text for context (apostrophe checking)
+     * @param pos Position of char in text
+     * @return true if char is part of a word
+     */
+    private fun isWordChar(char: Char, text: String, pos: Int): Boolean {
+        // Letters are always word characters
+        if (char.isLetter()) return true
+
+        // Digits break words (test|123 → prefix="test", suffix="")
+        if (char.isDigit()) return false
+
+        // Apostrophe is word char only when between letters (for contractions)
+        // Examples: don't, l'homme, dell'anno
+        // Check straight apostrophe (') and curly quotes (' U+2019, ' U+2018)
+        if (char == '\'' || char == '\u2019' || char == '\u2018') {
+            val before = text.getOrNull(pos - 1)
+            val after = text.getOrNull(pos + 1)
+            return before?.isLetter() == true && after?.isLetter() == true
+        }
+
+        // Check against explicit word boundaries
+        return char !in WORD_BOUNDARIES && !char.isWhitespace()
+    }
+
+    /**
+     * Normalizes text for prediction lookup.
+     * Removes diacritics/accents so "café" matches "cafe" in dictionary.
+     *
+     * @param text Text to normalize
+     * @return Normalized text (lowercase, no diacritics)
+     */
+    private fun normalizeForPrediction(text: String): String {
+        // NFD decomposition separates base chars from combining diacritics
+        val normalized = Normalizer.normalize(text, Normalizer.Form.NFD)
+        // Remove combining diacritical marks (Unicode category Mn)
+        return normalized.replace(Regex("\\p{Mn}"), "").lowercase()
+    }
+
+    /**
+     * Checks if sync should be skipped for this input type.
+     * Skip for passwords, URLs, emails, and other non-predictable fields.
+     *
+     * Public (#151): SuggestionHandler needs this to know that a suggestion tap
+     * in such a field cannot rely on cursor-sync deletion counts and must fall
+     * back to scanning the editor for the partial token to replace.
+     *
+     * @param editorInfo Editor info with input type
+     * @return true if sync is appropriate, false to skip
+     */
+    fun shouldSyncForInputType(editorInfo: EditorInfo?): Boolean {
+        editorInfo ?: return true
+
+        val inputType = editorInfo.inputType
+        val inputClass = inputType and InputType.TYPE_MASK_CLASS
+        val variation = inputType and InputType.TYPE_MASK_VARIATION
+
+        // Skip password fields
+        if (inputClass == InputType.TYPE_CLASS_TEXT) {
+            when (variation) {
+                InputType.TYPE_TEXT_VARIATION_PASSWORD,
+                InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
+                InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD -> return false
+
+                // Skip URL/email (special character patterns)
+                InputType.TYPE_TEXT_VARIATION_URI,
+                InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
+                InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS -> return false
+            }
+        }
+
+        // Skip number input
+        if (inputClass == InputType.TYPE_CLASS_NUMBER ||
+            inputClass == InputType.TYPE_CLASS_PHONE) {
+            return false
+        }
+
+        return true
+    }
+
+    /**
+     * Checks if language uses CJK script (no space-based word boundaries).
+     *
+     * @param language Language code (e.g., "zh", "ja", "ko", "th")
+     * @return true if language is CJK/Thai
+     */
+    private fun isCJKLanguage(language: String): Boolean {
+        val langLower = language.lowercase()
+        return langLower.startsWith("zh") ||  // Chinese
+               langLower.startsWith("ja") ||  // Japanese
+               langLower.startsWith("ko") ||  // Korean
+               langLower.startsWith("th")     // Thai
+    }
+
+    /**
+     * Checks if text contains CJK characters.
+     * Used as secondary check even when language setting is non-CJK.
+     *
+     * @param text Text to check
+     * @return true if text contains CJK characters
+     */
+    private fun containsCJKCharacters(text: String): Boolean {
+        return text.any { char ->
+            try {
+                // UnicodeBlock.of (API 1) instead of UnicodeScript.of (API 24).
+                Character.UnicodeBlock.of(char.code) in CJK_BLOCKS
+            } catch (e: Exception) {
+                false
+            }
+        }
+    }
+}

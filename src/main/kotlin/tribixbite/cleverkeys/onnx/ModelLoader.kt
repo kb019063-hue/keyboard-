@@ -1,0 +1,435 @@
+package tribixbite.cleverkeys.onnx
+
+import ai.onnxruntime.OnnxTensor
+import ai.onnxruntime.OrtEnvironment
+import ai.onnxruntime.OrtSession
+import android.content.Context
+import android.net.Uri
+import android.util.Log
+import java.io.File
+import java.io.FileInputStream
+import java.io.IOException
+import java.io.InputStream
+import tribixbite.cleverkeys.SettingsRanges
+
+/**
+ * Minimum plausible size (bytes) for a valid ONNX model stream. Any real
+ * encoder/decoder model is far larger; a read that returns fewer bytes than
+ * this indicates a truncated or corrupt stream (e.g. an LFS pointer file or a
+ * short read that wasn't fully drained) and must fail loudly rather than be
+ * handed to ORT as a malformed model.
+ */
+internal const val MIN_MODEL_SIZE_BYTES = 1024
+
+/**
+ * Fully read a model stream into a byte array, failing fast on implausibly
+ * small results.
+ *
+ * Uses [InputStream.readBytes], which loops until EOF — unlike a single
+ * `read(buffer)` sized by [InputStream.available], `available()` is only a hint
+ * and can under-report (returning 0 or a partial count) for content URIs,
+ * compressed streams, or slow sources, silently truncating the model.
+ *
+ * @param stream Source stream (NOT closed here — caller owns lifecycle).
+ * @param sourceDescription Human-readable origin for error messages.
+ * @return The fully read model bytes.
+ * @throws IOException if fewer than [MIN_MODEL_SIZE_BYTES] bytes were read.
+ */
+internal fun readModelBytes(stream: InputStream, sourceDescription: String): ByteArray {
+    val bytes = stream.readBytes()
+    if (bytes.size < MIN_MODEL_SIZE_BYTES) {
+        throw IOException(
+            "Model read from $sourceDescription is implausibly small " +
+                "(${bytes.size} bytes < $MIN_MODEL_SIZE_BYTES) — truncated or corrupt stream"
+        )
+    }
+    return bytes
+}
+
+/**
+ * Filename shape of the optimized-model cache files that builds prior to 2026-09-09 wrote
+ * into the app cache dir via `SessionOptions.setOptimizedModelFilePath`. Nothing ever read
+ * those files back ([ModelLoader.loadModel] always hands `createSession` the original model
+ * bytes), so the write was pure wasted I/O and disk on every keyboard start. The constants
+ * survive only so [deleteStaleOptimizedModelCache] can reclaim what old builds left behind.
+ */
+internal const val ORT_CACHE_FILE_PREFIX = "onnx_optimized_"
+internal const val ORT_CACHE_FILE_SUFFIX = ".ort"
+
+/**
+ * Delete stale optimized-model (`.ort`) files that pre-2026-09-09 builds wrote into
+ * [cacheDir] and never consumed. Matches only regular files named
+ * `onnx_optimized_*.ort`; anything else in the cache dir is left untouched.
+ *
+ * Pure `java.io` (no `android.*`) so the contract is testable under `runPureTests`.
+ *
+ * @return Names of the files actually deleted (empty when the dir is missing/empty).
+ */
+internal fun deleteStaleOptimizedModelCache(cacheDir: File): List<String> =
+    (cacheDir.listFiles() ?: emptyArray())
+        .filter {
+            it.isFile &&
+                it.name.startsWith(ORT_CACHE_FILE_PREFIX) &&
+                it.name.endsWith(ORT_CACHE_FILE_SUFFIX)
+        }
+        .mapNotNull { file -> if (file.delete()) file.name else null }
+
+/**
+ * Model loading and ONNX session initialization.
+ *
+ * Responsibilities:
+ * - Load model files from assets or external URIs
+ * - Create optimized ONNX sessions with hardware acceleration
+ * - Configure execution providers (XNNPACK, NNAPI, CPU)
+ * - Session options optimization (graph optimization, memory patterns)
+ * - Validation of loaded sessions
+ *
+ * Hardware Acceleration Fallback Chain (see [tryEnableHardwareAcceleration] for the
+ * authoritative order — XNNPACK is tried FIRST, not NNAPI):
+ * 1. XNNPACK - optimized CPU inference; the most stable provider on the devices we ship to
+ * 2. NNAPI (Neural Networks API) - NPU/DSP/GPU; faster in principle but prone to 'Session ID'
+ *    crashes, so it is only reached when XNNPACK fails to attach
+ * 3. CPU - basic fallback
+ *
+ * QNN (Qualcomm Neural Network) is NOT implemented: it would require the QNN AAR plus the
+ * per-SoC backend libraries, none of which are bundled.
+ *
+ * Thread Safety: This class is stateless and thread-safe.
+ */
+class ModelLoader(
+    private val context: Context,
+    private val ortEnvironment: OrtEnvironment
+) {
+
+    companion object {
+        private const val TAG = "ModelLoader"
+    }
+
+    init {
+        // Reclaim the onnx_optimized_*.ort files that builds prior to 2026-09-09 wrote on
+        // every load and never read back (see deleteStaleOptimizedModelCache).
+        val purged = deleteStaleOptimizedModelCache(context.cacheDir)
+        if (purged.isNotEmpty()) {
+            Log.i(TAG, "Deleted stale optimized-model cache files: $purged")
+        }
+    }
+
+    /**
+     * Result of model loading operation.
+     *
+     * @param session Loaded ONNX session ready for inference
+     * @param executionProvider Name of execution provider being used
+     * @param modelSizeBytes Size of loaded model in bytes
+     */
+    data class LoadResult(
+        val session: OrtSession,
+        val executionProvider: String,
+        val modelSizeBytes: Long
+    )
+
+    /**
+     * Load ONNX model and create optimized session.
+     *
+     * @param modelPath Asset path (e.g., "models/encoder.onnx") or content URI
+     * @param sessionName Human-readable name for logging (e.g., "encoder", "decoder")
+     * @param enableHardwareAcceleration Whether to attempt hardware acceleration
+     * @param xnnpackThreads Number of threads for XNNPACK (1-8, default 2)
+     * @return LoadResult with session and metadata
+     * @throws RuntimeException if loading fails
+     */
+    fun loadModel(
+        modelPath: String,
+        sessionName: String,
+        enableHardwareAcceleration: Boolean = true,
+        xnnpackThreads: Int = 2
+    ): LoadResult {
+        try {
+            // Load model bytes
+            val modelData = loadModelBytes(modelPath)
+            Log.d(TAG, "Loaded $sessionName model: ${modelData.size} bytes from $modelPath")
+            return loadModel(modelData, sessionName, enableHardwareAcceleration, xnnpackThreads)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load $sessionName model from $modelPath", e)
+            throw RuntimeException("Model loading failed: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Create an optimized session directly from model bytes the caller already holds.
+     *
+     * The path-based [loadModel] is this function plus a read. It exists separately because a
+     * model delivered by a language pack must be **hash-verified before ORT sees it**
+     * (`CtcPackModel`), and re-opening the file after the check would reintroduce exactly the
+     * time-of-check/time-of-use window the verification is there to close. Handing the verified
+     * array straight to ORT means the bytes hashed are the bytes parsed.
+     *
+     * @param modelData Model bytes, already read and (where applicable) verified.
+     * @param sessionName Human-readable name for logging.
+     * @param enableHardwareAcceleration Whether to attempt hardware acceleration.
+     * @param xnnpackThreads Number of threads for XNNPACK (1-8).
+     * @return LoadResult with session and metadata.
+     * @throws RuntimeException if session creation fails.
+     */
+    fun loadModel(
+        modelData: ByteArray,
+        sessionName: String,
+        enableHardwareAcceleration: Boolean = true,
+        xnnpackThreads: Int = 2
+    ): LoadResult {
+        try {
+            // Create optimized session options
+            val sessionOptions = createOptimizedSessionOptions()
+
+            // Try hardware acceleration if enabled
+            val executionProvider = if (enableHardwareAcceleration) {
+                tryEnableHardwareAcceleration(sessionOptions, sessionName, xnnpackThreads)
+            } else {
+                "CPU"
+            }
+
+            // Create session from model bytes
+            val session = ortEnvironment.createSession(modelData, sessionOptions)
+
+            Log.i(TAG, "✅ $sessionName session created successfully (${executionProvider})")
+
+            return LoadResult(
+                session = session,
+                executionProvider = executionProvider,
+                modelSizeBytes = modelData.size.toLong()
+            )
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to create $sessionName session from ${modelData.size} bytes", e)
+            throw RuntimeException("Model loading failed: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Load model bytes from assets or external URI.
+     *
+     * Supports:
+     * - Asset paths: "models/encoder.onnx"
+     * - Content URIs: "content://..."
+     * - File paths: "/sdcard/models/encoder.onnx"
+     *
+     * @param modelPath Path to model file
+     * @return Model bytes
+     * @throws IOException if file cannot be read
+     */
+    private fun loadModelBytes(modelPath: String): ByteArray {
+        val inputStream: InputStream = when {
+            // Content URI (e.g., from file picker)
+            modelPath.startsWith("content://") -> {
+                Log.d(TAG, "Loading external ONNX model from URI: $modelPath")
+                val uri = Uri.parse(modelPath)
+                context.contentResolver.openInputStream(uri)
+                    ?: throw IOException("Cannot open input stream for URI: $modelPath")
+            }
+
+            // External file path
+            modelPath.startsWith("/") -> {
+                Log.d(TAG, "Loading external ONNX model from file path: $modelPath")
+                val file = File(modelPath)
+                if (!file.exists()) {
+                    throw IOException("External model file does not exist: $modelPath")
+                }
+                if (!file.canRead()) {
+                    throw IOException("Cannot read external model file: $modelPath")
+                }
+                FileInputStream(file)
+            }
+
+            // Asset path
+            else -> {
+                context.assets.open(modelPath)
+            }
+        }
+
+        // Read all bytes from input stream. Uses readModelBytes (readBytes loop)
+        // rather than sizing by available(), which can under-report and truncate.
+        return inputStream.use { stream ->
+            readModelBytes(stream, modelPath)
+        }
+    }
+
+    /**
+     * Create optimized session options for inference.
+     *
+     * Optimizations:
+     * - Graph optimization level: ALL_OPT (operator fusion, layout transforms)
+     * - Memory pattern optimization for repeated inference
+     * - Intra-op thread count: auto-detect optimal for device
+     *
+     * NO optimized-model disk cache: until 2026-09-09 this also called
+     * `setOptimizedModelFilePath`, which made ORT serialize an optimized copy of the model
+     * into cacheDir on EVERY load while nothing ever read it back ([loadModel] always feeds
+     * `createSession` the original bytes) — wasted I/O and disk, not "faster subsequent
+     * loads" as the old comment claimed. A genuine read-back cache was rejected because the
+     * optimized graph bakes in whichever execution providers were attached when it was
+     * written (XNNPACK/NNAPI/CPU varies per device and per settings) and freshness cannot be
+     * keyed safely for asset (no mtime) or content-URI models. Guarded by
+     * `ModelLoaderOrtCacheTest`; the loader's `init` purges files old builds left behind.
+     *
+     * @return Configured SessionOptions
+     */
+    private fun createOptimizedSessionOptions(): OrtSession.SessionOptions {
+        val sessionOptions = OrtSession.SessionOptions()
+
+        // OPTIMIZATION 1: Maximum graph optimization level
+        sessionOptions.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+
+        // OPTIMIZATION 2: Let ONNX Runtime determine optimal thread count
+        sessionOptions.setIntraOpNumThreads(0) // Auto-detect
+
+        // OPTIMIZATION 3: Memory pattern optimization for repeated inference
+        sessionOptions.setMemoryPatternOptimization(true)
+
+        return sessionOptions
+    }
+
+    /**
+     * Try to enable hardware acceleration with fallback chain.
+     *
+     * Attempts execution providers in order:
+     * 1. XNNPACK (optimized CPU) — first because it is the most stable of the three; it attaches
+     *    on every device and never produces the NNAPI session failures below.
+     * 2. NNAPI (NPU/DSP/GPU) — only reached if XNNPACK could not attach. It can be faster, but
+     *    is prone to 'Session ID' crashes on some vendor drivers, which is why it is not first.
+     * 3. CPU (fallback)
+     *
+     * QNN is deliberately absent: implementing it needs the QNN AAR and per-SoC backend
+     * libraries that are not bundled, so there is nothing to attempt.
+     *
+     * @param sessionOptions Session options to configure
+     * @param sessionName Session name for logging
+     * @param xnnpackThreads Number of threads for XNNPACK (1-8)
+     * @return Name of execution provider being used
+     */
+    private fun tryEnableHardwareAcceleration(
+        sessionOptions: OrtSession.SessionOptions,
+        sessionName: String,
+        xnnpackThreads: Int
+    ): String {
+        // Try XNNPACK first (optimized CPU inference) - Most stable
+        if (tryXnnpack(sessionOptions, sessionName, xnnpackThreads)) {
+            return "XNNPACK"
+        }
+
+        // Try NNAPI (Android Neural Networks API) - Fast but prone to 'Session ID' crashes
+        if (tryNnapi(sessionOptions, sessionName)) {
+            return "NNAPI"
+        }
+
+        // QNN: not implemented — would need the QNN AAR + per-SoC backend libs, neither bundled.
+
+        // Fallback to CPU
+        Log.w(TAG, "⚠️ Hardware acceleration unavailable for $sessionName, using CPU")
+        return "CPU"
+    }
+
+    /**
+     * Try to enable NNAPI execution provider.
+     */
+    private fun tryNnapi(sessionOptions: OrtSession.SessionOptions, sessionName: String): Boolean {
+        return try {
+            sessionOptions.addNnapi()
+            Log.i(TAG, "✅ NNAPI enabled for $sessionName")
+            true
+        } catch (e: Exception) {
+            Log.d(TAG, "NNAPI not available for $sessionName: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Try to enable XNNPACK execution provider.
+     *
+     * @param sessionOptions Session options to configure
+     * @param sessionName Session name for logging
+     * @param threadCount Number of threads (1-8, default 2)
+     */
+    private fun tryXnnpack(
+        sessionOptions: OrtSession.SessionOptions,
+        sessionName: String,
+        threadCount: Int
+    ): Boolean {
+        return try {
+            // Configure XNNPACK with user-specified thread count
+            val threads = threadCount.coerceIn(SettingsRanges.ONNX_XNNPACK_THREADS)
+            val options = mapOf("intra_op_num_threads" to threads.toString())
+            sessionOptions.addXnnpack(options)
+            sessionOptions.setIntraOpNumThreads(threads)
+            Log.i(TAG, "✅ XNNPACK enabled for $sessionName with $threads threads")
+            true
+        } catch (e: Exception) {
+            Log.d(TAG, "XNNPACK not available for $sessionName: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Validate that a session is ready for inference.
+     *
+     * Checks:
+     * - Session has expected inputs and outputs
+     * - Input/output names match model graph
+     * - Session is not closed
+     *
+     * @param session Session to validate
+     * @param expectedInputs Expected input names
+     * @param expectedOutputs Expected output names
+     * @throws IllegalStateException if validation fails
+     */
+    fun validateSession(
+        session: OrtSession,
+        expectedInputs: List<String>,
+        expectedOutputs: List<String>
+    ) {
+        try {
+            val inputNames = session.inputNames
+            val outputNames = session.outputNames
+
+            // Check inputs
+            val missingInputs = expectedInputs.filter { it !in inputNames }
+            if (missingInputs.isNotEmpty()) {
+                throw IllegalStateException(
+                    "Session missing expected inputs: $missingInputs. " +
+                            "Found: $inputNames"
+                )
+            }
+
+            // Check outputs
+            val missingOutputs = expectedOutputs.filter { it !in outputNames }
+            if (missingOutputs.isNotEmpty()) {
+                throw IllegalStateException(
+                    "Session missing expected outputs: $missingOutputs. " +
+                            "Found: $outputNames"
+                )
+            }
+
+            Log.d(TAG, "✅ Session validation passed")
+        } catch (e: Exception) {
+            throw IllegalStateException("Session validation failed: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Get session metadata for debugging.
+     *
+     * @param session Session to inspect
+     * @return Map of metadata key-value pairs
+     */
+    fun getSessionMetadata(session: OrtSession): Map<String, String> {
+        return try {
+            mapOf(
+                "input_count" to session.inputNames.size.toString(),
+                "output_count" to session.outputNames.size.toString(),
+                "inputs" to session.inputNames.toString(),
+                "outputs" to session.outputNames.toString()
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to get session metadata: ${e.message}")
+            emptyMap()
+        }
+    }
+}

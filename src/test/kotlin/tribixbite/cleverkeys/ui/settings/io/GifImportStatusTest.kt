@@ -1,0 +1,159 @@
+package tribixbite.cleverkeys.ui.settings.io
+
+import com.google.common.truth.Truth.assertThat
+import com.google.common.truth.Truth.assertWithMessage
+import org.junit.Test
+import java.io.File
+import tribixbite.cleverkeys.EnglishResourceText
+
+/**
+ * ARC-075 — the GIF import status is a TYPE, not a message that happens to be English.
+ *
+ * `GifPanelSection` used to decide whether an import status was a failure by testing
+ * `status.startsWith("Error")` against a string produced three layers away in
+ * `SettingsGifHandlers`. That coupling is invisible to both ends: the producer is free to reword
+ * its message, and — the case that actually bites — the moment those messages are localized (or
+ * a provider hands back a non-English `Exception.message`, which happens TODAY on a localized
+ * ROM) the section renders a failure in the success colour with no code change anywhere.
+ *
+ * The fix is a typed status carrying the message verbatim, so the section branches on the
+ * variant and never reads the text. These tests pin both halves:
+ *
+ *  - **behaviour** — classification comes from the import RESULT type, so a French/Greek/Turkish
+ *    failure message classifies exactly like an English one, and the message survives untouched;
+ *  - **wiring** — the section reads no message text, and the producer emits the typed value.
+ *
+ * Pure: `GifImportStatus` and `GifPackImportResult` are plain Kotlin types (their enclosing
+ * files reach Android, but these classes do not), so `runPureTests` exercises the real thing.
+ */
+class GifImportStatusTest {
+
+    private fun source(relative: String): String {
+        val f = File("src/main/kotlin", relative)
+        assertWithMessage("expected source file to exist: ${f.path} (run from project root)")
+            .that(f.isFile).isTrue()
+        return f.readText()
+    }
+
+    // ── behaviour: the variant decides, in every language ────────────────────────────
+
+    /**
+     * The regression itself. A failure is classified by its result VARIANT: whatever text the
+     * log message carries (English, or a ROM-localized platform message wrapped by
+     * `PackImportFailure.fromException`), the status is Failed.
+     *
+     * Since 2026-09-30 the user sees the typed reason rendered through [ResultText], never the
+     * raw message: the English resolver here yields the `res/values` sentence for the reason.
+     */
+    @Test
+    fun `a failure classifies as a failure whatever language its message is in`() {
+        val messages = listOf(
+            "Échec : impossible d'ouvrir le fichier",      // fr
+            "Σφάλμα: μη έγκυρο manifest.json",             // el
+            "Dosya açılamıyor",                            // tr
+            "无法打开文件",                                  // zh
+        )
+        for (message in messages) {
+            val failure = tribixbite.cleverkeys.PackImportFailure.Io(
+                tribixbite.cleverkeys.IoFailureReason.FILE_NOT_FOUND, message
+            )
+            val status = GifImportStatus.forImportResult(
+                tribixbite.cleverkeys.gif.GifPackImportResult.Error(failure), EnglishResourceText
+            )
+            assertWithMessage(
+                "ARC-075: '$message' is a failed import and must render as one; the pre-fix " +
+                    "rule (startsWith(\"Error\")) reads it as a success and paints it in the " +
+                    "primary colour."
+            ).that(status).isInstanceOf(GifImportStatus.Failed::class.java)
+            assertWithMessage("the pre-fix English-prefix rule misses this message entirely")
+                .that(message.startsWith("Error")).isFalse()
+            assertWithMessage("the user sees the localized reason, not the raw log message")
+                .that(status.message).isEqualTo("The file could not be found or opened.")
+        }
+    }
+
+    @Test
+    fun `a typed GIF failure renders its own localized sentence`() {
+        val status = GifImportStatus.forImportResult(
+            tribixbite.cleverkeys.gif.GifPackImportResult.Error(
+                tribixbite.cleverkeys.PackImportFailure.MissingMember("manifest.json")
+            ),
+            EnglishResourceText,
+        )
+        assertThat(status).isInstanceOf(GifImportStatus.Failed::class.java)
+        assertThat(status.message).isEqualTo("The pack does not contain manifest.json.")
+    }
+
+    @Test
+    fun `a successful import is never a failure, whatever the pack is called`() {
+        val ok = GifImportStatus.forImportResult(
+            tribixbite.cleverkeys.gif.GifPackImportResult.Success("err.pack", "Error Handling", 3),
+            EnglishResourceText,
+        )
+        assertThat(ok).isInstanceOf(GifImportStatus.Ok::class.java)
+        assertWithMessage("a pack NAME must not be able to steer the render branch")
+            .that(ok.message).contains("Error Handling")
+
+        val installed = GifImportStatus.forImportResult(
+            tribixbite.cleverkeys.gif.GifPackImportResult.AlreadyInstalled("err.pack", "Error"),
+            EnglishResourceText,
+        )
+        assertThat(installed).isInstanceOf(GifImportStatus.Ok::class.java)
+    }
+
+    @Test
+    fun `success copy comes from resources with the GIF count pluralized`() {
+        // 2026-09-29 i18n sweep: the Ok messages are string resources, so a translated locale
+        // shows translated copy. Resolved here against the English res/values text.
+        fun success(count: Int) = GifImportStatus.forImportResult(
+            tribixbite.cleverkeys.gif.GifPackImportResult.Success("p.id", "Cats", count),
+            EnglishResourceText,
+        ).message
+        assertThat(success(1)).isEqualTo("Imported: Cats (1 GIF)")
+        assertThat(success(12)).isEqualTo("Imported: Cats (12 GIFs)")
+
+        val installed = GifImportStatus.forImportResult(
+            tribixbite.cleverkeys.gif.GifPackImportResult.AlreadyInstalled("p.id", "Cats"),
+            EnglishResourceText,
+        )
+        assertThat(installed.message).isEqualTo("Pack 'Cats' already installed")
+    }
+
+    @Test
+    fun `progress and failure are distinguishable without reading the text`() {
+        assertThat(GifImportStatus.Ok("Importing…")).isInstanceOf(GifImportStatus.Ok::class.java)
+        assertThat(GifImportStatus.Failed("boom").message).isEqualTo("boom")
+    }
+
+    // ── wiring: neither end may read the message to decide anything ──────────────────
+
+    @Test
+    fun `the section branches on the status type and renders the message verbatim`() {
+        val section = source("tribixbite/cleverkeys/ui/settings/sections/GifPanelSection.kt")
+
+        assertWithMessage(
+            "ARC-075: the section must not classify a status by its English text — that couples " +
+                "a render decision to copy produced in SettingsGifHandlers."
+        ).that(section).doesNotContain("startsWith(\"Error\")")
+
+        assertWithMessage("the error branch must be selected by the status VARIANT")
+            .that(section).contains("GifImportStatus.Failed")
+
+        assertWithMessage(
+            "and the message must be rendered as produced — no prefix stripping, no rewording."
+        ).that(section).contains("status.message")
+    }
+
+    @Test
+    fun `the producer emits the typed status, not a prefixed string`() {
+        val handlers = source("tribixbite/cleverkeys/ui/settings/io/SettingsGifHandlers.kt")
+
+        assertWithMessage(
+            "ARC-075: every gifImportStatus assignment must carry the typed value; a raw string " +
+                "assignment is how the English-prefix protocol got established in the first place."
+        ).that(handlers).doesNotContain("gifImportStatus = \"")
+
+        assertWithMessage("the failure paths must construct the failure variant explicitly")
+            .that(handlers).contains("GifImportStatus.Failed(")
+    }
+}

@@ -1,0 +1,353 @@
+package tribixbite.cleverkeys
+
+import com.google.common.truth.Truth.assertThat
+import com.google.common.truth.Truth.assertWithMessage
+import org.junit.Test
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
+import tribixbite.cleverkeys.backup.BackupSourceInfo
+import tribixbite.cleverkeys.backup.ChangeType
+import tribixbite.cleverkeys.backup.PrefValue
+import tribixbite.cleverkeys.backup.SettingsChange
+
+/**
+ * Pure JVM tests for the import-preview render helpers in
+ * `BackupRestorePreviewDialogs.kt`. The helpers are `internal` (changed
+ * from `private` to enable testing) so direct unit tests can verify
+ * the JSON-blob diff output without spinning up a Compose runtime.
+ *
+ * Covers:
+ *   - Single-side `renderJsonBlobSummary` for layouts, generic arrays,
+ *     objects, malformed input.
+ *   - Two-side `renderJsonBlobDelta` for layouts (added / removed /
+ *     unchanged) + extra_keys-style objects + non-matching shapes.
+ *   - `renderDelta` integration when both sides are JsonBlob.
+ *   - Truncation of long name lists.
+ *   - ARC-036 `renderBackupSourceNotice` for encrypted vs plaintext sources.
+ *
+ * Since the 2026-09-29 i18n sweep the helpers take a [ResultText]; tests resolve through
+ * [EnglishResourceText], so the English copy in res/values is what they pin.
+ */
+class BackupRestorePreviewRenderTest {
+
+    // ── renderJsonBlobSummary (single-side, ADDED rows) ──────────────────
+
+    @Test
+    fun layoutsSummary_listsLayoutNames() {
+        val raw = """[{"name":"qwerty"},{"name":"dvorak"}]"""
+        assertThat(renderJsonBlobSummary(raw, EnglishResourceText))
+            .isEqualTo("[2 layouts: qwerty, dvorak]")
+    }
+
+    @Test
+    fun layoutsSummary_singularGrammar() {
+        val raw = """[{"name":"qwerty"}]"""
+        assertThat(renderJsonBlobSummary(raw, EnglishResourceText))
+            .isEqualTo("[1 layout: qwerty]")
+    }
+
+    @Test
+    fun layoutsSummary_truncatesLongNameList() {
+        val raw = (1..20).joinToString(",", "[", "]") {
+            """{"name":"layout_with_long_name_$it"}"""
+        }
+        val out = renderJsonBlobSummary(raw, EnglishResourceText)
+        // Should mention the count and have a "+N more" suffix when truncated.
+        assertThat(out).startsWith("[20 layouts:")
+        assertThat(out).contains("+")
+        assertThat(out).contains("more")
+    }
+
+    @Test
+    fun genericArraySummary_falsBackToItemCount() {
+        // Array of strings — no `name` field — falls to generic count.
+        val raw = """["a","b","c"]"""
+        assertThat(renderJsonBlobSummary(raw, EnglishResourceText)).isEqualTo("[3 items]")
+    }
+
+    @Test
+    fun emptyArraySummary() {
+        assertThat(renderJsonBlobSummary("[]", EnglishResourceText)).isEqualTo("[empty]")
+    }
+
+    @Test
+    fun jsonObjectSummary_showsKeyCount() {
+        val raw = """{"key_dollar":[5,2],"key_euro":[5,1]}"""
+        assertThat(renderJsonBlobSummary(raw, EnglishResourceText)).isEqualTo("{2 keys}")
+    }
+
+    @Test
+    fun malformedJsonSummary_fallsBackToGenericLabel() {
+        assertThat(renderJsonBlobSummary("not json at all", EnglishResourceText))
+            .isEqualTo("(JSON change)")
+    }
+
+    // ── renderJsonBlobDelta (both sides, MODIFIED rows) ──────────────────
+
+    @Test
+    fun layoutsDelta_addedAndRemoved() {
+        val cur = """[{"name":"qwerty"},{"name":"dvorak"}]"""
+        val prop = """[{"name":"qwerty"},{"name":"azerty"}]"""
+        val out = renderJsonBlobDelta(cur, prop, EnglishResourceText)
+        assertThat(out).contains("+ azerty")
+        assertThat(out).contains("\u2212 dvorak")     // minus sign
+        assertThat(out).contains("(1 unchanged)")
+    }
+
+    @Test
+    fun layoutsDelta_onlyAdditions() {
+        val cur = """[{"name":"qwerty"}]"""
+        val prop = """[{"name":"qwerty"},{"name":"dvorak"},{"name":"azerty"}]"""
+        val out = renderJsonBlobDelta(cur, prop, EnglishResourceText)
+        assertThat(out).contains("+ ")
+        assertThat(out).doesNotContain("\u2212")     // no removed
+        assertThat(out).contains("(1 unchanged)")
+    }
+
+    @Test
+    fun layoutsDelta_onlyRemovals() {
+        val cur = """[{"name":"qwerty"},{"name":"dvorak"},{"name":"azerty"}]"""
+        val prop = """[{"name":"qwerty"}]"""
+        val out = renderJsonBlobDelta(cur, prop, EnglishResourceText)
+        assertThat(out).contains("\u2212")            // removed marker
+        assertThat(out).doesNotContain("+ ")          // no added
+    }
+
+    @Test
+    fun layoutsDelta_sameNamesDifferentInternalContent_reportsInternalChanges() {
+        // Same layout names, same key count, but a non-`keys` field differs
+        // (e.g. `script` tag, key glyphs). Deep diff buckets these as
+        // "internal changes" rather than reporting per-layout key counts.
+        val cur = """[
+            {"name":"qwerty","keys":[1,2,3],"script":"en"},
+            {"name":"dvorak","keys":[1,2],"script":"en"}
+        ]""".trimIndent()
+        val prop = """[
+            {"name":"qwerty","keys":[1,2,3],"script":"en-US"},
+            {"name":"dvorak","keys":[1,2],"script":"en"}
+        ]""".trimIndent()
+        val out = renderJsonBlobDelta(cur, prop, EnglishResourceText)
+        assertThat(out).contains("internal changes")
+        assertThat(out).contains("1 unchanged")  // dvorak unchanged
+    }
+
+    @Test
+    fun layoutsDelta_keyCountChanged_reportsPerLayoutCountDelta() {
+        // When a shared layout's key count changes, report the delta inline.
+        val cur = """[{"name":"qwerty","keys":[1,2,3]}]"""
+        val prop = """[{"name":"qwerty","keys":[1,2,3,4,5]}]"""
+        val out = renderJsonBlobDelta(cur, prop, EnglishResourceText)
+        assertThat(out).contains("qwerty: 3\u21925 keys")  // 3→5 keys
+    }
+
+    @Test
+    fun objectDelta_addedAndRemovedKeys() {
+        val cur = """{"key_dollar":[5,2],"key_euro":[5,1]}"""
+        val prop = """{"key_dollar":[5,2],"key_pound":[5,3]}"""
+        val out = renderJsonBlobDelta(cur, prop, EnglishResourceText)
+        assertThat(out).contains("+ key_pound")
+        assertThat(out).contains("\u2212 key_euro")
+        assertThat(out).contains("(1 unchanged)")
+    }
+
+    @Test
+    fun objectDelta_valueOnlyChange_reportedAsChanged() {
+        val cur = """{"key_dollar":[5,2]}"""
+        val prop = """{"key_dollar":[5,3]}"""
+        val out = renderJsonBlobDelta(cur, prop, EnglishResourceText)
+        assertThat(out).contains("~ key_dollar")
+    }
+
+    @Test
+    fun mixedShapeDelta_fallsBackToGenericLabel() {
+        // current is array, proposed is object → no clean diff path.
+        val out = renderJsonBlobDelta("""[1,2,3]""", """{"a":1}""", EnglishResourceText)
+        assertThat(out).isEqualTo("(JSON change)")
+    }
+
+    @Test
+    fun malformedJsonDelta_fallsBackToGenericLabel() {
+        val out = renderJsonBlobDelta("not json", """{"a":1}""", EnglishResourceText)
+        assertThat(out).isEqualTo("(JSON change)")
+    }
+
+    // ── per-layout theme binding in the real `layouts` blob shape ────────────
+
+    /**
+     * The stored `layouts` preference is an array of plain names and `{"kind":…}` objects —
+     * not the `{"name","keys"}` shape above — and a theme binding is a field INSIDE an entry.
+     * Before the binding was rendered, a backup that only re-bound themes showed the generic
+     * "[2 items → 2 items]", hiding exactly what the import would change.
+     */
+    @Test
+    fun layoutsDelta_realShape_reportsEachThemeBindingChange() {
+        val themedXml = "<keyboard name=\\\"Themed\\\" theme=\\\"rosepine\\\"><row/></keyboard>"
+        val cur = """["latn_qwerty_us",{"kind":"custom","xml":"$themedXml"},{"kind":"system"}]"""
+        val prop = """[{"kind":"named","name":"latn_qwerty_us","theme":"cobalt"},""" +
+            """{"kind":"custom","xml":"$themedXml","theme":"none"},{"kind":"system","theme":"none"}]"""
+
+        val out = renderJsonBlobDelta(cur, prop, EnglishResourceText)
+
+        assertThat(out).contains("latn_qwerty_us: theme Follow global theme \u2192 cobalt")
+        assertThat(out).contains("Themed: theme rosepine \u2192 Follow global theme")
+        assertWithMessage("System entry: follow-global either way (no XML default) — no change to report")
+            .that(out).doesNotContain("System")
+        assertThat(out).doesNotContain("items")
+    }
+
+    @Test
+    fun layoutsDelta_realShape_onlyBoundNamedEntries_isNotMistakenForTheNameKeysShape() {
+        // Every entry a bound named object: these also carry a `name`, but they are the stored
+        // shape and must be diffed by binding, not by the legacy name/key-count path.
+        val cur = """[{"kind":"named","name":"latn_qwerty_us","theme":"dark"}]"""
+        val prop = """[{"kind":"named","name":"latn_qwerty_us","theme":"rosepine"}]"""
+        assertThat(renderJsonBlobDelta(cur, prop, EnglishResourceText))
+            .isEqualTo("latn_qwerty_us: theme dark \u2192 rosepine")
+    }
+
+    @Test
+    fun layoutsDelta_realShape_withoutThemeChangesKeepsTheGenericCount() {
+        val out = renderJsonBlobDelta("""["latn_qwerty_us"]""", """["latn_qwerty_us",{"kind":"system"}]""", EnglishResourceText)
+        assertThat(out).isEqualTo("[1 \u2192 2 items]")
+    }
+
+    // ── renderDelta integration ──────────────────────────────────────────
+
+    @Test
+    fun renderDelta_bothJsonBlob_usesStructuredDiff() {
+        val change = SettingsChange(
+            key = "layouts",
+            current = PrefValue.JsonBlob("""[{"name":"qwerty"}]"""),
+            proposed = PrefValue.JsonBlob("""[{"name":"qwerty"},{"name":"dvorak"}]"""),
+            type = ChangeType.MODIFIED,
+        )
+        val out = renderDelta(change, EnglishResourceText)
+        // Should NOT contain the "→" separator since the diff is presented
+        // as a single combined string for JsonBlob pairs.
+        assertThat(out).doesNotContain("\u2192")
+        assertThat(out).contains("+ dvorak")
+    }
+
+    @Test
+    fun renderDelta_unsetToJsonBlob_usesAsymmetricFallthrough() {
+        // ADDED row: current is Unset, proposed is JsonBlob. Fall through
+        // to the per-side render so the dialog shows "(none) → [N layouts]".
+        val change = SettingsChange(
+            key = "layouts",
+            current = PrefValue.Unset,
+            proposed = PrefValue.JsonBlob("""[{"name":"qwerty"}]"""),
+            type = ChangeType.ADDED,
+        )
+        val out = renderDelta(change, EnglishResourceText)
+        assertThat(out).contains("(none)")
+        assertThat(out).contains("\u2192")
+        assertThat(out).contains("[1 layout: qwerty]")
+    }
+
+    // ── ARC-036: import-source provenance notice ─────────────────────────
+
+    /** Fixed-zone formatter so the assertion is independent of the runner's timezone. */
+    private val utcFormat: (Long) -> String = { ms ->
+        SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
+            .apply { timeZone = TimeZone.getTimeZone("UTC") }
+            .format(java.util.Date(ms))
+    }
+
+    @Test
+    fun sourceNotice_encrypted_showsLockBadgeAndExportTimestamp() {
+        // The replay-risk acceptance (backup-encryption design §7 residual #2) rests on the
+        // user SEEING how old the backup is before applying it. 2026-07-17 12:34:00 UTC.
+        val notice = renderBackupSourceNotice(
+            BackupSourceInfo.encrypted(1_784_291_640_000L), EnglishResourceText, utcFormat
+        )
+        assertThat(notice).contains("\uD83D\uDD12")
+        assertThat(notice).contains("Encrypted backup")
+        assertThat(notice).contains("2026-07-17 12:34")
+    }
+
+    @Test
+    fun sourceNotice_plaintext_showsTheReExportAdvisory() {
+        // Design §9: "Plaintext legacy file via UI → today's flow, plus a one-line notice."
+        val notice = renderBackupSourceNotice(BackupSourceInfo.PLAINTEXT, EnglishResourceText, utcFormat)
+        assertThat(notice).isEqualTo("Unencrypted backup — consider re-exporting encrypted.")
+    }
+
+    @Test
+    fun sourceNotice_plaintext_neverClaimsEncryption() {
+        val notice = renderBackupSourceNotice(BackupSourceInfo.PLAINTEXT, EnglishResourceText, utcFormat)
+        assertThat(notice).doesNotContain("\uD83D\uDD12")
+        assertThat(notice).doesNotContain("Encrypted")
+    }
+
+    @Test
+    fun sourceNotice_encryptedWithoutTimestamp_degradesToTheBadgeAlone() {
+        // Defensive branch: never render the literal "null" where a date belongs.
+        val notice = renderBackupSourceNotice(
+            BackupSourceInfo(encrypted = true, exportTimestampMs = null), EnglishResourceText, utcFormat
+        )
+        assertThat(notice).isEqualTo("\uD83D\uDD12 Encrypted backup")
+        assertThat(notice).doesNotContain("null")
+    }
+
+    @Test
+    fun sourceNotice_defaultFormatter_rendersAMinutePrecisionDate() {
+        // The production call site uses the default (device-timezone) formatter; assert its
+        // SHAPE without pinning a timezone, so this can't pass vacuously either.
+        val notice = renderBackupSourceNotice(BackupSourceInfo.encrypted(1_784_291_640_000L), EnglishResourceText)
+        assertThat(notice).containsMatch("""exported \d{4}-\d{2}-\d{2} \d{2}:\d{2}$""")
+    }
+
+    @Test
+    fun backupTimestampFormatter_isStableForAFixedInstantAndZone() {
+        val prior = TimeZone.getDefault()
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("UTC"))
+            assertThat(formatBackupTimestamp(1_784_291_640_000L)).isEqualTo("2026-07-17 12:34")
+        } finally {
+            TimeZone.setDefault(prior)
+        }
+    }
+
+    @Test
+    fun renderDelta_nonJsonBlob_preservesOldBehavior() {
+        // Regular int change → "current → proposed" (import_preview_value_change; single spaces
+        // since the 2026-09-29 i18n sweep — aapt collapses the old double spaces in a resource).
+        val change = SettingsChange(
+            key = "keyboard_height",
+            current = PrefValue.IntV(30),
+            proposed = PrefValue.IntV(27),
+            type = ChangeType.MODIFIED,
+        )
+        val out = renderDelta(change, EnglishResourceText)
+        assertThat(out).isEqualTo("30 \u2192 27")
+    }
+
+    @Test
+    fun learnedDataPreviewIsNotDroppedBetweenPlanDialogAndApply() {
+        val dialog = File(
+            "src/main/kotlin/tribixbite/cleverkeys/BackupRestorePreviewDialogs.kt"
+        ).readText()
+        assertThat(dialog).contains("LearnedDataPreviewCard(plan.learnedData)")
+        assertThat(dialog).contains("plan.learnedData.totalEntries")
+
+        val handler = File(
+            "src/main/kotlin/tribixbite/cleverkeys/ui/settings/io/SettingsDictionaryHandlers.kt"
+        ).readText()
+        assertThat(handler).contains("!plan.learnedData.hasEffect")
+
+        val manager = File(
+            "src/main/kotlin/tribixbite/cleverkeys/BackupRestoreManager.kt"
+        ).readText()
+        val applyBlock = manager
+            .substringAfter("fun applyDictImportPlan(")
+            .substringBefore("private fun readCurrentCustomWordsByLang")
+        assertThat(applyBlock).contains("plan.learnedData.rawJson")
+        assertThat(applyBlock).contains("let(::importLearnedDataFromJson)")
+        assertThat(applyBlock).contains("learnedBigramsImported = learned.bigrams")
+        assertThat(applyBlock).contains("learnedTrigramsImported = learned.trigrams")
+        assertThat(applyBlock).contains("learnedVocabularyImported = learned.vocabulary")
+        assertThat(applyBlock).contains("learnedDataIncomplete = learned.incomplete")
+    }
+}

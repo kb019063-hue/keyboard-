@@ -1,0 +1,851 @@
+package tribixbite.cleverkeys
+
+import android.content.Context
+import android.content.res.AssetManager
+import android.util.Log
+import org.json.JSONObject
+import tribixbite.cleverkeys.langpack.LanguagePackManager
+import tribixbite.cleverkeys.swipe.SwipeContractionPolicy
+import java.io.BufferedReader
+import java.io.File
+import java.io.InputStream
+import java.io.InputStreamReader
+
+/**
+ * Manages contraction mappings for apostrophe insertion in predictions.
+ *
+ * Handles two types of contractions:
+ * 1. Non-paired: apostrophe-free forms that map to single contractions
+ *    Example: "dont" -> "don't", "cant" -> "can't"
+ * 2. Paired: base words that have multiple contraction variants
+ *    Example: "well" -> ["we'll", "well"], "id" -> ["I'd", "id"]
+ *
+ * This class is extracted from CleverKeysService.java for better separation of concerns
+ * and testability (v1.32.341).
+ */
+class ContractionManager(private val context: Context) {
+    // Non-paired contractions: apostrophe-free form -> contraction with apostrophe
+    // Example: "dont" -> "don't", "wholl" -> "who'll"
+    private val nonPairedContractions: MutableMap<String, String> = mutableMapOf()
+
+    // Paired contractions: base word (valid English word) -> contraction variants
+    // Example: "its" -> ["it's"], "well" -> ["we'll"]
+    // These are words where the base form IS a valid word, so both forms should appear
+    private val pairedContractions: MutableMap<String, MutableList<String>> = mutableMapOf()
+
+    // Pairing frequency, BASE-scoped: base → (variant → frequency), from the `frequency` field of
+    // contraction_pairings.json (English only — the fr/it pairs files carry no frequency, and the
+    // binary store carries none). Base-scoped storage: the value that matters to the swipe
+    // overlay is the one listed for the surface the engine actually decoded. Since 2026-09-26
+    // every non-possessive variant carries ONE measured value file-wide (wordfreq zipf mapped
+    // onto en_enhanced.json's byte scale by `scripts/extract_apostrophe_words.py
+    // --en-pairing-frequencies`); before, the same contraction disagreed across bases ("she'd"
+    // 200 under "shed" but 211 under "she"; "we'll" 252 under "we"), which is why a
+    // variant-keyed lookup was never safe. Possessive values are still the upstream ones.
+    // Read by [tribixbite.cleverkeys.swipe.ContractionOverlay] (learning-system audit RC3).
+    private val pairedFrequencies: MutableMap<String, MutableMap<String, Int>> = mutableMapOf()
+
+    // Set of all known contractions (both non-paired and paired) for quick lookup
+    // Used to identify contractions in predictions and prevent unwanted autocorrect
+    private val knownContractions: MutableSet<String> = mutableSetOf()
+
+    private val assetManager: AssetManager = context.assets
+
+    /**
+     * Loads contraction mappings from assets/dictionaries/.
+     *
+     * OPTIMIZATION v1 (perftodos2.md Todo 4): Uses binary format for faster loading.
+     *
+     * Strategy:
+     * 1. Try binary format first (contractions.bin) - fastest
+     * 2. Fall back to JSON if binary doesn't exist or fails
+     *
+     * Binary format is 3-5x faster than JSON parsing.
+     *
+     * Must be called before using isKnownContraction() or getNonPairedMapping().
+     */
+    fun loadMappings() {
+        // v1.2.1: Clear existing mappings before loading to prevent stale data on reload
+        // Without this, language toggle could leave old contractions mixed with new
+        nonPairedContractions.clear()
+        pairedContractions.clear()
+        pairedFrequencies.clear()
+        knownContractions.clear()
+        loadEnglishBase()
+    }
+
+    /**
+     * The bundled English base set, loaded ADDITIVELY (no clear).
+     *
+     * Split out of [loadMappings] so a caller can choose the load ORDER. It matters:
+     * [loadLanguageContractions] and this are both earlier-wins, so whichever runs first owns
+     * every colliding key. A German-primary / English-secondary user must get German `im`, not
+     * English `I'm` — which is only achievable if the primary language can be loaded BEFORE the
+     * English base. See [loadTypingMappings].
+     */
+    private fun loadEnglishBase() {
+        try {
+            // Try binary format first (fastest)
+            if (loadBinaryContractions()) {
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                    Log.d(TAG, "Loaded contractions from binary format")
+                }
+                // Binary format merges all contractions into nonPairedContractions,
+                // misclassifying paired entries (e.g., "well"→"we'll" where "well" IS
+                // a valid word). Load JSON paired data to fix the classification.
+                loadPairedContractions()
+            } else {
+                // Fall back to JSON format (slower, but always works)
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                    Log.d(TAG, "Binary format not available, loading from JSON")
+                }
+                loadNonPairedContractions()
+                loadPairedContractions()
+            }
+
+            // 2026-07-23 (multilingual audit): COMPLETE the paired-classification fix.
+            // Both sources put paired bases into the non-paired map (the shipped binary
+            // carries well→we'll, were→we're, hell→he'll, girls→girls', states→states'),
+            // which violates getNonPairedMapping's documented contract ("only where the
+            // apostrophe-free form is not a valid word") and made the typing pipeline
+            // REPLACE those real words in the suggestion bar (typing "wer" showed "we're"
+            // and no "were"). Paired bases belong ONLY in pairedContractions, where
+            // consumers inject the variant ALONGSIDE the base instead of replacing it.
+            val pairedBases = pairedContractions.keys.intersect(nonPairedContractions.keys)
+            if (pairedBases.isNotEmpty()) {
+                pairedBases.forEach { nonPairedContractions.remove(it) }
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                    Log.d(TAG, "Reclassified ${pairedBases.size} paired bases out of the non-paired map")
+                }
+            }
+
+            Log.d(TAG, "Loaded ${nonPairedContractions.size} non-paired contractions, " +
+                    "${knownContractions.size} total known contractions")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load contraction mappings", e)
+        }
+    }
+
+    /**
+     * Loads the contraction mappings a SWIPE ENGINE may overlay onto a slate decoded in
+     * [langCode] — and nothing else. The single loader for both swipe adapters
+     * (`CtcEngineAdapter` / `GeometricEngineAdapter`), so the two can never drift apart.
+     *
+     * Policy ([SwipeContractionPolicy] — read its KDoc for the product rule):
+     *
+     *  - **English** (incl. `en-GB`/`en_US`, and a blank/unknown-yet code): the bundled base
+     *    set then `contractions_en.json`, i.e. byte-for-byte the pre-2026-08-16 behavior
+     *    both adapters had. This path is test-2400-validated and deliberately unchanged.
+     *  - **Any other language**: the previously loaded set is DROPPED and ONLY that
+     *    language's own files are loaded (both of them — see [loadLanguageContractions] for
+     *    the REPLACE/APPEND split). Without the drop, the bundled ENGLISH base
+     *    (`contractions.bin`'s 1,183 paired display forms — 1,116 of them possessives — plus
+     *    `contraction_pairings.json`) stays resident and injects English morphology into a
+     *    non-English slate: a `fr` decode of the real French word `franco` also offered
+     *    `franco's`, whose base `francos` is absent from the French lexicon
+     *    (`CtcMultiLanguageInstrumentedTest`, 2026-08-16).
+     *
+     * This mirrors the v1.1.88 vocabulary fix (`OptimizedVocabulary`, since deleted: clear the English
+     * contractions before loading the target language's) — the geo/CTC adapters were the
+     * last engines still contaminating non-English slates.
+     *
+     * NOTE — swipe only. The TYPING pipeline's shared manager (`KeyboardComponentGraph` /
+     * `PreferenceUIUpdateHandler`) keeps its own load order; changing that is a separate
+     * decision with a separate blast radius.
+     *
+     * Idempotent, and safe to call repeatedly on ONE instance across language switches:
+     * both branches start from a cleared state, so no previous language's mappings survive.
+     *
+     * @param langCode active decode language (ISO 639-1, optionally region-suffixed).
+     */
+    /**
+     * Load contraction mappings for the TYPING pipeline, scoped to the languages the user has
+     * actually selected.
+     *
+     * ## The bug this fixes
+     *
+     * The service wiring (now `KeyboardComponentGraph`) used to call `loadMappings()` (English base), then the primary
+     * language, then `loadLanguageContractions("en")` AGAIN — unconditionally. So every user of
+     * every language carried the full English set, and because the base loaded first and both
+     * loaders are earlier-wins, English owned every colliding key. Two high-frequency
+     * casualties were measured: German `im` (rank 16) offered "I'm", and French `dont`
+     * (rank 104) offered "don't". Both are ordinary words in their own language.
+     *
+     * The swipe path fixed this on 2026-08-16 ([loadSwipeDisplayMappings]) and its KDoc noted
+     * that the typing pipeline was "a separate decision with a separate blast radius". This is
+     * that decision.
+     *
+     * ## The policy
+     *
+     * English morphology appears only when the user has actually chosen English — as PRIMARY or
+     * as SECONDARY. Same rule the swipe path applies, and the same one `_englishFallbackEnabled`
+     * encoded in the deleted vocabulary: code-switching is a bug, not a feature.
+     *
+     * ## Why the order is primary -> secondary -> English base
+     *
+     * Both loaders are earlier-wins, so load order IS precedence. The primary language must
+     * claim its own words before the secondary language or the English base can; otherwise a
+     * German-primary / English-secondary user is back to "I'm" for `im`. Loading the English
+     * base LAST is what makes "English as secondary" additive rather than dominant.
+     *
+     * Also closes a second gap: the secondary language's own contractions were never loaded at
+     * all, so `m'appelle` failed for a user with French as their SECONDARY language.
+     *
+     * @param primaryLang the user's primary language (ISO 639-1, optionally region-suffixed).
+     * @param secondaryLang the secondary language, or null/blank/"none" when unset.
+     */
+    fun loadTypingMappings(primaryLang: String, secondaryLang: String?) {
+        val secondary = secondaryLang
+            ?.takeIf { it.isNotBlank() && !it.equals("none", ignoreCase = true) }
+            ?.takeIf { !it.equals(primaryLang, ignoreCase = true) }
+
+        val wantsEnglish = SwipeContractionPolicy.usesEnglishBase(primaryLang) ||
+            (secondary != null && SwipeContractionPolicy.usesEnglishBase(secondary))
+
+        val dropped = nonPairedContractions.size + pairedContractions.size
+        nonPairedContractions.clear()
+        pairedContractions.clear()
+        pairedFrequencies.clear()
+        knownContractions.clear()
+
+        // Precedence order — see the KDoc. Primary first, always.
+        if (!SwipeContractionPolicy.usesEnglishBase(primaryLang)) {
+            loadLanguageContractions(primaryLang)
+        }
+        if (secondary != null && !SwipeContractionPolicy.usesEnglishBase(secondary)) {
+            loadLanguageContractions(secondary)
+        }
+        if (wantsEnglish) {
+            loadEnglishBase()
+            loadLanguageContractions(SwipeContractionPolicy.ENGLISH)
+        }
+
+        // Demote REPLACE keys that are real words of the OTHER active language. This is the
+        // cross-language half of the 2026-07-23 paired-base reclassification above: without it
+        // an fr+en user typing French `dont` got `don't`, and a de+en user typing German `im`
+        // got `I'm`. See [ContractionCollisionDemotion] for the full rationale.
+        //
+        // Only meaningful when a SECOND language is active — a monolingual user's intersection
+        // is always empty — but it is run unconditionally rather than gated on `secondary`,
+        // because `wantsEnglish` can add English alongside a non-English primary even when no
+        // explicit secondary is set. Gating on `secondary != null` would silently miss exactly
+        // the fr-primary/English-base case that motivated this.
+        val activeLanguages = buildSet {
+            add(SwipeContractionPolicy.baseSubtag(primaryLang))
+            secondary?.let { add(SwipeContractionPolicy.baseSubtag(it)) }
+            if (wantsEnglish) add(SwipeContractionPolicy.ENGLISH)
+        }
+        val demoted = ContractionCollisionDemotion.demote(
+            nonPaired = nonPairedContractions,
+            paired = pairedContractions,
+            collisionsByKey = loadCollisionTables(activeLanguages),
+            activeLanguages = activeLanguages,
+        )
+
+        Log.d(
+            TAG,
+            "Typing contractions primary='" + primaryLang + "' secondary='" +
+                (secondary ?: "none") + "' english=" + wantsEnglish + ": dropped " + dropped +
+                ", loaded " + nonPairedContractions.size + " non-paired + " +
+                pairedContractions.size + " paired, demoted " + demoted + " cross-language"
+        )
+    }
+
+    /**
+     * Merged `key -> colliding languages` tables for every ACTIVE language.
+     *
+     * Only the active languages' sidecars are read: a key can only be demoted if it came from a
+     * mapping file that was actually loaded, and those are exactly the active languages' files.
+     *
+     * A missing sidecar is normal and not an error — es/pt/sv ship no REPLACE mappings at all, so
+     * they have nothing to collide, and an imported language pack has no sidecar by construction
+     * (documented residual: an uncurated pack can still destroy the other language's words on the
+     * typing path; the swipe path keeps the overlay's rank guard).
+     */
+    private fun loadCollisionTables(activeLanguages: Set<String>): Map<String, Set<String>> {
+        val merged = HashMap<String, MutableSet<String>>()
+
+        // Collisions contributed by IMPORTED packs, which cannot have a shipped sidecar — their
+        // contraction file and dictionary arrive long after the build. These are computed when
+        // the user picks languages in Settings ([ContractionCollisionScanner]) and cached, and
+        // the cache is scoped to the language set it was computed for, so a stale one is ignored
+        // rather than applied to the wrong combination.
+        for ((key, languages) in ContractionCollisionScanner.cachedFor(context, activeLanguages)) {
+            merged.getOrPut(key.lowercase()) { mutableSetOf() }.addAll(languages)
+        }
+
+        for (lang in activeLanguages) {
+            val filename = ContractionCollisionDemotion.assetName(lang)
+            try {
+                val jsonObj = JSONObject(readStream(assetManager.open(filename)))
+                val keys = jsonObj.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    val languages = jsonObj.getJSONArray(key)
+                    val bucket = merged.getOrPut(key.lowercase()) { mutableSetOf() }
+                    for (i in 0 until languages.length()) bucket.add(languages.getString(i))
+                }
+            } catch (e: java.io.FileNotFoundException) {
+                // No REPLACE mappings for this language, so nothing can collide.
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to load collision table for $lang: ${e.message}")
+            }
+        }
+        return merged
+    }
+
+    fun loadSwipeDisplayMappings(langCode: String) {
+        if (SwipeContractionPolicy.usesEnglishBase(langCode)) {
+            loadMappings()
+            loadLanguageContractions(SwipeContractionPolicy.ENGLISH)
+            return
+        }
+        val dropped = nonPairedContractions.size + pairedContractions.size
+        // The drop is the fix: loadLanguageContractions is EARLIER-WINS and never clears,
+        // so anything still resident here would shadow — and outlive — the active language.
+        nonPairedContractions.clear()
+        pairedContractions.clear()
+        pairedFrequencies.clear()
+        knownContractions.clear()
+        loadLanguageContractions(langCode)
+        Log.d(
+            TAG,
+            "Swipe contractions for '$langCode': dropped $dropped English/previous-language " +
+                "mappings, loaded ${nonPairedContractions.size} non-paired + " +
+                "${pairedContractions.size} paired"
+        )
+    }
+
+    /**
+     * Load language-specific contractions for the given language.
+     * Called when keyboard language changes to load appropriate contraction mappings.
+     *
+     * A language ships its mappings in TWO bundled files, and which file an entry lives in
+     * IS its display mode (see [tribixbite.cleverkeys.swipe.ContractionOverlay]):
+     *
+     *  - `contractions_<lang>.json` → [nonPairedContractions]: the key has no reading of its
+     *    own (`cest`, `jai`, `gehts`), so the display form REPLACES it and keeps its slot.
+     *  - `contraction_pairs_<lang>.json` → [pairedContractions]: the key IS a word of the
+     *    language (`lune`, `danse`, `lago`), so it is KEPT and the elision is APPENDED as a
+     *    variant. Both spellings stay reachable, which is the product requirement — the
+     *    keyboard may not decide for the user whether they meant the moon or "l'une".
+     *
+     * The split is resolved at data-generation time from corpus attestation of the bare form
+     * (`scripts/extract_apostrophe_words.py`), NOT at runtime from its frequency rank: rank
+     * works for English by luck and destroyed common French/Italian words, which rank past
+     * `REAL_WORD_ORDINAL_MAX` (fr `lune` is 2,055th). The overlay's rank guard stays as
+     * defense in depth for IMPORTED language packs, whose `contractions.json` is uncurated.
+     *
+     * Tries to load from:
+     * 1. Installed language pack (files/langpacks/{code}/contractions.json) — REPLACE-mode
+     *    only; a pack that supplies its own file wins outright and the bundled files for
+     *    that language are skipped, exactly as before.
+     * 2. Bundled assets (assets/dictionaries/contractions_{code}.json + the pairs file).
+     *
+     * @param langCode Language code (e.g., "fr", "it", "de", "es", "pt", "nl")
+     */
+    fun loadLanguageContractions(langCode: String) {
+        // First try loading from installed language pack
+        val langPackManager = LanguagePackManager.getInstance(context)
+        val packContractionsFile = langPackManager.getContractionsPath(langCode)
+
+        if (packContractionsFile != null) {
+            try {
+                val count = loadContractionsFromFile(packContractionsFile)
+                Log.d(TAG, "Loaded $count contractions for $langCode from language pack (total: ${nonPairedContractions.size})")
+                return
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to load contractions from language pack for $langCode: ${e.message}")
+            }
+        }
+
+        // Fall back to bundled assets
+        val filename = "dictionaries/contractions_$langCode.json"
+        try {
+            val inputStream = assetManager.open(filename)
+            val count = loadContractionsFromStream(inputStream)
+            Log.d(TAG, "Loaded $count contractions for $langCode from assets (total: ${nonPairedContractions.size})")
+        } catch (e: java.io.FileNotFoundException) {
+            Log.d(TAG, "No contraction file for $langCode (this is normal for some languages)")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load contractions for $langCode: ${e.message}")
+        }
+        loadLanguagePairedContractions(langCode)
+    }
+
+    /**
+     * Loads [langCode]'s APPEND-mode mappings from
+     * `assets/dictionaries/contraction_pairs_<lang>.json` (`{word: [variant, …]}`) into
+     * [pairedContractions] — see [loadLanguageContractions] for why the file exists.
+     *
+     * Deliberately a different shape from English's `contraction_pairings.json`
+     * (`{word: [{contraction, frequency}]}`): that file carries the frequency the English
+     * possessive generator was built around, which a per-language elision list has no
+     * equivalent of, and inventing one would be fabricated data.
+     *
+     * Absent file → no-op: only fr/it ship one, and es/pt/sv/id/ms/tl/sw must stay at zero
+     * mappings (`ContractionManagerTest`).
+     *
+     * @return the number of variants added.
+     */
+    private fun loadLanguagePairedContractions(langCode: String): Int {
+        val filename = "dictionaries/contraction_pairs_$langCode.json"
+        return try {
+            val jsonObj = JSONObject(readStream(assetManager.open(filename)))
+            val keys = jsonObj.keys()
+            var count = 0
+            while (keys.hasNext()) {
+                val baseWord = keys.next()
+                val lowerBase = baseWord.lowercase()
+                val variants = jsonObj.getJSONArray(baseWord)
+                for (i in 0 until variants.length()) {
+                    val variant = variants.getString(i).lowercase()
+                    knownContractions.add(variant)
+                    // EARLIER-WINS on the variant list, mirroring loadContractionsFromStream:
+                    // the first language loaded takes precedence and a re-load is idempotent.
+                    val existing = pairedContractions.getOrPut(lowerBase) { mutableListOf() }
+                    if (variant !in existing) {
+                        existing.add(variant)
+                        count++
+                    }
+                }
+            }
+            Log.d(TAG, "Loaded $count paired contractions for $langCode from assets")
+            count
+        } catch (e: java.io.FileNotFoundException) {
+            0 // Most languages ship no APPEND-mode mappings — not an error.
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load paired contractions for $langCode: ${e.message}")
+            0
+        }
+    }
+
+    /**
+     * Load contractions from a File (used for imported language packs).
+     */
+    private fun loadContractionsFromFile(file: File): Int {
+        return loadContractionsFromStream(file.inputStream())
+    }
+
+    /**
+     * Load contractions from an InputStream.
+     */
+    private fun loadContractionsFromStream(inputStream: InputStream): Int {
+        val jsonString = readStream(inputStream)
+        val jsonObj = JSONObject(jsonString)
+        val keys = jsonObj.keys()
+        var count = 0
+
+        while (keys.hasNext()) {
+            val withoutApostrophe = keys.next()
+            val withApostrophe = jsonObj.getString(withoutApostrophe)
+
+            val key = withoutApostrophe.lowercase()
+            // Don't overwrite existing mappings (first language loaded takes precedence).
+            //
+            // The pairedContractions check is NOT redundant with the nonPaired one, and omitting
+            // it silently undid the 2026-07-23 reclassification on the typing path. That fix
+            // moves pairing bases (`well`, `shell`, `hell`, `were`, `girls`, `states`, … 14 keys)
+            // OUT of the non-paired map, because they are ordinary English words that REPLACE
+            // mode would destroy in their own slot. `loadTypingMappings` then calls
+            // `loadLanguageContractions("en")`, and `contractions_en.json` repeats all 14 — so
+            // testing only "is it already non-paired?" found them absent (reclassification had
+            // just removed them) and put them straight back. Device-confirmed before the fix:
+            // `loadTypingMappings("en", null)` then `getNonPairedMapping("well")` returned
+            // "we'll".
+            //
+            // The paired map is the authority on "this key is a real word of some language", so a
+            // later REPLACE-mode file may never override it, whichever language supplied it.
+            if (!nonPairedContractions.containsKey(key) && !pairedContractions.containsKey(key)) {
+                nonPairedContractions[key] = withApostrophe.lowercase()
+                knownContractions.add(withApostrophe.lowercase())
+                count++
+            }
+        }
+
+        return count
+    }
+
+    /**
+     * Load contractions from optimized binary format.
+     *
+     * OPTIMIZATION v1 (perftodos2.md Todo 4): Fast binary loading without JSON parsing.
+     *
+     * @return true if loaded successfully, false if binary doesn't exist or failed
+     */
+    private fun loadBinaryContractions(): Boolean {
+        return try {
+            val data = BinaryContractionLoader.loadContractions(
+                context,
+                "dictionaries/contractions.bin"
+            ) ?: return false
+
+            nonPairedContractions.putAll(data.nonPairedContractions)
+            knownContractions.addAll(data.knownContractions)
+
+            // Derive paired contraction mappings from known contractions
+            // Binary format doesn't store base→contraction mappings for paired entries,
+            // so we derive them: for any contraction NOT in nonPaired values, the base
+            // word is the apostrophe-removed form (e.g., "it's" → base "its")
+            val nonPairedValues = data.nonPairedContractions.values.toSet()
+            for (contraction in data.knownContractions) {
+                if (contraction !in nonPairedValues) {
+                    val baseWord = contraction.replace("'", "")
+                    pairedContractions.getOrPut(baseWord) { mutableListOf() }.add(contraction)
+                }
+            }
+
+            true
+        } catch (e: Exception) {
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                Log.d(TAG, "Binary contractions not available: ${e.message}")
+            }
+            false
+        }
+    }
+
+    /**
+     * Checks if a word is a known contraction (has apostrophe).
+     *
+     * @param word Word to check (case-insensitive)
+     * @return true if word is in the known contractions set
+     *
+     * Examples:
+     * - isKnownContraction("don't") -> true
+     * - isKnownContraction("we'll") -> true
+     * - isKnownContraction("hello") -> false
+     */
+    fun isKnownContraction(word: String): Boolean {
+        return knownContractions.contains(word.lowercase())
+    }
+
+    /**
+     * Checks if a word is a contraction key (apostrophe-free form that maps to contraction).
+     * Used to skip autocorrect for words like "cest" that should become "c'est".
+     *
+     * @param word Word to check (case-insensitive)
+     * @return true if word is a key in nonPairedContractions
+     *
+     * Examples:
+     * - isContractionKey("cest") -> true (maps to "c'est")
+     * - isContractionKey("jai") -> true (maps to "j'ai")
+     * - isContractionKey("hello") -> false
+     */
+    fun isContractionKey(word: String): Boolean {
+        return nonPairedContractions.containsKey(word.lowercase())
+    }
+
+    /**
+     * Gets the contraction with apostrophe for an apostrophe-free form.
+     *
+     * Only works for non-paired contractions (where the apostrophe-free form
+     * is not a valid English word).
+     *
+     * @param withoutApostrophe Apostrophe-free form (case-insensitive)
+     * @return Contraction with apostrophe, or null if not found
+     *
+     * Examples:
+     * - getNonPairedMapping("dont") -> "don't"
+     * - getNonPairedMapping("wholl") -> "who'll"
+     * - getNonPairedMapping("well") -> null (paired contraction)
+     */
+    fun getNonPairedMapping(withoutApostrophe: String): String? {
+        return nonPairedContractions[withoutApostrophe.lowercase()]
+    }
+
+    /**
+     * Gets paired contraction variants for a base word that is also a valid English word.
+     *
+     * @param baseWord Base word (case-insensitive)
+     * @return List of contraction variants, or null if not a paired contraction base
+     *
+     * Examples:
+     * - getPairedContractions("its") -> ["it's"]
+     * - getPairedContractions("well") -> ["we'll"]
+     * - getPairedContractions("hello") -> null
+     */
+    fun getPairedContractions(baseWord: String): List<String>? {
+        return pairedContractions[baseWord.lowercase()]
+    }
+
+    /**
+     * The pairing frequency of [variant] as listed under [baseWord] in
+     * `contraction_pairings.json`, or null when no frequency is known for that pair (every
+     * non-English pairs file, and pairs derived only from `contractions.bin`).
+     *
+     * Same 0..255 byte scale as the en lexicon (`en_enhanced.json`, 134..255) — the swipe
+     * overlay compares the two directly. See [pairedFrequencies] for why it is base-scoped.
+     */
+    fun getPairedVariantFrequency(baseWord: String, variant: String): Int? =
+        pairedFrequencies[baseWord.lowercase()]?.get(variant.lowercase())
+
+    /** Every base that has at least one variant with a known pairing frequency. */
+    fun getPairedFrequencyBases(): Set<String> = pairedFrequencies.keys
+
+    /**
+     * Every alias KEY currently loaded — the apostrophe-free surfaces the overlay can
+     * rewrite, from BOTH the REPLACE file ([nonPairedContractions]) and the APPEND file
+     * ([pairedContractions]).
+     *
+     * The swipe engines use this to make the mapping table actually reachable: a key the
+     * decoder cannot spell is an inert mapping, so `CtcContractionKeys.inject` inserts these
+     * into the lexicon trie (at a floor frequency — see that class). Keys, not variants:
+     * the variants carry apostrophes and are never decoder output.
+     */
+    fun getAliasKeys(): Set<String> {
+        val keys = HashSet<String>(nonPairedContractions.size + pairedContractions.size)
+        keys.addAll(nonPairedContractions.keys)
+        keys.addAll(pairedContractions.keys)
+        return keys
+    }
+
+    /**
+     * Gets the number of non-paired contractions loaded.
+     * Useful for testing and diagnostics.
+     */
+    fun getNonPairedCount(): Int = nonPairedContractions.size
+
+    /**
+     * Gets the total number of known contractions (non-paired + paired).
+     * Useful for testing and diagnostics.
+     */
+    fun getTotalKnownCount(): Int = knownContractions.size
+
+    /**
+     * Generates a possessive form for a given word.
+     *
+     * OPTIMIZATION v5 (perftodos5.md): Rule-based possessive generation.
+     * Instead of storing 1700+ possessive entries, generate them dynamically.
+     *
+     * Rules (string form lives in [possessiveForm]; fixed 2026-09):
+     * - Most words: add 's (cat -> cat's, dog -> dog's)
+     * - Words ending in s/S: bare trailing apostrophe (parents -> parents', James -> James')
+     * - Words already containing an apostrophe: never augmented (no "Book's's")
+     * - Never generate for closed-class words ([canTakePossessive]: no "the's", "as'", "his'")
+     *
+     * @param word Base word to make possessive
+     * @return Possessive form, or null when not eligible
+     *
+     * Examples:
+     * - generatePossessive("cat") -> "cat's"
+     * - generatePossessive("dogs") -> "dogs'"
+     * - generatePossessive("James") -> "James'"
+     */
+    fun generatePossessive(word: String?): String? {
+        if (word.isNullOrEmpty()) {
+            return null
+        }
+
+        val wordLower = word.lowercase()
+
+        // Don't generate possessives for known contractions
+        // (e.g., don't turn "don't" into "don't's")
+        if (isKnownContraction(wordLower)) {
+            return null
+        }
+
+        // A closed-class word (pronoun, determiner, preposition, conjunction, auxiliary) is
+        // never a possessor — see [canTakePossessive].
+        if (!canTakePossessive(wordLower)) {
+            return null
+        }
+
+        // Eligibility passed — the string form itself is a pure rule shared with tests.
+        return possessiveForm(word)
+    }
+
+    /**
+     * Checks if a word should have a possessive variant generated.
+     *
+     * OPTIMIZATION v5 (perftodos5.md): Determine if possessive makes sense.
+     *
+     * @param word Word to check
+     * @return true if possessive should be generated
+     */
+    fun shouldGeneratePossessive(word: String): Boolean {
+        return generatePossessive(word) != null
+    }
+
+    /**
+     * Loads non-paired contractions from contractions_non_paired.json.
+     *
+     * Format: {"dont": "don't", "cant": "can't", ...}
+     *
+     * These are apostrophe-free forms that are NOT valid English words.
+     * The decoder predicts "dont", we replace with "don't".
+     */
+    private fun loadNonPairedContractions() {
+        val inputStream = assetManager.open("dictionaries/contractions_non_paired.json")
+        val jsonString = readStream(inputStream)
+
+        val jsonObj = JSONObject(jsonString)
+        val keys = jsonObj.keys()
+
+        while (keys.hasNext()) {
+            val withoutApostrophe = keys.next()
+            val withApostrophe = jsonObj.getString(withoutApostrophe)
+
+            nonPairedContractions[withoutApostrophe.lowercase()] = withApostrophe.lowercase()
+            knownContractions.add(withApostrophe.lowercase())
+        }
+
+        Log.d(TAG, "Loaded ${nonPairedContractions.size} non-paired contractions")
+    }
+
+    /**
+     * Loads paired contractions from contraction_pairings.json.
+     *
+     * Format: {"well": [{"contraction": "we'll", "frequency": 243}], ...}
+     *
+     * These are base words that ARE valid English words but also have
+     * contraction variants. Both forms should appear in predictions.
+     * Example: "well" (adverb) and "we'll" (we will) are both valid.
+     *
+     * ADDITIVE and EARLIER-WINS on the variant list, mirroring
+     * [loadLanguagePairedContractions]. The dedup is not cosmetic: this loader runs AFTER
+     * [loadBinaryContractions], which derives its own paired map from `contractions.bin`
+     * (every known contraction that is not a non-paired VALUE becomes `variant-without-
+     * apostrophes -> variant`). The two sources overlap on 599 of 2,258 bases — including
+     * `ill -> i'll` and `id -> i'd` — so a blind `add()` produced `["i'll", "i'll"]`, which
+     * `SuggestionHandler` injected verbatim and the user saw as `I'll` at bar ranks 0 AND 1
+     * (measured 2026-08-28, `docs/eval/2026-08-28-arc019-ctc-local-head2head.md` §4). The
+     * possessive bases (`times -> time's`, `boards -> board's`, …) doubled the same way.
+     *
+     * The swipe path was already immune — `ContractionOverlay.apply` dedups on emit — so this
+     * only ever surfaced on the tap path.
+     */
+    private fun loadPairedContractions() {
+        val inputStream = assetManager.open("dictionaries/contraction_pairings.json")
+        val jsonString = readStream(inputStream)
+
+        var pairedCount = 0
+
+        for ((lowerBase, variants) in parsePairings(jsonString)) {
+            for (variant in variants) {
+                val contraction = variant.contraction
+
+                knownContractions.add(contraction)
+                val existing = pairedContractions.getOrPut(lowerBase) { mutableListOf() }
+                if (contraction !in existing) {
+                    existing.add(contraction)
+                    pairedCount++
+                }
+                // Recorded even when the variant was already present from contractions.bin:
+                // the binary store carries no frequency, so this file is the only source.
+                // Earlier-wins, like the variant list itself.
+                variant.frequency?.let { freq ->
+                    pairedFrequencies.getOrPut(lowerBase) { mutableMapOf() }
+                        .putIfAbsent(contraction, freq)
+                }
+            }
+        }
+
+        Log.d(TAG, "Loaded $pairedCount paired contractions (${pairedContractions.size} base words)")
+    }
+
+    /**
+     * Reads an InputStream into a String.
+     * Helper method for JSON file loading.
+     */
+    private fun readStream(inputStream: InputStream): String {
+        BufferedReader(InputStreamReader(inputStream)).use { reader ->
+            return reader.readText()
+        }
+    }
+
+    /**
+     * One entry of `contraction_pairings.json`: a contraction [contraction] (lowercased) and its
+     * pairing [frequency] on the 0..255 byte scale, or null when the entry carries none.
+     */
+    data class PairedVariant(val contraction: String, val frequency: Int?)
+
+    companion object {
+        private const val TAG = "ContractionManager"
+
+        /**
+         * Parses `contraction_pairings.json` — `{"shed": [{"contraction": "she'd",
+         * "frequency": 188}], …}` — into lowercase base → variants in file order, KEEPING the
+         * `frequency` field (dropped until 2026-09-26, learning-system audit RC3). Pure (no
+         * Context) so the shipped file is pinned in `runPureTests` through this exact parser.
+         */
+        fun parsePairings(json: String): Map<String, List<PairedVariant>> {
+            val root = JSONObject(json)
+            val out = LinkedHashMap<String, MutableList<PairedVariant>>(root.length() * 2)
+            val keys = root.keys()
+            while (keys.hasNext()) {
+                val baseWord = keys.next()
+                val array = root.getJSONArray(baseWord)
+                val list = out.getOrPut(baseWord.lowercase()) { mutableListOf() }
+                for (i in 0 until array.length()) {
+                    val obj = array.getJSONObject(i)
+                    val frequency = if (obj.has("frequency")) obj.getInt("frequency") else null
+                    list.add(PairedVariant(obj.getString("contraction").lowercase(), frequency))
+                }
+            }
+            return out
+        }
+
+        /**
+         * The pure STRING rule for possessive augmentation. Companion (no Context) so the
+         * pure-JVM oracle can pin the production rule directly; [generatePossessive] applies
+         * the eligibility gates (contractions, function words) and then delegates here.
+         * Both the tap path (SuggestionHandler.augmentPredictionsWithPossessives) and any
+         * swipe-side possessive augmentation flow through [generatePossessive], so this is
+         * the single root for the form.
+         *
+         * Rules (fixed 2026-09 — swiping "parents" used to offer the malformed "parents's",
+         * and an already-possessive "Book's" was re-augmented to "Book's's"):
+         *  - An input already containing an apostrophe (ASCII `'` or typographic `’`) is
+         *    NEVER augmented — returns null.
+         *  - A word ending in s/S takes the bare trailing apostrophe: "parents" -> "parents'"
+         *    (correct for plurals; accepted style for s-final singulars like "James'").
+         *  - Everything else takes "'s": "cat" -> "cat's".
+         */
+        fun possessiveForm(word: String): String? = when {
+            word.any { it == '\'' || it == '’' } -> null
+            word.endsWith("s") || word.endsWith("S") -> "$word'"
+            else -> "$word's"
+        }
+
+        /**
+         * False for an English CLOSED-CLASS word — a pronoun, determiner, preposition,
+         * conjunction or auxiliary/modal — which can never be a possessor, so the D1 swipe
+         * augment (`SuggestionHandler.possessiveAdditions`) must not offer `'s` / `'` for it.
+         *
+         * Before 2026-10-07 only a 30-word pronoun/auxiliary set was excluded, so a confident
+         * swipe of `the`, `and`, `as`, `this` or `his` ended its bar with `the's`, `and's`,
+         * `as'`, `this'`, `his'`. A closed class is enumerable by definition, which is why this
+         * is a list and not a frequency rule: an open-class word stays eligible however frequent
+         * it is. Modals that double as nouns (`will`, `can`, `may`) stay excluded, as they were
+         * in the original set.
+         *
+         * @param wordLower the candidate, lowercased.
+         */
+        fun canTakePossessive(wordLower: String): Boolean = wordLower !in CLOSED_CLASS_WORDS
+
+        private val CLOSED_CLASS_WORDS = setOf(
+            // Personal, possessive, reflexive, relative, interrogative and demonstrative pronouns
+            "i", "me", "my", "mine", "myself", "you", "your", "yours", "yourself", "yourselves",
+            "he", "him", "his", "himself", "she", "her", "hers", "herself", "it", "its", "itself",
+            "we", "us", "our", "ours", "ourselves", "they", "them", "their", "theirs", "themselves",
+            "who", "whom", "whose", "which", "what", "that", "this", "these", "those",
+            "there", "here",
+            // Articles and determiners
+            "a", "an", "the", "some", "any", "each", "every", "either", "neither", "no", "all",
+            "both", "such",
+            // Prepositions
+            "of", "in", "on", "at", "by", "for", "from", "to", "with", "without", "into", "onto",
+            "upon", "about", "above", "below", "over", "under", "after", "before", "since",
+            "until", "till", "than", "as", "via", "per", "across", "among", "amongst", "between",
+            "through", "throughout", "towards", "toward", "during", "within", "against",
+            "beside", "besides", "despite", "unless", "plus", "versus", "vs",
+            // Conjunctions
+            "and", "or", "but", "nor", "so", "yet", "if", "because", "although", "though",
+            "whether", "while", "whereas",
+            // Auxiliaries and modals (the original set, kept whole)
+            "am", "is", "are", "was", "were", "be", "been", "being", "do", "does", "did",
+            "have", "has", "had", "will", "would", "shall", "should", "can", "could", "may",
+            "might", "must", "let", "not",
+        )
+    }
+}

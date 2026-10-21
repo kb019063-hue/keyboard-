@@ -1,0 +1,627 @@
+package tribixbite.cleverkeys.contextaware
+
+import android.content.Context
+import tribixbite.cleverkeys.LearnableWordPolicy
+
+/**
+ * A learned next-word continuation with the raw statistics needed for
+ * confidence floors, independent of whether it came from the trigram or the
+ * bigram model (audit 2026-08-06 §4.2 backoff).
+ *
+ * @property word the predicted continuation
+ * @property frequency how many times this continuation was observed in its model
+ * @property probability conditional probability within its model
+ * @property fromTrigram true when the sharper two-word context produced it
+ */
+data class ContextContinuation(
+    val word: String,
+    val frequency: Int,
+    val probability: Float,
+    val fromTrigram: Boolean = false
+)
+
+/**
+ * Context-aware N-gram model for prediction enhancement.
+ *
+ * A thin, language-aware view over the process-wide [BigramStore] and
+ * [TrigramStore] singletons (2026-08-06 persistence fix; trigram activation
+ * per audit §1.3-D/§4.2). Each `WordPredictor` owns one ContextModel and
+ * keeps [language] in sync with its active language; all reads/writes are
+ * isolated to that language's learned data.
+ *
+ * Usage Example:
+ * ```kotlin
+ * val contextModel = ContextModel(context, "en")
+ * contextModel.recordSequence(listOf("I", "want", "to"))  // Learn from typing
+ *
+ * // Later, when predicting after "want to"
+ * val boost = contextModel.getContextBoost(
+ *     candidateWord = "go",
+ *     previousWords = listOf("I", "want", "to")
+ * )
+ * // boost might be 2.5x for likely phrase "I want to go"
+ * ```
+ *
+ * Architecture:
+ * - BigramStore: P(word2 | word1) — singleton, language-keyed, debounced persistence
+ * - TrigramStore: P(word3 | word1, word2) — same discipline (activated 2026-08-06)
+ * - Hybrid scoring: prefer trigrams when the two-word context has data, back
+ *   off to bigrams otherwise
+ *
+ * The test-only two-store constructor passes `trigramStore = null`, which
+ * exercises the pure bigram backoff path; production always wires both stores.
+ */
+class ContextModel internal constructor(
+    private val bigramStore: BigramStore,
+    private val trigramStore: TrigramStore?,
+    language: String
+) {
+    companion object {
+        // Boost multipliers for context probabilities.
+        //
+        // DECLINED KNOB (2026-08-28, ledger ARC-026 — audit §3.2-3 proposed a
+        // `context_max_boost` slider over MAX_BOOST/BOOST_EXPONENT). Kept private
+        // constants on purpose:
+        //  - the 2026-08-26 next-word audit deliberately kept the user-facing surface
+        //    minimal; every extra shape knob is one more thing to explain and support;
+        //  - a boost-SHAPE control has the same per-scale footgun as the rescoring λ:
+        //    the value that helps at one context-probability scale actively hurts at
+        //    another, and the user has no instrument to tell which regime they are in.
+        // Revisit only with an offline replay that shows a per-user optimum spread wide
+        // enough to justify exposing it.
+        private const val MAX_BOOST = 5.0f  // Maximum 5x boost for very likely words
+        private const val MIN_BOOST = 1.0f  // No boost (neutral)
+        private const val BOOST_EXPONENT = 2.0f  // Non-linear boost: boost = (1 + prob)^2
+
+        // Context window sizes
+        private const val BIGRAM_WINDOW = 1  // Use 1 previous word
+        private const val TRIGRAM_WINDOW = 2  // Use 2 previous words
+
+        // Minimum probability thresholds
+        private const val MIN_BIGRAM_PROB = 0.01f  // 1% minimum
+        private const val MIN_TRIGRAM_PROB = 0.001f  // 0.1% minimum
+    }
+
+    /**
+     * Test-compat constructor: bigram-only view (trigram path disabled → pure
+     * bigram backoff). Production uses the [Context]-based constructor below.
+     */
+    internal constructor(bigramStore: BigramStore, language: String) :
+        this(bigramStore, null, language)
+
+    /**
+     * Production constructor: language-keyed view over the singleton stores.
+     */
+    constructor(context: Context, language: String = "en") :
+        this(BigramStore.getInstance(context), TrigramStore.getInstance(context), language)
+
+    /**
+     * Active language for this model's view of the store. WordPredictor updates
+     * this on language switch / auto-detection so learning and lookups stay
+     * language-isolated.
+     */
+    private var languageEpoch = 0L
+
+    @Volatile
+    var language: String = BigramStore.normalizeLanguage(language)
+        set(value) {
+            withLearningLocks {
+                val normalized = BigramStore.normalizeLanguage(value)
+                if (field != normalized) languageEpoch++
+                field = normalized
+            }
+        }
+
+    /**
+     * Record a word sequence from user typing.
+     * Extracts and records all bigrams AND trigrams into the active language's
+     * stores. Persistence is handled by the stores' debounced write-back — call
+     * [save] at lifecycle boundaries to checkpoint explicitly.
+     *
+     * PRIVACY: the only production caller is the gated learning funnel
+     * (`LearningGate.learnCommittedWord` via `WordPredictor.addWordToContext`),
+     * so the master `on_device_learning_enabled` gate and the per-feature
+     * context-aware gate are both enforced BEFORE this method runs.
+     *
+     * Example: ["I", "want", "to", "go"] records:
+     * - Bigrams: (I, want), (want, to), (to, go)
+     * - Trigrams: (I, want, to), (want, to, go)
+     *
+     * @param words List of words in order (should be normalized/lowercase)
+     */
+    fun recordSequence(words: List<String>) {
+        if (words.size < 2) return  // Need at least 2 words for bigrams
+
+        // Record bigrams
+        for (i in 0 until words.size - 1) {
+            bigramStore.recordBigram(language, words[i], words[i + 1])
+        }
+
+        // Record trigrams (audit §1.3-D activation — the learn path already
+        // supplied 4-word windows, so the extra order costs no extra plumbing)
+        if (trigramStore != null && words.size >= 3) {
+            for (i in 0 until words.size - 2) {
+                trigramStore.recordTrigram(language, words[i], words[i + 1], words[i + 2])
+            }
+        }
+    }
+
+    /**
+     * Record ONLY the newest n-grams ending at the just-committed word: the
+     * final bigram (last two words) and the final trigram (last three words).
+     *
+     * M3 (review 2026-08-06): this is THE per-commit hot-path entry
+     * (`LearningGate.learnCommittedWord` via `WordPredictor.addWordToContext`).
+     * The previous behavior replayed [recordSequence] over the whole rolling
+     * window on EVERY commit, so each earlier pair was re-recorded once per
+     * subsequent commit — a single typing of "the cat sat" yielded
+     * freq(the→cat)=2, silently defeating the "seen ≥2×" confidence floors
+     * (`BigramStore.DEFAULT_MIN_FREQUENCY`, `NextWordPredictor.MIN_LEARNED_FREQUENCY`).
+     * With newest-only recording, frequency == number of times the user
+     * actually typed the pair.
+     *
+     * [recordSequence] remains for bulk paths (import replay, tests) where the
+     * whole sequence is genuinely new.
+     *
+     * TYPO HYGIENE (learning-system audit 2026-09-26): an n-gram is recorded only when
+     * EVERY word in it passes [isLearnable] (production: `LearnableWordPolicy.isLearnable`
+     * — in the lexicon, in the user dictionary, or committed repeatedly). A typo therefore
+     * never enters either store, as the context word or as the continuation, while the
+     * n-grams around it that ARE clean still learn (a typo in trigram position 1 blocks
+     * only the trigram, not the bigram after it).
+     *
+     * @param words rolling committed-word window, most recent last (only the
+     *   trailing 3 words are consulted)
+     * @param isLearnable per-word write gate; the default admits everything (bulk/test paths)
+     */
+    fun recordCommit(words: List<String>, isLearnable: (String) -> Boolean = { true }) {
+        recordCommitWithReceipt(words, isLearnable)
+    }
+
+    internal class CommitReceipt internal constructor(
+        internal val owner: ContextModel,
+        internal val languageEpoch: Long,
+        internal val bigramVersion: Long,
+        internal val trigramVersion: Long?,
+        internal val bigram: BigramStore.IncrementReceipt?,
+        internal val trigram: TrigramStore.IncrementReceipt?
+    ) {
+        internal var consumed = false
+    }
+
+    /** Fixed cross-store lock order: bigram, trigram, then (at the predictor) vocabulary. */
+    internal fun <T> withLearningLocks(action: () -> T): T = synchronized(bigramStore) {
+        val trigrams = trigramStore
+        if (trigrams == null) action() else synchronized(trigrams, action)
+    }
+
+    internal fun recordCommitWithReceipt(
+        words: List<String>, isLearnable: (String) -> Boolean = { true }
+    ): CommitReceipt = withLearningLocks {
+        var bigram: BigramStore.IncrementReceipt? = null
+        var trigram: TrigramStore.IncrementReceipt? = null
+        val n = words.size
+        if (n >= 2 && isLearnable(words[n - 1]) && isLearnable(words[n - 2])) {
+            bigram = bigramStore.recordBigramWithReceipt(language, words[n - 2], words[n - 1])
+            if (n >= 3 && isLearnable(words[n - 3])) {
+                trigram = trigramStore?.recordTrigramWithReceipt(
+                    language, words[n - 3], words[n - 2], words[n - 1]
+                )
+            }
+        }
+        CommitReceipt(this, languageEpoch, bigramStore.receiptVersion(), trigramStore?.receiptVersion(), bigram, trigram)
+    }
+
+    internal fun isReceiptCurrent(receipt: CommitReceipt): Boolean = withLearningLocks {
+        receipt.owner === this && !receipt.consumed && receipt.languageEpoch == languageEpoch &&
+            receipt.bigramVersion == bigramStore.receiptVersion() &&
+            receipt.trigramVersion == trigramStore?.receiptVersion() &&
+            (receipt.bigram?.let(bigramStore::isReceiptCurrent) ?: true) &&
+            (receipt.trigram?.let { trigramStore?.isReceiptCurrent(it) == true } ?: true)
+    }
+
+    /** No learnability re-evaluation: reverse only the increments whose sinks issued receipts. */
+    internal fun rollbackReceipt(receipt: CommitReceipt): Boolean = withLearningLocks {
+        if (!isReceiptCurrent(receipt)) return@withLearningLocks false
+        receipt.consumed = true
+        val bigramUndone = receipt.bigram?.let(bigramStore::rollbackReceipt) ?: true
+        val trigramUndone = receipt.trigram?.let { trigramStore?.rollbackReceipt(it) == true } ?: true
+        bigramUndone && trigramUndone
+    }
+
+    /**
+     * Inverse of [recordCommit] (autocorrect-undo rollback, 2026-08-06): decrement
+     * the NEWEST bigram/trigram ending at the just-rejected word. Called with the
+     * SAME window [recordCommit] consumed, so exactly the n-grams that commit
+     * recorded are un-recorded. Unknown n-grams no-op (safe when the original
+     * record was gate-suppressed).
+     *
+     * Takes the SAME [isLearnable] predicate as [recordCommit] so that an n-gram the
+     * write gate skipped is not decremented here — otherwise undoing a typo would eat one
+     * legitimate observation of an identical pair learned earlier.
+     *
+     * @param words rolling committed-word window, most recent (the rejected
+     *   word) last — only the trailing 3 words are consulted
+     * @param isLearnable the per-word write gate [recordCommit] was given
+     */
+    fun rollbackCommit(words: List<String>, isLearnable: (String) -> Boolean = { true }) {
+        val n = words.size
+        if (n < 2) return
+        val last = words[n - 1]
+        val prev = words[n - 2]
+        if (!isLearnable(last) || !isLearnable(prev)) return
+        bigramStore.unrecordBigram(language, prev, last)
+        if (trigramStore != null && n >= 3 && isLearnable(words[n - 3])) {
+            trigramStore.unrecordTrigram(language, words[n - 3], prev, last)
+        }
+    }
+
+    /**
+     * TYPO-HYGIENE PURGE (learning-system audit 2026-09-26): delete learned bigrams and
+     * trigrams of [language] that contain a word failing [isLearnable] AND were observed at
+     * most `LearnableWordPolicy.PURGE_MAX_FREQUENCY` times — typos learned before the write
+     * gate existed (or that slipped in while the lexicon was still loading) go, while a
+     * frequently typed phrase survives even if one of its words is not in any dictionary.
+     *
+     * Scheduling is migration-style: the store keeps a per-language stamp of the last run.
+     * No stamp (every install upgrading into this code) ⇒ the purge runs at the first
+     * opportunity — the one-time cleanup; afterwards it re-runs once
+     * `LearnableWordPolicy.PURGE_INTERVAL_MS` has elapsed. The caller runs this OFF the main
+     * thread (it may load the language's tables) and only when the master learning gate and
+     * the context-aware gate are on — with learning off the stores are inert, neither read
+     * nor rewritten.
+     *
+     * @param language the language whose lexicon [isLearnable] reflects — passed explicitly
+     *   rather than read from [language] so a concurrent language switch cannot pair one
+     *   language's lexicon with another language's store
+     * @param force run even if not due (tests / an explicit maintenance request)
+     * @return entries removed across both stores, or null when the purge was not due
+     */
+    /**
+     * Is [purgeUnlearnable] due for [language]? A cheap stamp read, so a caller can skip
+     * building the purge's lexicon snapshot on the (weekly-idle) common path.
+     */
+    fun isTypoPurgeDue(language: String, nowMs: Long = System.currentTimeMillis()): Boolean =
+        LearnableWordPolicy.isPurgeDue(bigramStore.getTypoPurgeStamp(BigramStore.normalizeLanguage(language)), nowMs)
+
+    fun purgeUnlearnable(
+        language: String,
+        isLearnable: (String) -> Boolean,
+        nowMs: Long = System.currentTimeMillis(),
+        force: Boolean = false
+    ): Int? {
+        val lang = BigramStore.normalizeLanguage(language)
+        if (!force && !LearnableWordPolicy.isPurgeDue(bigramStore.getTypoPurgeStamp(lang), nowMs)) {
+            return null
+        }
+        // Memoize: the same few thousand words recur across tens of thousands of entries.
+        val memo = HashMap<String, Boolean>()
+        val learnable: (String) -> Boolean = { w -> memo.getOrPut(w) { isLearnable(w) } }
+
+        var removed = bigramStore.purgeEntries(lang) {
+            LearnableWordPolicy.shouldPurge(it.frequency, listOf(it.word1, it.word2), learnable)
+        }
+        if (trigramStore != null) {
+            removed += trigramStore.purgeEntries(lang) {
+                LearnableWordPolicy.shouldPurge(it.frequency, listOf(it.word1, it.word2, it.word3), learnable)
+            }
+        }
+        bigramStore.setTypoPurgeStamp(lang, nowMs)
+        return removed
+    }
+
+    /**
+     * Get context-based boost for a candidate word.
+     *
+     * Calculates a multiplier (≥1.0) based on how likely the candidate is given previous words.
+     * Higher boost for more likely words in context.
+     *
+     * Algorithm:
+     * 1. Try trigram if we have 2+ previous words (future)
+     * 2. Fall back to bigram if we have 1+ previous word
+     * 3. Return 1.0 (no boost) if no context available
+     *
+     * Boost formula: boost = (1 + probability)^BOOST_EXPONENT
+     * - P=0.0 → boost=1.0 (no change)
+     * - P=0.1 → boost=1.21
+     * - P=0.5 → boost=2.25
+     * - P=0.9 → boost=3.61
+     * - P=1.0 → boost=4.0 (max realistic)
+     *
+     * @param candidateWord The word being predicted
+     * @param previousWords List of previous words (most recent last)
+     * @return Boost multiplier (1.0 to MAX_BOOST)
+     */
+    fun getContextBoost(candidateWord: String, previousWords: List<String>): Float {
+        if (previousWords.isEmpty() || candidateWord.isEmpty()) {
+            return MIN_BOOST
+        }
+
+        // Prefer the trigram model when two words of context are available —
+        // P(word | w1, w2) is a sharper signal than P(word | w2) (audit §4.2).
+        // L2 (review 2026-08-06): use the CONFIDENT probability (0 below the
+        // store's min-frequency floor) — a once-seen n-gram must not hand a
+        // candidate the near-max boost just because its conditional probability
+        // is 1.0 on a single observation.
+        if (trigramStore != null && previousWords.size >= TRIGRAM_WINDOW) {
+            val w1 = previousWords[previousWords.size - 2]
+            val w2 = previousWords.last()
+            val trigramProb = trigramStore.getConfidentProbability(language, w1, w2, candidateWord)
+            if (trigramProb >= MIN_TRIGRAM_PROB) {
+                return calculateBoost(trigramProb)
+            }
+        }
+
+        // Back off to bigram with most recent previous word
+        val prevWord = previousWords.last()
+        val bigramProb = bigramStore.getConfidentProbability(language, prevWord, candidateWord)
+
+        if (bigramProb >= MIN_BIGRAM_PROB) {
+            return calculateBoost(bigramProb)
+        }
+
+        return MIN_BOOST  // No context match
+    }
+
+    /**
+     * The learned evidence for [candidateWord], or null when there is none the stores are
+     * confident about — the swipe-rescoring counterpart to [getContextBoost].
+     *
+     * Returns the full [ContextContinuation] rather than just a boost because a rank-1 promotion
+     * must clear the stricter `NextWordPredictor` floors, which are expressed in frequency AND
+     * probability. A collapsed multiplier cannot reconstruct either.
+     *
+     * **Policy is identical to [getContextBoost] by construction** — trigram preferred when two
+     * words of context exist, bigram backoff otherwise, both gated on the stores' own confidence
+     * floors. The two must not drift: if this one used a different backoff, the boost that decides
+     * the SORT and the counts that decide the PROMOTION would describe different n-grams.
+     *
+     * **Non-loading.** Every ordinary store accessor builds a language's table from persisted
+     * storage on a miss. This path runs on the main thread during a swipe, where that blob load
+     * is the documented cause of first-swipe jank, so both store lookups are the non-loading
+     * variants and this returns null rather than blocking. A swipe taken before the store warms
+     * is simply not rescored; the next-word append path warms it on the executor moments later.
+     */
+    fun getContextEvidence(
+        candidateWord: String,
+        previousWords: List<String>,
+    ): ContextContinuation? {
+        if (previousWords.isEmpty() || candidateWord.isEmpty()) return null
+
+        if (trigramStore != null && previousWords.size >= TRIGRAM_WINDOW) {
+            val w1 = previousWords[previousWords.size - 2]
+            val w2 = previousWords.last()
+            val entry = trigramStore.getConfidentEntry(language, w1, w2, candidateWord)
+            if (entry != null && entry.probability >= MIN_TRIGRAM_PROB) {
+                return ContextContinuation(
+                    word = candidateWord,
+                    frequency = entry.frequency,
+                    probability = entry.probability,
+                    fromTrigram = true,
+                )
+            }
+        }
+
+        val entry = bigramStore.getConfidentEntry(language, previousWords.last(), candidateWord)
+            ?: return null
+        if (entry.probability < MIN_BIGRAM_PROB) return null
+        return ContextContinuation(
+            word = candidateWord,
+            frequency = entry.frequency,
+            probability = entry.probability,
+            fromTrigram = false,
+        )
+    }
+
+    /**
+     * The boost [getContextBoost] would return for an already-looked-up [continuation].
+     *
+     * Exists so callers that need the raw counts AND the multiplier do not re-derive `(1 + p)^2`
+     * themselves. The formula, its exponent and its clamp live in exactly one place; a second
+     * copy would drift the moment any of the three changed.
+     */
+    fun boostFor(continuation: ContextContinuation): Float =
+        calculateBoost(continuation.probability)
+
+    /**
+     * True when BOTH stores already hold this model's language in RAM.
+     *
+     * The caller's fast path: if this is false, skip rescoring entirely rather than have
+     * [getContextEvidence] return null for every candidate one lookup at a time.
+     */
+    fun isLoadedInMemory(): Boolean =
+        bigramStore.isLanguageLoaded(language) &&
+            (trigramStore?.isLanguageLoaded(language) ?: true)
+
+    /**
+     * Get top N predictions given context words.
+     *
+     * Returns candidate words ranked by context probability from the active
+     * language's learned data. Used by next-word prediction (§4) and for showing
+     * contextually relevant suggestions.
+     *
+     * @param previousWords List of previous words (most recent last)
+     * @param maxResults Maximum number of predictions
+     * @return List of candidate words with their context boost values
+     */
+    fun getTopPredictions(
+        previousWords: List<String>,
+        maxResults: Int = 10
+    ): List<Pair<String, Float>> {
+        return getNextWordCandidates(previousWords, maxResults).map { c ->
+            c.word to calculateBoost(c.probability)
+        }
+    }
+
+    /**
+     * Get ranked next-word candidates with raw learned statistics
+     * (frequency + conditional probability) for filtering/floors.
+     *
+     * Backoff order (audit §4.2): trigram continuations of the last TWO context
+     * words first (sharper), then bigram continuations of the last word for the
+     * remaining slots (deduplicated — a word surfaced by the trigram model keeps
+     * its trigram statistics).
+     */
+    fun getNextWordCandidates(
+        previousWords: List<String>,
+        maxResults: Int = 10
+    ): List<ContextContinuation> {
+        if (previousWords.isEmpty()) return emptyList()
+
+        val out = ArrayList<ContextContinuation>(maxResults)
+        val seen = HashSet<String>()
+
+        if (trigramStore != null && previousWords.size >= TRIGRAM_WINDOW) {
+            val w1 = previousWords[previousWords.size - 2]
+            val w2 = previousWords.last()
+            for (entry in trigramStore.getPredictions(language, w1, w2, maxResults)) {
+                if (seen.add(entry.word3)) {
+                    out.add(ContextContinuation(entry.word3, entry.frequency, entry.probability, fromTrigram = true))
+                }
+            }
+        }
+
+        if (out.size < maxResults) {
+            for (entry in bigramStore.getPredictions(language, previousWords.last(), maxResults)) {
+                if (out.size >= maxResults) break
+                if (seen.add(entry.word2)) {
+                    out.add(ContextContinuation(entry.word2, entry.frequency, entry.probability, fromTrigram = false))
+                }
+            }
+        }
+
+        return out
+    }
+
+    /**
+     * Check if context model has data for a given previous word.
+     *
+     * @param previousWord The context word to check
+     * @return True if we have predictions for this word
+     */
+    fun hasContextFor(previousWord: String): Boolean {
+        return bigramStore.getAllBigrams(language, previousWord).isNotEmpty()
+    }
+
+    /**
+     * Get the raw probability (not boost) for a word pair.
+     *
+     * @param previousWord Previous word
+     * @param candidateWord Predicted word
+     * @return Probability (0.0 to 1.0)
+     */
+    fun getProbability(previousWord: String, candidateWord: String): Float {
+        return bigramStore.getProbability(language, previousWord, candidateWord)
+    }
+
+    /**
+     * Clear this language's context data (for testing or user reset).
+     */
+    fun clear() {
+        bigramStore.clear(language)
+        trigramStore?.clear(language)
+    }
+
+    /**
+     * Checkpoint learned context data to persistent storage.
+     *
+     * NOT called per record — [recordSequence] only marks the store dirty and the
+     * store's debounced persister writes back in the background. This method
+     * requests an immediate asynchronous flush and is invoked from lifecycle
+     * boundaries (input-view finish, predictor eviction, coordinator shutdown).
+     * No-op when there are no unflushed changes.
+     */
+    fun save() {
+        bigramStore.requestFlush()
+        trigramStore?.requestFlush()
+    }
+
+    /**
+     * Synchronous flush for tests and hard-teardown paths.
+     */
+    fun saveBlocking() {
+        bigramStore.flush()
+        trigramStore?.flush()
+    }
+
+    /**
+     * Get statistics about the context model for the active language.
+     */
+    data class ContextStats(
+        val bigramStats: BigramStore.BigramStats,
+        val totalContextWords: Int,
+        val averageBoostPotential: Float,
+        val trigramCount: Int = 0
+    )
+
+    fun getStatistics(): ContextStats {
+        val bigramStats = bigramStore.getStatistics(language)
+
+        // Calculate average boost potential (average of all bigram probabilities)
+        val allProbabilities = mutableListOf<Float>()
+        for (word1 in bigramStats.topContextWords.map { it.first }) {
+            val bigrams = bigramStore.getAllBigrams(language, word1)
+            allProbabilities.addAll(bigrams.map { it.probability })
+        }
+
+        val avgProb = if (allProbabilities.isNotEmpty()) {
+            allProbabilities.average().toFloat()
+        } else 0f
+
+        val avgBoost = calculateBoost(avgProb)
+
+        return ContextStats(
+            bigramStats = bigramStats,
+            totalContextWords = bigramStats.uniqueContextWords,
+            averageBoostPotential = avgBoost,
+            trigramCount = trigramStore?.getTotalTrigramCount(language) ?: 0
+        )
+    }
+
+    /**
+     * Export the active language's context data as JSON.
+     */
+    fun exportToJson(): String {
+        // NOTE: THIS method returns bigrams only — it is the per-language analysis/debug
+        // export, not the backup payload. The BACKUP path does carry both n-gram orders
+        // since ARC-022: `BackupRestoreManager.buildDictionariesJson` writes
+        // `learned_bigrams_by_language` AND `learned_trigrams_by_language`, reading each
+        // store directly rather than going through here.
+        return bigramStore.exportToJson(language)
+    }
+
+    /**
+     * Import context data for the active language from JSON.
+     */
+    fun importFromJson(jsonString: String) {
+        bigramStore.importFromJson(language, jsonString)
+    }
+
+    /**
+     * Calculate boost multiplier from probability.
+     *
+     * Uses non-linear formula to amplify high probabilities:
+     * boost = (1 + probability)^BOOST_EXPONENT
+     *
+     * Clamped between MIN_BOOST and MAX_BOOST.
+     *
+     * @param probability Value between 0.0 and 1.0
+     * @return Boost multiplier between MIN_BOOST and MAX_BOOST
+     */
+    private fun calculateBoost(probability: Float): Float {
+        if (probability <= 0f) return MIN_BOOST
+
+        val rawBoost = Math.pow((1.0 + probability).toDouble(), BOOST_EXPONENT.toDouble()).toFloat()
+        return rawBoost.coerceIn(MIN_BOOST, MAX_BOOST)
+    }
+
+    /**
+     * Set minimum frequency threshold for bigrams.
+     * Useful for filtering noise in production usage.
+     *
+     * @param minFrequency Minimum occurrence count (default: 2)
+     */
+    fun setMinimumFrequency(minFrequency: Int) {
+        bigramStore.setMinimumFrequency(minFrequency)
+    }
+}

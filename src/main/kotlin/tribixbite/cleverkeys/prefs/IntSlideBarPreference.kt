@@ -1,0 +1,104 @@
+package tribixbite.cleverkeys.prefs
+
+import android.content.Context
+import android.content.res.TypedArray
+import android.util.AttributeSet
+import android.view.View
+import android.widget.SeekBar
+import android.widget.TextView
+import androidx.preference.DialogPreference
+
+/**
+ * IntSlideBarPreference
+ * -
+ * Open a dialog showing a seekbar for integer values
+ * -
+ * xml attrs:
+ *   android:defaultValue  Default value (int)
+ *   min                   min value (int)
+ *   max                   max value (int)
+ * -
+ * Summary field allows showing the current value using %s flag
+ */
+class IntSlideBarPreference(
+    context: Context,
+    attrs: AttributeSet?
+) : DialogPreference(context, attrs), SeekBar.OnSeekBarChangeListener {
+
+    private val min: Int
+    private val max: Int
+    private var value: Int
+    private val initialSummary: CharSequence?
+
+    // Dialog views
+    private var seekBar: SeekBar? = null
+    private var textView: TextView? = null
+
+    init {
+        initialSummary = summary
+        min = attrs?.getAttributeIntValue(null, "min", 0) ?: 0
+        max = attrs?.getAttributeIntValue(null, "max", 100) ?: 100
+        value = min
+
+        // Set up dialog layout resource (shared with SlideBarPreference)
+        dialogLayoutResource = tribixbite.cleverkeys.R.layout.preference_slider_dialog
+    }
+
+    override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+        value = progress + min
+        updateText()
+    }
+
+    override fun onStartTrackingTouch(seekBar: SeekBar) {}
+
+    override fun onStopTrackingTouch(seekBar: SeekBar) {}
+
+    override fun onSetInitialValue(defaultValue: Any?) {
+        val defVal = (defaultValue as? Int) ?: min
+        value = getPersistedInt(defVal)
+        updateText()
+    }
+
+    override fun onGetDefaultValue(a: TypedArray, index: Int): Any {
+        return a.getInt(index, min)
+    }
+
+    fun onDialogClosed(positiveResult: Boolean) {
+        if (positiveResult) {
+            persistInt(value)
+        } else {
+            value = getPersistedInt(min)
+        }
+        updateText()
+    }
+
+    fun onBindDialogView(view: View) {
+        textView = view.findViewById(tribixbite.cleverkeys.R.id.slider_value)
+        seekBar = view.findViewById<SeekBar>(tribixbite.cleverkeys.R.id.slider_seekbar)?.apply {
+            // Qualify the preference's own min: inside this SeekBar `apply` block a bare
+            // `min` would resolve to SeekBar/ProgressBar#getMin (API 26, and the wrong value).
+            max = this@IntSlideBarPreference.max - this@IntSlideBarPreference.min
+            progress = value - this@IntSlideBarPreference.min
+            setOnSeekBarChangeListener(this@IntSlideBarPreference)
+        }
+        updateText()
+    }
+
+    private fun updateText() {
+        val formattedValue = try {
+            String.format(initialSummary?.toString() ?: "%s", value)
+        } catch (e: Exception) {
+            value.toString()
+        }
+        textView?.text = formattedValue
+        summary = formattedValue
+    }
+
+    fun getValue(): Int = value
+
+    fun setValue(newValue: Int) {
+        value = newValue
+        seekBar?.progress = value - min
+        updateText()
+    }
+}

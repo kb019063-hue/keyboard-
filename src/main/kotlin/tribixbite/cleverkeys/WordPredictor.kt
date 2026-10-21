@@ -1,0 +1,3858 @@
+package tribixbite.cleverkeys
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.content.SharedPreferences
+import android.util.Log
+import tribixbite.cleverkeys.autocorrect.AutocorrectRanking
+import tribixbite.cleverkeys.autocorrect.AutocorrectTuning
+import tribixbite.cleverkeys.autocorrect.ChannelCandidate
+import tribixbite.cleverkeys.autocorrect.ChannelEditCost
+import tribixbite.cleverkeys.autocorrect.ChannelRanker
+import tribixbite.cleverkeys.autocorrect.ChannelWeights
+import tribixbite.cleverkeys.autocorrect.FrequencyFloor
+import tribixbite.cleverkeys.autocorrect.FuzzyPrefixMatcher
+import tribixbite.cleverkeys.autocorrect.isDoubleReduction
+import tribixbite.cleverkeys.autocorrect.KeyAdjacency
+import tribixbite.cleverkeys.autocorrect.Morphology
+import tribixbite.cleverkeys.swipe.SwipeContextRescorer
+import tribixbite.cleverkeys.contextaware.ContextModel
+import tribixbite.cleverkeys.langpack.LanguagePackManager
+import tribixbite.cleverkeys.persist.DebouncedPersister
+import tribixbite.cleverkeys.personalization.PersonalizationEngine
+import org.json.JSONException
+import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.math.ln1p
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
+
+/**
+ * Word prediction engine that matches swipe patterns to dictionary words
+ */
+class WordPredictor : Predictor {
+    companion object {
+        private const val TAG = "WordPredictor"
+        private const val MAX_PREDICTIONS_TYPING = 5
+        private const val MAX_PREDICTIONS_SWIPE = 10
+
+        /**
+         * Frequency rank given to a contraction alias key that is NOT itself a word of the
+         * secondary dictionary (`NormalizedPrefixIndex` ranks run 0 = most common …
+         * 255 = least).
+         *
+         * 254 is the floor above "absent". The secondary path scores a hit as
+         * `((255 - rank) * 4000) + 1000`, so this yields 5,000 — the same anchor
+         * [loadPrimaryContractionKeys] already gives a new alias in the primary dictionary,
+         * and the bottom of the range real dictionary words occupy. An alias is therefore
+         * REACHABLE by prefix search but can never outrank a real word of the language.
+         */
+        private const val CONTRACTION_ALIAS_RANK = 254
+
+        // ── Autocorrect tuning constants ────────────────────────────
+        // Used by the dual-gate scoring in `autoCorrect`. Constants
+        // (not config knobs) because they're calibration values that
+        // should NOT need per-user tuning — exposing them as config
+        // would tempt users into breaking the gate semantics.
+
+        /**
+         * Same-length minimum-exact-match-ratio gate. At least half the
+         * positions must literally match before we'll consider the
+         * candidate, regardless of how adjacency-flattering the
+         * substitutions look. Without this, every same-length word
+         * scores 0.5+ via adjacency-similarity alone and the frequency
+         * tiebreaker picks common-but-unrelated words (`questin →
+         * without`).
+         */
+        internal const val MIN_SAME_LENGTH_EXACT_RATIO = 0.50f
+
+        /**
+         * Absolute cap on substituted positions for a same-length
+         * correction candidate. Complements [MIN_SAME_LENGTH_EXACT_RATIO]:
+         * the ratio gate scales with length (50% → ⌊L/2⌋ allowed subs), so
+         * for a 7-letter word it still admits THREE wrong keys. That let
+         * `broight` "correct" to `thought` (4/7 match, 3 subs `b→t r→h i→u`)
+         * which then beat the real target `brought` (6/7 match, single
+         * adjacent `i→u` typo) purely on a higher frequency inside
+         * [SCORE_TIEBREAK_GAP].
+         *
+         * A correction that changes 3+ keys of a word is rarely a
+         * fat-finger fix and is dangerous to apply silently. Capping at 2
+         * substitutions removes those structurally-poor candidates BEFORE
+         * the score/frequency tiebreaker, so the deliberate
+         * frequency-breaks-near-ties behavior (`questin → question` over
+         * `quentin`) is preserved while `broight → brought` is restored.
+         * Binds only for length ≥ 6; shorter words remain governed by the
+         * ratio gate.
+         *
+         * Verified accept: `broight → brought` (1 sub), `tge → the` (1),
+         *   `donr → dont` (1), `thoight → thought` (1).
+         * Verified reject: `broight → thought` (3 subs), `delight`/`troughs`
+         *   (3 subs each) — all drop out, brought wins on score.
+         */
+        internal const val MAX_SAME_LENGTH_SUBSTITUTIONS = 2
+
+        /**
+         * Length-diff edit-distance budget — caps allowed substitution
+         * cost ABOVE the literal length difference. Each insertion or
+         * deletion costs 1.0 in our weighted Levenshtein; adjacent-key
+         * substitutions cost ~0.137; distant subs cost up to 1.0.
+         *
+         * Calibrated through three iterations against the ew-cli dictionary:
+         *   - 2.0 was way too loose (let unrelated `something` through)
+         *   - 1.0 was still too loose (let `season` through at ed ≈ 2.95
+         *     for `wuestion → season` lengthDiff=2 case)
+         *   - 0.5 is tight enough: only adjacent-key subs fit beyond the
+         *     length diff, so unrelated 2-length-diff candidates (which
+         *     inevitably need ≥ 1 mid/distant sub in their best alignment)
+         *     get rejected, while legitimate single-char-insertion typos
+         *     (`questin → question`, ed=1.0) clear `1 + 0.5 = 1.5`.
+         *
+         * Verified accept:
+         *   - `questin → question` (lenDiff=1, ed=1.0): 1.0 ≤ 1.5 ✓
+         *   - `quuestion → question` (lenDiff=1, ed=1.0): 1.0 ≤ 1.5 ✓
+         *
+         * Verified reject:
+         *   - `wuestion → season` (lenDiff=2, ed≈2.95): 2.95 > 2.5 ✗
+         *   - `wuestion → wuthering` (lenDiff=1, ed≈2.79): 2.79 > 1.5 ✗
+         *   - `wuestion → something` (lenDiff=1, ed≈2.71): 2.71 > 1.5 ✗
+         */
+        internal const val LENGTH_DIFF_ED_BUDGET = 0.5f
+
+        // NOTE (2026-07-04): the old ALIAS_SCORE_BONUS (+0.15 to alias-key
+        // candidates) is GONE. As a score bump it could beat candidates up to
+        // 0.15 STRONGER than the alias — the very thing its own doc said it
+        // shouldn't do ("thier" → "this'd" instead of "their"). Alias
+        // preference is now a RULE in the tiebreaker: within the gap band an
+        // alias wins against a non-alias only at equal-or-better RAW score.
+
+        /**
+         * Score-difference threshold for score-vs-frequency tiebreaker.
+         * When two candidates differ by MORE than this in raw score, the
+         * higher-scoring one wins regardless of frequency. When the gap is
+         * within this band, structural rules (alias privilege, transposition
+         * beats 2-sub) and then frequency decide.
+         *
+         * Why hybrid: same-length multi-substitution candidates have an
+         * asymmetric scoring advantage over lengthDiff=1 candidates. A
+         * user typing `quuestion` almost certainly meant `question`
+         * (one extra letter, ed=1) not `quotation` (three subs, score
+         * 0.938 vs 0.889 — tantalizingly close by score, semantically
+         * miles apart). Pure score-primary picks `quotation`; pure
+         * freq-primary picks `quentin` for `questin`. The 0.10 gap
+         * threshold separates "clearly better" from "noise" — picks
+         * `question` correctly via the freq fallback.
+         *
+         * Calibrated against (sim, 26/29 on the 98k dictionary, 2026-07-04):
+         *   - `donr → don't` (dont/done raw-tied 0.972) → alias privilege
+         *   - `thier → their` (transposition 0.97 > alias thisd 0.95) → raw
+         *   - `thsi → this` (transposition beats 2-sub `that` in-band)
+         *   - `tge → the` (gap 0.149 vs `weve`) → score wins (the)
+         *   - `tfe → the` (gap 0.037 vs `tfw`) → freq wins (the)
+         *   - `quuestion → question` (gap 0.049 vs `quotation`) → freq wins
+         *   - `questin → question` (gap 0.052 vs `quentin`) → freq wins
+         */
+        internal const val SCORE_TIEBREAK_GAP = 0.10f
+
+        // The shipped NB tiebreak variant (see [NeighbourTiebreak]) is OFF
+        // (`Defaults.AUTOCORRECT_NEIGHBOUR_TIEBREAK`, user-selectable since 2026-10-18).
+        // Neither N1 nor NA was admissible on GTC-DEV
+        // (`docs/eval/2026-10-12-neighbour-substitution-tiebreak.md` §2: real distant
+        // one-letter misspellings outnumber the neighbour slips it fixes). OFF also skips
+        // the per-position neighbour check.
+
+        /**
+         * Length-normalized score penalty for an adjacent-transposition
+         * (Damerau) match in the same-length path: score = 1 − penalty/len.
+         * Calibrated (0.25 → 0.15, 2026-07-04) so a transposition ranks
+         * BETWEEN a single adjacent-key substitution and a 2-substitution
+         * candidate — where one swap operation structurally belongs:
+         *   "teh"→"the" 0.950 vs "ten" (1 sub) 0.959 → in-band, freq → the ✓
+         *   "thier"→"their" 0.970 vs "thisd" (2 subs) 0.950 → raw win ✓
+         * Verified accept: teh→the, hte→the, becuase→because, recieve→receive,
+         * thsi→this, waht→what, taht→that, jsut→just, liek→like, onyl→only.
+         * Note: transposition detection is positional, not keyboard-aware — a swap of
+         * physically distant keys scores the same 1−0.15/len, and in rare short-word
+         * cases a 1-substitution alias candidate at equal-or-better raw score can win
+         * via alias privilege (e.g. hypothetical dnot→snot vs don't); accepted as an
+         * edge (2026-07-13 review H4).
+         */
+        internal const val TRANSPOSITION_PENALTY = 0.15f
+
+        /**
+         * Step 1.45 (DD-M) margin, in steps of `maxFreq / 255` (on the shipped
+         * `en_enhanced.bin`, one step ≈ one rank: 3,921.6 vs 3,900): a re-inserted
+         * doubled letter ("helo" → "hello") beats the sweep's word only when it is at
+         * most this many steps rarer. Tuned once on GitHub Typo Corpus DEV commits +
+         * half of a synthetic adjacent-slip control, gated on the held-out half, ON THE
+         * DEVICE DICTIONARY (docs/eval/2026-10-11-dropped-double-margin.md §5; the
+         * earlier M = 32 was tuned on a JSON-derived scale the device never loads).
+         * 64 keeps see/very/one/many/from/the against seed/berry/knee/nanny/groom/ghee
+         * (66–191 steps) and gives hello over help (39 steps). The nearest, see/seed,
+         * is only 2 steps outside the margin.
+         */
+        internal const val DROPPED_DOUBLE_MARGIN_STEPS = 64
+        private const val MAX_EDIT_DISTANCE = 2
+        private const val MAX_RECENT_WORDS = 20 // Keep last 20 words for language detection
+        private const val PREFIX_INDEX_MAX_LENGTH = 3 // Index prefixes up to 3 chars
+
+        // ── Prefix-score constants (calculatePrefixScore) ──────────────
+        /** Prefix score of a word typed in full. */
+        internal const val DIRECT_MATCH_PREFIX_SCORE = 1000
+        /** Base prefix score of a completion of the typed prefix. */
+        private const val COMPLETION_BASE_PREFIX_SCORE = 800
+        /** Per typed letter bonus for a completion (a longer prefix is more specific). */
+        private const val COMPLETION_PREFIX_BONUS_PER_CHAR = 50
+        /** Completions longer than this many letters pay [COMPLETION_LENGTH_PENALTY_PER_CHAR]. */
+        private const val COMPLETION_FREE_LENGTH = 6
+        private const val COMPLETION_LENGTH_PENALTY_PER_CHAR = 10
+
+        /**
+         * Prefix score of a completion of [wordLength] letters for a typed prefix of
+         * [typedLength] letters — the shared completion formula of [calculatePrefixScore]
+         * and the fuzzy candidates (which score as the completion of the prefix they were
+         * corrected to, then pay [fuzzyPrefixScore]'s penalty).
+         */
+        internal fun completionPrefixScore(wordLength: Int, typedLength: Int): Int =
+            COMPLETION_BASE_PREFIX_SCORE + typedLength * COMPLETION_PREFIX_BONUS_PER_CHAR -
+                max(0, (wordLength - COMPLETION_FREE_LENGTH) * COMPLETION_LENGTH_PENALTY_PER_CHAR)
+
+        // ── Typo-tolerant bar candidates (2026-09-26 user report: "pka" → "play") ──
+
+        /**
+         * Fraction of the prefix score a fuzzy candidate loses per unit of
+         * [FuzzyPrefixMatcher] cost: 25% per full edit, so a neighbouring-key slip
+         * (cost 0.5) costs 12.5% and a swap (0.6) 15%. Because the penalty multiplies the
+         * SAME prefix score an exact match of that shape would get, a fuzzy candidate always
+         * ranks below an exact candidate of equal length and equal frequency/learning signals —
+         * it can only overtake an exact completion that is materially rarer, shorter-scored,
+         * or less boosted by context/personalization.
+         */
+        internal const val FUZZY_PENALTY_PER_EDIT = 0.25f
+
+        /**
+         * Fuzzy prefix score for a candidate reached at [cost]: [basePrefixScore] (what the
+         * word would score if the user had typed the corrected prefix/word) reduced by
+         * [FUZZY_PENALTY_PER_EDIT] per unit of cost, never below 1.
+         */
+        internal fun fuzzyPrefixScore(basePrefixScore: Int, cost: Float): Int =
+            (basePrefixScore * (1f - FUZZY_PENALTY_PER_EDIT * cost)).roundToInt().coerceAtLeast(1)
+
+        /**
+         * Exact results are "strong" — and the fuzzy search is skipped — when the bar is
+         * already full of exact completions AND the best of them is at least as frequent as
+         * the word at this fraction of the dictionary's frequency ranking (top 5%: ≈4.9k of
+         * the 98k English words, e.g. `play`, `question`; `thwart` is not). Rank-based, not
+         * value-based, because the frequency SCALE differs by loader (binary 5.5k–1M, JSON
+         * fallback 100–10k) and contraction aliases sit at a 5,000 floor that would skew a min/max span.
+         */
+        private const val FUZZY_STRONG_EXACT_TOP_FRACTION = 0.05f
+
+        /**
+         * Most fuzzy matches that go through full unified scoring. The matcher can return
+         * thousands (a bucket like `pa*` at one deletion); they are pre-ranked by the
+         * context-free part of the score (penalized prefix score × frequency factor) and only
+         * this many are fully scored with context/adaptation/personalization — 10× the bar,
+         * so the learned signals still reorder a deep pool.
+         */
+        private const val FUZZY_SCORING_POOL = 48
+
+        /**
+         * Bar slots guaranteed to the best typo-tolerant candidates whenever the fuzzy search
+         * ran (i.e. the exact results were missing, too few, or all rare). Needed because the
+         * unified score's frequency factor is log-compressed (`1 + ln1p(f/100)` is 5.0–10.2
+         * across the whole binary-dictionary range), so a bar full of rare exact completions
+         * whose frequencies are close to the correction's would otherwise hide the obvious
+         * correction. (On the shipped `.bin`, `thw` → `the` already wins on raw score because
+         * `thwart` is 176 ranks rarer; the reservation matters when the gap is smaller.) Reserved entries keep their score order: they take the
+         * places of the lowest-scoring exact entries, never the lead.
+         */
+        internal const val FUZZY_RESERVED_SLOTS = 2
+
+        // Real English words that also appear as contraction bases in contractions_en.json.
+        // These must NOT be autocorrected (e.g., "well" should stay "well", not become "we'll").
+        // Excludes "hes"/"shes"/"intl" which are NOT real words despite appearing in pairings data.
+        private val REAL_WORD_CONTRACTION_BASES = setOf(
+            "well", "were", "hell", "shed", "shell", "wed",
+            "editors", "girls", "readers", "states", "whore"
+        )
+
+        // Static flag to signal all WordPredictor instances need to reload custom/user/disabled words
+        @Volatile
+        private var needsReload = false
+
+        /**
+         * Signal all WordPredictor instances to reload custom/user/disabled words on next prediction
+         * Called by Dictionary Manager when user makes changes
+         */
+        @JvmStatic
+        fun signalReloadNeeded() {
+            needsReload = true
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "Reload signal set - all instances will reload on next prediction")
+        }
+    }
+
+    // OPTIMIZATION v4 (perftodos4.md): Use AtomicReference for lock-free atomic map swapping
+    // Allows O(1) atomic swap instead of O(n) putAll() on main thread during async loading
+    private val dictionary: AtomicReference<MutableMap<String, Int>> = AtomicReference(mutableMapOf())
+    private val prefixIndex: AtomicReference<MutableMap<String, MutableSet<String>>> = AtomicReference(mutableMapOf())
+
+    // Cached max dictionary frequency, used to scale the autocorrect frequency
+    // floor (see FrequencyFloor). Recomputed lazily whenever the dictionary size
+    // changes — covers initial load, language switch, and custom-word additions
+    // without hooking every mutation site. Value changes that don't alter size
+    // (e.g. DictionaryWord.enabled toggles) don't affect frequencies, so a
+    // size-keyed cache is sufficient.
+    @Volatile private var cachedMaxFreq: Int = 0
+    @Volatile private var cachedMaxFreqForSize: Int = -1
+    private var bigramModel: BigramModel? = BigramModel.getInstance(null)
+    private var contextModel: ContextModel? = null // Phase 7.1: Dynamic N-gram model
+    private var personalizationEngine: PersonalizationEngine? = null // Phase 7.2: Personalized learning
+    // C-8 (2026-09-06 audit): the PersonalizedScorer field that used to sit here was
+    // assigned in setContext and never read — the real scoring path queries
+    // personalizationEngine directly in resolveScoreBreakdown. Class deleted.
+    private var languageDetector: LanguageDetector? = LanguageDetector()
+    private var multiLanguageManager: MultiLanguageManager? = null // Phase 8.3: Multi-language models
+    private var currentLanguage: String = "en" // Default to English
+    private val recentWords: MutableList<String> = mutableListOf() // For language detection
+
+    /**
+     * One-slot record of the newest commit fed through the learn funnel: the word, the learn
+     * window it was recorded with, and the language store it went to. [rollbackCommittedWord]
+     * falls back to it when the window no longer ends with the rejected word — a sentence
+     * boundary (`.`, Enter) clears the window, yet the #110 backspace undo still fires for the
+     * word before it (review of 59bd4159: swipe "got", ".", backspace ×2 left fix→got and the
+     * vocabulary +1 in place). Replaced by every commit, consumed by a rollback, dropped when
+     * the window is cleared for a non-sentence reason (field/session/password boundary).
+     * Nullable so an Objenesis-allocated test double starts in the correct empty state.
+     */
+    private var lastRecordedCommit: RecordedCommit? = null
+
+    private class RecordedCommit(val word: String, val window: List<String>, val language: String)
+
+    private data class LearningGates(
+        val master: Boolean, val context: Boolean, val vocabulary: Boolean,
+        val configuredLanguage: String?
+    )
+
+    private class ExactLearningCommit(
+        val handle: LearningCommit,
+        val word: String,
+        val windowBefore: List<String>,
+        val language: String,
+        val gates: LearningGates,
+        val fieldAllowed: Boolean,
+        val contextOwner: ContextModel?,
+        val vocabularyOwner: PersonalizationEngine?,
+        val contextReceipt: ContextModel.CommitReceipt?,
+        val vocabularyReceipt: tribixbite.cleverkeys.personalization.UserVocabulary.IncrementReceipt?,
+        val vocabularyVersion: Long?,
+        val vocabularyEnabled: Boolean?
+    )
+
+    private var exactLearningCommit: ExactLearningCommit? = null
+    private var learningCommitId = 0L
+    private var learningEpoch = 0L
+    // Config is mutable and often re-supplied as the SAME object: cache values, not its reference.
+    private var lastLearningGates: LearningGates? = null
+
+    private fun learningGates(value: Config? = config): LearningGates = LearningGates(
+        value?.on_device_learning_enabled ?: false,
+        value?.context_aware_predictions_enabled ?: false,
+        value?.personalized_learning_enabled ?: false,
+        value?.primary_language
+    )
+
+    private fun invalidateExactLearningCommit() {
+        learningEpoch++
+        exactLearningCommit = null
+    }
+
+    private fun refreshLearningEpoch(): LearningGates {
+        val gates = learningGates()
+        if (lastLearningGates != gates) {
+            invalidateExactLearningCommit()
+            lastLearningGates = gates
+        }
+        return gates
+    }
+
+    /** Fixed lock order is bigram → trigram → vocabulary; no InputConnection work belongs here. */
+    private fun <T> withLearningStoreLocks(gates: LearningGates, fieldAllowed: Boolean, action: () -> T): T {
+        val context = contextModel.takeIf { gates.master && gates.context && fieldAllowed }
+        val vocabulary = personalizationEngine.takeIf { gates.master && gates.vocabulary && fieldAllowed }
+        val underVocabulary = { if (vocabulary == null) action() else synchronized(vocabulary.learningLock(), action) }
+        return if (context == null) underVocabulary() else context.withLearningLocks(underVocabulary)
+    }
+
+    private var config: Config? = null
+    private var adaptationManager: UserAdaptationManager? = null
+    private var context: Context? = null // For accessing SharedPreferences for disabled words
+    private var disabledWords: MutableSet<String> = mutableSetOf() // Cache of disabled words
+    // Track custom/user-added words — these override disabled status (Issue #72: Boston bug)
+    @Volatile
+    private var customAndUserWords: Set<String> = emptySet()
+    private var lastReloadTime: Long = 0
+
+    // Issue #72: Track original case of user-added words (proper nouns)
+    // Maps lowercase word to original case: "boston" -> "Boston"
+    // v1.2.7: Use ConcurrentHashMap for thread-safety (accessed from async loader thread)
+    private val userWordOriginalCase: MutableMap<String, String> = java.util.concurrent.ConcurrentHashMap()
+
+    // C-3 (2026-09-06 audit): base-dictionary frequencies SHADOWED by a custom/user word.
+    // Custom words overwrite the base entry in the ONE shared dictionary map, so deleting
+    // a custom word that spells a bundled word ("hello" added to boost it) used to remove
+    // the BASE word from predictions until a full reload. Every insert path that overwrites
+    // a non-user entry records the base value here; the observer's removal path restores it
+    // instead of removing. Cleared alongside [userWordOriginalCase] on full loads (C-9) but
+    // NOT in reloadCustomAndUserWords — a reload runs over the serving map, where the
+    // existing entry for an already-custom word is the CUSTOM value, not the base one.
+    private val shadowedBaseFrequencies: MutableMap<String, Int> = java.util.concurrent.ConcurrentHashMap()
+
+    // OPTIMIZATION: Async loading state
+    @Volatile
+    private var isLoadingState: Boolean = false
+    private val asyncLoader: AsyncDictionaryLoader = AsyncDictionaryLoader()
+
+    // OPTIMIZATION: UserDictionary and custom words observer
+    private var dictionaryObserver: UserDictionaryObserver? = null
+    private var observerActive: Boolean = false
+    @Volatile private var closed = false
+
+    // Track contraction aliases added to dictionary (e.g., "im" → "i'm", "dont" → "don't")
+    // These are in the dictionary for prediction purposes but should still be autocorrected
+    @Volatile
+    private var contractionAliases: Map<String, String> = emptyMap()
+
+    // v1.1.93: Secondary language dictionary for bilingual touch typing.
+    // Async loads build on the shared worker and publish on main. The blocking loader can
+    // still publish off-main; predictions read these fields across threads, so both remain
+    // @Volatile — pinned by LangpackStartupOffMainDriftTest.
+    @Volatile
+    private var secondaryIndex: NormalizedPrefixIndex? = null
+    @Volatile
+    private var secondaryLanguageCode: String = "none"
+
+    /**
+     * Typo hygiene (learning-system audit 2026-09-26): the ONE "may this word be learned?"
+     * predicate, over the LIVE lexicon — see [LearnableWordPolicy] for the rules and the
+     * table of consumers. The repeat tally is the personalization vocabulary's usage count.
+     */
+    private val learnableWordPolicy: LearnableWordPolicy
+        // Built on first use rather than in an initializer: test doubles that allocate a
+        // predictor without running its constructor (Objenesis-backed mocks/spies) would
+        // otherwise see a null field. The lambdas read live state, so one instance suffices.
+        get() = learnableWordPolicyCache ?: LearnableWordPolicy(
+            lexiconReady = { liveLexicon().isNotEmpty() },
+            isKnownWord = { w -> isInLexicon(w, liveLexicon(), liveUserWords(), secondaryIndex) },
+            observationCount = { w -> personalizationEngine?.getWordUsage(w)?.usageCount ?: 0 }
+        ).also { learnableWordPolicyCache = it }
+
+    @Volatile
+    private var learnableWordPolicyCache: LearnableWordPolicy? = null
+
+    // Null-tolerant reads for the policy: in an Objenesis-allocated test double the field
+    // initializers never ran, so these "non-null" fields are null at runtime. An empty
+    // lexicon makes the policy fail OPEN (learn as before), which is the safe default.
+    @Suppress("UNNECESSARY_SAFE_CALL", "USELESS_ELVIS")
+    private fun liveLexicon(): Map<String, Int> = dictionary?.get() ?: emptyMap()
+
+    @Suppress("UNNECESSARY_SAFE_CALL", "USELESS_ELVIS")
+    private fun liveUserWords(): Set<String> = customAndUserWords ?: emptySet()
+
+    /**
+     * Set context for accessing disabled words from SharedPreferences
+     */
+    fun setContext(context: Context) {
+        this.context = context
+        loadDisabledWords()
+
+        // ARC-010: the shipped static bigram asset for the active language is
+        // the next-word cold-start seed. Loaded off the main thread — until it
+        // lands, BigramModel serves its hardcoded pairs, so there is no state
+        // to wait on. Idempotent per language.
+        bigramModel?.loadStaticContinuationsAsync(context, currentLanguage)
+
+        // Phase 7.1: Initialize ContextModel for dynamic N-gram predictions
+        // (language-keyed view over the singleton BigramStore — 2026-08-06 persistence fix)
+        if (contextModel == null) {
+            contextModel = ContextModel(context, currentLanguage)
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "ContextModel initialized for dynamic N-gram predictions (lang=$currentLanguage)")
+        }
+
+        // Phase 7.2: Initialize PersonalizationEngine for personalized learning
+        if (personalizationEngine == null) {
+            personalizationEngine = PersonalizationEngine(context)
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "PersonalizationEngine initialized for adaptive predictions")
+        }
+
+        // Phase 8.3: Initialize Multi-Language support if enabled.
+        // Phase 8.4's MultiLanguageDictionaryManager was deleted with the neural engine
+        // (2026-08-18): it wrapped an OptimizedVocabulary per language and was constructed
+        // here but never read — per-language tap dictionaries come from DictionaryManager.
+        val enableMultiLang = config?.enable_multilang ?: false
+        if (enableMultiLang) {
+            if (multiLanguageManager == null) {
+                val primaryLang = config?.primary_language ?: "en"
+                multiLanguageManager = MultiLanguageManager(primaryLang)
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "MultiLanguageManager initialized (primary: $primaryLang)")
+            }
+        }
+
+        // Initialize dictionary observer for automatic updates
+        if (dictionaryObserver == null) {
+            dictionaryObserver = UserDictionaryObserver(context).apply {
+                setChangeListener(object : UserDictionaryObserver.ChangeListener {
+                    override fun onUserDictionaryChanged(addedWords: Map<String, Int>, removedWords: Set<String>) {
+                        handleIncrementalUpdate(addedWords, removedWords)
+                        // ARC-081/ARC-082: since the platform user dictionary now also feeds the
+                        // SWIPE lexicons, a provider change invalidates their memoized trie /
+                        // template index too. This listener is the only place the ContentObserver
+                        // surfaces, so it owns that trigger; the custom-words half is owned by the
+                        // preference seam (PreferenceUIUpdateHandler), and the scheduler coalesces
+                        // the two so a single "add word" that writes both costs one rebuild.
+                        SwipeRewarmScheduler.requestRewarm()
+                    }
+
+                    override fun onCustomWordsChanged(addedOrModified: Map<String, Int>, removed: Set<String>) {
+                        handleIncrementalUpdate(addedOrModified, removed)
+                    }
+                })
+            }
+        }
+    }
+
+    /**
+     * Start observing UserDictionary and custom words for changes.
+     *
+     * OPTIMIZATION: Enables automatic incremental updates without polling.
+     * Call this after dictionary is loaded to receive change notifications.
+     */
+    fun startObservingDictionaryChanges() {
+        if (closed) return
+        dictionaryObserver?.let {
+            if (!observerActive) {
+                it.start()
+                observerActive = true
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                    Log.d(TAG, "Started observing dictionary changes")
+                }
+            }
+        }
+    }
+
+    /**
+     * Stop observing dictionary changes.
+     * Call this when WordPredictor is no longer needed.
+     */
+    override fun stopObservingDictionaryChanges() {
+        dictionaryObserver?.let {
+            if (observerActive) {
+                it.stop()
+                observerActive = false
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                    Log.d(TAG, "Stopped observing dictionary changes")
+                }
+            }
+        }
+    }
+
+    /** Stop owned work before releasing dictionaries; late loader results are discarded. */
+    override fun shutdown() {
+        if (closed) return
+        closed = true
+        asyncLoader.close()
+        stopObservingDictionaryChanges()
+        dictionary.set(mutableMapOf())
+        prefixIndex.set(mutableMapOf())
+        secondaryIndex = null
+        secondaryLanguageCode = "none"
+        isLoadingState = false
+        customAndUserWords = emptySet()
+        contractionAliases = emptyMap()
+        userWordOriginalCase.clear()
+        shadowedBaseFrequencies.clear()
+    }
+
+    /**
+     * Handle incremental dictionary updates.
+     *
+     * OPTIMIZATION: Updates dictionary and prefix index without full rebuild.
+     *
+     * @param addedOrModified Words to add or update (word -> frequency)
+     * @param removed Words to remove
+     */
+    private fun handleIncrementalUpdate(addedOrModified: Map<String, Int>, removed: Set<String>) {
+        var hasChanges = false
+        val dict = dictionary.get()
+
+        // Remove words. C-3: a custom word that shadowed a base entry restores the base
+        // value instead of deleting it — the bundled word must survive the custom word.
+        if (removed.isNotEmpty()) {
+            val droppedOutright = mutableSetOf<String>()
+            for (word in removed) {
+                val lower = word.lowercase()
+                val shadowedBase = shadowedBaseFrequencies.remove(lower)
+                if (shadowedBase != null) {
+                    dict[lower] = shadowedBase // stays prefix-reachable
+                } else {
+                    dict.remove(lower)
+                    droppedOutright.add(lower)
+                }
+                userWordOriginalCase.remove(lower)
+            }
+            if (droppedOutright.isNotEmpty()) {
+                removeFromPrefixIndex(droppedOutright)
+            }
+            customAndUserWords = customAndUserWords - removed.map { it.lowercase() }.toSet()
+            hasChanges = true
+        }
+
+        // Add or modify words. C-2: the observer delivers STORED 1..255 values verbatim
+        // (provider FREQUENCY column / the pref value), so they must go through the same
+        // wave-U2 calibration as the three full-load paths — raw, they rank below the
+        // entire base dictionary. C-3: record a base entry we are about to overwrite.
+        // The words also join [customAndUserWords] so the disabled-word override and the
+        // autocorrect floor exemption see them without waiting for a full reload.
+        if (addedOrModified.isNotEmpty()) {
+            val (scaleFloor, scaleCeil) = baseFrequencySpanOf(dict)
+            val calibrated = HashMap<String, Int>(addedOrModified.size * 2)
+            for ((word, storedFreq) in addedOrModified) {
+                val lower = word.lowercase()
+                val existing = dict[lower]
+                if (existing != null && lower !in customAndUserWords) {
+                    shadowedBaseFrequencies.putIfAbsent(lower, existing)
+                }
+                calibrated[lower] =
+                    UserWordFrequency.scaleOnto(storedFreq, scaleFloor, scaleCeil).roundToInt()
+                // Issue #72 mirror of the full-load paths: the observer delivers the spelling
+                // AS STORED, so a cased word serves its casing immediately instead of
+                // lowercase-until-the-next-full-load; a lowercase (re-)add clears any stale
+                // mapping, exactly as a full load's cleared map would leave it absent.
+                if (word != lower) {
+                    userWordOriginalCase[lower] = word
+                } else {
+                    userWordOriginalCase.remove(lower)
+                }
+            }
+            dict.putAll(calibrated)
+            addToPrefixIndex(calibrated.keys)
+            customAndUserWords = customAndUserWords + calibrated.keys
+            hasChanges = true
+        }
+
+        if (hasChanges) {
+            Log.i(TAG, "Incremental dictionary update: +${addedOrModified.size} words, -${removed.size} words")
+        }
+    }
+
+    /**
+     * Load disabled words from SharedPreferences
+     *
+     * v1.1.92: Use language-specific key (disabled_words_${lang}) instead of legacy global key
+     */
+    private fun loadDisabledWords() {
+        if (context == null) {
+            disabledWords = mutableSetOf()
+            return
+        }
+
+        val ctx = context
+        if (ctx == null) {
+            disabledWords = mutableSetOf()
+            return
+        }
+        val prefs = DirectBootAwarePreferences.get_shared_preferences(ctx)
+        // v1.1.92: Use language-specific disabled words key
+        val disabledWordsKey = LanguagePreferenceKeys.disabledWordsKey(currentLanguage)
+        val disabledSet = prefs.getStringSet(disabledWordsKey, emptySet()) ?: emptySet()
+        // Create a new HashSet to avoid modifying the original
+        disabledWords = disabledSet.toMutableSet()
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "Loaded ${disabledWords.size} disabled words for '$currentLanguage'")
+    }
+
+    /**
+     * Check if a word is disabled.
+     * Public (2026-07-15): the add-to-dictionary prompt guard (UT-2) needs it
+     * so a possessive of a DISABLED base is not suppressed as "known".
+     */
+    override fun isWordDisabled(word: String): Boolean {
+        val lower = word.lowercase()
+        // Custom/user-added words override disabled status — if user explicitly added
+        // "Boston" after disabling "boston", the custom word wins
+        return disabledWords.contains(lower) && !customAndUserWords.contains(lower)
+    }
+
+    /**
+     * Reload disabled words (called when Dictionary Manager updates the list)
+     */
+    fun reloadDisabledWords() {
+        loadDisabledWords()
+    }
+
+    /**
+     * Reload custom words and user dictionary (called when Dictionary Manager makes changes)
+     * PERFORMANCE: Only reloads small dynamic sets, overwrites existing entries
+     * Also rebuilds prefix index to include new words
+     *
+     * v1.1.90: Uses currentLanguage to filter UserDictionary by locale.
+     */
+    override fun reloadCustomAndUserWords() {
+        context?.let {
+            // Issue #72: Clear proper noun case map before reloading
+            userWordOriginalCase.clear()
+            // v1.1.90: Pass currentLanguage to filter by locale
+            val customWords = loadCustomAndUserWords(it, currentLanguage)
+            customAndUserWords = customWords  // Track for disabled-word override check
+            // NOTE: Full rebuild needed here because we don't track which words were removed
+            // Future optimization: track previous custom words to compute diff (added/removed)
+            buildPrefixIndex()
+            lastReloadTime = System.currentTimeMillis()
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                Log.d(TAG, "Reloaded ${customWords.size} custom/user words for '$currentLanguage' + rebuilt prefix index")
+            }
+        }
+    }
+
+    /**
+     * Check if reload is needed and perform it
+     * Called at start of prediction
+     */
+    private fun checkAndReload() {
+        if (needsReload && context != null) {
+            // C-1 (2026-09-06 audit): consume the signal BEFORE reloading — one Dictionary
+            // Manager edit costs exactly ONE reload, not a full prefix-index rebuild plus a
+            // provider query on EVERY prediction for the rest of the process lifetime. The
+            // old "don't clear, let all instances reload" rationale died with ARC-079:
+            // exactly one WordPredictor exists per process. Clearing first (not after)
+            // means a signal raised DURING the reload is kept for the next prediction
+            // instead of being swallowed.
+            needsReload = false
+            reloadDisabledWords()
+            reloadCustomAndUserWords()
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "Auto-reloaded dictionaries due to signal")
+        }
+    }
+
+    /**
+     * Set the config for weight access
+     */
+    override fun setConfig(config: Config) {
+        this.config = config
+        refreshLearningEpoch()
+
+        // H3 (review 2026-08-06): keep the selection-adaptation store's enabled
+        // flag synced to the master gate so its multiplier READS are inert with
+        // the master off — belt-and-braces alongside the canUseAdaptation guard
+        // at every read site below.
+        syncAdaptationEnabled()
+
+        // Phase 7.2: Update personalization engine settings when config changes.
+        // Task A (2026-08-06): the MASTER on-device-learning gate ANDs into the
+        // engine's enabled state, so with the master off the engine neither
+        // records (recordWordTyped no-ops) nor boosts (getPersonalizationBoost
+        // returns 0) — the learned vocabulary becomes fully inert.
+        personalizationEngine?.let { engine ->
+            engine.setEnabled(
+                LearningGate.canLearnPersonalization(
+                    config.on_device_learning_enabled,
+                    config.personalized_learning_enabled
+                )
+            )
+
+            // Parse learning aggression from config
+            val aggression = try {
+                PersonalizationEngine.LearningAggression.valueOf(config.learning_aggression)
+            } catch (e: IllegalArgumentException) {
+                PersonalizationEngine.LearningAggression.BALANCED // Default if invalid
+            }
+            engine.setLearningAggression(aggression)
+        }
+    }
+
+    /**
+     * Set the user adaptation manager for frequency adjustment
+     */
+    fun setUserAdaptationManager(adaptationManager: UserAdaptationManager) {
+        this.adaptationManager = adaptationManager
+        // H3: setConfig may already have run — sync the read gate now.
+        syncAdaptationEnabled()
+    }
+
+    /**
+     * H3 (review 2026-08-06): may the learned selection-adaptation history be
+     * read right now? Master off (or config not yet supplied — fail CLOSED)
+     * makes the store inert, not just frozen.
+     */
+    private fun canUseAdaptation(): Boolean =
+        LearningGate.canUseAdaptation(config?.on_device_learning_enabled ?: false)
+
+    /** Mirror the master gate into the adaptation store's own enabled flag. */
+    private fun syncAdaptationEnabled() {
+        config?.let { cfg ->
+            adaptationManager?.setEnabled(LearningGate.canUseAdaptation(cfg.on_device_learning_enabled))
+        }
+    }
+
+    /**
+     * Set the active language for N-gram predictions
+     *
+     * v1.1.91: Also updates UserDictionaryObserver to filter by new language.
+     * v1.1.92: Reloads disabled words for language-specific key.
+     */
+    fun setLanguage(language: String) {
+        // L6 (review 2026-08-06): the rolling learn window must not straddle a
+        // language switch — otherwise the first commits after the switch record
+        // mixed-language pairs into the NEW language's store.
+        if (language != currentLanguage) {
+            invalidateExactLearningCommit()
+            recentWords.clear()
+        }
+        currentLanguage = language
+        bigramModel?.let {
+            it.setLanguage(language)
+            // ARC-010: pull in the new language's shipped static bigram asset
+            // (async). No-op when it has already been attempted.
+            context?.let { ctx -> it.loadStaticContinuationsAsync(ctx, language) }
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "N-gram language set to: $language")
+        }
+
+        // Keep the learned context LM language-isolated (2026-08-06 keying fix)
+        contextModel?.language = language
+
+        // Phase 8.3: Switch multi-language models if enabled
+        multiLanguageManager?.let {
+            val switched = it.switchLanguage(language)
+            if (switched) {
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "MultiLanguageManager switched to: $language")
+            } else {
+                Log.w(TAG, "Failed to switch MultiLanguageManager to: $language")
+            }
+        }
+
+        // v1.1.91: Update observer to filter by new language
+        dictionaryObserver?.setLanguage(language)
+
+        // v1.1.92: Reload disabled words for language-specific key
+        loadDisabledWords()
+    }
+
+    /**
+     * Get the current active language
+     */
+    fun getCurrentLanguage(): String {
+        return bigramModel?.getCurrentLanguage() ?: "en"
+    }
+
+    /**
+     * Check if a language is supported by the N-gram model
+     */
+    fun isLanguageSupported(language: String): Boolean {
+        return bigramModel?.isLanguageSupported(language) ?: false
+    }
+
+    /**
+     * Check if a word exists in the dictionary.
+     * Used for determining whether to offer "Add to dictionary?" prompt.
+     *
+     * @param word The word to check (case-insensitive)
+     * @return true if word is in dictionary, false otherwise
+     */
+    override fun isInDictionary(word: String): Boolean =
+        isInDictionary(word, fieldAllowsPersonalizedLearning = true)
+
+    /**
+     * [isInDictionary] for a caller that knows the active field's incognito flag. The
+     * dictionary itself is always consulted; the learned selection-adaptation history (which
+     * can also admit a word) is read only when the master learning gate is on AND the field
+     * allows personalized learning — an `IME_FLAG_NO_PERSONALIZED_LEARNING` field must not be
+     * personalized by learned data, reads included (next-word static tier, 2026-09-26).
+     *
+     * @param fieldAllowsPersonalizedLearning false when the active editor set
+     *   `IME_FLAG_NO_PERSONALIZED_LEARNING` (see [LearningGate.fieldAllowsPersonalizedLearning])
+     */
+    override fun isInDictionary(word: String, fieldAllowsPersonalizedLearning: Boolean): Boolean {
+        if (word.isEmpty()) return false
+        val lowerWord = word.lowercase()
+        // Check main dictionary
+        if (dictionary.get().containsKey(lowerWord)) {
+            return true
+        }
+        // Check if user has typed it frequently (adaptation manager) — gated
+        // (H3): with the master off, learned selection history must not
+        // suppress add-to-dictionary prompts; nor may it widen anything in an
+        // incognito field.
+        if (!canUseAdaptation() || !fieldAllowsPersonalizedLearning) return false
+        val adaptationMultiplier = adaptationManager?.getAdaptationMultiplier(lowerWord) ?: 0f
+        return adaptationMultiplier > 1.0f
+    }
+
+    /**
+     * Issue #72: Apply original case from user dictionary to a word.
+     * If user added "Boston" to dictionary, this transforms "boston" → "Boston".
+     *
+     * @param word Word to potentially restore case for (should be lowercase)
+     * @return Word with original case if found in user dictionary, otherwise unchanged
+     */
+    fun applyUserWordCase(word: String): String {
+        val lowerWord = word.lowercase()
+        return userWordOriginalCase[lowerWord] ?: word
+    }
+
+    /**
+     * Issue #72: Apply original case to a list of predictions.
+     *
+     * @param words List of predicted words
+     * @return List with proper noun case restored where applicable
+     */
+    override fun applyUserWordCaseToList(words: List<String>): List<String> {
+        return words.map { applyUserWordCase(it) }
+    }
+
+    /**
+     * Add a word to the recent words list for language detection and run the
+     * gated learn funnel.
+     *
+     * @param fieldAllowsPersonalizedLearning false when the active editor set
+     *   `IME_FLAG_NO_PERSONALIZED_LEARNING` (M5 incognito contract) — the
+     *   language-detection window still updates (detection is not learning),
+     *   but NO learn path runs.
+     */
+    override fun addWordToContext(word: String?, fieldAllowsPersonalizedLearning: Boolean) {
+        if (word.isNullOrBlank()) return
+        val gates = refreshLearningEpoch()
+        withLearningStoreLocks(gates, fieldAllowsPersonalizedLearning) {
+            recordContextCommit(word, gates, fieldAllowsPersonalizedLearning)
+        }
+        // A replacement of the newest token must not switch language halfway through its
+        // transaction. Ordinary subsequent commits retain the existing detection behavior.
+        if (recentWords.size >= 5) tryAutoLanguageDetection()
+    }
+
+    /** Caller holds the participating store locks. Receipts describe actual writes, not gate guesses. */
+    private fun recordContextCommit(
+        word: String, gates: LearningGates, fieldAllowed: Boolean
+    ): LearningCommit {
+        val normalizedWord = word.lowercase().trim()
+        val windowBefore = recentWords.toList()
+        recentWords.add(normalizedWord)
+        while (recentWords.size > MAX_RECENT_WORDS) recentWords.removeAt(0)
+        lastRecordedCommit = RecordedCommit(
+            normalizedWord, recentWords.takeLast(LearningGate.CONTEXT_WINDOW), currentLanguage
+        )
+        // Supersede the previous identity BEFORE any sink can throw or be interrupted.
+        exactLearningCommit = null
+        val contextOwner = contextModel.takeIf { gates.master && gates.context && fieldAllowed }
+        val vocabularyOwner = personalizationEngine.takeIf { gates.master && gates.vocabulary && fieldAllowed }
+        var contextReceipt: ContextModel.CommitReceipt? = null
+        var vocabularyReceipt: tribixbite.cleverkeys.personalization.UserVocabulary.IncrementReceipt? = null
+        LearningGate.learnCommittedWord(
+            recentWords = recentWords,
+            committedWord = normalizedWord,
+            onDeviceLearningEnabled = gates.master,
+            contextAwareEnabled = gates.context,
+            personalizedLearningEnabled = gates.vocabulary,
+            recordSequence = { sequence ->
+                contextReceipt = contextOwner?.recordCommitWithReceipt(sequence, learnableWordPolicy::isLearnable)
+            },
+            recordWordUsage = { committed ->
+                vocabularyOwner?.recordWordTyped(committed)
+                vocabularyReceipt = vocabularyOwner?.latestIncrementReceipt()
+            },
+            fieldAllowsPersonalizedLearning = fieldAllowed
+        )
+        // Even a one-word or self-reference commit owns a version snapshot, so a reset while
+        // its suffix action is pending cannot resurrect context into a newly emptied store.
+        if (contextReceipt == null) contextReceipt = contextOwner?.recordCommitWithReceipt(emptyList())
+        val handle = LearningCommit(this, ++learningCommitId, learningEpoch)
+        exactLearningCommit = ExactLearningCommit(
+            handle, normalizedWord, windowBefore, currentLanguage, gates, fieldAllowed,
+            contextOwner, vocabularyOwner, contextReceipt, vocabularyReceipt,
+            vocabularyOwner?.receiptVersion(), vocabularyOwner?.isEnabled()
+        )
+        return handle
+    }
+
+    override fun latestLearningCommit(): LearningCommit? {
+        refreshLearningEpoch()
+        return exactLearningCommit?.takeIf { it.language == currentLanguage }?.handle
+    }
+
+    private fun matchingLearningCommit(
+        handle: LearningCommit, gates: LearningGates, fieldAllowed: Boolean
+    ): ExactLearningCommit? {
+        val recorded = exactLearningCommit ?: return null
+        if (recorded.handle !== handle || handle.owner !== this || handle.epoch != learningEpoch) return null
+        // An observed permission boundary expires this identity permanently. A later call
+        // from an allowed field must not revive the old field's same-spelled commit.
+        if (recorded.fieldAllowed != fieldAllowed) {
+            invalidateExactLearningCommit()
+            return null
+        }
+        return recorded.takeIf {
+            it.language == currentLanguage && it.gates == gates && it.word == recentWords.lastOrNull() &&
+                it.contextOwner === contextModel.takeIf { gates.master && gates.context && fieldAllowed } &&
+                it.vocabularyOwner === personalizationEngine.takeIf { gates.master && gates.vocabulary && fieldAllowed }
+        }
+    }
+
+    private fun receiptsAreCurrent(commit: ExactLearningCommit): Boolean =
+        (commit.contextReceipt?.let { commit.contextOwner?.isReceiptCurrent(it) == true } ?: true) &&
+            (commit.vocabularyOwner?.let { owner ->
+                owner.receiptVersion() == commit.vocabularyVersion &&
+                    owner.isEnabled() == commit.vocabularyEnabled &&
+                    (commit.vocabularyReceipt?.let(owner::isReceiptCurrent) ?: true)
+            } ?: true)
+
+    override fun canReplaceLearningCommit(commit: LearningCommit, fieldAllowsPersonalizedLearning: Boolean): Boolean {
+        val gates = refreshLearningEpoch()
+        val recorded = matchingLearningCommit(commit, gates, fieldAllowsPersonalizedLearning) ?: return false
+        return withLearningStoreLocks(gates, fieldAllowsPersonalizedLearning) { receiptsAreCurrent(recorded) }
+    }
+
+    override fun replaceLearningCommit(
+        commit: LearningCommit, replacement: String, fieldAllowsPersonalizedLearning: Boolean
+    ): LearningCommitReplacement {
+        if (replacement.isBlank()) return LearningCommitReplacement.Invalidated
+        val gates = refreshLearningEpoch()
+        if (matchingLearningCommit(commit, gates, fieldAllowsPersonalizedLearning) == null) {
+            return LearningCommitReplacement.Invalidated
+        }
+        return withLearningStoreLocks(gates, fieldAllowsPersonalizedLearning) {
+            val recorded = matchingLearningCommit(commit, gates, fieldAllowsPersonalizedLearning)
+                ?: return@withLearningStoreLocks LearningCommitReplacement.Invalidated
+            if (!receiptsAreCurrent(recorded)) {
+                invalidateExactLearningCommit()
+                return@withLearningStoreLocks LearningCommitReplacement.Invalidated
+            }
+            // Consume before mutation; a failed operation is never retried against an older
+            // same-spelled word. All validation precedes the first decrement under these locks.
+            exactLearningCommit = null
+            lastRecordedCommit = null
+            try {
+                val contextUndone = recorded.contextReceipt?.let {
+                    recorded.contextOwner?.rollbackReceipt(it) == true
+                } ?: true
+                val vocabularyUndone = recorded.vocabularyReceipt?.let {
+                    recorded.vocabularyOwner?.rollbackReceipt(it) == true
+                } ?: true
+                if (!contextUndone || !vocabularyUndone) {
+                    recentWords.clear()
+                    return@withLearningStoreLocks LearningCommitReplacement.Invalidated
+                }
+                recentWords.clear()
+                recentWords.addAll(recorded.windowBefore)
+                LearningCommitReplacement.Applied(
+                    recordContextCommit(replacement, gates, fieldAllowsPersonalizedLearning)
+                )
+            } catch (error: Exception) {
+                // Store/persistence failures are not an atomic rollback guarantee. Abandon
+                // transient ownership; do not replay writes or reconstruct forgotten data.
+                invalidateExactLearningCommit()
+                lastRecordedCommit = null
+                recentWords.clear()
+                Log.w(TAG, "Learning replacement failed; commit ownership invalidated", error)
+                LearningCommitReplacement.Invalidated
+            }
+        }
+    }
+
+    /**
+     * Try to automatically detect and switch language based on recent words
+     */
+    private fun tryAutoLanguageDetection() {
+        // Phase 8.3: Skip entirely if auto-detect is disabled
+        val autoDetectEnabled = config?.auto_detect_language ?: false
+        if (!autoDetectEnabled) return
+        // GH #186/#61: a layout with a language binding decides the language; detection must
+        // not switch the n-gram/context models away from it mid-sentence.
+        if (config?.layout_bound_language != null) return
+
+        // Use MultiLanguageManager for detection and switching if available
+        if (multiLanguageManager != null) {
+            val sensitivity = config?.language_detection_sensitivity ?: 0.6f
+            val detected = multiLanguageManager?.detectAndSwitch(recentWords, sensitivity)
+            if (detected != null && detected != currentLanguage) {
+                invalidateExactLearningCommit()
+                currentLanguage = detected
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                    Log.d(TAG, "MultiLanguageManager auto-detected and switched to: $detected")
+                }
+                bigramModel?.setLanguage(detected)
+                contextModel?.language = detected
+                // L6: the window that triggered detection holds PRIOR-language
+                // words — clear it so the first post-switch commits don't learn
+                // mixed-language pairs into the new language's store.
+                recentWords.clear()
+                return
+            }
+        }
+
+        // Fallback to legacy detection only if auto-detect enabled but MultiLanguageManager unavailable
+        languageDetector ?: return
+
+        val detectedLanguage = languageDetector?.detectLanguageFromWords(recentWords)
+        if (detectedLanguage != null && detectedLanguage != currentLanguage) {
+            if (bigramModel?.isLanguageSupported(detectedLanguage) == true) {
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                    Log.d(TAG, "Auto-detected language change from $currentLanguage to $detectedLanguage")
+                }
+                setLanguage(detectedLanguage)
+            }
+        }
+    }
+
+    /**
+     * Manually detect language from a text sample
+     */
+    fun detectLanguage(text: String): String? {
+        return languageDetector?.detectLanguage(text)
+    }
+
+    /**
+     * Get the list of recent words used for language detection
+     */
+    fun getRecentWords(): List<String> {
+        return recentWords.toList()
+    }
+
+    /**
+     * Clear the recent words context
+     */
+    override fun clearContext() {
+        invalidateExactLearningCommit()
+        recentWords.clear()
+        lastRecordedCommit = null
+    }
+
+    /**
+     * Autocorrect-undo rollback (2026-08-06): the user REJECTED an autocorrect
+     * whose result had already been fed through the learn funnel by
+     * [addWordToContext]. Removes the rejected word from the rolling learn
+     * window and decrements the n-grams its commit recorded, so:
+     * - the undo's replacement commit cannot learn a bogus
+     *   `rejected → original` pair (the rejected word is gone from the window),
+     * - the `previous → rejected` pair's frequency returns to its pre-commit
+     *   value (a once-mislearned pair stays below the ≥2 confidence floors).
+     *
+     * The store decrement runs only under the SAME gate conditions the learn
+     * used ([LearningGate.canLearnContext] + the per-field incognito flag) —
+     * if the original record was suppressed, nothing is decremented, so
+     * legitimately-accumulated frequencies are never reduced.
+     *
+     * The personalization vocabulary's +1 for the rejected word is rolled back too,
+     * under [LearningGate.canLearnPersonalization] (the gate its record used). This was
+     * once left in place as "benign" because final autocorrect only produces dictionary
+     * words — but a rejected SWIPE auto-insert ("got" when the user meant "git") is
+     * exactly the case where the +1 is wrong, and the vocabulary count now also feeds
+     * [LearnableWordPolicy]'s repeat tally. ORDER: the n-grams are un-recorded FIRST,
+     * with the tally still including this commit, so the policy judges the rollback
+     * exactly as it judged the record.
+     *
+     * Target: the newest window entry when it is [word]; otherwise the one-slot
+     * [lastRecordedCommit] when it recorded [word] in the current language (a
+     * sentence boundary cleared the window in between). No-op otherwise — e.g. a
+     * session flush / password boundary ([clearContext]) or a newer commit, and
+     * a second rollback of the same commit (the slot is consumed).
+     *
+     * @param word the autocorrected word being undone (as committed)
+     * @param fieldAllowsPersonalizedLearning the active field's incognito flag,
+     *   as passed to [addWordToContext] for the original commit
+     */
+    override fun rollbackCommittedWord(word: String, fieldAllowsPersonalizedLearning: Boolean) {
+        invalidateExactLearningCommit()
+        val normalized = word.lowercase().trim()
+        val inWindow = recentWords.isNotEmpty() && recentWords.last() == normalized
+        // Window cleared by a sentence boundary since the commit: undo from the one-slot
+        // record, but only for the same language store (a switch drops the pairing).
+        val recorded = lastRecordedCommit?.takeIf { it.word == normalized && it.language == currentLanguage }
+        val window: List<String> = when {
+            inWindow -> recentWords.takeLast(LearningGate.CONTEXT_WINDOW)
+            recorded != null -> recorded.window
+            else -> return
+        }
+        lastRecordedCommit = null
+
+        val master = (config?.on_device_learning_enabled ?: false) && fieldAllowsPersonalizedLearning
+        val contextAware = config?.context_aware_predictions_enabled ?: false
+        if (LearningGate.canLearnContext(master, contextAware) && window.size >= 2) {
+            // Same predicate as the record, so a skipped (unlearnable) n-gram is not decremented.
+            contextModel?.rollbackCommit(window, learnableWordPolicy::isLearnable)
+        }
+        val personalized = config?.personalized_learning_enabled ?: false
+        if (LearningGate.canLearnPersonalization(master, personalized)) {
+            personalizationEngine?.unrecordWordTyped(normalized)
+        }
+        if (inWindow) recentWords.removeAt(recentWords.size - 1)
+    }
+
+    /**
+     * Sentence boundary hook (2026-08-06, audit §4.6): called when the user types
+     * sentence-final punctuation (`.` `?` `!`). Clears the learning window so
+     * [addWordToContext]'s recordSequence never learns bigrams that span a
+     * sentence boundary (cross-boundary pairs are noise for both context boosting
+     * and next-word generation).
+     */
+    override fun onSentenceBoundary() {
+        invalidateExactLearningCommit()
+        recentWords.clear()
+    }
+
+    /**
+     * Next-word prediction support (audit 2026-08-06 §4): learned continuations
+     * for the given committed-word context, ranked by conditional probability.
+     * Empty when the context LM is disabled or has no data for the context.
+     */
+    /**
+     * Learned evidence for each word of a swipe slate, or **null** when rescoring must not run.
+     *
+     * Step 2 of `docs/specs/ctc-context-rescoring-and-tunables.md`. Mirrors
+     * [getNextWordCandidates]: the M2 fail-closed gating lives HERE, in the class that owns the
+     * config reference, so no caller can reach the learned stores without passing it.
+     *
+     * ## null vs a list of nulls — the distinction is load-bearing
+     *
+     * - **null** = do not rescore at all. The caller must pass its slate through untouched, by
+     *   reference. Returned when the gate fails or the stores are not resident.
+     * - **a list containing [SwipeContextRescorer.Evidence.NONE]** = rescore; these particular
+     *   candidates simply had no confident learned continuation. That is the ordinary case, and
+     *   an all-NONE list yields the identity ordering anyway, since every boost is then neutral.
+     *
+     * Collapsing the two would make "learning is off" indistinguishable from "learning is on but
+     * knows nothing" — and the privacy contract is that the OFF output is byte-identical to
+     * today's, produced by not running rather than by running to a no-op.
+     *
+     * ## Why the store-residency check is not merely an optimisation
+     *
+     * The first access to a language's n-gram tables builds them from persisted storage. This
+     * runs on the MAIN THREAD during a swipe, where that load is the documented cause of
+     * first-swipe jank, so a cold store means SKIP — never block. The next-word append path warms
+     * the stores on the executor moments later, so the cost is at most one unrescored swipe.
+     *
+     * @param words the slate, already in display form (`"don't"`, `"café"`).
+     * @param contextWords preceding words, oldest first, as the stores key them.
+     */
+    override fun getSwipeContextEvidence(
+        words: List<String>,
+        contextWords: List<String>,
+    ): List<SwipeContextRescorer.Evidence>? {
+        if (words.isEmpty() || contextWords.isEmpty()) return null
+
+        // Null config fails CLOSED (M2) — same gate as getNextWordCandidates and
+        // calculateUnifiedScore's boost read.
+        val canUse = LearningGate.canUseLearnedContext(
+            config?.on_device_learning_enabled ?: false,
+            config?.context_aware_predictions_enabled ?: false
+        )
+        if (!canUse) return null
+
+        val model = contextModel ?: return null
+        if (!model.isLoadedInMemory()) return null
+
+        return words.map { word ->
+            val continuation = model.getContextEvidence(word.lowercase(), contextWords)
+                ?: return@map SwipeContextRescorer.Evidence.NONE
+            SwipeContextRescorer.Evidence(
+                // The REAL boost function, not a local copy of `(1 + p)^2`: the formula, its
+                // exponent and its clamp must have exactly one definition.
+                boost = model.boostFor(continuation).toDouble(),
+                frequency = continuation.frequency,
+                probability = continuation.probability,
+            )
+        }
+    }
+
+    override fun getNextWordCandidates(
+        contextWords: List<String>,
+        maxResults: Int
+    ): List<tribixbite.cleverkeys.contextaware.ContextContinuation> {
+        // Task A: the master gate makes the learned store inert for READS too —
+        // next-word candidates come exclusively from learned data. Null config
+        // fails CLOSED (M2).
+        val canUse = LearningGate.canUseLearnedContext(
+            config?.on_device_learning_enabled ?: false,
+            config?.context_aware_predictions_enabled ?: false
+        )
+        if (!canUse) return emptyList()
+        return contextModel?.getNextWordCandidates(contextWords, maxResults) ?: emptyList()
+    }
+
+    /**
+     * ARC-020 cold start: the SHIPPED static continuations of the last context
+     * word, used only to FILL next-word slots the learned store could not.
+     *
+     * Deliberately carries NO LearningGate check, unlike every read above it.
+     * This is not learned or personal data — it is the same read-only asset for
+     * every install, so gating it on the learning prefs would be theatre.
+     *
+     * Two-tier contract (2026-09-26): the seed is the next-word STATIC tier. Its
+     * only reader is `NextWordPredictor.candidatesFor`, which calls it once
+     * `NextWordPredictor.decideTiers` has opened `TierGate.showStatic` — the
+     * feature pref, word prediction, and the suggestion-bar guards (not a
+     * password field, no special prompt showing, not Termux, non-empty context).
+     * It is deliberately read with on-device learning OFF, with context-aware
+     * predictions OFF and in an incognito field, where it is the whole bar; only
+     * the LEARNED tier (`TierGate.useLearned`) needs those. No call site reads it
+     * directly — pinned by `LearningWiringDriftTest`.
+     *
+     * @return continuations ranked best-first; empty when the context is empty,
+     *   the language has no static data, or the previous word is unknown
+     */
+    override fun getStaticNextWordSeed(
+        contextWords: List<String>,
+        maxResults: Int
+    ): List<StaticBigramSeed.Continuation> {
+        val prevWord = contextWords.lastOrNull() ?: return emptyList()
+        return bigramModel?.getPredictions(prevWord, maxResults) ?: emptyList()
+    }
+
+    /**
+     * Personalization boost (0..6) for a word — 0 when personalization or the
+     * master on-device-learning gate is off, or the word is unknown. Used by
+     * next-word re-ranking.
+     */
+    override fun getPersonalizationBoostFor(word: String): Float {
+        // Null config fails CLOSED (M2).
+        val canUse = LearningGate.canLearnPersonalization(
+            config?.on_device_learning_enabled ?: false,
+            config?.personalized_learning_enabled ?: false
+        )
+        if (!canUse) return 0f
+        return personalizationEngine?.getPersonalizationBoost(word) ?: 0f
+    }
+
+    /**
+     * @return true if the word is in the user's learned personal vocabulary.
+     * Next-word filter: membership here OR in the dictionary is required so
+     * typo'd garbage absorbed by the bigram store never surfaces.
+     *
+     * Typo hygiene (2026-09-26): bare vocabulary membership is NOT enough — the vocabulary
+     * tallies every committed word, a once-typed typo included, which made this filter a
+     * no-op for exactly the words it exists to stop. A word counts as the user's once it
+     * has been committed [LearnableWordPolicy.REPEAT_OBSERVATIONS_TO_LEARN] times.
+     */
+    override fun isInUserVocabulary(word: String): Boolean {
+        return learnableWordPolicy.isRepeatedlyObserved(word)
+    }
+
+    /**
+     * Lexicon membership for [LearnableWordPolicy]: the primary dictionary map (which also
+     * carries custom/user-dictionary words and the contraction alias keys), the tracked
+     * user-word set, and the secondary bilingual lexicon (matched accent-insensitively, the
+     * way that index is keyed). Parameters rather than fields so the purge can judge
+     * against the snapshot it was scheduled with.
+     */
+    private fun isInLexicon(
+        word: String,
+        lexicon: Map<String, Int>,
+        userWords: Set<String>,
+        secondary: NormalizedPrefixIndex?
+    ): Boolean =
+        lexicon.containsKey(word) || word in userWords ||
+            (secondary?.contains(AccentNormalizer.normalize(word)) == true)
+
+    /**
+     * Typo-hygiene purge trigger (see [ContextModel.purgeUnlearnable]): called when a
+     * language's PRIMARY dictionary has just been published. Only when the learned context
+     * LM is usable (master learning gate + context-aware feature on; M2: a missing config
+     * fails closed). WHEN it may actually run — every configured lexicon source published —
+     * and the frozen lexicon copy it judges against are [LearnedTypoPurgeScheduler]'s job;
+     * the purge body runs on the learned-data persistence thread, never the main thread, and
+     * is a no-op unless due (first run after upgrade, then weekly).
+     */
+    private fun scheduleLearnedTypoPurge(language: String) {
+        publishedLexiconLanguage = language
+        if (!canPurgeLearnedTypos()) return
+        typoPurgeScheduler().onPrimaryPublished(lexiconState(language))
+    }
+
+    /**
+     * The secondary (bilingual) lexicon was published, replaced or unloaded. A purge the
+     * primary publication deferred because this source was still pending runs now (review of
+     * 59bd4159: the purge used to judge a bilingual user's store before the secondary
+     * lexicon existed, deleting their second language's n-grams).
+     */
+    private fun notifySecondaryLexiconChanged() {
+        val language = publishedLexiconLanguage ?: return
+        if (!canPurgeLearnedTypos()) return
+        typoPurgeScheduler().onSecondaryChanged(lexiconState(language))
+    }
+
+    private fun canPurgeLearnedTypos(): Boolean {
+        if (closed) return false
+        val cfg = config ?: return false
+        if (!LearningGate.canUseLearnedContext(cfg.on_device_learning_enabled, cfg.context_aware_predictions_enabled)) return false
+        return contextModel != null
+    }
+
+    /**
+     * Every lexicon source the purge's "known" test needs, as published right now. The
+     * scheduler copies the mutable parts (the primary map, the user-word set) when — and only
+     * when — it actually queues a purge. The secondary index is kept by reference: it is built
+     * privately and never mutated after publication (a switch publishes a NEW index).
+     */
+    private fun lexiconState(language: String): LearnedTypoPurgeScheduler.LexiconState {
+        val secondary = secondaryIndex
+        val engine = personalizationEngine
+        return LearnedTypoPurgeScheduler.LexiconState(
+            language = language,
+            lexicon = dictionary.get(),
+            userWords = customAndUserWords,
+            configuredSecondary = configuredSecondaryLanguage(),
+            publishedSecondary = if (secondary != null) secondaryLanguageCode else null,
+            secondaryContains = secondary?.let { idx -> { w: String -> idx.contains(AccentNormalizer.normalize(w)) } },
+            observationCount = { w -> engine?.getWordUsage(w)?.usageCount ?: 0 }
+        )
+    }
+
+    /**
+     * The secondary language the user has CONFIGURED (multilang on + a language chosen), read
+     * from the same prefs `PredictionCoordinator` loads it from — or null when monolingual.
+     * Compared against the published index to tell "not bilingual" from "bilingual, secondary
+     * lexicon still loading (or failed to load)"; the latter defers the purge.
+     */
+    private fun configuredSecondaryLanguage(): String? {
+        // GH #186/#61: the ACTIVE secondary, which is what PredictionCoordinator loads — null
+        // while a layout with a language binding is current, even with Multi-Language on.
+        config?.let { return it.active_secondary_language }
+        // No config yet: fall back to the preferences the active value is resolved from.
+        val ctx = context ?: return null
+        return try {
+            val prefs = DirectBootAwarePreferences.get_shared_preferences(ctx)
+            if (!prefs.getBoolean("pref_enable_multilang", Defaults.ENABLE_MULTILANG)) return null
+            prefs.getString("pref_secondary_language", Defaults.SECONDARY_LANGUAGE)?.takeIf { it.isNotEmpty() && it != LanguageDisplayNames.NONE }
+        } catch (e: Exception) {
+            // Unreadable prefs: cannot rule out a secondary language — report one so the
+            // scheduler defers rather than judging a possibly-bilingual store monolingually.
+            "unknown"
+        }
+    }
+
+    /** Built on first use (Objenesis-allocated test doubles never run field initializers). */
+    private fun typoPurgeScheduler(): LearnedTypoPurgeScheduler =
+        typoPurgeSchedulerCache ?: synchronized(this) {
+            typoPurgeSchedulerCache ?: LearnedTypoPurgeScheduler(
+                executor = { task ->
+                    try {
+                        DebouncedPersister.sharedScheduler().execute(task)
+                    } catch (e: RejectedExecutionException) {
+                        // Shared scheduler already shut down (process teardown) — the next load retries.
+                    }
+                },
+                isDue = { lang -> contextModel?.isTypoPurgeDue(lang) ?: false },
+                runPurge = { lang, learnable ->
+                    try {
+                        contextModel?.purgeUnlearnable(lang, learnable)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Typo purge failed for '$lang'", e)
+                        null
+                    }
+                },
+                log = { msg -> Log.i(TAG, msg) }
+            ).also { typoPurgeSchedulerCache = it }
+        }
+
+    @Volatile
+    private var typoPurgeSchedulerCache: LearnedTypoPurgeScheduler? = null
+
+    /** Language of the primary lexicon currently published in [dictionary] (null before the first). */
+    @Volatile
+    private var publishedLexiconLanguage: String? = null
+
+    /**
+     * Checkpoint all learned data (context LM bigrams + personalization vocabulary)
+     * to persistent storage. Asynchronous flush of the debounced write-back stores;
+     * cheap no-op when nothing is dirty.
+     *
+     * Called from the two lifecycle boundaries that remain after ARC-079 deleted
+     * DictionaryManager's predictor cache: input-view finish (CleverKeysService →
+     * PredictionCoordinator.flushLearnedData) and coordinator shutdown
+     * (PredictionCoordinator.shutdown).
+     */
+    override fun persistLearnedData() {
+        contextModel?.save()
+        personalizationEngine?.persist()
+    }
+
+    /**
+     * Load dictionary from language packs or assets.
+     * v1.2.5 FIX: Also checks installed language packs (issue #63 root cause)
+     */
+    fun loadDictionary(context: Context, language: String) {
+        if (closed) return
+        asyncLoader.cancel()
+        dictionary.get().clear()
+        prefixIndex.get().clear()
+        // C-9 (2026-09-06 audit): the per-word user state describes the OUTGOING
+        // dictionary. Without these clears, language A's proper-noun casing kept
+        // rewriting language B's predictions (en "LaTeX" restyling fr "latex"), and
+        // stale shadow entries could restore a wrong-language base value.
+        userWordOriginalCase.clear()
+        shadowedBaseFrequencies.clear()
+        customAndUserWords = emptySet()
+
+        var loadedBinary = false
+
+        // v1.2.5 FIX: First try loading from installed language packs
+        // This fixes autocorrect for languages only available via language pack (e.g., Dutch)
+        // Without this, WordPredictor's dictionary would be empty and autocorrect would
+        // incorrectly "correct" valid swipe predictions (issue #63)
+        try {
+            val packManager = LanguagePackManager.getInstance(context)
+            val dictFile = packManager.getDictionaryPath(language)
+            if (dictFile != null) {
+                loadedBinary = BinaryDictionaryLoader.loadDictionaryWithPrefixIndexFromFile(
+                    dictFile, dictionary.get(), prefixIndex.get()
+                )
+                if (loadedBinary) {
+                    Log.i(TAG, "Loaded dictionary from language pack: $language (${dictionary.get().size} words)")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load from language pack: $language", e)
+        }
+
+        // Fall back to bundled assets if language pack not available
+        if (!loadedBinary) {
+            // OPTIMIZATION: Try binary format first (5-10x faster than JSON)
+            // Binary format includes pre-built prefix index, eliminating runtime computation
+            val binaryFilename = "dictionaries/${language}_enhanced.bin"
+            loadedBinary = BinaryDictionaryLoader.loadDictionaryWithPrefixIndex(
+                context, binaryFilename, dictionary.get(), prefixIndex.get()
+            )
+
+            if (loadedBinary) {
+                Log.i(TAG, "Loaded binary dictionary from assets with ${dictionary.get().size} words and ${prefixIndex.get().size} prefixes")
+            }
+        }
+
+        if (!loadedBinary) {
+            // Fall back to JSON format if binary not available
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "Binary dictionary not available, falling back to JSON")
+
+            val jsonFilename = "dictionaries/${language}_enhanced.json"
+            try {
+                val reader = BufferedReader(InputStreamReader(context.assets.open(jsonFilename)))
+                val jsonBuilder = StringBuilder()
+                reader.useLines { lines ->
+                    lines.forEach { jsonBuilder.append(it) }
+                }
+
+                // Parse JSON object
+                val jsonDict = JSONObject(jsonBuilder.toString())
+                val keys = jsonDict.keys()
+                while (keys.hasNext()) {
+                    val word = keys.next().lowercase()
+                    val frequency = jsonDict.getInt(word)
+                    // Frequency is 128-255, scale to 100-10000 range for better scoring
+                    val scaledFreq = 100 + ((frequency - 128) / 127.0 * 9900).toInt()
+                    dictionary.get()[word] = scaledFreq
+                }
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "Loaded JSON dictionary: $jsonFilename with ${dictionary.get().size} words")
+            } catch (e: Exception) {
+                // No JSON lexicon either — and there is no further fallback. The historical
+                // "${language}_enhanced.txt" branch was dead code: no *_enhanced.txt asset ever
+                // shipped, so it always threw straight into its own error log. Language-pack
+                // and _enhanced.bin sources were already tried above.
+                Log.e(TAG, "Failed to load dictionary for '$language': no bundled bin/json asset", e)
+            }
+
+            // Build prefix index for fast lookup (only needed if JSON/text was loaded)
+            buildPrefixIndex()
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "Built prefix index: ${prefixIndex.get().size} prefixes for ${dictionary.get().size} words")
+        }
+
+        // Load custom words and user dictionary (additive to main dictionary)
+        // OPTIMIZATION v2: Use incremental prefix index updates instead of full rebuild
+        // v1.1.90: Pass language to filter UserDictionary by locale
+        val customWords = loadCustomAndUserWords(context, language)
+        customAndUserWords = customWords  // Track for disabled-word override check
+
+        // Add custom words to prefix index (incremental update)
+        if (customWords.isNotEmpty()) {
+            if (loadedBinary) {
+                // Binary format: prefix index is pre-built, just add custom words
+                addToPrefixIndex(customWords)
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                    Log.d(TAG, "Added ${customWords.size} custom words to prefix index incrementally")
+                }
+            } else {
+                // JSON/text format: prefix index needs full rebuild anyway (includes custom words)
+                buildPrefixIndex()
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                    Log.d(TAG, "Built prefix index with custom words: ${prefixIndex.get().size} prefixes")
+                }
+            }
+        }
+
+        // v1.2.7: Load contraction keys (apostrophe-free forms) into primary dictionary
+        // This allows typing "dont" or "cant" to find "don't" or "can't" in predictions
+        val contractionKeysAdded = loadPrimaryContractionKeys(context, language)
+        if (contractionKeysAdded > 0) {
+            Log.i(TAG, "Added $contractionKeysAdded contraction keys to primary prefix index for '$language'")
+        }
+
+        // Set the N-gram model language to match the dictionary
+        setLanguage(language)
+
+        // Typo hygiene: the lexicon is now complete — purge learned typos if due.
+        scheduleLearnedTypoPurge(language)
+    }
+
+    /**
+     * Load dictionary asynchronously on background thread.
+     *
+     * OPTIMIZATION: Prevents UI freezes during dictionary loading.
+     * The callback will be invoked on the main thread when loading completes.
+     *
+     * @param context Android context for asset access
+     * @param language Language code (e.g., "en")
+     * @param callback Callback for load completion (optional, can be null)
+     */
+    override fun loadDictionaryAsync(context: Context, language: String, callback: Runnable?) {
+        if (closed) return
+        // v1.2.0: Don't ignore reload requests - AsyncDictionaryLoader will cancel previous task
+        // This fixes language toggle not reloading dictionary when initial load is in progress
+        if (isLoadingState) {
+            Log.i(TAG, "Dictionary load in progress, will cancel and reload for '$language'")
+        }
+
+        isLoadingState = true
+        asyncLoader.loadDictionaryAsync(context, language, object : AsyncDictionaryLoader.LoadCallback {
+            // Build metadata beside the private dictionary. Cancelled work must never mutate
+            // the serving language's case/alias/custom-word state before publication.
+            private val loadedCase = mutableMapOf<String, String>()
+            private val loadedBaseFrequencies = mutableMapOf<String, Int>()
+            private val loadedAliases = mutableMapOf<String, String>()
+            private var loadedCustomWords: Set<String> = emptySet()
+
+            override fun onLoadStarted(lang: String) {
+                isLoadingState = true
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "Started async dictionary load: $lang")
+            }
+
+            override fun onLoadCustomWords(
+                ctx: Context,
+                dictionary: MutableMap<String, Int>,
+                prefixIndex: MutableMap<String, MutableSet<String>>
+            ): Set<String> {
+                // OPTIMIZATION v4 (perftodos4.md): This runs on BACKGROUND THREAD!
+                // Load custom words into the maps before they're swapped on main thread
+                // v1.1.90: Pass language to filter UserDictionary by locale
+                val customWords = loadCustomAndUserWordsIntoMap(
+                    ctx, dictionary, language, loadedCase, loadedBaseFrequencies
+                )
+                loadedCustomWords = customWords
+
+                // Add custom words to prefix index
+                if (customWords.isNotEmpty()) {
+                    addToPrefixIndexForMap(customWords, prefixIndex)
+                }
+
+                // v1.2.7: Load contraction keys (apostrophe-free forms) for primary language
+                // This allows typing "dont" or "cant" to find "don't" or "can't"
+                val contractionKeys = loadContractionKeysIntoMaps(ctx, dictionary, prefixIndex, language, loadedAliases)
+                if (contractionKeys > 0) {
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "Added $contractionKeys contraction keys during async load for '$language'")
+                }
+
+                return customWords
+            }
+
+            override fun onLoadComplete(
+                dictionary: Map<String, Int>,
+                prefixIndex: Map<String, Set<String>>
+            ) {
+                // OPTIMIZATION v4 (perftodos4.md): ATOMIC SWAP on main thread
+                // Dictionary parsing and indexing happened on the background thread. Swap
+                // the large maps, then publish their accompanying user-word metadata.
+
+                // Replace the complete dictionary/index references without copying their entries.
+                @Suppress("UNCHECKED_CAST")
+                this@WordPredictor.dictionary.set(dictionary as MutableMap<String, Int>)
+                @Suppress("UNCHECKED_CAST")
+                this@WordPredictor.prefixIndex.set(prefixIndex as MutableMap<String, MutableSet<String>>)
+
+                customAndUserWords = loadedCustomWords
+                userWordOriginalCase.clear()
+                userWordOriginalCase.putAll(loadedCase)
+                shadowedBaseFrequencies.clear()
+                shadowedBaseFrequencies.putAll(loadedBaseFrequencies)
+                contractionAliases = loadedAliases
+
+                // Set the N-gram model language
+                setLanguage(language)
+
+                // Typo hygiene: the lexicon is now published — purge learned typos if due.
+                scheduleLearnedTypoPurge(language)
+
+                isLoadingState = false
+                // v1.2.0: Enhanced logging for debugging language toggle issues
+                val sampleWords = this@WordPredictor.dictionary.get().keys.take(5).joinToString(", ")
+                Log.i(TAG, "Async dictionary load complete for '$language': ${this@WordPredictor.dictionary.get().size} words, " +
+                    "${this@WordPredictor.prefixIndex.get().size} prefixes (sample: $sampleWords)")
+                MemoryProbe.mark("primary.dictionary", settle = true) {
+                    val idx = this@WordPredictor.prefixIndex.get()
+                    "lang=$language words=${this@WordPredictor.dictionary.get().size} " +
+                        "prefixes=${idx.size} setEntries=${idx.values.sumOf { it.size }}"
+                }
+
+                callback?.run()
+            }
+
+            override fun onLoadFailed(lang: String, error: Exception) {
+                isLoadingState = false
+                Log.e(TAG, "Async dictionary load failed: $lang", error)
+
+                // Fall back to synchronous loading
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "Falling back to synchronous dictionary load")
+                loadDictionary(context, lang)
+
+                callback?.run()
+            }
+        })
+    }
+
+    /**
+     * Check if dictionary is currently loading.
+     *
+     * @return true if dictionary is loading asynchronously
+     */
+    override fun isLoading(): Boolean {
+        return isLoadingState
+    }
+
+    /**
+     * Check if dictionary is ready for predictions.
+     *
+     * @return true if dictionary is loaded and ready
+     */
+    fun isReady(): Boolean {
+        return !isLoadingState && dictionary.get().isNotEmpty()
+    }
+
+    // ==================== v1.1.93: SECONDARY DICTIONARY SUPPORT ====================
+
+    /**
+     * Issue #179: schedule [loadSecondaryDictionary] on the shared dictionary-loader thread.
+     *
+     * This is the ONLY form the [Predictor] interface exposes, because every consumer
+     * (`PredictionCoordinator`'s IME-create path and the multilang preference listeners) calls
+     * from the MAIN thread — and for a user whose secondary language is an imported language
+     * pack, the blocking load reads and indexes the whole pack, which used to happen inside
+     * `onCreate` on every IME process create.
+     *
+     * `"none"`/empty unloads IMMEDIATELY on the caller's thread (a pair of field writes), so
+     * toggling multilang off still takes effect for the very next keystroke. Until a real load
+     * completes, predictions simply lack secondary words — exactly the pre-existing async
+     * contract of the primary dictionary ([loadDictionaryAsync]).
+     */
+    override fun loadSecondaryDictionaryAsync(language: String, callback: Runnable?) {
+        if (closed) return
+        if (language == "none" || language.isEmpty()) {
+            unloadSecondaryDictionary()
+            callback?.run()
+            return
+        }
+        asyncLoader.runOffMain {
+            val index = buildSecondaryDictionary(language)
+            Runnable {
+                if (index != null) {
+                    secondaryIndex = index
+                    secondaryLanguageCode = language
+                    notifySecondaryLexiconChanged()
+                }
+                callback?.run()
+            }
+        }
+    }
+
+    /**
+     * Load a secondary language dictionary for bilingual touch typing.
+     *
+     * Uses NormalizedPrefixIndex (V2 format) for accent-aware lookups.
+     * Secondary dictionary words will be included in touch typing predictions.
+     *
+     * **Blocking and I/O-bound — reads the langpack/asset and builds the index on the calling
+     * thread. Never call on the main thread; use [loadSecondaryDictionaryAsync]** (issue #179).
+     *
+     * @param language Language code (e.g., "es", "fr", "de")
+     * @return true if loaded successfully
+     */
+    fun loadSecondaryDictionary(language: String): Boolean {
+        if (language == "none" || language.isEmpty()) {
+            unloadSecondaryDictionary()
+            return true
+        }
+
+        if (closed) return false
+        asyncLoader.cancelSecondary()
+        val index = buildSecondaryDictionary(language) ?: return false
+        secondaryIndex = index
+        secondaryLanguageCode = language
+        notifySecondaryLexiconChanged()
+        return true
+    }
+
+    /** Build privately; only the request's guarded completion publishes async results. */
+    private fun buildSecondaryDictionary(language: String): NormalizedPrefixIndex? {
+        val ctx = context ?: return null
+
+        try {
+            Log.i(TAG, "Loading secondary dictionary for touch typing: $language")
+
+            // Try language pack first, then bundled assets
+            val packManager = LanguagePackManager.getInstance(ctx)
+            val packPath: java.io.File? = packManager.getDictionaryPath(language)
+
+            val index = NormalizedPrefixIndex()
+            val loaded = if (packPath != null) {
+                BinaryDictionaryLoader.loadIntoNormalizedIndexFromFile(packPath, index)
+            } else {
+                val filename = "dictionaries/${language}_enhanced.bin"
+                BinaryDictionaryLoader.loadIntoNormalizedIndex(ctx, filename, index)
+            }
+
+            if (loaded && index.size() > 0) {
+                MemoryProbe.mark("secondary.binaryIndex", settle = true) {
+                    "lang=$language words=${index.size()} normalized=${index.normalizedCount()}"
+                }
+
+                // v1.1.94: Also load custom words for secondary language
+                val customWordsAdded = loadSecondaryCustomWords(ctx, index, language)
+
+                // v1.2.6: Also add contraction keys (apostrophe-free forms) for secondary language
+                // This allows typing "dont" to find "don't" in secondary English dictionary
+                val contractionsAdded = loadSecondaryContractionKeys(ctx, index, language)
+                MemoryProbe.mark("secondary.contractionKeys", settle = true) {
+                    "lang=$language added=$contractionsAdded custom=$customWordsAdded"
+                }
+
+                Log.i(TAG, "Secondary dictionary loaded: $language (${index.size()} words, +$customWordsAdded custom, +$contractionsAdded contractions)")
+                return index
+            } else {
+                Log.w(TAG, "Failed to load secondary dictionary: $language")
+                return null
+            }
+        } catch (e: java.util.concurrent.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading secondary dictionary: $language", e)
+            return null
+        }
+    }
+
+    /**
+     * Unload the secondary dictionary to free memory.
+     */
+    override fun unloadSecondaryDictionary() {
+        asyncLoader.cancelSecondary()
+        secondaryIndex = null
+        secondaryLanguageCode = "none"
+        Log.i(TAG, "Unloaded secondary dictionary for touch typing")
+        notifySecondaryLexiconChanged()
+    }
+
+    /**
+     * v1.1.94: Load custom words for secondary language into NormalizedPrefixIndex.
+     *
+     * @param context Android context
+     * @param index The NormalizedPrefixIndex to add words to
+     * @param language Language code for custom words key
+     * @return Number of custom words added
+     */
+    private fun loadSecondaryCustomWords(context: Context, index: NormalizedPrefixIndex, language: String): Int {
+        var count = 0
+        try {
+            val prefs = DirectBootAwarePreferences.get_shared_preferences(context)
+            val customWordsKey = LanguagePreferenceKeys.customWordsKey(language)
+            val customWordsJson = prefs.getString(customWordsKey, "{}") ?: "{}"
+
+            if (customWordsJson != "{}") {
+                val jsonObj = JSONObject(customWordsJson)
+                val keys = jsonObj.keys()
+
+                while (keys.hasNext()) {
+                    checkDictionaryLoadInterrupted()
+                    val word = keys.next()
+                    val frequency = jsonObj.optInt(word, 1000)
+                    // Wave U2: the stored value is on the 1..255 user scale
+                    // (UserWordFrequency), and the secondary index wants a RANK
+                    // (0 = most common). 255 − stored maps the add-word default
+                    // (255) to rank 0; the old `255 − freq/4000` assumed a ~1M
+                    // scale and sent every stored value to rank ~255 (worst).
+                    val rank = max(0, min(255, 255 - frequency.coerceIn(1, 255)))
+                    index.addWord(word, rank)
+                    count++
+                }
+
+                if (count > 0) {
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "Added $count custom words to secondary index for '$language'")
+                }
+            }
+        } catch (e: java.util.concurrent.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load secondary custom words for '$language'", e)
+        }
+        return count
+    }
+
+    /**
+     * v1.2.7: Load contraction keys into provided maps (for async loading path).
+     * This variant accepts maps as parameters instead of using instance fields.
+     *
+     * @param context Android context
+     * @param targetDict Dictionary map to add contraction aliases to
+     * @param targetPrefixIndex Prefix index to add lookup keys to
+     * @param language Language code
+     * @return Number of contraction keys added
+     */
+    private fun loadContractionKeysIntoMaps(
+        context: Context,
+        targetDict: MutableMap<String, Int>,
+        targetPrefixIndex: MutableMap<String, MutableSet<String>>,
+        language: String,
+        aliases: MutableMap<String, String>
+    ): Int {
+        var count = 0
+        try {
+            val packManager = LanguagePackManager.getInstance(context)
+            val packFile = packManager.getContractionsPath(language)
+
+            val inputStream = if (packFile != null) {
+                packFile.inputStream()
+            } else {
+                try {
+                    context.assets.open("dictionaries/contractions_$language.json")
+                } catch (e: java.util.concurrent.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    return 0
+                }
+            }
+
+            run {
+                aliases.clear()
+
+                // Streaming parse — see [ContractionJsonReader]. The restored fr/it files hold
+                // ~18k/~21k mappings, so the old whole-file-into-String parse was a multi-MB
+                // transient spike on every dictionary load.
+                ContractionJsonReader.forEachEntry(inputStream) { withoutApostrophe, withApostrophe ->
+                    checkDictionaryLoadInterrupted()
+                    // Skip real English words that are also contraction bases
+                    if (withoutApostrophe in REAL_WORD_CONTRACTION_BASES) return@forEachEntry
+
+                    // Base form is NOT a real word → create alias and add to dictionary.
+                    // Preserve existing freq (same fix as `loadPrimaryContractionKeys`
+                    // — see that function for rationale). The async loader path
+                    // would otherwise silently downgrade bare-form contractions.
+                    aliases[withoutApostrophe] = withApostrophe
+                    targetDict[withoutApostrophe] = targetDict[withApostrophe]
+                        ?: targetDict[withoutApostrophe]
+                        ?: 5000
+
+                    val maxLen = min(PREFIX_INDEX_MAX_LENGTH, withoutApostrophe.length)
+                    for (len in 1..maxLen) {
+                        val prefix = withoutApostrophe.substring(0, len)
+                        targetPrefixIndex.getOrPut(prefix) { HashSet() }.add(withoutApostrophe)
+                    }
+                    count++
+                }
+
+            }
+        } catch (e: java.util.concurrent.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load contraction keys for '$language' (async)", e)
+        }
+        return count
+    }
+
+    /**
+     * v1.2.7: Load contraction keys (apostrophe-free forms) into PRIMARY dictionary's prefix index.
+     * This allows typing "dont" or "cant" to find "don't" or "can't" in typing predictions.
+     *
+     * The dictionary stores words with apostrophes ("can't"), but the prefix index is keyed
+     * by actual prefixes. When user types "cant", prefix lookup can't find "can't" because
+     * "cant" is not a prefix of "can'" (the apostrophe breaks the match).
+     *
+     * This method adds the apostrophe-free form as an alias in the prefix index.
+     *
+     * @param context Android context
+     * @param language Language code
+     * @return Number of contraction keys added
+     */
+    private fun loadPrimaryContractionKeys(context: Context, language: String): Int {
+        var count = 0
+        try {
+            // Try language pack first
+            val packManager = LanguagePackManager.getInstance(context)
+            val packFile = packManager.getContractionsPath(language)
+
+            val inputStream = if (packFile != null) {
+                packFile.inputStream()
+            } else {
+                // Try bundled assets
+                try {
+                    context.assets.open("dictionaries/contractions_$language.json")
+                } catch (e: Exception) {
+                    // No contractions file for this language - that's OK
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "No contractions file for primary language '$language'")
+                    return 0
+                }
+            }
+
+            run {
+                val currentDict = dictionary.get()
+                val currentPrefixIndex = prefixIndex.get()
+                val aliases = mutableMapOf<String, String>()
+
+                // Streaming parse — see [ContractionJsonReader].
+                ContractionJsonReader.forEachEntry(inputStream) { withoutApostrophe, withApostrophe ->
+                    // Skip real English words that also happen to be contraction bases
+                    // (e.g., "well" should stay "well", not autocorrect to "we'll")
+                    if (withoutApostrophe in REAL_WORD_CONTRACTION_BASES) return@forEachEntry
+
+                    // Base form is NOT a real word (e.g., "dont", "im", "thats", "hes")
+                    // → create autocorrect alias and add to dictionary for predictions.
+                    //
+                    // Preserve any pre-existing frequency for the bare form (loaded
+                    // from the binary/JSON dict) rather than overwriting. The
+                    // previous `?: 5000` form was destructive: a bare form like
+                    // `hadnt` loaded from binary at ≈ 789K freq would be SILENTLY
+                    // DOWNGRADED to 5000 (since `currentDict[withApostrophe]` is
+                    // null — the apostrophe form is never in the dict). The fall-
+                    // through order is now: apostrophe-form freq if present →
+                    // existing bare-form freq if present → 5000 anchor. This
+                    // preserves both the binary-loaded ranking signal and the
+                    // beam-search ranking (OptimizedVocabulary normalizes to 0-1
+                    // and multiplied it by a frequency weight, so
+                    // higher input freq → slightly better ranking).
+                    aliases[withoutApostrophe] = withApostrophe
+                    currentDict[withoutApostrophe] = currentDict[withApostrophe]
+                        ?: currentDict[withoutApostrophe]
+                        ?: 5000
+
+                    // Add to prefix index so typing "don" finds "dont" → "don't"
+                    val maxLen = min(PREFIX_INDEX_MAX_LENGTH, withoutApostrophe.length)
+                    for (len in 1..maxLen) {
+                        val prefix = withoutApostrophe.substring(0, len)
+                        currentPrefixIndex.getOrPut(prefix) { HashSet() }.add(withoutApostrophe)
+                    }
+
+                    count++
+                }
+
+                contractionAliases = aliases
+            }
+
+            if (count > 0) {
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "Added $count contraction keys to primary prefix index for '$language'")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load primary contraction keys for '$language'", e)
+        }
+        return count
+    }
+
+    /**
+     * v1.2.6: Load contraction keys (apostrophe-free forms) into secondary dictionary.
+     * This allows typing "dont" to find "don't" in secondary English dictionary.
+     *
+     * The NormalizedPrefixIndex stores words with apostrophes intact, so prefix search
+     * for "dont" won't find "don't". By adding the apostrophe-free form as an alias,
+     * both searches will work.
+     *
+     * @param context Android context
+     * @param index The NormalizedPrefixIndex to add keys to
+     * @param language Language code
+     * @return Number of contraction keys added
+     */
+    private fun loadSecondaryContractionKeys(
+        context: Context,
+        index: NormalizedPrefixIndex,
+        language: String
+    ): Int {
+        var count = 0
+        try {
+            // Try language pack first
+            val packManager = LanguagePackManager.getInstance(context)
+            val packFile = packManager.getContractionsPath(language)
+
+            val inputStream = if (packFile != null) {
+                packFile.inputStream()
+            } else {
+                // Try bundled assets
+                try {
+                    context.assets.open("dictionaries/contractions_$language.json")
+                } catch (e: java.util.concurrent.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // No contractions file for this language - that's OK
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "No contractions file for secondary language '$language'")
+                    return 0
+                }
+            }
+
+            // Keys only: the display form is not needed here (the index stores the
+            // apostrophe-free surface), and streaming avoids materializing the whole file —
+            // this is the exact call that ran out of heap on a 256 MB device.
+            count = ContractionJsonReader.forEachKey(inputStream) { withoutApostrophe ->
+                checkDictionaryLoadInterrupted()
+                // Add the apostrophe-free form as an alias so prefix search can reach the
+                // contraction. Two rules, both load-bearing since the 2026-08-17 restore took
+                // the French/Italian files from ~100 curated aliases to 18k/21k:
+                //
+                //  1. SKIP a key the index already holds. Every English alias (`dont`,
+                //     `cant`, …) is itself a dictionary entry, so this preserves its real
+                //     frequency instead of overwriting it — and avoids a duplicate canonical.
+                //  2. Add a NEW key at the RANK FLOOR, never as a common word. These are
+                //     mostly productive elisions (`allabbaiare`, `dabaissement`); at the old
+                //     hard-coded rank 50 all 21k of them scored ≈821k — above nearly every
+                //     real word — and would have buried genuine Italian suggestions under
+                //     pseudo-words. Findable, never preferred: the same call the swipe side
+                //     makes in [CtcContractionKeys].
+                val normalized = AccentNormalizer.normalize(withoutApostrophe)
+                if (normalized.isNotEmpty() && !index.contains(normalized)) {
+                    index.addWord(withoutApostrophe, CONTRACTION_ALIAS_RANK)
+                }
+            }
+
+            if (count > 0) {
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "Added $count contraction keys to secondary index for '$language'")
+            }
+        } catch (e: java.util.concurrent.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load secondary contraction keys for '$language'", e)
+        }
+        return count
+    }
+
+    /**
+     * Check if a secondary dictionary is loaded.
+     */
+    fun hasSecondaryDictionary(): Boolean {
+        return secondaryIndex != null
+    }
+
+    /**
+     * Get the secondary language code.
+     */
+    fun getSecondaryLanguageCode(): String {
+        return secondaryLanguageCode
+    }
+
+    /**
+     * Build prefix index for fast word lookup during predictions
+     * Creates mapping from prefixes (1-3 chars) to sets of matching words
+     * Performance: Reduces 50k iterations per keystroke to ~100-500
+     */
+    private fun buildPrefixIndex() {
+        prefixIndex.get().clear()
+
+        for (word in dictionary.get().keys) {
+            // Index prefixes of length 1 to PREFIX_INDEX_MAX_LENGTH (3)
+            val maxLen = min(PREFIX_INDEX_MAX_LENGTH, word.length)
+            for (len in 1..maxLen) {
+                val prefix = word.substring(0, len)
+                prefixIndex.get().getOrPut(prefix) { HashSet() }.add(word)
+            }
+        }
+    }
+
+    /**
+     * Add words to prefix index (for incremental updates)
+     */
+    private fun addToPrefixIndex(words: Set<String>) {
+        for (word in words) {
+            val maxLen = min(PREFIX_INDEX_MAX_LENGTH, word.length)
+            for (len in 1..maxLen) {
+                val prefix = word.substring(0, len)
+                prefixIndex.get().getOrPut(prefix) { HashSet() }.add(word)
+            }
+        }
+    }
+
+    /**
+     * Remove words from prefix index (for incremental updates)
+     * OPTIMIZATION: Allows removing custom/user words without full rebuild
+     */
+    private fun removeFromPrefixIndex(words: Set<String>) {
+        for (word in words) {
+            val maxLen = min(PREFIX_INDEX_MAX_LENGTH, word.length)
+            for (len in 1..maxLen) {
+                val prefix = word.substring(0, len)
+                val prefixWords = prefixIndex.get()[prefix]
+                prefixWords?.let {
+                    it.remove(word)
+                    // Clean up empty prefix sets to save memory
+                    if (it.isEmpty()) {
+                        prefixIndex.get().remove(prefix)
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Load custom and user words into a specific map instance.
+     * Used during async loading to populate new map before atomic swap.
+     *
+     * OPTIMIZATION v4 (perftodos4.md): Allows loading into new map off main thread,
+     * then swapping the entire map atomically instead of putAll() on main thread.
+     *
+     * v1.1.90: Added language parameter to filter UserDictionary by locale.
+     * This prevents English words from appearing in French touch typing predictions.
+     *
+     * @param context Android context for accessing SharedPreferences and ContentProvider
+     * @param targetMap The map to load words into (not dictionary)
+     * @param language Language code to filter UserDictionary (e.g., "fr", "de")
+     * @return Set of all words loaded (for incremental prefix index updates)
+     */
+    private fun loadCustomAndUserWordsIntoMap(context: Context, targetMap: MutableMap<String, Int>, language: String = "en"): Set<String> =
+        loadCustomAndUserWordsIntoMap(context, targetMap, language, userWordOriginalCase, shadowedBaseFrequencies)
+
+    private fun loadCustomAndUserWordsIntoMap(
+        context: Context,
+        targetMap: MutableMap<String, Int>,
+        language: String,
+        originalCase: MutableMap<String, String>,
+        baseFrequencies: MutableMap<String, Int>
+    ): Set<String> {
+        val loadedWords = mutableSetOf<String>()
+        // C-9: this is a FULL load into a fresh map (the async language-switch path) —
+        // the previous language's case + shadowed-base state must not survive it.
+        originalCase.clear()
+        baseFrequencies.clear()
+        // Wave U2: calibrate stored 1..255 user frequencies onto the base scale
+        // already loaded into [targetMap] (see baseFrequencySpanOf).
+        val (scaleFloor, scaleCeil) = baseFrequencySpanOf(targetMap)
+
+        try {
+            val prefs = DirectBootAwarePreferences.get_shared_preferences(context)
+
+            // 1. Load custom words from SharedPreferences
+            // v1.1.92: Use language-specific key (custom_words_${lang}) instead of legacy global key
+            val customWordsKey = LanguagePreferenceKeys.customWordsKey(language)
+            val customWordsJson = prefs.getString(customWordsKey, "{}") ?: "{}"
+            if (customWordsJson != "{}") {
+                try {
+                    // Parse JSON map: {"word": frequency, ...}
+                    val jsonObj = JSONObject(customWordsJson)
+                    val keys = jsonObj.keys()
+                    var customCount = 0
+                    while (keys.hasNext()) {
+                        checkDictionaryLoadInterrupted()
+                        val originalWord = keys.next()
+                        val lowerWord = originalWord.lowercase()
+                        val frequency = jsonObj.optInt(originalWord, 1000)
+                        // C-3: a custom word about to overwrite a BASE entry records the
+                        // base value so deleting the custom word can restore it.
+                        if (lowerWord !in loadedWords) {
+                            targetMap[lowerWord]?.let { baseFrequencies.putIfAbsent(lowerWord, it) }
+                        }
+                        // Write the CALIBRATED value to the target map, not dictionary
+                        targetMap[lowerWord] =
+                            UserWordFrequency.scaleOnto(frequency, scaleFloor, scaleCeil).roundToInt()
+                        loadedWords.add(lowerWord)
+                        // v1.2.7: Preserve original case for proper nouns (Issue #72)
+                        if (originalWord != lowerWord) {
+                            originalCase[lowerWord] = originalWord
+                        }
+                        customCount++
+                    }
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                        Log.d(TAG, "Loaded $customCount custom words for '$language' into new map")
+                    }
+                } catch (e: JSONException) {
+                    Log.e(TAG, "Failed to parse custom words JSON", e)
+                }
+            }
+
+            // 2. Load Android user dictionary
+            // The locale-filtered read lives in UserDictionaryWords (ARC-081) — the same rows
+            // the swipe adapters now merge into their lexicons, so tap and swipe can never
+            // disagree about which personal words exist. Its KDoc owns the filter rationale.
+            val userRows = UserDictionaryWords.read(context, language)
+            for ((originalWord, frequency) in userRows) {
+                checkDictionaryLoadInterrupted()
+                val lowerWord = originalWord.lowercase()
+                // C-3: same shadowed-base recording as the custom-words loop above.
+                if (lowerWord !in loadedWords) {
+                    targetMap[lowerWord]?.let { baseFrequencies.putIfAbsent(lowerWord, it) }
+                }
+                // Provider rows are 1..255 too — same calibration as the preference words.
+                targetMap[lowerWord] =
+                    UserWordFrequency.scaleOnto(frequency, scaleFloor, scaleCeil).roundToInt()
+                loadedWords.add(lowerWord)
+                // v1.2.7: Preserve original case for proper nouns (Issue #72)
+                if (originalWord != lowerWord) {
+                    originalCase[lowerWord] = originalWord
+                }
+            }
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                Log.d(TAG, "Loaded ${userRows.size} user dictionary words for locale '$language' into new map")
+            }
+        } catch (e: java.util.concurrent.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading custom/user words into new map", e)
+        }
+
+        return loadedWords
+    }
+
+    /**
+     * Add words to a specific prefix index map.
+     * Used during async loading to populate new index before atomic swap.
+     *
+     * OPTIMIZATION v4 (perftodos4.md): Allows building prefix index off main thread,
+     * then swapping the entire index atomically.
+     *
+     * @param words Words to add to prefix index
+     * @param targetIndex The prefix index to add to (not prefixIndex)
+     */
+    private fun addToPrefixIndexForMap(words: Set<String>, targetIndex: MutableMap<String, MutableSet<String>>) {
+        for (word in words) {
+            val maxLen = min(PREFIX_INDEX_MAX_LENGTH, word.length)
+            for (len in 1..maxLen) {
+                val prefix = word.substring(0, len)
+                targetIndex.getOrPut(prefix) { HashSet() }.add(word)
+            }
+        }
+    }
+
+    /**
+     * Load custom words and Android user dictionary into predictions
+     * Called during dictionary initialization for performance
+     *
+     * OPTIMIZATION v2: Returns the set of loaded words for incremental prefix index updates
+     *
+     * v1.1.90: Added language parameter to filter UserDictionary by locale.
+     * This prevents English words from appearing in French touch typing predictions.
+     *
+     * @param context Android context for accessing preferences and content providers
+     * @param language Language code to filter UserDictionary (e.g., "fr", "de")
+     * @return Set of words that were added to the dictionary
+     */
+    private fun loadCustomAndUserWords(context: Context, language: String = "en"): Set<String> {
+        val loadedWords = mutableSetOf<String>()
+        // C-3: on a RELOAD over the serving map, an entry for an already-custom word holds
+        // the CUSTOM value — never record that as a "base" frequency. Only a word that was
+        // not custom before this call can be shadowing a genuine base entry. On the
+        // loadDictionary path this set was reset to empty, so everything qualifies.
+        val previousUserWords = customAndUserWords
+        // Wave U2: calibrate stored 1..255 user frequencies onto the serving map's base
+        // scale (stable across reloads — see baseFrequencySpanOf).
+        val (scaleFloor, scaleCeil) = baseFrequencySpanOf(dictionary.get())
+
+        try {
+            val prefs = DirectBootAwarePreferences.get_shared_preferences(context)
+
+            // 1. Load custom words from SharedPreferences
+            // v1.1.92: Use language-specific key (custom_words_${lang}) instead of legacy global key
+            val customWordsKey = LanguagePreferenceKeys.customWordsKey(language)
+            val customWordsJson = prefs.getString(customWordsKey, "{}") ?: "{}"
+            if (customWordsJson != "{}") {
+                try {
+                    // Parse JSON map: {"word": frequency, ...}
+                    val jsonObj = JSONObject(customWordsJson)
+                    val keys = jsonObj.keys()
+                    var customCount = 0
+                    while (keys.hasNext()) {
+                        val originalWord = keys.next()
+                        val lowerWord = originalWord.lowercase()
+                        val frequency = jsonObj.optInt(originalWord, 1000)
+                        // C-3: record a genuine base entry we are about to overwrite.
+                        if (lowerWord !in loadedWords && lowerWord !in previousUserWords) {
+                            dictionary.get()[lowerWord]?.let {
+                                shadowedBaseFrequencies.putIfAbsent(lowerWord, it)
+                            }
+                        }
+                        dictionary.get()[lowerWord] =
+                            UserWordFrequency.scaleOnto(frequency, scaleFloor, scaleCeil).roundToInt()
+                        loadedWords.add(lowerWord)  // Track loaded word
+                        // Issue #72: Preserve original case for proper nouns
+                        // Only store if word has uppercase (potential proper noun)
+                        if (originalWord != lowerWord) {
+                            userWordOriginalCase[lowerWord] = originalWord
+                        }
+                        customCount++
+                    }
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                        Log.d(TAG, "Loaded $customCount custom words for '$language'")
+                    }
+                } catch (e: JSONException) {
+                    Log.e(TAG, "Failed to parse custom words JSON", e)
+                }
+            }
+
+            // 2. Load Android user dictionary
+            // The locale-filtered read lives in UserDictionaryWords (ARC-081) — the same rows
+            // the swipe adapters now merge into their lexicons, so tap and swipe can never
+            // disagree about which personal words exist. Its KDoc owns the filter rationale.
+            val userRows = UserDictionaryWords.read(context, language)
+            for ((originalWord, frequency) in userRows) {
+                val lowerWord = originalWord.lowercase()
+                // C-3: same shadowed-base recording as the custom-words loop above.
+                if (lowerWord !in loadedWords && lowerWord !in previousUserWords) {
+                    dictionary.get()[lowerWord]?.let {
+                        shadowedBaseFrequencies.putIfAbsent(lowerWord, it)
+                    }
+                }
+                // Provider rows are 1..255 too — same calibration as the preference words.
+                dictionary.get()[lowerWord] =
+                    UserWordFrequency.scaleOnto(frequency, scaleFloor, scaleCeil).roundToInt()
+                loadedWords.add(lowerWord)  // Track loaded word
+                // v1.2.7: Preserve original case for proper nouns (Issue #72)
+                if (originalWord != lowerWord) {
+                    userWordOriginalCase[lowerWord] = originalWord
+                }
+            }
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                Log.d(TAG, "Loaded ${userRows.size} user dictionary words for locale '$language'")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading custom/user words", e)
+        }
+
+        return loadedWords
+    }
+
+    /**
+     * Reset the predictor state - called after space/punctuation
+     */
+    override fun reset() {
+        // This method will be called from CleverKeysService to reset state
+        // Dictionary remains loaded, just clears any internal state if needed
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+            Log.d(TAG, "===== PREDICTOR RESET CALLED =====")
+            Log.d(TAG, "Stack trace: ", Exception("Reset trace"))
+        }
+    }
+
+    /**
+     * Get candidate words from prefix index
+     * Returns all words starting with the given prefix
+     * Performance: O(1) lookup instead of O(n) iteration
+     */
+    private fun getPrefixCandidates(prefix: String): Set<String> {
+        if (prefix.isEmpty()) {
+            // For empty prefix, return all words (fallback to full dictionary)
+            return dictionary.get().keys
+        }
+
+        // Use prefix as-is if <= 3 chars, otherwise use first 3 chars
+        val lookupPrefix = if (prefix.length <= PREFIX_INDEX_MAX_LENGTH) {
+            prefix
+        } else {
+            prefix.substring(0, PREFIX_INDEX_MAX_LENGTH)
+        }
+
+        val candidates = prefixIndex.get()[lookupPrefix] ?: return emptySet()
+
+        // If typed prefix is longer than indexed prefix, filter further
+        if (prefix.length > PREFIX_INDEX_MAX_LENGTH) {
+            return candidates.filter { it.startsWith(prefix) }.toSet()
+        }
+
+        return candidates
+    }
+
+    /**
+     * Predict words based on the sequence of touched keys
+     * Returns list of predictions (for backward compatibility)
+     */
+    fun predictWords(keySequence: String): List<String> {
+        val result = predictWordsWithScores(keySequence)
+        return result.words
+    }
+
+    /**
+     * Predict words with context (PUBLIC API - delegates to internal unified method)
+     */
+    override fun predictWordsWithContext(keySequence: String, context: List<String>): PredictionResult {
+        return predictInternal(keySequence, context)
+    }
+
+    /**
+     * Predict words and return with their scores (no context)
+     */
+    fun predictWordsWithScores(keySequence: String): PredictionResult {
+        return predictInternal(keySequence, emptyList())
+    }
+
+    /**
+     * UNIFIED prediction logic with early fusion of all signals
+     * Context is applied to ALL candidates BEFORE selecting top N
+     */
+    // The beginSection("WordPredictor.predictInternal") below IS balanced: it is immediately
+    // followed by a try { ... } finally { Trace.endSection() } (see the finally near the end of
+    // this method), so the section always closes on every path. Lint's early-return heuristic
+    // can't see the pairing across the try/finally.
+    @SuppressLint("UnclosedTrace")
+    private fun predictInternal(keySequence: String, context: List<String>): PredictionResult {
+        if (keySequence.isEmpty()) {
+            return PredictionResult(emptyList(), emptyList())
+        }
+
+        // Check if dictionary changes require reload
+        checkAndReload()
+
+        // OPTIMIZATION v3 (perftodos3.md): Use android.os.Trace for system-level profiling
+        android.os.Trace.beginSection("WordPredictor.predictInternal")
+        try {
+            // UNIFIED SCORING with EARLY FUSION
+            // Context is applied to ALL candidates BEFORE selecting top N
+            val candidates = mutableListOf<WordCandidate>()
+            val lowerSequence = keySequence.lowercase()
+
+            // OPTIMIZATION: Verbose logging disabled in release builds for performance
+            // v1.2.0: Always log prediction language for debugging language toggle issues
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "Predicting for: '$lowerSequence' (lang=$currentLanguage, dictSize=${dictionary.get().size})")
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                Log.d(TAG, "Predicting for: $lowerSequence (len=${lowerSequence.length}) with context: $context")
+            }
+
+            val maxPredictions = MAX_PREDICTIONS_TYPING
+
+            // Find all words that could match the typed prefix using prefix index
+            // PERFORMANCE: Prefix index reduces 50k iterations to ~100-500 (100x speedup)
+            // Get candidate words from prefix index (only words starting with typed prefix)
+            val candidateWords = getPrefixCandidates(lowerSequence)
+
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                Log.d(TAG, "Prefix index lookup: ${candidateWords.size} candidates for prefix '$lowerSequence'")
+            }
+
+            // Frequency of the most frequent exact candidate — the fuzzy trigger's
+            // "are the exact results strong?" input (see shouldSearchFuzzy).
+            var bestExactFrequency = Int.MIN_VALUE
+
+            for (word in candidateWords) {
+                // SKIP DISABLED WORDS - Filter out words disabled via Dictionary Manager
+                if (isWordDisabled(word)) {
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                        Log.d(TAG, "Skipping disabled word: $word")
+                    }
+                    continue
+                }
+
+                // Get frequency for scoring
+                val frequency = dictionary.get()[word] ?: continue // Should not happen, but safe guard
+
+                // UNIFIED SCORING: Combine ALL signals into one score BEFORE selection
+                val score = calculateUnifiedScore(word, lowerSequence, frequency, context)
+
+                if (score > 0) {
+                    candidates.add(WordCandidate(word, score))
+                    if (frequency > bestExactFrequency) bestExactFrequency = frequency
+                }
+            }
+
+            // v1.1.93: SECONDARY DICTIONARY LOOKUP for bilingual touch typing
+            val secIndex = secondaryIndex
+            if (secIndex != null) {
+                val primaryWords = candidates.map { it.word.lowercase() }.toSet()
+                val secondaryResults = secIndex.getWordsWithPrefix(lowerSequence)
+
+                for (result in secondaryResults) {
+                    // Skip if already in primary dictionary
+                    if (result.normalized in primaryWords || result.bestCanonical.lowercase() in primaryWords) {
+                        continue
+                    }
+
+                    // Skip disabled words
+                    if (isWordDisabled(result.bestCanonical)) {
+                        continue
+                    }
+
+                    // Convert frequency rank (0-255) to frequency score
+                    // Rank 0 = most common → high frequency; Rank 255 = rare → low frequency
+                    val frequency = secondaryRankToFrequency(result.bestFrequencyRank)
+
+                    // Calculate score with secondary penalty (configurable, default 0.9x)
+                    val baseScore = calculateUnifiedScore(result.bestCanonical, lowerSequence, frequency, context)
+                    val secondaryWeight = config?.secondary_prediction_weight ?: Defaults.SECONDARY_PREDICTION_WEIGHT
+                    val score = (baseScore * secondaryWeight).toInt()
+
+                    if (score > 0) {
+                        candidates.add(WordCandidate(result.bestCanonical, score))
+                    }
+                }
+
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                    Log.d(TAG, "Secondary dictionary: ${secondaryResults.size} matches for '$lowerSequence' (lang=$secondaryLanguageCode)")
+                }
+            }
+
+            // 2026-09-26 (user report "pka" → "play"): typo-tolerant candidates when the
+            // exact prefix results are empty, too few to fill the bar, or all rare. Scored
+            // by the same unified scorer with an explicit penalty, so they fill in BELOW
+            // exact completions of similar frequency (see FUZZY_PENALTY_PER_EDIT).
+            val fuzzySearched = shouldSearchFuzzy(lowerSequence, candidates.size, bestExactFrequency)
+            if (fuzzySearched) {
+                addFuzzyCandidates(lowerSequence, context, candidates)
+            }
+
+            // Sort all candidates by score (descending). Stable: on a score tie the exact
+            // candidates, added first, stay ahead of fuzzy ones.
+            candidates.sortByDescending { it.score }
+
+            // Extract top N predictions (with the fuzzy slot reservation when it ran)
+            val top = selectTopCandidates(candidates, maxPredictions, if (fuzzySearched) FUZZY_RESERVED_SLOTS else 0)
+            val predictions = top.map { it.word }
+            val scores = top.map { it.score }
+
+            // Issue #72: Apply proper noun case from user dictionary
+            val casedPredictions = applyUserWordCaseToList(predictions)
+
+            // Task B transparency: provenance metas for the FINAL top-N only
+            // (N ≤ MAX_PREDICTIONS_TYPING — a handful of cheap map lookups per
+            // keystroke, NOT the per-candidate hot loop). Breakdown re-resolves
+            // through the same UnifiedScore path that produced the score.
+            val metas = top.map { candidate ->
+                val lower = candidate.word.lowercase()
+                val fuzzyPrefix = candidate.fuzzyPrefixScore
+                if (fuzzyPrefix != null) {
+                    // Typo-tolerant entry — prefix ("pka" → "play") and whole-word ("pkay"
+                    // → "play") corrections alike: one FuzzyPrefixMatcher mechanism, and the
+                    // breakdown's prefix score shows which shape it was. Its own origin, not
+                    // AUTOCORRECT: nothing has been corrected yet, it is only offered.
+                    // Breakdown only for primary-dictionary words — the secondary score is
+                    // weighted outside the unified scorer, exactly like secondary prefix entries.
+                    SuggestionMeta(
+                        origin = SuggestionOrigin.TYPO_CORRECTION,
+                        breakdown = if (candidate.fromSecondary) null else dictionary.get()[lower]?.let { freq ->
+                            resolveScoreBreakdown(lower, lowerSequence, freq, context, fuzzyPrefix)
+                        },
+                        note = ProvenanceNote.TypoCorrectionOf(keySequence)
+                    )
+                } else {
+                    SuggestionMeta(
+                        origin = SuggestionOrigin.DICTIONARY_PREFIX,
+                        breakdown = dictionary.get()[lower]?.let { freq ->
+                            resolveScoreBreakdown(lower, lowerSequence, freq, context)
+                        }
+                    )
+                }
+            }
+
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                Log.d(TAG, "Final predictions (${casedPredictions.size}): $casedPredictions")
+                Log.d(TAG, "Scores: $scores")
+            }
+
+            return PredictionResult(casedPredictions, scores, metas)
+        } finally {
+            android.os.Trace.endSection()
+        }
+    }
+
+    /**
+     * UNIFIED SCORING - Combines all prediction signals (early fusion)
+     *
+     * Combines: prefix quality + frequency + user adaptation + context probability + personalization
+     * Context is evaluated for ALL candidates, not just top N (key improvement)
+     *
+     * Phase 7.1: Includes dynamic N-gram boost from ContextModel alongside static BigramModel
+     * Phase 7.2: Includes personalization boost from user's typing frequency and recency
+     *
+     * @param word The word being scored
+     * @param keySequence The typed prefix
+     * @param frequency Dictionary frequency (higher = more common)
+     * @param context Previous words for contextual prediction (can be empty)
+     * @return Combined score
+     */
+    private fun calculateUnifiedScore(word: String, keySequence: String, frequency: Int, context: List<String>): Int {
+        return resolveScoreBreakdown(word, keySequence, frequency, context)?.finalScore ?: 0
+    }
+
+    /**
+     * Resolve every scoring signal for one candidate and combine them via the
+     * pure [UnifiedScore] combiner — the SINGLE implementation shared by the
+     * hot-path [calculateUnifiedScore], the top-N provenance metas in
+     * [predictInternal], and the long-press [explainScore] sheet (Task B), so
+     * the displayed breakdown can never drift from the real score.
+     *
+     * Signals resolved here:
+     * 1. prefix-match quality; 2. selection-adaptation multiplier;
+     * 3a. static BigramModel context multiplier; 3b. learned ContextModel boost
+     * (per-feature toggle AND — Task A — the master on-device-learning gate:
+     * with the master off, learned data is not read at all);
+     * 3d. raw personalization boost (engine returns 0 when disabled, incl. via
+     * the master-gate sync in [setConfig]).
+     * The static-vs-learned combination (context_source, audit §3.2-2), the
+     * personalization weight (§3.2-1), the log frequency damping, and the final
+     * formula all live in [UnifiedScore.combine].
+     *
+     * @param prefixScoreOverride the prefix-match quality to use instead of
+     *   [calculatePrefixScore] — the typo-tolerant path passes its penalized
+     *   [fuzzyPrefixScore] (a fuzzy candidate does not prefix-match the sequence)
+     * @return null when the word does not prefix-match the sequence (score 0)
+     */
+    private fun resolveScoreBreakdown(
+        word: String,
+        keySequence: String,
+        frequency: Int,
+        context: List<String>,
+        prefixScoreOverride: Int? = null
+    ): ScoreBreakdown? {
+        val prefixScore = prefixScoreOverride ?: calculatePrefixScore(word, keySequence)
+        if (prefixScore == 0) return null // Should not happen if caller does prefix check
+
+        // H3: the selection-adaptation multiplier is a READ of learned data —
+        // inert (1.0) when the master gate is off or config is absent.
+        val adaptationMultiplier = if (canUseAdaptation()) {
+            adaptationManager?.getAdaptationMultiplier(word) ?: 1.0f
+        } else {
+            1.0f
+        }
+
+        val staticContextMultiplier = if (bigramModel != null && context.isNotEmpty()) {
+            bigramModel?.getContextMultiplier(word, context) ?: 1.0f
+        } else {
+            1.0f
+        }
+
+        // Null config fails CLOSED (M2).
+        val canUseLearned = LearningGate.canUseLearnedContext(
+            config?.on_device_learning_enabled ?: false,
+            config?.context_aware_predictions_enabled ?: false
+        )
+        val dynamicContextBoost = if (canUseLearned && contextModel != null && context.isNotEmpty()) {
+            contextModel?.getContextBoost(word, context) ?: 1.0f
+        } else {
+            1.0f
+        }
+
+        // Personalization boost read: master AND feature gate, fail closed (M2).
+        val personalizationEnabled = LearningGate.canLearnPersonalization(
+            config?.on_device_learning_enabled ?: false,
+            config?.personalized_learning_enabled ?: false
+        )
+        val personalizationBoost = if (personalizationEnabled && personalizationEngine != null) {
+            personalizationEngine?.getPersonalizationBoost(word) ?: 0.0f
+        } else {
+            0.0f
+        }
+
+        return UnifiedScore.combine(
+            prefixScore = prefixScore,
+            adaptationMultiplier = adaptationMultiplier,
+            staticContextMultiplier = staticContextMultiplier,
+            dynamicContextBoost = dynamicContextBoost,
+            contextSource = config?.context_source ?: Defaults.CONTEXT_SOURCE,
+            personalizationBoost = personalizationBoost,
+            personalizationWeight = config?.personalization_weight ?: Defaults.PERSONALIZATION_WEIGHT,
+            frequency = frequency,
+            frequencyScale = config?.prediction_frequency_scale ?: Defaults.PREDICTION_FREQUENCY_SCALE,
+            contextBoost = config?.prediction_context_boost ?: Defaults.PREDICTION_CONTEXT_BOOST
+        )
+    }
+
+    /**
+     * Transparency API (Task B): full per-signal breakdown for one candidate,
+     * recomputed on demand (long-press provenance sheet). Returns null when the
+     * word is not in the primary dictionary or does not match the sequence.
+     */
+    override fun explainScore(word: String, keySequence: String, context: List<String>): ScoreBreakdown? {
+        val lower = word.lowercase()
+        val frequency = dictionary.get()[lower] ?: return null
+        return resolveScoreBreakdown(lower, keySequence.lowercase(), frequency, context)
+    }
+
+    /**
+     * Transparency API (Task B): wires the previously dead
+     * `PersonalizationEngine.explainBoost()` into the provenance sheet.
+     */
+    override fun explainPersonalization(word: String): tribixbite.cleverkeys.personalization.BoostExplanation? {
+        return personalizationEngine?.explainBoost(word.lowercase())
+    }
+
+    // ── Typo-tolerant candidates ────────────────────────────────────────────
+
+    /** Frequency at the [FUZZY_STRONG_EXACT_TOP_FRACTION] rank, cached per dictionary size. */
+    @Volatile private var cachedStrongExactFrequency: Int = 0
+    @Volatile private var cachedStrongExactForSize: Int = -1
+
+    /** Primary index alphabet (every letter of its keys), cached per index identity + size. */
+    @Volatile private var fuzzyAlphabetCache: CharArray? = null
+    @Volatile private var fuzzyAlphabetIndexRef: Any? = null
+    @Volatile private var fuzzyAlphabetIndexSize: Int = -1
+
+    /**
+     * Should the typo-tolerant search run for [seq]? Only for all-letter input whose length
+     * [FuzzyPrefixMatcher.budgetFor] allows (3..24 letters), and only when the exact results
+     * cannot fill the bar ([exactCount] < [MAX_PREDICTIONS_TYPING]) or even the most frequent
+     * of them ([bestExactFrequency]) is outside the dictionary's top
+     * [FUZZY_STRONG_EXACT_TOP_FRACTION]. Common prefixes ("pla", "the", "que") therefore pay
+     * nothing for this feature. Apostrophes/digits skip it: the handler already retries an
+     * apostrophe-free search, and digits have no typo neighbourhood worth guessing.
+     */
+    private fun shouldSearchFuzzy(seq: String, exactCount: Int, bestExactFrequency: Int): Boolean {
+        if (FuzzyPrefixMatcher.budgetFor(seq.length) <= 0f) return false
+        if (!seq.all { it.isLetter() }) return false
+        if (exactCount < MAX_PREDICTIONS_TYPING) return true
+        return bestExactFrequency < strongExactFrequency(dictionary.get())
+    }
+
+    /**
+     * The frequency of the word at the [FUZZY_STRONG_EXACT_TOP_FRACTION] rank of [dict].
+     * One O(n log n) pass per dictionary-size change (load, language switch, word add),
+     * computed lazily the first time a full, possibly-weak exact result set needs judging.
+     */
+    private fun strongExactFrequency(dict: Map<String, Int>): Int {
+        if (dict.size != cachedStrongExactForSize) {
+            val values = dict.values.toIntArray()
+            values.sort()
+            val k = max(1, (values.size * FUZZY_STRONG_EXACT_TOP_FRACTION).toInt())
+            cachedStrongExactFrequency = if (values.isEmpty()) 0 else values[max(0, values.size - k)]
+            cachedStrongExactForSize = dict.size
+        }
+        return cachedStrongExactFrequency
+    }
+
+    /** [FuzzyPrefixMatcher.PrefixSource] over the primary prefix index (raw lowercase words). */
+    private class PrimaryFuzzySource(
+        private val index: Map<String, Set<String>>,
+        private val chars: CharArray
+    ) : FuzzyPrefixMatcher.PrefixSource {
+        override val indexedDepth: Int get() = PREFIX_INDEX_MAX_LENGTH
+        override fun wordsWithPrefix(prefix: String): Collection<String>? = index[prefix]
+        override fun alphabet(): CharArray = chars
+    }
+
+    /** [FuzzyPrefixMatcher.PrefixSource] over the secondary index (accent-normalized words). */
+    private class SecondaryFuzzySource(private val index: NormalizedPrefixIndex) : FuzzyPrefixMatcher.PrefixSource {
+        override val indexedDepth: Int get() = index.indexedPrefixLength
+        override fun wordsWithPrefix(prefix: String): Collection<String>? = index.wordsWithIndexedPrefix(prefix)
+        override fun alphabet(): CharArray = index.indexedAlphabet()
+    }
+
+    private fun primaryFuzzyAlphabet(index: Map<String, Set<String>>): CharArray {
+        val cached = fuzzyAlphabetCache
+        if (cached != null && fuzzyAlphabetIndexRef === index && fuzzyAlphabetIndexSize == index.size) {
+            return cached
+        }
+        val chars = FuzzyPrefixMatcher.alphabetOfKeys(index.keys)
+        fuzzyAlphabetCache = chars
+        fuzzyAlphabetIndexRef = index
+        fuzzyAlphabetIndexSize = index.size
+        return chars
+    }
+
+    /**
+     * Prefix score for a fuzzy candidate reached at [cost]: scored as a WHOLE-WORD match when
+     * the entire word is within [cost] of what was typed ("pkay" → "play"), otherwise as a
+     * completion of the corrected prefix ("pka" → "place"), then penalized.
+     */
+    private fun fuzzyPrefixScoreFor(typed: String, word: String, cost: Float, budget: Float): Int {
+        val wholeWord = kotlin.math.abs(word.length - typed.length) <= budget &&
+            FuzzyPrefixMatcher.distance(typed, word, cost) <= cost + 1e-4f
+        val base = if (wholeWord) DIRECT_MATCH_PREFIX_SCORE else completionPrefixScore(word.length, typed.length)
+        return fuzzyPrefixScore(base, cost)
+    }
+
+    /**
+     * Pre-rank fuzzy [matches] by the context-free part of the unified score and keep the
+     * best [FUZZY_SCORING_POOL] that are not already candidates and not disabled.
+     */
+    private fun poolFuzzyMatches(
+        typedLength: Int,
+        matches: Map<String, Float>,
+        present: Set<String>,
+        frequencyScale: Float,
+        frequencyOf: (String) -> Int?
+    ): List<Pair<String, Float>> {
+        val ranked = ArrayList<Triple<String, Float, Double>>(matches.size)
+        val checkDisabled = disabledWords.isNotEmpty()
+        for ((word, cost) in matches) {
+            if (word in present) continue
+            if (checkDisabled && isWordDisabled(word)) continue
+            val freq = frequencyOf(word) ?: continue
+            val approx = fuzzyPrefixScore(completionPrefixScore(word.length, typedLength), cost) *
+                (1.0 + ln1p(freq / frequencyScale.toDouble().coerceAtLeast(1e-6)))
+            ranked.add(Triple(word, cost, approx))
+        }
+        ranked.sortByDescending { it.third }
+        return ranked.asSequence().take(FUZZY_SCORING_POOL).map { it.first to it.second }.toList()
+    }
+
+    /**
+     * Add typo-tolerant candidates for [seq] (lowercase) from the primary dictionary and, when
+     * loaded, the secondary one — through the same unified scorer as exact candidates (so
+     * frequency, adaptation, context and personalization all apply), with the penalized
+     * prefix score in place of the exact prefix score. Words already among [candidates] are
+     * skipped; disabled words are never offered.
+     */
+    private fun addFuzzyCandidates(seq: String, context: List<String>, candidates: MutableList<WordCandidate>) {
+        val budget = FuzzyPrefixMatcher.budgetFor(seq.length)
+        val present = HashSet<String>(candidates.size * 2 + 8)
+        for (c in candidates) present.add(c.word.lowercase())
+        val frequencyScale = config?.prediction_frequency_scale ?: Defaults.PREDICTION_FREQUENCY_SCALE
+
+        // Primary dictionary.
+        val dict = dictionary.get()
+        val index = prefixIndex.get()
+        val primaryMatches = FuzzyPrefixMatcher.findMatches(
+            seq, PrimaryFuzzySource(index, primaryFuzzyAlphabet(index)), budget
+        )
+        for ((word, cost) in poolFuzzyMatches(seq.length, primaryMatches, present, frequencyScale) { dict[it] }) {
+            val frequency = dict[word] ?: continue
+            val prefixScore = fuzzyPrefixScoreFor(seq, word, cost, budget)
+            val score = resolveScoreBreakdown(word, seq, frequency, context, prefixScore)?.finalScore ?: 0
+            if (score > 0) {
+                candidates.add(WordCandidate(word, score, fuzzyPrefixScore = prefixScore))
+                present.add(word)
+            }
+        }
+
+        // Secondary dictionary (bilingual typing) — matched on the accent-normalized forms,
+        // scored exactly like secondary prefix hits (rank → frequency, × secondary weight).
+        val secIndex = secondaryIndex ?: return
+        val normalizedSeq = AccentNormalizer.normalize(seq)
+        val secondaryBudget = FuzzyPrefixMatcher.budgetFor(normalizedSeq.length)
+        if (secondaryBudget <= 0f) return
+        val secondaryMatches = FuzzyPrefixMatcher.findMatches(normalizedSeq, SecondaryFuzzySource(secIndex), secondaryBudget)
+        val secondaryWeight = config?.secondary_prediction_weight ?: Defaults.SECONDARY_PREDICTION_WEIGHT
+        val pooled = poolFuzzyMatches(normalizedSeq.length, secondaryMatches, present, frequencyScale) { normalized ->
+            secIndex.lookup(normalized)?.let { secondaryRankToFrequency(it.bestFrequencyRank) }
+        }
+        for ((normalized, cost) in pooled) {
+            val hit = secIndex.lookup(normalized) ?: continue
+            val canonical = hit.bestCanonical
+            if (canonical.lowercase() in present) continue
+            if (disabledWords.isNotEmpty() && isWordDisabled(canonical)) continue
+            val frequency = secondaryRankToFrequency(hit.bestFrequencyRank)
+            val prefixScore = fuzzyPrefixScoreFor(normalizedSeq, normalized, cost, secondaryBudget)
+            val base = resolveScoreBreakdown(canonical, seq, frequency, context, prefixScore)?.finalScore ?: 0
+            val score = (base * secondaryWeight).toInt()
+            if (score > 0) {
+                candidates.add(WordCandidate(canonical, score, fuzzyPrefixScore = prefixScore, fromSecondary = true))
+                present.add(canonical.lowercase())
+            }
+        }
+    }
+
+    /**
+     * The top [limit] of score-sorted [sorted], guaranteeing up to [reservedFuzzy] places to
+     * the best fuzzy candidates (see [FUZZY_RESERVED_SLOTS]): if fewer are already in the top,
+     * the next-best fuzzy ones replace the lowest-scoring exact entries. The result stays in
+     * score order.
+     */
+    private fun selectTopCandidates(sorted: List<WordCandidate>, limit: Int, reservedFuzzy: Int): List<WordCandidate> {
+        val top = sorted.take(limit).toMutableList()
+        if (reservedFuzzy <= 0 || top.size < limit) return top
+        var missing = reservedFuzzy - top.count { it.fuzzyPrefixScore != null }
+        if (missing <= 0) return top
+        val extras = sorted.asSequence().drop(limit).filter { it.fuzzyPrefixScore != null }.take(missing).toList()
+        for (extra in extras) {
+            val victim = top.indexOfLast { it.fuzzyPrefixScore == null }
+            if (victim < 0) break
+            top.removeAt(victim)
+            top.add(extra)
+            missing--
+        }
+        // Stable: equal scores keep their current relative order.
+        top.sortByDescending { it.score }
+        return top
+    }
+
+    /**
+     * Secondary-index rank (0 = most common … 255) → the frequency scale the secondary
+     * prefix path scores with. Same formula as the exact secondary lookup in [predictInternal].
+     */
+    private fun secondaryRankToFrequency(rank: Int): Int = ((255 - rank) * 4000) + 1000
+
+    /**
+     * Calculate base score for prefix-based matching (used by unified scoring)
+     */
+    private fun calculatePrefixScore(word: String, keySequence: String): Int {
+        // Direct match is highest score
+        if (word == keySequence) return DIRECT_MATCH_PREFIX_SCORE
+
+        // Word starts with sequence (guaranteed by caller): base + per-typed-letter bonus
+        // (longer prefix = more specific) − a slight penalty for very long words so common
+        // shorter completions lead. See [completionPrefixScore].
+        if (word.startsWith(keySequence)) {
+            return completionPrefixScore(word.length, keySequence.length)
+        }
+
+        return 0 // Should not reach here due to prefix check in caller
+    }
+
+    /**
+     * Auto-correct a typed word after user presses space/punctuation.
+     *
+     * Finds dictionary words with:
+     * - Same length
+     * - Same first 2 letters
+     * - High positional character match (default: 2/3 chars)
+     *
+     * Example: "teh" → "the", "Teh" → "The", "TEH" → "THE"
+     *
+     * @param typedWord The word user just finished typing
+     * @return Corrected word, or original if no suitable correction found
+     */
+    /**
+     * True iff [a] and [b] differ ONLY by one swap of two adjacent (distinct)
+     * characters — the Damerau transposition typo ("teh"/"the", "becuase"/
+     * "because"). Same-length inputs only; O(n), no allocation.
+     */
+    private fun isAdjacentTransposition(a: String, b: String): Boolean {
+        if (a.length != b.length || a.length < 2) return false
+        var i = 0
+        while (i < a.length && a[i] == b[i]) i++
+        if (i >= a.length - 1) return false           // identical or diff at last char only
+        if (a[i] != b[i + 1] || a[i + 1] != b[i] || a[i] == a[i + 1]) return false
+        for (j in i + 2 until a.length) if (a[j] != b[j]) return false
+        return true
+    }
+
+    /**
+     * Max frequency in the current dictionary, cached and recomputed only when
+     * the dictionary size changes. Used by [FrequencyFloor] to scale the
+     * autocorrect confidence floor to whatever frequency scale the dictionary
+     * was loaded on. O(n) on a size change, O(1) otherwise.
+     */
+    private fun dictMaxFrequency(dict: Map<String, Int>): Int {
+        if (dict.size != cachedMaxFreqForSize) {
+            cachedMaxFreq = dict.values.maxOrNull() ?: 0
+            cachedMaxFreqForSize = dict.size
+        }
+        return cachedMaxFreq
+    }
+
+    /**
+     * Wave U2 — the `[floor..ceil]` frequency span of the CURRENT dictionary map, for
+     * calibrating stored 1..255 user-word frequencies onto whatever scale the base
+     * dictionary was loaded on via [UserWordFrequency.scaleOnto].
+     *
+     * The tap dictionary's scale varies by source — binary CKDT converts ranks to
+     * `1000000 − rank·3900` (~5.5K..1M) while the JSON fallback scales bytes to
+     * 100..10000 — and a RAW stored value (old default 100) sat at or below the floor
+     * of BOTH, ranking a user's own word behind the entire base dictionary in
+     * `UnifiedScore`'s `1 + ln1p(freq/scale)` factor. Mapping through the span keeps
+     * the user's ordering, puts stored 255 (the add-word default) at the top of the
+     * scale, and never buries a custom word below the rarest base word.
+     *
+     * Called BEFORE user words are inserted on a fresh map; on a reload the previously
+     * calibrated user values already lie within the span, so the answer is stable.
+     * An empty map (no base dictionary) yields the identity span 1..255.
+     */
+    private fun baseFrequencySpanOf(dict: Map<String, Int>): Pair<Double, Double> {
+        var mn = Int.MAX_VALUE
+        var mx = Int.MIN_VALUE
+        for (v in dict.values) {
+            if (v < mn) mn = v
+            if (v > mx) mx = v
+        }
+        return if (mx < mn) {
+            UserWordFrequency.MIN.toDouble() to UserWordFrequency.MAX.toDouble()
+        } else {
+            mn.toDouble() to mx.toDouble()
+        }
+    }
+
+    override fun autoCorrect(typedWord: String): String =
+        autoCorrect(typedWord, AutocorrectTuning.of(config))
+
+    /**
+     * In-band "neighbour substitution beats distant substitution" tiebreak variants
+     * (eval: `docs/eval/2026-10-12-neighbour-substitution-tiebreak.md`). OFF = frequency
+     * decides between two in-band substitution candidates; N1 = between two ONE-substitution
+     * candidates, the one whose substituted key is a neighbour of the typed key wins; NA = the
+     * same over candidates with any number of substitutions (all-neighbour vs any-distant).
+     */
+    enum class NeighbourTiebreak { OFF, N1, NA }
+
+    /**
+     * [autoCorrect] under the BAND ranking with step 1.45's margin as a parameter — the
+     * evaluation seam for `DroppedDoubleMarginEval` and `NeighbourTiebreakEval`, which need the
+     * pre-DD-M behaviour ([droppedDoubleMarginSteps] = null: step 1.45 skipped entirely) and the
+     * sweep's W without the step, on the dictionary the device actually loads. Every other
+     * weight is the default; production goes through [autoCorrect] with the live tuning.
+     */
+    internal fun autoCorrect(
+        typedWord: String,
+        droppedDoubleMarginSteps: Int?,
+        neighbourTiebreak: NeighbourTiebreak = AutocorrectTuning.DEFAULT.neighbourTiebreak
+    ): String = autoCorrect(
+        typedWord,
+        AutocorrectTuning.DEFAULT.copy(
+            ranking = AutocorrectRanking.BAND,
+            droppedDoubleEnabled = droppedDoubleMarginSteps != null,
+            droppedDoubleMarginSteps = droppedDoubleMarginSteps ?: DROPPED_DOUBLE_MARGIN_STEPS,
+            neighbourTiebreak = neighbourTiebreak,
+        )
+    )
+
+    /**
+     * What rule C saw for one input, for `ChannelRankingEval`: the gated candidates (in the
+     * order the sweep met them), the guard-G stem if step 1.5 deferred to the sweep, and the
+     * frequency floor and dictionary maximum the decision used.
+     */
+    internal class ChannelProbe(
+        val lowerTypedWord: String,
+        val candidates: List<ChannelCandidate>,
+        val guardStem: String?,
+        val frequencyFloor: Int,
+        val maxFrequency: Int,
+    )
+
+    /**
+     * Space-bar autocorrect of [typedWord] under [tuning]. [probe], when given, receives the
+     * channel ranking's inputs just before its decision (eval seam; never set in production).
+     */
+    internal fun autoCorrect(
+        typedWord: String,
+        tuning: AutocorrectTuning,
+        probe: ((ChannelProbe) -> Unit)? = null,
+    ): String {
+        if (config?.autocorrect_enabled != true || typedWord.isEmpty()) {
+            return typedWord
+        }
+
+        // v1.1.89: Dictionary now loads primary language, so autocorrect uses correct vocabulary
+        // The dictionary variable contains words from config.primary_language (loaded in PredictionCoordinator)
+        // No need to skip autocorrect for non-English - it will match against the loaded dictionary
+
+        val lowerTypedWord = typedWord.lowercase()
+
+        // 0. Check for contraction aliases FIRST (e.g., "im" → "I'm", "dont" → "don't")
+        // These are in the dictionary for prediction purposes but should still be autocorrected.
+        // C-5 (2026-09-06 audit): contraction guard #4 (skill §5) applies HERE too — a
+        // REPLACE-mode rewrite takes the typed word's slot, so it must never fire on a word
+        // the user added by hand (fr "dangle" as a name → must not commit "d'angle").
+        // customAndUserWords is the predictor's lowercase view of the personal dictionary
+        // (custom prefs + platform provider), so the containment check is case-total. A
+        // guarded word falls through to step 1's in-dictionary short-circuit and survives.
+        val contractionTarget = contractionAliases[lowerTypedWord]
+        if (contractionTarget != null && lowerTypedWord !in customAndUserWords) {
+            // Capitalize I-contractions (im → I'm, ill → I'll, id → I'd)
+            val corrected = if (contractionTarget.startsWith("i'")) {
+                contractionTarget.replaceFirstChar { it.uppercase() }
+            } else {
+                preserveCapitalization(typedWord, contractionTarget)
+            }
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "AUTO-CORRECT (contraction): '$typedWord' → '$corrected'")
+            return corrected
+        }
+
+        // 1. Do not correct words already in dictionary or user's vocabulary.
+        // A word the user DISABLED in Dictionary Manager is no longer valid
+        // vocabulary, so it must NOT short-circuit here — typed "ans" with
+        // "ans" disabled falls through to the sweep and corrects like any
+        // typo (UT-8; "ans" IS a bundled dictionary word). The explicit
+        // disable also outranks the implicit personalization multiplier;
+        // custom/user words still override the disable inside isWordDisabled.
+        // The `isNotEmpty` guard keeps the common no-disabled-words path free
+        // of the extra lowercase-set lookup (same pattern as the sweep).
+        val typedWordDisabled = disabledWords.isNotEmpty() && isWordDisabled(lowerTypedWord)
+        if (!typedWordDisabled &&
+            (dictionary.get().containsKey(lowerTypedWord) ||
+                (canUseAdaptation() &&
+                    (adaptationManager?.getAdaptationMultiplier(lowerTypedWord) ?: 0f) > 1.0f))
+        ) {
+            return typedWord
+        }
+
+        val dict = dictionary.get()
+
+        // 1.4. Doubled-letter elongation collapse ("gamees" → "games",
+        // "embeer" → "ember"). Key auto-repeat / a lingering finger doubles a
+        // letter; when removing one half of a doubled pair yields a dictionary
+        // word, that word is a structurally near-certain intent — an exact
+        // letter match at edit distance 1. It must run BEFORE the morphology
+        // guard (which would misread "gamees" as a valid -es inflection of
+        // "game" and freeze it) and before the sweep (whose adjacency scoring
+        // prefers 1-substitution lookalikes: "gamees" would sweep to "gamers",
+        // "embeer" to "embers"). Structural certainty exempts it from the
+        // frequency floor — same rationale as the contraction path (step 0) —
+        // but disabled words are still never offered. Gated on
+        // autocorrect_max_length_diff >= 1: this IS a length-changing
+        // correction, and a user who configured same-length-only corrections
+        // keeps that guarantee. The collapsed word must still meet the
+        // min-word-length bar (typed length must exceed it by the removed char).
+        if (tuning.elongationCollapseEnabled &&
+            lowerTypedWord.length > (config?.autocorrect_min_word_length ?: Defaults.AUTOCORRECT_MIN_WORD_LENGTH) &&
+            (config?.autocorrect_max_length_diff ?: Defaults.AUTOCORRECT_MAX_LENGTH_DIFF) >= 1
+        ) {
+            var collapseBest: String? = null
+            var collapseBestFreq = -1
+            for (i in 0 until lowerTypedWord.length - 1) {
+                if (lowerTypedWord[i] != lowerTypedWord[i + 1] ||
+                    !lowerTypedWord[i].isLetter()
+                ) continue
+                val collapsed = lowerTypedWord.removeRange(i, i + 1)
+                val freq = dict[collapsed] ?: continue
+                if (disabledWords.isNotEmpty() && isWordDisabled(collapsed)) continue
+                if (freq > collapseBestFreq) {
+                    collapseBest = collapsed
+                    collapseBestFreq = freq
+                }
+            }
+            if (collapseBest != null) {
+                // Re-route alias-keyed hits ("doont" → collapse "dont" →
+                // "don't"), mirroring the sweep-winner re-route in step 5;
+                // C-5 guard #4 symmetry lives in finalizeCorrection.
+                val corrected = finalizeCorrection(typedWord, collapseBest)
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "AUTO-CORRECT (elongation collapse): '$typedWord' → '$corrected'")
+                return corrected
+            }
+        }
+
+        // Shared sweep inputs, hoisted so step 1.45 can run the same sweep as step 4.
+        val configFloor = config?.autocorrect_confidence_min_frequency
+            ?: Defaults.AUTOCORRECT_MIN_FREQUENCY
+        val frequencyFloor = FrequencyFloor.effective(configFloor, dictMaxFrequency(dict))
+        val diagnosticsEnabled = config?.swipe_debug_detailed_logging == true
+        val rejectionLog = mutableListOf<Pair<String, Float>>()  // (word, score) for top-N
+        var sweepDone = false
+        var sweepBest: AutocorrectCandidate? = null
+
+        // 1.45. Dropped doubled letter, frequency margin (DD-M; eval
+        // docs/eval/2026-10-11-dropped-double-margin.md). The mirror of 1.4:
+        // "helo" → "hello", "tomorow" → "tomorrow", "begining" → "beginning".
+        // Unlike the collapse, an insertion does NOT win outright — that version
+        // hijacked one-key slips of common words ("bery" → berry, not very). The
+        // inserted word D competes with the word W the normal sweep (step 4)
+        // would commit, and wins only when it is at most
+        // DROPPED_DOUBLE_MARGIN_STEPS byte-rank steps rarer than W (or when the
+        // sweep commits nothing). W being the user's own word keeps W. Runs
+        // before the morphology guard, which would freeze "begining" as begin +
+        // -ing. If D loses, the input continues down the unchanged path and step
+        // 4 reuses this sweep. BAND ranking only: the channel ranking prices a
+        // re-doubled letter inside its edit cost (ChannelWeights.doubleCost).
+        val channel = tuning.ranking == AutocorrectRanking.CHANNEL
+        val droppedDoubleMarginSteps = tuning.droppedDoubleMarginSteps
+        val insertion = if (!channel && tuning.droppedDoubleEnabled) {
+            droppedDoubleTarget(lowerTypedWord, dict, frequencyFloor)
+        } else null
+        if (insertion != null) {
+            sweepBest = autocorrectSweep(lowerTypedWord, dict, if (diagnosticsEnabled) rejectionLog else null, tuning)
+            sweepDone = true
+            val w = sweepBest?.takeIf { isCommittable(it, frequencyFloor) }
+            val insertionFreq = dict[insertion] ?: 0
+            val insertionWins = w == null ||
+                (w.word !in customAndUserWords &&
+                    insertionFreq.toLong() * 255 >=
+                    w.frequency.toLong() * 255 - droppedDoubleMarginSteps.toLong() * dictMaxFrequency(dict))
+            if (insertionWins) {
+                val corrected = finalizeCorrection(typedWord, insertion)
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "AUTO-CORRECT (dropped double): '$typedWord' → '$corrected' " +
+                    "(insertion freq=$insertionFreq, sweep=${w?.word} freq=${w?.frequency})")
+                return corrected
+            }
+        }
+
+        // 1.5. Morphological guard (#B1): do NOT autocorrect a word that is a
+        // regular inflection of a dictionary word. The bundled dictionary has
+        // incomplete inflection coverage (e.g. "immunization" is present but
+        // the valid plural "immunizations" is not), and without this guard the
+        // missing inflection gets "corrected" to a distant same-length word
+        // that happens to be in the dictionary ("organizations"), which is
+        // worse than leaving it alone. Require stem length >= 4 so short,
+        // ambiguous words (e.g. "thes") remain correctable — long technical
+        // plurals/inflections (immunization, vaccination, realization, ...)
+        // are the real failure mode.
+        // UT-8: an explicitly-disabled typed word outranks the inflection
+        // heuristic — the user said this exact token is not a word, so don't
+        // freeze it just because a plausible stem exists.
+        //
+        // Guard G (channel ranking, eval 2026-10-18 §1.1): with a finite
+        // inflection cost γ the guard does not return here. It records the most
+        // frequent qualifying stem and lets the sweep's winner compete against it
+        // after step 4 ("shated" = "shat" + -ed must lose to "shared").
+        var guardStem: String? = null
+        if (tuning.inflectionGuardEnabled && !typedWordDisabled) {
+            val stem = Morphology.inflectionStems(lowerTypedWord)
+                .filter { it.length >= tuning.inflectionGuardMinStem && dict.containsKey(it) }
+                .maxByOrNull { dict[it] ?: 0 }
+            if (stem != null) {
+                if (!channel || tuning.channel.inflectionCost == Float.POSITIVE_INFINITY) {
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "AUTO-CORRECT skip (valid inflection): '$typedWord'")
+                    return typedWord
+                }
+                guardStem = stem
+            }
+        }
+
+        // 1.6. Possessive guard + possessive-typo correction (AC-4). A
+        // possessive of a known noun ("ember's", "dog's", "rivers'") is valid
+        // English, but the possessive form itself is never stored in the
+        // dictionary — so without this guard autocorrect treats it as a typo
+        // and "corrects" it to a same-ish dictionary word ("ember's" →
+        // "rivers", "dog's" → "does"). If the base (the text before the last
+        // apostrophe) is a known word, accept the possessive as-is.
+        // Covers singular ('s) and plural/already-ends-in-s (trailing ') forms;
+        // suffixes other than "s"/"" (e.g. "'t", "'ll") are left to the
+        // contraction-alias path. Both straight (') and curly (’) apostrophes.
+        //
+        // When the base is NOT a known word it's a typo'd possessive
+        // ("embeer's"). Running the normal pipeline on the full token compares
+        // it against apostrophe-free dictionary words and strips the suffix
+        // ("embeer's" → "rivers") — so instead correct the BASE alone via a
+        // recursive call (which reuses every guard: contraction aliases, min
+        // length, morphology, disabled words, frequency floor, capitalization)
+        // and re-append the suffix with its ORIGINAL apostrophe character.
+        // If the base can't be corrected, return the token untouched — never
+        // strip the suffix. Recursion terminates: the base is strictly
+        // shorter, and a base whose own last apostrophe is at index < 2
+        // (e.g. "o'clock") doesn't re-enter this block.
+        val apostropheIdx = lowerTypedWord.indexOfLast { it == '\'' || it == '’' }
+        if (apostropheIdx >= 2) {
+            val base = lowerTypedWord.substring(0, apostropheIdx)
+            val suffix = lowerTypedWord.substring(apostropheIdx + 1)
+            if (suffix == "s" || suffix.isEmpty()) {
+                // UT-8: a DISABLED base is no longer a known word, so its
+                // possessive must not be accepted as-is — fall through to the
+                // AC-4 base-correction path (whose recursive autoCorrect call
+                // applies the disabled check again). isWordDisabled keeps the
+                // custom-word override.
+                val baseDisabled = disabledWords.isNotEmpty() && isWordDisabled(base)
+                if (!baseDisabled &&
+                    (dict.containsKey(base) || customAndUserWords.contains(base))
+                ) {
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "AUTO-CORRECT skip (possessive of '$base'): '$typedWord'")
+                    return typedWord
+                }
+                // AC-4: base is a typo — correct it alone, keep the suffix.
+                val originalBase = typedWord.substring(0, apostropheIdx)
+                val correctedBase = autoCorrect(originalBase, tuning)
+                if (correctedBase != originalBase) {
+                    val corrected = correctedBase + typedWord.substring(apostropheIdx)
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "AUTO-CORRECT (possessive base): '$typedWord' → '$corrected'")
+                    return corrected
+                }
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "AUTO-CORRECT skip (uncorrectable possessive base): '$typedWord'")
+                return typedWord
+            }
+        }
+
+        // 2. Enforce minimum word length for correction
+        if (lowerTypedWord.length < (config?.autocorrect_min_word_length ?: Defaults.AUTOCORRECT_MIN_WORD_LENGTH)) {
+            return typedWord
+        }
+
+        // 3.–4. Channel ranking (rule C): gated candidates, minimum edit cost +
+        // λ · rank, then guard G and the frequency floor (channelDecide).
+        if (channel) {
+            val candidates = gatedCandidates(lowerTypedWord, dict, if (diagnosticsEnabled) rejectionLog else null, tuning)
+                .map { ChannelCandidate(it.word, it.frequency, it.isAlias) }
+            val maxFrequency = dictMaxFrequency(dict)
+            probe?.invoke(ChannelProbe(lowerTypedWord, candidates, guardStem, frequencyFloor, maxFrequency))
+            val editCosts = FloatArray(candidates.size) {
+                ChannelEditCost.cost(lowerTypedWord, candidates[it].word, tuning.channel)
+            }
+            return channelDecide(typedWord, candidates, editCosts, guardStem,
+                tuning.channel, frequencyFloor, maxFrequency)
+        }
+
+        // 3.–4. Candidate sweep (see autocorrectSweep); reuse step 1.45's run.
+        val bestCandidate: AutocorrectCandidate? =
+            if (sweepDone) sweepBest
+            else autocorrectSweep(lowerTypedWord, dict, if (diagnosticsEnabled) rejectionLog else null, tuning)
+
+        // 5. Apply correction only if confident candidate found.
+        // Custom/user-added words are injected at a low placeholder frequency
+        // (1000) far below the binary dict's runtime scale (5.5k..1M), so any
+        // non-zero slider floor would silently exclude EVERY custom word as a
+        // correction target. The user added them explicitly, so exempt them
+        // from the floor — analogous to the custom-word override in
+        // isWordDisabled. (AC-2, 2026-07.)
+        if (bestCandidate != null && isCommittable(bestCandidate, frequencyFloor)) {
+            // Re-route alias-keyed winners through contractionAliases so the
+            // returned form is the apostrophe-bearing contraction. Without
+            // this, `donr → dont` (the alias-key) would stop there; the
+            // user-visible result must be `don't` (see finalizeCorrection).
+            val corrected = finalizeCorrection(typedWord, bestCandidate.word)
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "AUTO-CORRECT: '$typedWord' → '$corrected' " +
+                "(winner=${bestCandidate.word} score=${"%.3f".format(bestCandidate.score)} " +
+                "freq=${bestCandidate.frequency})")
+            return corrected
+        }
+
+        // Diagnostic logging on rejection. Symmetric with the success log so
+        // "why didn't it correct X?" is answerable from logcat.
+        if (diagnosticsEnabled) {
+            val top = rejectionLog.sortedByDescending { it.second }.take(5)
+                .joinToString(", ") { "${it.first}=${"%.3f".format(it.second)}" }
+            val reason = when {
+                bestCandidate == null ->
+                    "no candidate above threshold ${config?.autocorrect_char_match_threshold ?: Defaults.AUTOCORRECT_CHAR_MATCH_THRESHOLD}"
+                bestCandidate.frequency < frequencyFloor ->
+                    "best='${bestCandidate.word}' freq=${bestCandidate.frequency} < floor=$frequencyFloor"
+                else -> "?"
+            }
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "AUTO-CORRECT-REJECT: '$typedWord' [$reason]  top=[$top]")
+        }
+
+        return typedWord // No suitable correction found
+    }
+
+    /**
+     * Steps 3–4 of [autoCorrect] under the BAND ranking: the pairwise band fold over
+     * [gatedCandidates], in the order the sweep met them. Returns the best candidate by the
+     * score / structural / frequency tiebreak, or null when nothing clears
+     * `autocorrect_char_match_threshold`. The frequency floor and custom-word exemption are NOT
+     * applied here (see [isCommittable]). Shared by step 1.45 (dropped-double margin) and
+     * step 5, so the two never disagree about W.
+     */
+    private fun autocorrectSweep(
+        lowerTypedWord: String,
+        dict: Map<String, Int>,
+        diagnostics: MutableList<Pair<String, Float>>?,
+        tuning: AutocorrectTuning
+    ): AutocorrectCandidate? {
+        var best: AutocorrectCandidate? = null
+        for (c in gatedCandidates(lowerTypedWord, dict, diagnostics, tuning)) {
+            if (bandBeats(c, best, tuning)) best = c
+        }
+        return best
+    }
+
+    /**
+     * Steps 3–4's candidate set, shared by both rankings: every dictionary word that passes
+     * the prefix, length, disabled-word and dual gates and scores at least
+     * `autocorrect_char_match_threshold`, in dictionary iteration order. When [diagnostics] is
+     * non-null, every candidate scoring >= 0.4 is appended for rejection logging.
+     */
+    private fun gatedCandidates(
+        lowerTypedWord: String,
+        dict: Map<String, Int>,
+        diagnostics: MutableList<Pair<String, Float>>?,
+        tuning: AutocorrectTuning
+    ): List<AutocorrectCandidate> {
+        val neighbourTiebreak = tuning.neighbourTiebreak
+        // 3. Required-prefix rule. Configurable via `autocorrect_prefix_length`:
+        //   - >0: candidate must share that many leading chars with typed word
+        //   - 0:  no prefix required — typo on first char (e.g. "wuestion" →
+        //         "question") is correctable. Skips the prefix filter entirely
+        //         so the candidate sweep also covers off-by-one-on-first-char.
+        // Clamped to typed-word length so a misconfigured huge prefix doesn't
+        // short-circuit. Was previously hard-coded to 2, ignoring config.
+        val configPrefixLength = (config?.autocorrect_prefix_length ?: Defaults.AUTOCORRECT_PREFIX_LENGTH).coerceAtLeast(0)
+        val effectivePrefixLength = minOf(configPrefixLength, lowerTypedWord.length)
+        val prefix: String? =
+            if (effectivePrefixLength > 0) lowerTypedWord.substring(0, effectivePrefixLength)
+            else null
+
+        val wordLength = lowerTypedWord.length
+        val charMatchThreshold = config?.autocorrect_char_match_threshold ?: Defaults.AUTOCORRECT_CHAR_MATCH_THRESHOLD
+        val maxLengthDiff = (config?.autocorrect_max_length_diff ?: Defaults.AUTOCORRECT_MAX_LENGTH_DIFF).coerceAtLeast(0)
+
+        val gated = ArrayList<AutocorrectCandidate>()
+
+        // 4. Iterate through dictionary to find candidates.
+        //
+        //    Same-length candidates are scored by KEYBOARD-ADJACENCY-WEIGHTED
+        //    positional match: each position contributes `1.0` for a perfect
+        //    match, `~0.86` for an adjacent-key substitution (e.g. `q↔w`),
+        //    down to `0` for distant pairs. Sum / wordLength yields a
+        //    score in [0, 1] comparable to the old positional-match ratio.
+        //
+        //    Different-length candidates (up to `autocorrect_max_length_diff`)
+        //    are scored via KeyAdjacency.weightedEditDistance — substitution
+        //    cost = keyDistance, insertion/deletion cost = 1.0. Score is
+        //    `1 - editDistance / maxLength`.
+        //
+        //    Why two paths? Position-wise scoring is faster (linear in
+        //    word length, no DP) and is the right model when the candidate
+        //    aligns with the typed word index-by-index. Levenshtein handles
+        //    the harder case where one is a one-off insertion or deletion.
+        for ((dictWord, candidateFrequency) in dict) {
+            val lengthDiff = kotlin.math.abs(dictWord.length - wordLength)
+            if (lengthDiff > maxLengthDiff) continue
+
+            // Prefix match (when required by config).
+            if (prefix != null && !dictWord.startsWith(prefix)) continue
+
+            // Never offer a user-disabled word as a CORRECTION TARGET.
+            // `autoCorrect` previously consulted `isWordDisabled` nowhere, so
+            // disabling "boston" still let "bostom → boston", and bundled
+            // corpus-noise the user disabled (teh, wich, hav, …) stayed
+            // reachable as targets. The `isNotEmpty` guard skips the per-word
+            // lowercase in `isWordDisabled` for the common no-disabled-words
+            // case (the dictionary scan runs ~52k times per correction).
+            if (disabledWords.isNotEmpty() && isWordDisabled(dictWord)) continue
+
+            // Dual-gate scoring. Adjacency-weighted scores reward typos on
+            // physically-near keys, but applied naively they let unrelated
+            // 7-char words like "without" clear a 0.65 threshold against
+            // typed "questin" (every char-pair has SOME adjacency similarity).
+            //
+            // Same-length path:
+            //   - GATE 1: at least 50% of positions must exactly match.
+            //     Rejects unrelated same-length words wholesale ("questin"
+            //     vs "without" has 0 exact matches → fails).
+            //   - GATE 2: weighted score must clear `charMatchThreshold`.
+            //     Picks adjacency-rich matches ("tge" vs "the" passes both
+            //     because 2/3 exact AND weighted ≈ 0.95).
+            //
+            // Length-diff path:
+            //   - Position-by-position exact-counting is unreliable here
+            //     (insertion/deletion shifts the alignment). Instead use
+            //     an ABSOLUTE edit-distance budget: `ed ≤ lengthDiff + 2`.
+            //     Allows the legitimate-typo case (lengthDiff=1, ed≈1.0
+            //     for `questin → question`) while rejecting weakly-aligned
+            //     unrelated candidates (ed≈3+ for `wuestion → wuthering`).
+            var isTransposition = false
+            var isMultiSub = false
+            // Same-length substitution candidates only (not transpositions, not length
+            // changes): how many keys differ, and whether every differing key is a neighbour
+            // of the typed key on the active layout. Feeds the NB tiebreak rule.
+            var substitutionCount = -1
+            var neighbourOnly = false
+            val score: Float = if (lengthDiff == 0) {
+                if (isAdjacentTransposition(lowerTypedWord, dictWord)) {
+                    // Damerau transposition fast path ("teh" → "the", "becuase"
+                    // → "because", "recieve" → "receive"). A swap typo has only
+                    // wordLength−2 exact positions, so for short words it can
+                    // NEVER pass the 50% exact-ratio gate ("teh" vs "the" is
+                    // 1/3 exact) even though it's among the most common typo
+                    // classes. Score it as a mild, length-normalized penalty —
+                    // just below a single adjacent-key substitution, so a
+                    // genuine 1-sub candidate still outranks it on score and
+                    // the within-gap frequency tiebreak resolves the rest
+                    // ("teh": ten scores 0.959 vs the 0.950, gap < 0.10 →
+                    // freq picks "the").
+                    isTransposition = true
+                    1f - tuning.transpositionPenalty / wordLength
+                } else {
+                // Pass 1: cheap exact-match count only (`==`, no keyDistance).
+                // GATE 1a (ratio) + GATE 1b (sub-cap) depend solely on this, so
+                // words that fail the gate — the large majority of the 98k dict
+                // for any typed word — skip the expensive adjacency-weighted
+                // sum (a keyDistance/hypot per position) entirely.
+                var exactCount = 0
+                for (i in 0 until wordLength) {
+                    if (lowerTypedWord[i] == dictWord[i]) exactCount++
+                }
+                val substitutions = wordLength - exactCount
+                isMultiSub = substitutions >= 2
+                if (exactCount.toFloat() / wordLength >= tuning.minExactRatio &&
+                    substitutions <= tuning.maxSubstitutions
+                ) {
+                    // Pass 2: adjacency-weighted score, only for gate survivors.
+                    var weightedSum = 0f
+                    var allNeighbours = true
+                    for (i in 0 until wordLength) {
+                        val a = lowerTypedWord[i]
+                        val b = dictWord[i]
+                        weightedSum += KeyAdjacency.substitutionScore(a, b)
+                        if (neighbourTiebreak != NeighbourTiebreak.OFF && a != b && allNeighbours &&
+                            !KeyAdjacency.areNeighbors(a, b)
+                        ) allNeighbours = false
+                    }
+                    substitutionCount = substitutions
+                    neighbourOnly = allNeighbours
+                    weightedSum / wordLength
+                } else -1f
+                }
+            } else {
+                val maxEd = lengthDiff + tuning.lengthEditBudget
+                // Early-abandon budget: most dict words in the ±length band are
+                // unrelated and blow past maxEd after 2-3 DP rows. When ed > maxEd
+                // the sweep rejects anyway, so a fast above-budget lower bound is
+                // equivalent and avoids the full n×m DP over ~50% of 98k words.
+                val ed = KeyAdjacency.weightedEditDistance(lowerTypedWord, dictWord, maxEd)
+                if (ed <= maxEd) {
+                    val maxLen = maxOf(wordLength, dictWord.length).toFloat()
+                    (1f - ed / maxLen).coerceAtLeast(0f)
+                } else {
+                    -1f
+                }
+            }
+
+            if (diagnostics != null && score >= 0.4f) {
+                diagnostics += dictWord to score
+            }
+
+            if (score >= charMatchThreshold) {
+                gated += AutocorrectCandidate(
+                    dictWord, score, candidateFrequency,
+                    dictWord in contractionAliases, isTransposition, isMultiSub,
+                    substitutionCount, neighbourOnly
+                )
+            }
+        }
+
+        return gated
+    }
+
+    /**
+     * The band fold's pairwise rule: does gated candidate [c] replace [bestCandidate]?
+     */
+    private fun bandBeats(c: AutocorrectCandidate, bestCandidate: AutocorrectCandidate?, tuning: AutocorrectTuning): Boolean {
+        // Tiebreaker — RAW-score dominance first, then structural
+        // rules inside the ±SCORE_TIEBREAK_GAP band, then frequency:
+        //   1. SCORE PRIMARY — a candidate more than the gap better
+        //      wins outright (`wuestion → question` 0.986 beats the
+        //      freq-popular but distant `within`).
+        //   2. Within the band, ALIAS PRIVILEGE: a bare-contraction
+        //      key wins against a non-alias ONLY at equal-or-better
+        //      raw score. This flips true ties toward the contraction
+        //      (`donr → don't`, dont/done both 0.972) but — unlike the
+        //      old +0.15 score bonus, which could beat candidates up
+        //      to 0.15 STRONGER — can no longer override a
+        //      structurally better match (`thier → their`, not
+        //      `this'd`: the transposition outscores the 2-sub alias).
+        //   3. Within the band, TRANSPOSITION beats a 2-substitution
+        //      candidate regardless of frequency: one swap is almost
+        //      always the intent vs two independent wrong keys
+        //      (`thsi → this`, not the more frequent `that`).
+        //   4. FREQ — otherwise the more common word wins (the normal
+        //      "several 1-sub candidates" case).
+        // The gap is `tuning.bandGap` (default SCORE_TIEBREAK_GAP).
+        val bestIsAlias = bestCandidate?.isAlias == true
+        val isAlias = c.isAlias
+        return when {
+            bestCandidate == null -> true
+            // Raw-score dominance beyond the gap.
+            c.score > bestCandidate.score + tuning.bandGap -> true
+            c.score < bestCandidate.score - tuning.bandGap -> false
+            // Alias vs alias: structural closeness (raw score) wins,
+            // NOT frequency — sibling contractions (`hadnt` vs `hasnt`)
+            // sit at similar freqs and typing `hadnr` means `hadnt`.
+            isAlias && bestIsAlias -> c.score > bestCandidate.score
+            // Alias privilege: only at equal-or-better raw score.
+            isAlias && !bestIsAlias -> c.score >= bestCandidate.score
+            bestIsAlias && !isAlias -> c.score > bestCandidate.score
+            // One Damerau swap beats two independent substitutions.
+            c.isTransposition && bestCandidate.isMultiSub -> true
+            bestCandidate.isTransposition && c.isMultiSub -> false
+            // A neighbour-key slip beats a distant-key substitution (NB rule).
+            neighbourRuleApplies(tuning.neighbourTiebreak, c.substitutions, bestCandidate.substitutions) &&
+                c.neighbourOnly != bestCandidate.neighbourOnly -> c.neighbourOnly
+            // Within the band, normal case → frequency wins.
+            c.frequency > bestCandidate.frequency -> true
+            c.frequency < bestCandidate.frequency -> false
+            // Score-close AND freq-tied → deterministic by score.
+            else -> c.score > bestCandidate.score
+        }
+    }
+
+    /**
+     * The channel ranking's decision (rule C + guard G, eval 2026-10-18 §1.1), given the gated
+     * [candidates] and each one's edit cost in [editCosts]: pick the minimum `E + λ · rank`;
+     * when step 1.5 deferred with [guardStem], keep [typedWord] if `γ + λ · rank(stem)` is no
+     * worse than the winner; then the frequency floor / custom-word exemption and the
+     * alias/capitalization finalization, exactly as the band ranking applies them.
+     *
+     * Internal so `ChannelRankingEval` can replay a probed input under many weights with the
+     * production decision; production calls it once per autocorrect.
+     */
+    internal fun channelDecide(
+        typedWord: String,
+        candidates: List<ChannelCandidate>,
+        editCosts: FloatArray,
+        guardStem: String?,
+        weights: ChannelWeights,
+        frequencyFloor: Int,
+        maxFrequency: Int,
+    ): String {
+        var index = ChannelRanker.pick(candidates, editCosts, maxFrequency, weights.frequencyWeight, weights.aliasBonus)
+        if (index < 0) {
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "AUTO-CORRECT-REJECT (channel): '$typedWord' [no candidate]")
+            return typedWord
+        }
+        // The user's own word outranks a re-doubling guess — the band path's DD-M rule ("a W the
+        // user added by hand keeps it"): with `help` added by hand, `helo` stays `help` rather
+        // than becoming `hello`. When the winner only re-doubles letters and the best candidate
+        // that does not is a custom/user word, that word wins. The eval corpora carry no user
+        // words, so no measured outcome depends on this (eval doc §6).
+        val lowerTyped = typedWord.lowercase()
+        if (customAndUserWords.isNotEmpty() && candidates[index].word !in customAndUserWords &&
+            isDoubleReduction(lowerTyped, candidates[index].word)
+        ) {
+            val others = candidates.indices.filter { !isDoubleReduction(lowerTyped, candidates[it].word) }
+            val best = ChannelRanker.pick(
+                others.map { candidates[it] }, FloatArray(others.size) { editCosts[others[it]] },
+                maxFrequency, weights.frequencyWeight, weights.aliasBonus,
+            )
+            if (best >= 0 && candidates[others[best]].word in customAndUserWords) index = others[best]
+        }
+        val winner = candidates[index]
+        val winnerCost = ChannelRanker.totalCost(editCosts[index], winner.frequency, maxFrequency,
+            weights.frequencyWeight, winner.isAlias, weights.aliasBonus)
+        // Rule C2 (eval doc §3.1): a re-doubling ("spaming" → "spamming") bypasses guard G, as
+        // DD-M ran before the guard in the band path.
+        if (guardStem != null && !isDoubleReduction(lowerTyped, winner.word)) {
+            val stemFrequency = dictionary.get()[guardStem] ?: 0
+            val keepCost = weights.inflectionCost +
+                weights.frequencyWeight * ChannelRanker.rankSteps(stemFrequency, maxFrequency)
+            if (keepCost <= winnerCost) {
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "AUTO-CORRECT skip (inflection of '$guardStem', " +
+                    "keep=${"%.3f".format(keepCost)} <= ${winner.word}=${"%.3f".format(winnerCost)}): '$typedWord'")
+                return typedWord
+            }
+        }
+        // κ (round 5, eval doc §13): a correction farther than the maximum cost is not made.
+        if (editCosts[index] > weights.maxCorrectionCost) {
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "AUTO-CORRECT-REJECT (channel): '$typedWord' " +
+                "[best='${winner.word}' edit=${"%.3f".format(editCosts[index])} > max=${weights.maxCorrectionCost}]")
+            return typedWord
+        }
+        if (winner.frequency < frequencyFloor && winner.word !in customAndUserWords) {
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "AUTO-CORRECT-REJECT (channel): '$typedWord' " +
+                "[best='${winner.word}' freq=${winner.frequency} < floor=$frequencyFloor]")
+            return typedWord
+        }
+        val corrected = finalizeCorrection(typedWord, winner.word)
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "AUTO-CORRECT (channel): '$typedWord' → '$corrected' " +
+            "(edit=${"%.3f".format(editCosts[index])} total=${"%.3f".format(winnerCost)} freq=${winner.frequency})")
+        return corrected
+    }
+
+    /** Step-5 commit test: clears the frequency floor, or is the user's own word (AC-2). */
+    private fun isCommittable(candidate: AutocorrectCandidate, frequencyFloor: Int): Boolean =
+        candidate.frequency >= frequencyFloor || customAndUserWords.contains(candidate.word)
+
+    /**
+     * Output form of an autocorrect target: alias keys are re-routed through
+     * [contractionAliases] (`dont` → `don't`, I-contractions capitalised) unless
+     * the key is the user's own word (C-5 guard #4), else the typed word's
+     * capitalisation is preserved. Shared by steps 1.4, 1.45 and 5.
+     */
+    private fun finalizeCorrection(typedWord: String, word: String): String {
+        val aliasTarget = if (word in customAndUserWords) null else contractionAliases[word]
+        return if (aliasTarget != null && aliasTarget.startsWith("i'")) {
+            aliasTarget.replaceFirstChar { it.uppercase() }
+        } else {
+            preserveCapitalization(typedWord, aliasTarget ?: word)
+        }
+    }
+
+    /**
+     * Step 1.45 candidate: the most frequent dictionary word made by doubling one
+     * letter of [lowerTypedWord] in place ("helo" → "hello"), or null. Same gates
+     * as the step-1.4 collapse (typed length above `autocorrect_min_word_length`,
+     * `autocorrect_max_length_diff >= 1`); letters-only input; disabled words are
+     * never offered; the frequency floor applies except to the user's own words.
+     */
+    private fun droppedDoubleTarget(lowerTypedWord: String, dict: Map<String, Int>, frequencyFloor: Int): String? {
+        if (lowerTypedWord.length <= (config?.autocorrect_min_word_length ?: Defaults.AUTOCORRECT_MIN_WORD_LENGTH) ||
+            (config?.autocorrect_max_length_diff ?: Defaults.AUTOCORRECT_MAX_LENGTH_DIFF) < 1 ||
+            !lowerTypedWord.all { it.isLetter() }
+        ) return null
+        var best: String? = null
+        var bestFreq = -1
+        for (i in lowerTypedWord.indices) {
+            val inserted = StringBuilder(lowerTypedWord).insert(i, lowerTypedWord[i]).toString()
+            val freq = dict[inserted] ?: continue
+            if (disabledWords.isNotEmpty() && isWordDisabled(inserted)) continue
+            if (freq < frequencyFloor && inserted !in customAndUserWords) continue
+            if (freq > bestFreq) {
+                best = inserted
+                bestFreq = freq
+            }
+        }
+        return best
+    }
+
+    /**
+     * Preserve capitalization of original word when applying correction.
+     *
+     * Examples:
+     * - "teh" + "the" → "the"
+     * - "Teh" + "the" → "The"
+     * - "TEH" + "the" → "THE"
+     */
+    private fun preserveCapitalization(originalWord: String, correctedWord: String): String {
+        if (originalWord.isEmpty() || correctedWord.isEmpty()) {
+            return correctedWord
+        }
+
+        // Check if ALL uppercase
+        val isAllUpper = originalWord.all { it.isUpperCase() || !it.isLetter() }
+
+        if (isAllUpper) {
+            return correctedWord.uppercase()
+        }
+
+        // Check if first letter uppercase (Title Case)
+        if (originalWord[0].isUpperCase()) {
+            return correctedWord[0].uppercase() + correctedWord.substring(1)
+        }
+
+        return correctedWord
+    }
+
+    /**
+     * Get dictionary size
+     */
+    fun getDictionarySize(): Int {
+        return dictionary.get().size
+    }
+
+    /**
+     * Helper class to store word candidates with scores (used by
+     * `predictWords` — score is the unified ranking integer from
+     * `calculateUnifiedScore`, NOT a [0,1] match score).
+     */
+    private data class WordCandidate(
+        val word: String,
+        val score: Int,
+        /** Penalized prefix score when this is a typo-tolerant candidate; null for exact matches. */
+        val fuzzyPrefixScore: Int? = null,
+        /** Came from the secondary-language dictionary (scored outside the unified breakdown). */
+        val fromSecondary: Boolean = false
+    )
+
+    /**
+     * Helper class to store autocorrect candidates.
+     *
+     * `score` is the RAW adjacency-weighted match quality in [0, 1] (no
+     * bonuses — alias preference is a tiebreak RULE, not a score bump).
+     * `frequency` is the raw dictionary frequency (scale varies by loader —
+     * binary 5K-1M, JSON 100-10K). The structural flags feed the in-band
+     * tiebreaker: alias privilege (equal-or-better raw only) and
+     * transposition-beats-2-substitutions.
+     *
+     * Kept distinct from `WordCandidate` so the prediction path's
+     * Int-score contract isn't conflated with the autocorrect path's
+     * Float-score-+-Int-freq pair.
+     */
+    private data class AutocorrectCandidate(
+        val word: String,
+        val score: Float,
+        val frequency: Int,
+        val isAlias: Boolean,
+        val isTransposition: Boolean,
+        val isMultiSub: Boolean,
+        /** Differing keys of a same-length substitution candidate; −1 for transpositions and length changes. */
+        val substitutions: Int,
+        /** Every differing key is a neighbour of the typed key on the active layout. */
+        val neighbourOnly: Boolean
+    )
+
+    /** Whether the NB tiebreak compares two candidates with these substitution counts. */
+    private fun neighbourRuleApplies(variant: NeighbourTiebreak, a: Int, b: Int): Boolean = when (variant) {
+        NeighbourTiebreak.OFF -> false
+        NeighbourTiebreak.N1 -> a == 1 && b == 1
+        NeighbourTiebreak.NA -> a >= 1 && b >= 1
+    }
+
+    /**
+     * Result class containing predictions and their scores
+     */
+    /**
+     * @property metas per-suggestion provenance parallel to [words] (Task B
+     *   transparency); null on legacy/empty paths. Origin is DICTIONARY_PREFIX
+     *   for every unified-scorer word; breakdowns are present for primary-
+     *   dictionary words (secondary-dictionary entries carry origin only).
+     */
+    data class PredictionResult(
+        @JvmField val words: List<String>,
+        @JvmField val scores: List<Int>,
+        @JvmField val metas: List<SuggestionMeta>? = null
+    )
+}

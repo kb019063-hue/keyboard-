@@ -1,0 +1,290 @@
+package tribixbite.cleverkeys
+
+import android.content.SharedPreferences
+import com.google.common.truth.Truth.assertThat
+import org.junit.Test
+import java.io.File
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ScheduledThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+
+/**
+ * Persistence + retention contract of [UserAdaptationManager] (learning-system audit
+ * 2026-09-26):
+ *
+ * - **W6** — selection history used to persist only on every 10th selection, and
+ *   `cleanup()` had no callers, so up to 9 selections were lost at every process death
+ *   (frequent under LMK on the maintainer's phone). It now uses the same debounced
+ *   write-back as the other learned stores and is flushed at the input-session boundary.
+ * - **W4** — a 30-day WHOLESALE wipe armed itself the first time `last_reset` was written,
+ *   which the v4 upgrade migration now does for every upgrader. Learned preferences are now
+ *   aged by halving instead (half-life 30 days); the explicit user reset and the one-time v4
+ *   migration reset still wipe.
+ *
+ * Runs in `runMockTests` (android.jar stubs on the classpath for the SharedPreferences
+ * interface); the preferences are a thread-safe in-memory fake because the debounced flush
+ * runs on the persistence thread.
+ */
+class UserAdaptationManagerPersistenceTest {
+
+    private companion object {
+        const val DAY_MS = 24L * 60L * 60L * 1000L
+        const val T0 = 1_700_000_000_000L
+    }
+
+    /** Thread-safe in-memory SharedPreferences (apply == commit, removals really remove). */
+    private class FakePrefs : SharedPreferences {
+        val data = ConcurrentHashMap<String, Any>()
+
+        /** Test hook run at the start of every commit, on the committing thread. */
+        @Volatile
+        var beforeCommit: (() -> Unit)? = null
+
+        /** Test hook run after every commit's changes are visible, on the committing thread. */
+        @Volatile
+        var afterCommit: (() -> Unit)? = null
+
+        override fun getAll(): Map<String, *> = HashMap(data)
+        override fun getString(key: String, defValue: String?): String? = data[key] as? String ?: defValue
+        @Suppress("UNCHECKED_CAST")
+        override fun getStringSet(key: String, defValues: Set<String>?): Set<String>? =
+            data[key] as? Set<String> ?: defValues
+        override fun getInt(key: String, defValue: Int): Int = data[key] as? Int ?: defValue
+        override fun getLong(key: String, defValue: Long): Long = data[key] as? Long ?: defValue
+        override fun getFloat(key: String, defValue: Float): Float = data[key] as? Float ?: defValue
+        override fun getBoolean(key: String, defValue: Boolean): Boolean = data[key] as? Boolean ?: defValue
+        override fun contains(key: String): Boolean = data.containsKey(key)
+        override fun registerOnSharedPreferenceChangeListener(l: SharedPreferences.OnSharedPreferenceChangeListener) {}
+        override fun unregisterOnSharedPreferenceChangeListener(l: SharedPreferences.OnSharedPreferenceChangeListener) {}
+
+        override fun edit(): SharedPreferences.Editor = object : SharedPreferences.Editor {
+            private val puts = LinkedHashMap<String, Any>()
+            private val removes = LinkedHashSet<String>()
+            private var clear = false
+            override fun putString(key: String, value: String?) = apply { if (value == null) removes += key else puts[key] = value }
+            override fun putStringSet(key: String, values: Set<String>?) = apply { if (values == null) removes += key else puts[key] = values }
+            override fun putInt(key: String, value: Int) = apply { puts[key] = value }
+            override fun putLong(key: String, value: Long) = apply { puts[key] = value }
+            override fun putFloat(key: String, value: Float) = apply { puts[key] = value }
+            override fun putBoolean(key: String, value: Boolean) = apply { puts[key] = value }
+            override fun remove(key: String) = apply { removes += key }
+            override fun clear() = apply { clear = true }
+            override fun commit(): Boolean {
+                beforeCommit?.invoke()
+                synchronized(data) {
+                    // Android semantics: clear() first, then removals, then puts.
+                    if (clear) data.clear()
+                    removes.forEach { data.remove(it) }
+                    data.putAll(puts)
+                }
+                afterCommit?.invoke()
+                return true
+            }
+            override fun apply() { commit() }
+        }
+    }
+
+    private fun waitUntil(timeoutMs: Long = 12_000, condition: () -> Boolean): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (condition()) return true
+            Thread.sleep(25)
+        }
+        return condition()
+    }
+
+    // ------------------------------------------------------------------ W6
+
+    /**
+     * Open now 13 (2026-10-14): this used to run on the PROCESS-WIDE single-thread
+     * `DebouncedPersister.sharedScheduler()` with the production 5 s debounce, then poll a 12 s
+     * wall-clock deadline. In `runMockTests` that thread is shared with every learned-data store
+     * and typo-purge task created by the ~40 classes before this one, and the suite runs on the
+     * loaded dev phone; once, the write landed after the deadline. The contract under test is
+     * "the write-back happens on its own, without a lifecycle call" — not the production debounce
+     * length (DebouncedPersisterTest owns the timing) — so the manager gets its own scheduler
+     * and a short debounce, and the test waits on the commit itself. The 30 s await is only a
+     * hang guard, far beyond the ~50 ms the write needs.
+     */
+    @Test
+    fun `W6 - a few selections are persisted by the write-back without any lifecycle call`() {
+        val prefs = FakePrefs()
+        val persisted = CountDownLatch(1)
+        prefs.afterCommit = { if (prefs.getInt("word_selections_git", 0) == 3) persisted.countDown() }
+        val scheduler = ScheduledThreadPoolExecutor(1)
+        try {
+            val manager = UserAdaptationManager(
+                prefs, FakePrefs(), clock = { T0 },
+                scheduler = scheduler, debounceMs = 50, maxDelayMs = 500
+            )
+            repeat(3) { manager.recordSelection("git") }
+
+            // No flush/cleanup call: process death may come at any moment after this.
+            assertThat(persisted.await(30, TimeUnit.SECONDS)).isTrue()
+
+            val revived = UserAdaptationManager(prefs, FakePrefs(), clock = { T0 }, scheduler = scheduler)
+            assertThat(revived.getSelectionCount("git")).isEqualTo(3)
+        } finally {
+            scheduler.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `W6 - the input-session checkpoint flushes selection history too`() {
+        val coordinator = File("src/main/kotlin/tribixbite/cleverkeys/PredictionCoordinator.kt").readText()
+        val body = coordinator.substringAfter("fun flushLearnedData()").substringBefore("\n    }\n")
+        assertThat(body).contains("adaptationManager?.requestFlush()")
+    }
+
+    // ------------------------------------------------------------------ W4
+
+    /** A store whose `last_reset` was written at [T0] (any reset — e.g. the v4 migration). */
+    private fun seededPrefs(counts: Map<String, Int>): FakePrefs = FakePrefs().apply {
+        data["last_reset"] = T0
+        data["total_selections"] = counts.values.sum()
+        counts.forEach { (w, c) -> data["word_selections_$w"] = c }
+    }
+
+    @Test
+    fun `W4 - learned selections survive 30 days, halved rather than wiped`() {
+        val prefs = seededPrefs(mapOf("git" to 8, "got" to 2))
+        val manager = UserAdaptationManager(prefs, FakePrefs(), clock = { T0 + 31 * DAY_MS })
+
+        assertThat(manager.getSelectionCount("git")).isEqualTo(4)
+        assertThat(manager.getSelectionCount("got")).isEqualTo(1)
+    }
+
+    @Test
+    fun `W4 - decay compounds once per elapsed period and drops words that reach zero`() {
+        val prefs = seededPrefs(mapOf("git" to 8, "got" to 2))
+        val manager = UserAdaptationManager(prefs, FakePrefs(), clock = { T0 + 61 * DAY_MS })
+
+        assertThat(manager.getSelectionCount("git")).isEqualTo(2)
+        assertThat(manager.getSelectionCount("got")).isEqualTo(0)
+        assertThat(manager.getTrackedWordCount()).isEqualTo(1)
+    }
+
+    @Test
+    fun `W4 - decay is anchored, so a restart inside the period does not decay again`() {
+        val prefs = seededPrefs(mapOf("git" to 8))
+        UserAdaptationManager(prefs, FakePrefs(), clock = { T0 + 31 * DAY_MS }).cleanup()
+        val later = UserAdaptationManager(prefs, FakePrefs(), clock = { T0 + 40 * DAY_MS })
+        assertThat(later.getSelectionCount("git")).isEqualTo(4)
+    }
+
+    @Test
+    fun `W4 - an explicit reset no longer arms a wipe 30 days later`() {
+        val prefs = FakePrefs()
+        var now = T0
+        val manager = UserAdaptationManager(prefs, FakePrefs(), clock = { now })
+        manager.resetAdaptation()
+        repeat(6) { manager.recordSelection("git") }
+        manager.cleanup()
+
+        now = T0 + 31 * DAY_MS
+        val revived = UserAdaptationManager(prefs, FakePrefs(), clock = { now })
+        assertThat(revived.getSelectionCount("git")).isEqualTo(3)
+    }
+
+    @Test
+    fun `W4 - a store with no anchor is never decayed on first sight`() {
+        // Installs that never reset have no last_reset key; the first run anchors "now".
+        val prefs = FakePrefs().apply {
+            data["total_selections"] = 8
+            data["word_selections_git"] = 8
+        }
+        val manager = UserAdaptationManager(prefs, FakePrefs(), clock = { T0 + 400 * DAY_MS })
+        assertThat(manager.getSelectionCount("git")).isEqualTo(8)
+    }
+
+    /**
+     * Review of d8846a98 (LOW): the decay wrote its result with a DIRECT save, outside the
+     * debounced persister's serialization. A write-back already in flight — its snapshot taken
+     * before the decay — could then land AFTER the decay's save. Words the decay dropped to zero
+     * are deleted only once (the pending-removal set is drained by the decay's snapshot), so the
+     * late write-back resurrected them in storage for good.
+     */
+    @Test
+    fun `W4-W6 - an in-flight write-back cannot resurrect words the decay dropped`() {
+        val prefs = seededPrefs(mapOf("old" to 1))
+        var now = T0
+        val scheduler = ScheduledThreadPoolExecutor(1)
+        try {
+            val persistThread = scheduler.submit<Thread> { Thread.currentThread() }.get()
+            val manager = UserAdaptationManager(
+                prefs, FakePrefs(), clock = { now },
+                scheduler = scheduler, debounceMs = 1, maxDelayMs = 1
+            )
+
+            // Hold the persistence thread INSIDE its write — its snapshot (old=1, new=1) is taken.
+            val armed = AtomicBoolean(true)
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            prefs.beforeCommit = {
+                if (Thread.currentThread() === persistThread && armed.compareAndSet(true, false)) {
+                    entered.countDown()
+                    release.await(10, TimeUnit.SECONDS)
+                }
+            }
+            manager.recordSelection("new")
+            assertThat(entered.await(10, TimeUnit.SECONDS)).isTrue()
+
+            // 31 days later the next selection applies the decay: old and new halve to zero.
+            now = T0 + 31 * DAY_MS
+            val decayer = Thread { manager.recordSelection("other") }
+            decayer.start()
+            decayer.join(300) // the old direct save finishes here; the fixed one queues behind
+            release.countDown()
+            decayer.join(10_000)
+            manager.flush()
+            assertThat(waitUntil { prefs.contains("word_selections_other") }).isTrue()
+
+            val revived = UserAdaptationManager(prefs, FakePrefs(), clock = { now })
+            assertThat(revived.getSelectionCount("old")).isEqualTo(0)
+            assertThat(revived.getSelectionCount("new")).isEqualTo(0)
+            assertThat(revived.getSelectionCount("other")).isEqualTo(1)
+        } finally {
+            scheduler.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `W4 - the decay reaches storage through the persister together with its anchor`() {
+        val src = File("src/main/kotlin/tribixbite/cleverkeys/UserAdaptationManager.kt").readText()
+        val decay = src.substringAfter("private fun applyDueDecay()").substringBefore("\n    }\n")
+        assertThat(decay).contains("persister.markDirty()")
+        assertThat(decay).contains("persister.flush()")
+        assertThat(decay).doesNotContain("saveSelectionHistory()")
+    }
+
+    // --------------------------------------------- resets that must still wipe
+
+    @Test
+    fun `explicit resetAdaptation still wipes RAM and persisted history`() {
+        val prefs = seededPrefs(mapOf("git" to 8))
+        val manager = UserAdaptationManager(prefs, FakePrefs(), clock = { T0 + DAY_MS })
+        manager.resetAdaptation()
+        manager.cleanup()
+
+        assertThat(manager.getSelectionCount("git")).isEqualTo(0)
+        assertThat(prefs.contains("word_selections_git")).isFalse()
+        assertThat(UserAdaptationManager(prefs, FakePrefs(), clock = { T0 + DAY_MS }).getSelectionCount("git")).isEqualTo(0)
+    }
+
+    @Test
+    fun `the v4 upgrade reset still wipes exactly once`() {
+        val prefs = seededPrefs(mapOf("git" to 8))
+        val main = FakePrefs().apply { data[LearningMigration.SELECTION_HISTORY_RESET_PENDING_KEY] = true }
+
+        val first = UserAdaptationManager(prefs, main, clock = { T0 + DAY_MS })
+        assertThat(first.getSelectionCount("git")).isEqualTo(0)
+        assertThat(main.contains(LearningMigration.SELECTION_HISTORY_RESET_PENDING_KEY)).isFalse()
+
+        repeat(2) { first.recordSelection("git") }
+        first.cleanup()
+        val second = UserAdaptationManager(prefs, main, clock = { T0 + 2 * DAY_MS })
+        assertThat(second.getSelectionCount("git")).isEqualTo(2)
+    }
+}

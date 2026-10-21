@@ -1,0 +1,272 @@
+CleverKeys
+Copyright (C) tribixbite and contributors
+Licensed under the GNU General Public License v3.0 (see LICENSE).
+
+This product includes third-party data and components:
+
+================================================================================
+Word frequencies — overview
+================================================================================
+CleverKeys' word lists come from three CC BY-SA sources, selected per list:
+
+  List                                              Source
+  ------------------------------------------------  -----------------------------
+  bundled dictionaries (src/main/assets/            wordfreq (+ AOSP LatinIME
+    dictionaries/) and langpack-<lang>.zip for        inclusion oracle where noted
+    en, es, fr, de, it, nl, pt, sv, ru, el, tr, he,   below)
+    uk, bg, mk, id, ms, tl; langpack-en-wordfreq.zip
+  langpack-en-opensubtitles.zip,                    FrequencyWords (OpenSubtitles)
+    langpack-en-opensubtitles-50k.zip
+  langpack-sw.zip                                   Swwiki (Swahili Wikipedia)
+
+Every list is modified: words were selected, filtered and ranked, and their
+frequencies quantised into CleverKeys' binary dictionary format ("converted to
+a CleverKeys frequency list"). Each langpack-*.zip carries its own NOTICE.txt
+and "license" / "attribution" / "source" manifest keys, so the attribution
+travels with a pack downloaded on its own (scripts/build_langpack.py;
+docs/audit/2026-09-26-data-licensing-audit.md).
+
+CC BY-SA 4.0 adaptations may be licensed under GPLv3
+(https://creativecommons.org/compatible-licenses/; conditions at
+https://wiki.creativecommons.org/wiki/ShareAlike_compatibility:_GPLv3 — keep
+the attribution, licence notice and link, indicate changes). CleverKeys
+distributes these adapted lists under GPL-3.0-only, with the attribution below.
+
+================================================================================
+Word frequencies — wordfreq
+================================================================================
+  wordfreq — Robyn Speer et al.
+  https://github.com/rspeer/wordfreq
+  Code: Apache License 2.0 (no wordfreq code is distributed with CleverKeys)
+  Data: Creative Commons Attribution-ShareAlike 4.0 (CC BY-SA 4.0)
+  https://creativecommons.org/licenses/by-sa/4.0/
+
+wordfreq's frequency data combines, among others:
+
+  * SUBTLEX word lists (SUBTLEX-US, SUBTLEX-UK, SUBTLEX-CH, SUBTLEX-DE,
+    SUBTLEX-NL), created by Marc Brysbaert et al. and freely available at
+    http://crr.ugent.be/programs-data/subtitle-frequencies. SUBTLEX is freely
+    available data; its authors are credited here as its terms require.
+  * OPUS OpenSubtitles 2018 (http://opus.nlpl.eu/OpenSubtitles.php), whose data
+    originates from OpenSubtitles.org (http://www.opensubtitles.org/) — see the
+    OpenSubtitles section below.
+  * Google Books Ngram Viewer data. Acknowledgement requested by Google:
+    source Google Books Ngram Viewer, http://books.google.com/ngrams
+  * Wikipedia (http://www.wikipedia.org), the Leeds Internet Corpus
+    (University of Leeds Centre for Translation Studies) and ParaCrawl
+    (https://paracrawl.eu), under Creative Commons licences.
+
+================================================================================
+Word frequencies — FrequencyWords / OpenSubtitles
+================================================================================
+langpack-en-opensubtitles.zip (25k) and langpack-en-opensubtitles-50k.zip are
+built from the English lists of FrequencyWords (2018 release):
+
+  FrequencyWords — Hermit Dave
+  https://github.com/hermitdave/FrequencyWords
+  License: "MIT License for code. CC-by-sa-4.0 for content." The word lists
+  are content: CC BY-SA 4.0, https://creativecommons.org/licenses/by-sa/4.0/
+
+FrequencyWords is computed from the OPUS OpenSubtitles corpus, whose data
+originates from OpenSubtitles.org (http://www.opensubtitles.org/):
+
+  P. Lison and J. Tiedemann (2016). OpenSubtitles2016: Extracting Large
+  Parallel Corpora from Movie and TV Subtitles. In Proceedings of the 10th
+  International Conference on Language Resources and Evaluation (LREC 2016).
+  OPUS: http://opus.nlpl.eu/OpenSubtitles.php
+
+================================================================================
+Word frequencies — Swwiki (Swahili)
+================================================================================
+langpack-sw.zip is built from Swwiki, a word-frequency list made from the text
+of Swahili Wikipedia (https://sw.wikipedia.org/, Wikipedia contributors):
+
+  Swwiki — Kevin Donnelly
+  https://kevindonnelly.org.uk/swahili/swwiki/
+  License: Creative Commons Attribution-ShareAlike 3.0 Unported (CC BY-SA 3.0)
+  https://creativecommons.org/licenses/by-sa/3.0/
+
+Licence chain: CC BY-SA 3.0 is not itself GPL-compatible, but its §4(b) lets an
+adaptation be distributed under a later version of the licence with the same
+licence elements — CC BY-SA 4.0 — and CC BY-SA 4.0 adaptations may be licensed
+under GPLv3 (https://creativecommons.org/compatible-licenses/). The Swahili
+list is therefore adapted under CC BY-SA 4.0 and distributed under
+GPL-3.0-only, with this attribution preserved.
+
+================================================================================
+AOSP LatinIME word lists
+================================================================================
+The dictionary build pipeline (scripts/build_wordlist.py) uses the Android
+Open Source Project LatinIME word lists as build-time inclusion oracles for
+en, es, fr, de, it, nl, pt (pt_BR + pt_PT), sv, ru, el, tr and he (published
+upstream as "iw"); per-snapshot provenance is recorded in
+scripts/data/PROVENANCE.md. The oracle only decides which words are kept; no
+AOSP frequencies are distributed. (The prebuilt langpack-en.zip and
+langpack-en-wordfreq.zip predate the oracle and do not use it.)
+
+  AOSP LatinIME dictionaries — The Android Open Source Project
+  https://android.googlesource.com/platform/packages/inputmethods/LatinIME/
+  License: Apache License 2.0, https://www.apache.org/licenses/LICENSE-2.0
+
+Apache-2.0 is one-way compatible with GPLv3; the derived word selections
+distributed with CleverKeys are redistributed under GPL-3.0, with attribution
+preserved here.
+
+================================================================================
+FUTO swipe gesture corpus (swipe.futo.org)
+================================================================================
+The bundled CTC swipe-emission encoder
+(src/main/assets/models/ctc_swipe_encoder.onnx) was trained from scratch by the
+CleverKeys project on gesture data derived from the FUTO swipe corpus. No FUTO
+model weights and no FUTO model outputs were used at any point in training; the
+bundled weights are original CleverKeys work distributed under GPL-3.0 with the
+app. (The FUTO Model Weights License therefore does not apply to this asset;
+the decode algorithms in src/main/kotlin/.../swipe/ctc/ are a clean-room port of
+FUTO's GPL-3.0 swipe-library, license-compatible with this project.)
+
+  swipe.futo.org dataset — FUTO
+  https://huggingface.co/datasets/futo-org/swipe.futo.org
+  License: MIT
+
+================================================================================
+How-We-Swipe shape-writing dataset
+================================================================================
+Training of the CTC swipe-emission encoder additionally used the How-We-Swipe
+shape-writing dataset.
+
+  How-We-Swipe — Luis A. Leiva, Sunjun Kim, Wenzhe Cui, Xiaojun Bi,
+  Antti Oulasvirta (OSF node sj67f)
+  https://osf.io/sj67f/
+  License: MIT (Copyright (c) 2021 the authors above, as declared on the OSF node)
+
+MIT is GPLv3-compatible; the trained weights distributed with CleverKeys are
+redistributed under GPL-3.0, with attribution preserved here.
+
+================================================================================
+Shipped CTC script models — per-model provenance
+================================================================================
+CleverKeys ships one CTC swipe-emission encoder per script. Every one of them is
+original CleverKeys work, trained from scratch, distributed under GPL-3.0 with
+the app. This list is exhaustive; add a line here whenever a script model is
+added.
+
+Two delivery routes, both of them "shipped":
+
+  * The Latin encoder is an APK asset (src/main/assets/models/).
+  * Since 2026-09-10 the six per-script encoders travel INSIDE their language
+    packs (scripts/dictionaries/langpack-<code>.zip, member model.onnx) rather
+    than in the APK. Every one of those six languages needs its pack to decode
+    at all, so the model reaches exactly the users who can use it — and nobody
+    else carries 3.1 MB they cannot. The licence position is unchanged: the
+    bytes are the same GPL-3.0 CleverKeys artifacts, distributed with the app's
+    own language packs from the app's own repository.
+
+  src/main/assets/models/ctc_swipe_encoder.onnx — Latin (en/fr/de/es/…).
+    Trained on gesture data derived from the FUTO swipe corpus (MIT) and the
+    How-We-Swipe shape-writing dataset (MIT); see the two sections above.
+
+  langpack-ru.zip!model.onnx = ru_synth_v3_ch80_fp16w.onnx — Cyrillic (ru).
+    Trained on 100% SYNTHESIZED gesture data: a learned trace generator fitted
+    only to the same two MIT corpora above (FUTO + How-We-Swipe) emits Russian
+    traces from a Russian word list and the on-screen layout geometry. No real
+    Cyrillic gesture row appears anywhere in its pipeline — not in training, not
+    in the validation split used for checkpoint selection. The Russian corpus
+    used to *report* this model's accuracy (Yandex Cup 2023) carries no license
+    grant, was therefore treated as research/held-out evaluation only, and
+    contributed no bytes to any shipped artifact; the generator track that
+    touched it is permanently unshippable. See
+    docs/specs/ctc-architecture-and-multiscript-guide.md §3.3 and the licence
+    seal note for the full record.
+
+  langpack-el.zip!model.onnx = el_synth_v3_ch80_fp16w.onnx — Greek (el).
+    Trained on 100% SYNTHESIZED gesture data from the same learned trace
+    generator and MIT-only FUTO + How-We-Swipe source corpora described above,
+    using a Greek word list and the shipped Greek layout geometry. No real Greek
+    gesture row appears in training or checkpoint selection. Greek has no
+    real-swipe evaluation corpus at any evidence tier; synthesis-holdout levels
+    are not reported as accuracy.
+
+  langpack-uk.zip!model.onnx = uk_synth_v3_ch80_fp16w.onnx — Cyrillic (uk).
+    Trained on 100% SYNTHESIZED gesture data from the same learned trace
+    generator and MIT-only FUTO + How-We-Swipe source corpora described above,
+    using a Ukrainian word list and the shipped Ukrainian layout geometry. No
+    real Ukrainian gesture row appears in training or checkpoint selection.
+    Ukrainian has no real-swipe evaluation corpus at any evidence tier;
+    synthesis-holdout levels are not reported as accuracy.
+
+  langpack-bg.zip!model.onnx = bg_synth_v3_ch80_fp16w.onnx — Cyrillic (bg).
+    Trained on 100% SYNTHESIZED gesture data from the same learned trace
+    generator and MIT-only FUTO + How-We-Swipe source corpora described above,
+    using a Bulgarian word list and the shipped Bulgarian layout geometry. No
+    real Bulgarian gesture row appears in training or checkpoint selection.
+    Bulgarian has no real-swipe evaluation corpus at any evidence tier;
+    synthesis-holdout levels are not reported as accuracy.
+
+  langpack-mk.zip!model.onnx = mk_synth_v3_ch80_fp16w.onnx — Cyrillic (mk).
+    Trained on 100% SYNTHESIZED gesture data from the same learned trace
+    generator and MIT-only FUTO + How-We-Swipe source corpora described above,
+    using a Macedonian word list and the shipped Macedonian layout geometry. No
+    real Macedonian gesture row appears in training or checkpoint selection.
+    Macedonian has no real-swipe evaluation corpus at any evidence tier;
+    synthesis-holdout levels are not reported as accuracy.
+
+  langpack-he.zip!model.onnx = he_synth_v3_ch80_fp16w.onnx — Hebrew (he).
+    Trained on 100% SYNTHESIZED gesture data from the same learned trace
+    generator and MIT-only FUTO + How-We-Swipe source corpora described above,
+    using a Hebrew word list and the shipped Hebrew layout geometry. No real
+    Hebrew gesture row appears in training or checkpoint selection. Hebrew has
+    no real-swipe evaluation corpus at any evidence tier; synthesis-holdout
+    levels are not reported as accuracy.
+
+================================================================================
+Static context language model — Leipzig Corpora Collection
+================================================================================
+The bundled context models (src/main/assets/lm/<lang>.cklm, built by
+scripts/build_static_lm.py) are derived from word-pair counts over these
+Leipzig Corpora Collection downloads (web and news text):
+
+  English     (lm/en.cklm)  eng-com_web-public_2018_300K
+  German      (lm/de.cklm)  deu-de_web_2021_300K
+  French      (lm/fr.cklm)  fra-fr_web_2013_300K
+  Italian     (lm/it.cklm)  ita-it_web-public_2019_300K
+  Portuguese  (lm/pt.cklm)  por-pt_web_2015_300K (weight 0.5) +
+                            por-br_newscrawl_2011_300K (weight 0.5)
+  Swedish     (lm/sv.cklm)  swe_news_2023_300K
+
+Only pruned, quantised word-pair statistics are distributed; no sentence text
+is shipped.
+
+  Leipzig Corpora Collection — Universität Leipzig
+  https://wortschatz.uni-leipzig.de/en/download
+  Terms: https://wortschatz.uni-leipzig.de/en/usage
+  License: Creative Commons Attribution 4.0 (CC BY 4.0)
+
+  D. Goldhahn, T. Eckart & U. Quasthoff: Building Large Monolingual
+  Dictionaries at the Leipzig Corpora Collection: From 100 to 200 Languages.
+  In: Proceedings of the 8th International Language Resources and Evaluation
+  Conference (LREC'12), 2012.
+
+CC BY 4.0 is compatible with GPLv3 redistribution; attribution is preserved
+here. Source hashes are pinned in scripts/data/PROVENANCE.md.
+
+================================================================================
+Static context language model — Tatoeba
+================================================================================
+The same models additionally count sentences in their language from the
+Tatoeba collaborative sentence database, weighted against the Leipzig counts
+(English 0.1, German 0.25, French 0.05, Italian 0.1, Swedish 2.0; the
+Portuguese model counts no Tatoeba sentence; the per-snapshot weight and hash
+are recorded in src/main/assets/lm/<lang>.json).
+
+  Tatoeba — https://tatoeba.org
+  License: Creative Commons Attribution 2.0 France (CC BY 2.0 FR)
+  https://creativecommons.org/licenses/by/2.0/fr/
+
+The contributors whose sentences were counted are listed, per language, in
+files generated with each model:
+
+  scripts/data/tatoeba-contributors-en.txt
+  scripts/data/tatoeba-contributors-de.txt
+  scripts/data/tatoeba-contributors-fr.txt
+  scripts/data/tatoeba-contributors-it.txt
+  scripts/data/tatoeba-contributors-sv.txt

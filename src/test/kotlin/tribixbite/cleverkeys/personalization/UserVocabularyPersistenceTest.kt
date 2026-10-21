@@ -1,0 +1,240 @@
+package tribixbite.cleverkeys.personalization
+
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import tribixbite.cleverkeys.persist.InMemoryLearnedStorage
+import java.util.concurrent.ScheduledThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+
+/**
+ * Pure-JVM tests for [UserVocabulary]'s debounced persistence
+ * (audit 2026-08-06 §1.1 / P0: the per-word raw-Thread Gson dump is replaced by
+ * dirty-flag + debounced write-back) and the learned-data-manager edit APIs.
+ */
+class UserVocabularyPersistenceTest {
+
+    private val scheduler = ScheduledThreadPoolExecutor(1)
+
+    private fun newVocab(
+        storage: InMemoryLearnedStorage,
+        debounceMs: Long = 60_000,
+        maxDelayMs: Long = 120_000
+    ) = UserVocabulary(storage, debounceMs, maxDelayMs, scheduler)
+
+    @After
+    fun tearDown() {
+        scheduler.shutdownNow()
+        scheduler.awaitTermination(2, TimeUnit.SECONDS)
+    }
+
+    private fun waitUntil(timeoutMs: Long = 3000, condition: () -> Boolean) {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (condition()) return
+            Thread.sleep(10)
+        }
+        assertTrue("condition not met within ${timeoutMs}ms", condition())
+    }
+
+    @Test
+    fun `receipt reverses only its normalized increment once`() {
+        val vocab = newVocab(InMemoryLearnedStorage())
+        vocab.recordWordUsage("kotlin", 1000)
+        val receipt = requireNotNull(vocab.recordWordUsageWithReceipt(" Kotlin ", 2000))
+        assertTrue(vocab.rollbackReceipt(receipt))
+        assertFalse(vocab.rollbackReceipt(receipt))
+        assertEquals(1, vocab.getWordUsage("kotlin")?.usageCount)
+        assertEquals(null, vocab.recordWordUsageWithReceipt("a", 3000))
+        // Counts are reversed; timestamp history is deliberately not reconstructed.
+        assertEquals(2000L, vocab.getWordUsage("kotlin")?.lastUsed)
+    }
+
+    @Test
+    fun `receipt cannot touch recreated vocabulary after forget or import`() {
+        val vocab = newVocab(InMemoryLearnedStorage())
+        val forgotten = requireNotNull(vocab.recordWordUsageWithReceipt("kotlin", 1000))
+        vocab.clearAll()
+        vocab.recordWordUsage("kotlin", 2000)
+        assertFalse(vocab.rollbackReceipt(forgotten))
+        val imported = requireNotNull(vocab.recordWordUsageWithReceipt("kotlin", 3000))
+        vocab.importFromJson(vocab.exportToJson())
+        assertFalse(vocab.rollbackReceipt(imported))
+        assertEquals(2, vocab.getWordUsage("kotlin")?.usageCount)
+    }
+
+    @Test
+    fun `receipt rejects another store and an intervening vocabulary mutation`() {
+        val first = newVocab(InMemoryLearnedStorage())
+        val second = newVocab(InMemoryLearnedStorage())
+        val receipt = requireNotNull(first.recordWordUsageWithReceipt("kotlin", 1000))
+        second.recordWordUsage("kotlin", 1000)
+        assertFalse(second.rollbackReceipt(receipt))
+        first.recordWordUsage("other", 2000)
+        assertFalse(first.rollbackReceipt(receipt))
+        assertEquals(1, first.getWordUsage("kotlin")?.usageCount)
+        assertEquals(1, second.getWordUsage("kotlin")?.usageCount)
+    }
+
+    @Test
+    fun `record then flush survives process restart`() {
+        val storage = InMemoryLearnedStorage()
+        val vocab = newVocab(storage)
+
+        repeat(3) { vocab.recordWordUsage("kotlin", timestamp = 1000L + it) }
+        vocab.recordWordUsage("gradle", timestamp = 2000L)
+        vocab.flush()
+
+        val revived = newVocab(storage)
+        assertEquals(2, revived.size())
+        assertEquals(3, revived.getWordUsage("kotlin")?.usageCount)
+        assertEquals(1, revived.getWordUsage("gradle")?.usageCount)
+        assertTrue(revived.hasWord("kotlin"))
+    }
+
+    @Test
+    fun `unflushed words are lost on process death`() {
+        val storage = InMemoryLearnedStorage()
+        val vocab = newVocab(storage) // debounce never fires in test time
+
+        vocab.recordWordUsage("ephemeral")
+        assertTrue(vocab.isDirty())
+
+        val revived = newVocab(storage)
+        assertEquals(0, revived.size())
+    }
+
+    @Test
+    fun `per-word save storm coalesces into bounded storage writes`() {
+        val storage = InMemoryLearnedStorage()
+        val vocab = newVocab(storage, debounceMs = 80, maxDelayMs = 5000)
+
+        // 40 committed words in a burst — the old implementation would have
+        // spawned 40 threads each serializing the whole vocabulary.
+        repeat(40) { i -> vocab.recordWordUsage("word$i") }
+        // Wait for the completed write (isDirty clears before the write lands)
+        waitUntil { storage.getString("vocabulary_data")?.contains("word39") == true }
+
+        assertTrue(
+            "expected coalesced writes (got ${storage.putCount.get()})",
+            storage.putCount.get() <= 2
+        )
+
+        val revived = newVocab(storage)
+        assertEquals(40, revived.size())
+    }
+
+    @Test
+    fun `debounced write-back persists without explicit flush`() {
+        val storage = InMemoryLearnedStorage()
+        val vocab = newVocab(storage, debounceMs = 60, maxDelayMs = 2000)
+
+        vocab.recordWordUsage("background")
+        waitUntil { storage.getString("vocabulary_data")?.contains("background") == true }
+
+        val revived = newVocab(storage)
+        assertTrue(revived.hasWord("background"))
+    }
+
+    @Test
+    fun `removeWord deletes, marks dirty, and survives flush`() {
+        val storage = InMemoryLearnedStorage()
+        val vocab = newVocab(storage)
+        vocab.recordWordUsage("keepme")
+        vocab.recordWordUsage("deleteme")
+        vocab.flush()
+
+        assertTrue(vocab.removeWord("deleteme"))
+        assertFalse(vocab.removeWord("deleteme")) // already gone
+        assertFalse(vocab.removeWord("neverexisted"))
+
+        // NOT `assertTrue(vocab.isDirty())`. That was racy and it was the source of an
+        // intermittent failure that only appeared under combined-run load: removeWord calls
+        // persister.requestFlush(), which is `scheduler.execute { flush() }` — an ASYNCHRONOUS
+        // flush that clears the dirty flag. The assertion was therefore racing the scheduler
+        // thread, and lost whenever the machine was busy enough to schedule it first.
+        //
+        // The production behaviour is correct and deliberate (audit L4: a user-initiated delete
+        // flushes promptly so process death inside the debounce window cannot resurrect the
+        // word), so the test was wrong, not the code. Assert THAT contract instead — the delete
+        // reaches storage on its own, with no explicit flush — which is both deterministic and
+        // a stronger statement than "a transient flag was briefly set".
+        waitUntil {
+            storage.keys().none { key -> storage.getString(key)?.contains("deleteme") == true }
+        }
+
+        vocab.flush()
+
+        val revived = newVocab(storage)
+        assertTrue(revived.hasWord("keepme"))
+        assertFalse(revived.hasWord("deleteme"))
+    }
+
+    @Test
+    fun `clearAll wipes RAM and storage immediately`() {
+        val storage = InMemoryLearnedStorage()
+        val vocab = newVocab(storage)
+        vocab.recordWordUsage("something")
+        vocab.flush()
+
+        vocab.clearAll()
+        assertEquals(0, vocab.size())
+
+        val revived = newVocab(storage)
+        assertEquals(0, revived.size())
+    }
+
+    @Test
+    fun `export import round-trip preserves usage data`() {
+        val storage = InMemoryLearnedStorage()
+        val vocab = newVocab(storage)
+        repeat(5) { vocab.recordWordUsage("favorite", timestamp = 10_000L + it) }
+        vocab.recordWordUsage("rare", timestamp = 20_000L)
+
+        val json = vocab.exportToJson()
+
+        val storage2 = InMemoryLearnedStorage()
+        val imported = newVocab(storage2)
+        assertEquals(2, imported.importFromJson(json))
+        assertEquals(5, imported.getWordUsage("favorite")?.usageCount)
+
+        // Import persists immediately (user-initiated action)
+        val revived = newVocab(storage2)
+        assertEquals(2, revived.size())
+    }
+
+    @Test
+    fun `corrupted persisted JSON falls back to empty vocabulary`() {
+        val storage = InMemoryLearnedStorage()
+        storage.seed("vocabulary_data", "]]]not json")
+
+        val vocab = newVocab(storage)
+        assertEquals(0, vocab.size())
+        vocab.recordWordUsage("recovers")
+        assertTrue(vocab.hasWord("recovers"))
+    }
+
+    @Test
+    fun `short words are skipped`() {
+        val storage = InMemoryLearnedStorage()
+        val vocab = newVocab(storage)
+        vocab.recordWordUsage("a")
+        vocab.recordWordUsage("")
+        assertEquals(0, vocab.size())
+        assertFalse(vocab.isDirty())
+    }
+
+    @Test
+    fun `getTopWords ranks by personalization boost`() {
+        val storage = InMemoryLearnedStorage()
+        val vocab = newVocab(storage)
+        val now = System.currentTimeMillis()
+        repeat(10) { vocab.recordWordUsage("frequent", timestamp = now) }
+        vocab.recordWordUsage("single", timestamp = now)
+
+        val top = vocab.getTopWords(10)
+        assertEquals("frequent", top.first().word)
+    }
+}

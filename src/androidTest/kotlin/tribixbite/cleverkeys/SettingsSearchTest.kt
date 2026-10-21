@@ -1,0 +1,255 @@
+package tribixbite.cleverkeys
+
+import android.content.Context
+import android.content.Intent
+import android.view.KeyEvent
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.uiautomator.By
+import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.Until
+import org.junit.After
+import org.junit.Assert.*
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+
+/**
+ * UIAutomator instrumented tests for Settings search-to-scroll functionality.
+ *
+ * Regression test for MonotonicFrameClock crash: tapping a search result
+ * triggered animateScrollTo() via lifecycleScope (missing Compose frame clock).
+ * Fixed by using rememberCoroutineScope() which provides the clock.
+ *
+ * Uses individual key code presses for Compose TextField compatibility —
+ * UiObject2.setText() and shell "input text" bypass Compose's onValueChange.
+ */
+@RunWith(AndroidJUnit4::class)
+class SettingsSearchTest {
+
+    private lateinit var device: UiDevice
+    private lateinit var context: Context
+    private val LAUNCH_TIMEOUT = 5000L
+    private val UI_TIMEOUT = 3000L
+
+    @Before
+    fun setup() {
+        device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        context = InstrumentationRegistry.getInstrumentation().targetContext
+
+        // Launch SettingsActivity
+        val intent = Intent(context, SettingsActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        }
+        context.startActivity(intent)
+
+        // Wait for the activity to appear
+        device.wait(Until.hasObject(By.text("CleverKeys Settings")), LAUNCH_TIMEOUT)
+    }
+
+    @After
+    fun teardown() {
+        device.pressBack()
+    }
+
+    /** Type text into the focused Compose TextField via individual key code presses.
+     *  This is the only reliable method — setText() and shell "input text" bypass
+     *  Compose's internal text state management and don't trigger onValueChange. */
+    private fun typeKeys(text: String) {
+        for (char in text) {
+            when {
+                char == ' ' -> device.pressKeyCode(KeyEvent.KEYCODE_SPACE)
+                char in 'a'..'z' -> device.pressKeyCode(KeyEvent.KEYCODE_A + (char - 'a'))
+                char in 'A'..'Z' -> device.pressKeyCode(
+                    KeyEvent.KEYCODE_A + (char.lowercaseChar() - 'a'),
+                    KeyEvent.META_SHIFT_ON
+                )
+                char in '0'..'9' -> device.pressKeyCode(KeyEvent.KEYCODE_0 + (char - '0'))
+            }
+            Thread.sleep(30)
+        }
+    }
+
+    /** Click the search field and type a query */
+    private fun searchFor(query: String) {
+        // Find the search field by its placeholder text or by description
+        val searchField = device.wait(
+            Until.findObject(By.text("Search settings...")),
+            UI_TIMEOUT
+        ) ?: device.wait(
+            Until.findObject(By.desc("Search settings...")),
+            UI_TIMEOUT
+        ) ?: device.wait(
+            Until.findObject(By.textContains("Search")),
+            UI_TIMEOUT
+        )
+        assertNotNull("Search field should be found", searchField)
+        searchField!!.click()
+
+        Thread.sleep(500) // Wait for focus + keyboard
+        typeKeys(query)
+        Thread.sleep(1000) // Wait for search results to filter
+    }
+
+    // =========================================================================
+    // Search scroll crash regression (MonotonicFrameClock)
+    // =========================================================================
+
+    @Test
+    fun searchAndTapResult_backspaceUndoSwipe_doesNotCrash() {
+        searchFor("backspace undo")
+
+        val result = device.wait(
+            Until.findObject(By.text("Backspace Undo Swipe")),
+            UI_TIMEOUT
+        )
+        assertNotNull("Search result 'Backspace Undo Swipe' should appear", result)
+
+        // Tap the search result — this is where the MonotonicFrameClock crash happened
+        result.click()
+        Thread.sleep(1500)
+
+        // If we get here without crashing, the fix works.
+        val toggle = device.wait(
+            Until.findObject(By.textContains("Tapping backspace immediately")),
+            UI_TIMEOUT
+        )
+        assertNotNull("Backspace Undo Swipe description should be visible after scroll", toggle)
+    }
+
+    @Test
+    fun searchAndTapResult_keyRepeat_doesNotCrash() {
+        searchFor("key repeat")
+
+        // The search result now shows the control's full title ("Key Repeat Enabled"),
+        // since the index is auto-derived from the actual control names.
+        val result = device.wait(
+            Until.findObject(By.text("Key Repeat Enabled")),
+            UI_TIMEOUT
+        )
+        assertNotNull("Search result 'Key Repeat Enabled' should appear", result)
+
+        result.click()
+        Thread.sleep(1500)
+
+        // No crash = pass. Header may scroll off-screen so check package is still foreground.
+        // startsWith covers both release (tribixbite.cleverkeys) and debug (.debug suffix).
+        val pkg = device.currentPackageName ?: ""
+        assertTrue(
+            "Settings activity should still be running, got pkg=$pkg",
+            pkg.startsWith("tribixbite.cleverkeys")
+        )
+    }
+
+    @Test
+    fun searchAndTapResult_gatedSetting_doesNotCrash() {
+        // Prediction Engine is gated by Enable Swipe Typing — tests the gated
+        // scrollToSetting path. (Was "Beam Width" until WP9 v1.1 moved the beam
+        // sliders out of the main section; those sliders no longer exist at all.)
+        searchFor("prediction engine")
+
+        val result = device.wait(
+            Until.findObject(By.text("Prediction Engine")),
+            UI_TIMEOUT
+        )
+        assertNotNull("Search result 'Prediction Engine' should appear", result)
+
+        result.click()
+        Thread.sleep(1500)
+
+        val pkg = device.currentPackageName ?: ""
+        assertTrue(
+            "Settings activity should still be running after gated search tap, got pkg=$pkg",
+            pkg.startsWith("tribixbite.cleverkeys")
+        )
+    }
+
+    // =========================================================================
+    // #110: Backspace Undo Swipe search result visibility
+    // =========================================================================
+
+    @Test
+    fun backspaceUndoSwipe_appearsInInputBehaviorSection() {
+        searchFor("backspace undo")
+
+        val result = device.wait(
+            Until.findObject(By.text("Backspace Undo Swipe")),
+            UI_TIMEOUT
+        )
+        assertNotNull("Backspace Undo Swipe should appear in search results", result)
+
+        // The control lives in InputBehaviorSection. Use the localized section
+        // resource rather than a historical label from the old settings screen.
+        val sectionName = context.getString(R.string.settings_section_input)
+            .dropWhile { !it.isLetterOrDigit() }.trim()
+        val expectedLabel = context.getString(R.string.settings_search_in_section, sectionName)
+        val sectionLabel = device.wait(
+            Until.findObject(By.text(expectedLabel)),
+            UI_TIMEOUT
+        )
+        assertNotNull("Should show the Input Behavior section label", sectionLabel)
+    }
+
+    @Test
+    fun searchResults_backspace_showsMultipleResults() {
+        // Search for "backspace undo" — matches "Backspace Undo Swipe" and
+        // "Backspace Undo Autocorrect" (2 results, both visible without scrolling).
+        // Note: searching bare "backspace" returns 5 results that overflow the
+        // 200dp search results card, making items below the fold invisible to
+        // UIAutomator on some devices.
+        searchFor("backspace undo")
+
+        val undoSwipe = device.wait(
+            Until.findObject(By.text("Backspace Undo Swipe")),
+            UI_TIMEOUT
+        )
+        val undoAutocorrect = device.wait(
+            Until.findObject(By.text("Backspace Undo Autocorrect")),
+            UI_TIMEOUT
+        )
+        assertNotNull("'Backspace Undo Swipe' should appear in search results", undoSwipe)
+        assertNotNull("'Backspace Undo Autocorrect' should appear in search results", undoAutocorrect)
+    }
+
+    // =========================================================================
+    // Auto-derived search index (generated from control titles) — these settings
+    // previously returned ZERO results because they were missing from the
+    // hand-maintained list. They are now indexed automatically.
+    // =========================================================================
+
+    @Test
+    fun search_sanitizeSetting_isFindable() {
+        // The originally-reported bug: typing "sanitize" returned no results.
+        searchFor("sanitize")
+        val result = device.wait(
+            Until.findObject(By.text("Sanitize tracking parameters")),
+            UI_TIMEOUT
+        )
+        assertNotNull("'Sanitize tracking parameters' should appear for query 'sanitize'", result)
+    }
+
+    @Test
+    fun search_autoIndexedAutocorrectSetting_isFindableAndDoesNotCrash() {
+        // Was "Fuzzy Match Algorithm", which had zero search coverage before the generated
+        // index — but that control was DELETED with the neural engine (its only consumer was
+        // OptimizedVocabulary's fuzzy rescue; see AutoCorrectionSection.kt), and this test kept
+        // asserting a nonexistent control was findable — the only red in the 2026-08-27 full
+        // run (1,418 tests). "Typo Forgiveness" is a surviving auto-indexed control from the
+        // same section with an equally distinctive query token.
+        searchFor("forgiveness")
+        val result = device.wait(
+            Until.findObject(By.text("Typo Forgiveness")),
+            UI_TIMEOUT
+        )
+        assertNotNull("Auto-indexed 'Typo Forgiveness' should appear for query 'forgiveness'", result)
+
+        // Tapping expands the correct section and scrolls toward the control.
+        result.click()
+        Thread.sleep(1500)
+        val pkg = device.currentPackageName ?: ""
+        assertTrue(
+            "Settings should remain foreground after tapping an auto-indexed result, got pkg=$pkg",
+            pkg.startsWith("tribixbite.cleverkeys")
+        )
+    }
+}

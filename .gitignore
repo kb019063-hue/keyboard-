@@ -1,0 +1,246 @@
+# Gradle files
+.gradle/
+build/
+*/build/
+# Kotlin daemon/build cache (sessions + errors)
+.kotlin/
+
+# Local configuration
+local.properties
+check_layout_output.txt
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# IDE specific files
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Captures
+captures/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Log files
+*.log
+
+# Keystore files (never commit these!)
+*.keystore
+*.jks
+
+# Assets generated during build
+src/main/assets/compose_data.bin
+src/main/assets/dictionaries/en_enhanced.bin
+src/main/assets/dictionaries/contractions.bin
+
+# Temporary test artifacts
+test_onnx_cli.jar
+onnxruntime-1.20.0-android.jar
+res/raw/*.xml
+
+# Build comparison artifacts (never commit)
+local_apk/
+local_apk_content/
+check_apks/
+github_apk/
+debug_apk/
+*.dex
+diff*.txt
+diff*.html
+local_*.txt
+remote_*.txt
+# Stray release-scratch dirs (remote_v16/, remote_v19_all/, ...) — downloaded
+# release bundles / CHANGELOGs that must never be tracked.
+remote_v*/
+github_*.txt
+lint_results.txt
+check_layout.output
+*.part1
+*.part2
+fdroiddata_temp/
+
+# Binary tools (F-Droid scanner rejects these)
+tools/aapt2_official/
+
+# APK files (never commit - F-Droid rejects pre-built binaries)
+*.apk
+release_apks/
+*debug_apk/
+
+# Dictionary build artifacts
+scripts/dictionaries/*.txt
+scripts/dictionaries/fr_words.txt
+
+# Language pack build temp directories (keep ZIPs for distribution)
+scripts/dictionaries/de/
+scripts/dictionaries/en/
+scripts/dictionaries/es/
+scripts/dictionaries/fr/
+scripts/dictionaries/id/
+scripts/dictionaries/it/
+scripts/dictionaries/ms/
+scripts/dictionaries/nl/
+scripts/dictionaries/pt/
+scripts/dictionaries/sw/
+scripts/dictionaries/tl/
+
+# Swahili corpus data (external source)
+scripts/swahili_freq.ods
+scripts/sw_words.txt
+
+# English corpus comparison data (external sources)
+scripts/en_opensubtitles_50k.txt
+scripts/en_opensubtitles_50k_words.txt
+scripts/en_opensubtitles_full.txt
+scripts/en_opensubtitles_words.txt
+scripts/en_wordfreq_words.txt
+scripts/en_norvig_50k.txt
+scripts/norvig_count_1w.txt
+scripts/google_10000.txt
+scripts/twitter_background.csv
+scripts/reddit_wordcount.txt
+
+# Language pack build intermediates
+scripts/dictionaries/*/
+!scripts/dictionaries/*.zip
+# …but the English curation inputs are dictionary source-of-truth — keep tracked
+# (en_words.txt / en_enhanced.bin / unigrams.txt were grandfathered before the rule)
+!scripts/dictionaries/en/
+scripts/dictionaries/en/*
+!scripts/dictionaries/en/en_words.txt
+!scripts/dictionaries/en/en_allowlist.txt
+!scripts/dictionaries/en/en_blocklist.txt
+!scripts/dictionaries/en/en_enhanced.bin
+!scripts/dictionaries/en/unigrams.txt
+# Per-language classifier sources (build_wordlist.py): the generated word list
+# and the curated allow/blocklists are source-of-truth and stay tracked; the
+# per-language *_enhanced.bin/unigrams.txt intermediates are reproducible (the
+# shipped copies live in assets / langpack zips) and stay ignored.
+!scripts/dictionaries/es/
+!scripts/dictionaries/fr/
+!scripts/dictionaries/de/
+!scripts/dictionaries/it/
+!scripts/dictionaries/pt/
+!scripts/dictionaries/nl/
+!scripts/dictionaries/sv/
+!scripts/dictionaries/ru/
+!scripts/dictionaries/el/
+!scripts/dictionaries/tr/
+!scripts/dictionaries/id/
+!scripts/dictionaries/ms/
+!scripts/dictionaries/tl/
+!scripts/dictionaries/uk/
+!scripts/dictionaries/bg/
+!scripts/dictionaries/mk/
+!scripts/dictionaries/he/
+scripts/dictionaries/es/*
+scripts/dictionaries/fr/*
+scripts/dictionaries/de/*
+scripts/dictionaries/it/*
+scripts/dictionaries/pt/*
+scripts/dictionaries/nl/*
+scripts/dictionaries/sv/*
+scripts/dictionaries/ru/*
+scripts/dictionaries/el/*
+scripts/dictionaries/tr/*
+scripts/dictionaries/id/*
+scripts/dictionaries/ms/*
+scripts/dictionaries/tl/*
+scripts/dictionaries/uk/*
+scripts/dictionaries/bg/*
+scripts/dictionaries/mk/*
+scripts/dictionaries/he/*
+!scripts/dictionaries/*/*_words.txt
+!scripts/dictionaries/*/*_allowlist.txt
+!scripts/dictionaries/*/*_blocklist.txt
+scripts/norvig_missing.txt
+scripts/opensub_missing.txt
+
+# Language pack build output (root level)
+/dictionaries/
+
+# Prefix boost debug JSON files (binary .bin files are tracked)
+src/main/assets/prefix_boosts/*.json
+
+# Temporary build scripts
+.tmp-*.sh
+
+# MCP tool generated code
+pal_generated.code
+# A LITERAL `~` directory, not a home reference: bun under Termux does not expand
+# `~` when it resolves its install cache, so `bun install` inside site/ creates
+# site/~/.bun/install/cache instead of $HOME/.bun/…. Every site build recreates it.
+# The directory exclusion has to come before the `!site/**/*.json` re-includes below
+# and stay a DIRECTORY pattern — git never descends into an excluded directory, so a
+# negation cannot resurrect the cached package.json files inside it.
+site/~/
+
+# Temp emoji data files
+*.json
+!site/**/*.json
+!site/package.json
+!site/tsconfig.json
+!web_demo/**/*.json
+# i18n data read by tests and scripts (glossary.json, review-flags.json).
+!docs/i18n/*.json
+# Bundled dictionary assets are SHIPPED data, not scratch output. Every file here
+# is read from the APK at runtime (contractions_<lang>.json,
+# contraction_pairs_<lang>.json, contraction_pairings.json, en_enhanced.json);
+# without this exception a newly generated one is silently never committed and the
+# feature dies on CI while working locally.
+!src/main/assets/dictionaries/*.json
+# The static context LM's sidecar (counts, sha256, sources) ships beside en.cklm and is
+# what StaticLmAssetDriftTest checks the model against.
+!src/main/assets/lm/*.json
+# Test fixtures are SOURCE, not scratch output. Golden files (ctc_golden.json,
+# the futo_*.json layout captures, and the per-script goldens the multiscript
+# plan adds) live under these two roots and must be tracked without `git add -f`;
+# a force-add is invisible to the next contributor, so the next fixture is
+# silently never committed and only fails on CI. Verified with `git check-ignore`
+# that both negations take effect: neither tree has a directory-level exclusion
+# above it, which is the usual reason a gitignore negation quietly does nothing.
+!src/test/resources/**/*.json
+!src/androidTest/assets/**/*.json
+generated_*.kt
+.env
+
+# GIF pipeline data (large binary files — only track scripts, not output)
+tools/gif_pipeline/raw_data/gifs/
+tools/gif_pipeline/raw_data/metadata/
+tools/gif_pipeline/processed/
+tools/gif_pipeline/discord_processed/
+tools/gif_pipeline/packs/
+tools/gif_pipeline/assets/
+tools/gif_pipeline/*.db
+tools/gif_pipeline/*.log
+tools/gif_pipeline/pipeline_history.json
+assets/gifs.db
+
+# Local checkout of the Squoosh fork used by tools/gif_pipeline/pipeline.py for WebP
+# optimization. It was previously recorded as a bare gitlink (mode 160000) with no
+# .gitmodules entry, which made `git submodule status` fail and broke
+# `git clone --recursive`. It is a developer-side tool, not a build input — keep it
+# out of the index entirely.
+squoosh/
+
+# Dead scratch artifacts (deleted from the tree; keep them from creeping back)
+archive/
+/cli_test_10_output.txt
+/resources_diff.txt
+/test_swipes_*.jsonl
+/test_prediction.kts
+/preview.html
+/swipe.html
+model/export_log.txt
+assets/models/*_character_quant.onnx
+src/androidTest/assets/ctc_bench/*.onnx
+
+# Decoded at deploy/dev time from ctc_vocab.bin.b64 (F-Droid scanner cleanliness)
+web_demo/demo/models/ctc_vocab.bin

@@ -1,0 +1,412 @@
+package tribixbite.cleverkeys
+
+import com.google.common.truth.Truth.assertWithMessage
+import org.junit.Test
+import java.io.File
+
+/**
+ * Drift guards for the dead/unwired-plumbing findings of the 2026-08-29 second-pass audit
+ * (`docs/audit/2026-08-28-archive-verification.md`).
+ *
+ * All three findings share a failure mode that no compiler warning catches: code that is
+ * reachable-by-linker but unreachable-by-execution, kept alive by blanket ProGuard keeps or
+ * by a settings screen that writes a preference nothing reads. Deleting it once is not
+ * enough — a later refactor can reintroduce the same shape. These scans pin the deletions.
+ *
+ *  - **ARC-084** — the CGR chain (`storeCGRPredictions` and everything it fed) had zero
+ *    callers while CLAUDE.md and ADR-011 assert the project has no CGR. R8 shipped it
+ *    anyway because `Keyboard2View`/`CleverKeysService` are covered by `-keep {*;}`.
+ *  - **ARC-085** — the "Correction Style" dropdown wrote `swipe_correction_preset`, which
+ *    no `Config`, predictor or engine adapter ever read: a control that responded to touch
+ *    and changed nothing.
+ *  - **ARC-097** — `SuggestionOrigin.forRoutedEngine` had zero production callers while its
+ *    own KDoc and three shipped docs named it THE production mechanism; the two dispatch
+ *    sites passed enum literals instead.
+ *
+ * Source-scan convention (project root as CWD) matches [CoreImeHygieneDriftTest] and
+ * [LearningWiringDriftTest].
+ */
+class DeadPlumbingDriftTest {
+
+    private val mainKotlin = File("src/main/kotlin")
+
+    private fun kotlinSources(): List<File> {
+        check(mainKotlin.isDirectory) {
+            "Source dir not found at ${mainKotlin.absolutePath} — drift test must run with project root as CWD."
+        }
+        return mainKotlin.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
+    }
+
+    private fun source(relative: String): String {
+        val f = File(mainKotlin, relative)
+        assertWithMessage("expected source file to exist: ${f.path} (run from project root)")
+            .that(f.isFile).isTrue()
+        return f.readText()
+    }
+
+    /**
+     * True for a line that is entirely a comment (`//`, a KDoc/block-comment continuation, or
+     * a block opener). Deleting dead plumbing leaves TOMBSTONE comments behind on purpose —
+     * they are the record of why the code is not coming back and they necessarily name the
+     * deleted symbols. The invariant these scans enforce is about CODE, so comment-only lines
+     * are not violations; a real re-introduction is always an executable line.
+     */
+    private fun isCommentOnly(line: String): Boolean {
+        val t = line.trim()
+        return t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")
+    }
+
+    /**
+     * Reports every `<path>:<line>` in main Kotlin sources whose CODE (comment-only lines
+     * excluded, see [isCommentOnly]) matches [pattern], skipping files whose repo-relative
+     * path is in [allowedFiles].
+     */
+    private fun occurrences(pattern: Regex, allowedFiles: Set<String> = emptySet()): List<String> {
+        val hits = mutableListOf<String>()
+        kotlinSources().forEach { file ->
+            val relative = file.path.removePrefix(mainKotlin.path).trimStart('/')
+            if (relative in allowedFiles) return@forEach
+            file.readLines().forEachIndexed { index, line ->
+                if (!isCommentOnly(line) && pattern.containsMatchIn(line)) {
+                    hits += "$relative:${index + 1}: ${line.trim()}"
+                }
+            }
+        }
+        return hits
+    }
+
+    // ---------------------------------------------------------------- ARC-084
+
+    @Test
+    fun `ARC-084 - the dead CGR prediction chain is gone`() {
+        // Every symbol of the chain: the store/clear entry points, the backing state, the
+        // two getters they fed, the KeyboardDimensionsHelper consumers and the two
+        // CleverKeysService hatches that re-exported them.
+        val cgrChain = Regex(
+            "storeCGRPredictions|clearCGRPredictions|getCGRPredictions|areCGRPredictionsFinal|" +
+                "updateCGRPredictions|checkCGRPredictions|_cgrPredictions|_cgrFinalPredictions"
+        )
+        val hits = occurrences(cgrChain)
+        assertWithMessage(
+            "ARC-084: the CGR prediction chain has no callers and no producer — " +
+                "`_cgrPredictions` can never be non-empty, so every consumer is dead code that " +
+                "R8 nonetheless ships (blanket `-keep {*;}`). CLAUDE.md and ADR-011 both state " +
+                "the project has no CGR. Do not reintroduce it; the swipe pipeline delivers " +
+                "predictions through InputCoordinator.handlePredictionResults.\nFound:\n" +
+                hits.joinToString("\n")
+        ).that(hits).isEmpty()
+    }
+
+    // ---------------------------------------------------------------- ARC-099
+
+    @Test
+    fun `ARC-099 - the dead legacy swipe-prediction chain is gone`() {
+        // Same shape as ARC-084, found during that deletion: three KeyboardDimensionsHelper
+        // "legacy" methods that pushed a caller-supplied list straight into the suggestion
+        // bar, plus three CleverKeysService pass-throughs that re-exported them. Nothing
+        // called the pass-throughs and nothing called the helpers directly, so no list could
+        // ever reach the bar through this path — the live route is
+        // InputCoordinator.handlePredictionResults. R8 shipped it regardless: both classes
+        // are covered by blanket `-keep class ... { *; }` rules (proguard-rules.pro:39, :91),
+        // which is exactly why no build-time signal ever flagged it.
+        val legacyChain = Regex(
+            "\\b(updateSwipePredictions|completeSwipePredictions|clearSwipePredictions)\\b"
+        )
+        val hits = occurrences(legacyChain)
+        assertWithMessage(
+            "ARC-099: the legacy swipe-prediction chain has zero callers — the three " +
+                "KeyboardDimensionsHelper methods were reachable only through three " +
+                "CleverKeysService pass-throughs that nothing called. Do not reintroduce it; " +
+                "swipe predictions reach the suggestion bar through " +
+                "InputCoordinator.handlePredictionResults.\nFound:\n" + hits.joinToString("\n")
+        ).that(hits).isEmpty()
+    }
+
+    // ---------------------------------------------------------------- ARC-085
+
+    @Test
+    fun `ARC-085 - the dead swipe_correction_preset control is gone`() {
+        // The key survives in exactly ONE place: SettingsValidation.DEPRECATED_KEYS. That
+        // list is what stops a v1.5.x backup (which exported the key, because it was in
+        // SETTINGS_DEFAULTS) from showing a meaningless import-preview row and writing a
+        // dead key back into prefs. Anything BEYOND the tombstone is live plumbing again.
+        val tombstone = "tribixbite/cleverkeys/backup/SettingsValidation.kt"
+        val prefHits = occurrences(Regex("swipe_correction_preset"), allowedFiles = setOf(tombstone))
+        assertWithMessage(
+            "ARC-085: `swipe_correction_preset` is read by nothing — no Config field, no " +
+                "predictor, no engine adapter. The \"Correction Style\" dropdown that wrote it " +
+                "responded to touch and changed nothing. Only the " +
+                "SettingsValidation.DEPRECATED_KEYS tombstone may name it.\nFound:\n" +
+                prefHits.joinToString("\n")
+        ).that(prefHits).isEmpty()
+
+        // The Compose state field is what makes a dead key look alive (same reasoning the
+        // ARC-051 comment in SettingsActivity records for the six keys deleted before it).
+        val fieldHits = occurrences(Regex("\\bswipeCorrectionPreset\\b"))
+        assertWithMessage(
+            "ARC-085: the `swipeCorrectionPreset` Compose state field must go with the " +
+                "dropdown — a backing field loaded on every settings open and rewritten on " +
+                "every preference change is exactly what disguises a dead pref as a live one." +
+                "\nFound:\n" + fieldHits.joinToString("\n")
+        ).that(fieldHits).isEmpty()
+    }
+
+    @Test
+    fun `ARC-085 - the Correction Style strings are gone from every locale`() {
+        // Left behind, these are unused-translation lint warnings in 21 locales plus the
+        // default. res/ is scanned directly (the strings never had a Kotlin reference once
+        // the dropdown went).
+        val resDir = File("res")
+        check(resDir.isDirectory) {
+            "res/ not found at ${resDir.absolutePath} — drift test must run with project root as CWD."
+        }
+        val styleStrings = Regex("""<string name="autocorrect_style_(title|desc)"""")
+        val hits = resDir.walkTopDown()
+            .filter { it.isFile && it.name == "strings.xml" }
+            .flatMap { file ->
+                file.readLines().mapIndexedNotNull { index, line ->
+                    if (styleStrings.containsMatchIn(line)) "${file.path}:${index + 1}" else null
+                }
+            }
+            .toList()
+        assertWithMessage(
+            "ARC-085: `autocorrect_style_title` / `autocorrect_style_desc` labelled the deleted " +
+                "\"Correction Style\" dropdown. Every locale copy must go too, or lint reports " +
+                "unused translations.\nFound:\n" + hits.joinToString("\n")
+        ).that(hits).isEmpty()
+    }
+
+    // ------------------------------------------------- Terminal Mode (2026-10-07)
+
+    @Test
+    fun `the dead Terminal Mode switch is gone`() {
+        // "Terminal Mode — Show Ctrl, Meta, PageUp/Down keys for terminal apps" shows no keys
+        // on current main, and its last reader (tap trailing-space suppression) was deleted with the
+        // unified pipeline in WP9 step 6. Terminal handling is automatic (TerminalUtils plus
+        // the custom_terminal_packages setting). Only the DEPRECATED_KEYS tombstone, which
+        // keeps old backups from re-importing it, may name the key.
+        val tombstone = "tribixbite/cleverkeys/backup/SettingsValidation.kt"
+        val hits = occurrences(
+            Regex("termux_mode_enabled|TERMUX_MODE_ENABLED|\\btermuxModeEnabled\\b"),
+            allowedFiles = setOf(tombstone),
+        )
+        assertWithMessage(
+            "The Terminal Mode switch responded to touch and changed nothing; do not restore " +
+                "it without a real consumer.\nFound:\n" + hits.joinToString("\n")
+        ).that(hits).isEmpty()
+
+        val strings = Regex("""<string name="advanced_terminal_mode_(title|desc)"""")
+        val stringHits = File("res").walkTopDown()
+            .filter { it.isFile && it.name == "strings.xml" }
+            .flatMap { file ->
+                file.readLines().mapIndexedNotNull { index, line ->
+                    if (strings.containsMatchIn(line)) "${file.path}:${index + 1}" else null
+                }
+            }
+            .toList()
+        assertWithMessage("Terminal Mode strings must go from every locale.\nFound:\n" + stringHits.joinToString("\n"))
+            .that(stringHits).isEmpty()
+    }
+
+    // ------------------------------------------------------------------- B-2
+
+    @Test
+    fun `B-2 - the dead SwipeInput and SwipePruner classes are gone`() {
+        // 2026-09-06 comprehensive audit, B-2: both classes were consumers of the
+        // ADR-011-deleted neural pipeline and kept zero production call sites after it went.
+        // SwipeInput was additionally force-kept in every minified release by a stale
+        // ProGuard rule whose comment ("prediction input handling") described a pipeline
+        // that no longer exists. Same blanket-keep blind spot as ARC-084/099: R8 never
+        // flags a kept class as unused.
+        for (relative in listOf(
+            "tribixbite/cleverkeys/gesture/SwipeInput.kt",
+            "tribixbite/cleverkeys/gesture/SwipePruner.kt",
+        )) {
+            assertWithMessage(
+                "B-2: $relative is an ADR-011 orphan with zero production call sites — " +
+                    "deleted 2026-09-06; do not resurrect it. Swipe input reaches the engines " +
+                    "as SwipeResult/SwipeDetectorInput via InputCoordinator.handleSwipeTyping, " +
+                    "and candidate pruning lives inside each engine (CtcLexiconTrie / " +
+                    "geometric CandidatePruner)."
+            ).that(File(mainKotlin, relative).exists()).isFalse()
+        }
+
+        // No executable line anywhere in main sources may name either class again
+        // (comment-only tombstones stay legal, as everywhere else in this file).
+        val hits = occurrences(Regex("\\b(SwipeInput|SwipePruner)\\b"))
+        assertWithMessage(
+            "B-2: SwipeInput/SwipePruner must not be referenced by production code.\nFound:\n" +
+                hits.joinToString("\n")
+        ).that(hits).isEmpty()
+
+        // The stale keep rule is the half of the finding that shipped bytes: without it R8
+        // would at least have stripped the dead class from the release APK. Comment lines
+        // stay legal (the deletion's tombstone comment names the class on purpose).
+        val keepHits = File("proguard-rules.pro").readLines().mapIndexedNotNull { index, line ->
+            if (!line.trim().startsWith("#") && line.contains("SwipeInput")) {
+                "proguard-rules.pro:${index + 1}: ${line.trim()}"
+            } else null
+        }
+        assertWithMessage(
+            "B-2: proguard-rules.pro must not keep the deleted SwipeInput (the old rule's " +
+                "\"prediction input handling\" comment described the ADR-011 neural pipeline)." +
+                "\nFound:\n" + keepHits.joinToString("\n")
+        ).that(keepHits).isEmpty()
+    }
+
+    // ---------------------------------------------------------------- ARC-097
+
+    @Test
+    fun `ARC-097 - both routed-engine dispatches derive their origin from forRoutedEngine`() {
+        // The documented contract (SuggestionProvenance KDoc, docs/ARCHITECTURE_MASTER.md,
+        // docs/specs/ctc-swipe-engine.md, docs/wiki/specs/typing/swipe-typing-spec.md) is
+        // that the origin attached to a swipe suggestion is the ROUTED engine's, derived via
+        // SuggestionOrigin.forRoutedEngine. SuggestionProvenanceTest pins what that function
+        // ANSWERS for each engine; this pins that production actually asks it. Passing the
+        // enum literal instead produces the same tag today but leaves the mapping duplicated
+        // in three places, so a future engine (or a remap) silently diverges — which is the
+        // whole reason the helper exists.
+        val coordinator = source("tribixbite/cleverkeys/InputCoordinator.kt")
+
+        assertWithMessage(
+            "ARC-097: the geometric decode callback must tag its results with " +
+                "SuggestionOrigin.forRoutedEngine(SwipeEngineRouter.Engine.GEOMETRIC)."
+        ).that(coordinator)
+            .contains("SuggestionOrigin.forRoutedEngine(SwipeEngineRouter.Engine.GEOMETRIC)")
+
+        assertWithMessage(
+            "ARC-097: the CTC decode callback must tag its results with " +
+                "SuggestionOrigin.forRoutedEngine(SwipeEngineRouter.Engine.CTC)."
+        ).that(coordinator)
+            .contains("SuggestionOrigin.forRoutedEngine(SwipeEngineRouter.Engine.CTC)")
+
+        // No dispatch site may fall back to a bare literal — that is the bypass this finding
+        // is about. (SuggestionProvenance.kt itself and the bar's colour table legitimately
+        // name the enum constants; only the dispatcher is constrained.)
+        val bareLiteral = Regex("""SuggestionOrigin\.(GEOMETRIC|CTC)\b""")
+        val literalHits = coordinator.lines().mapIndexedNotNull { index, line ->
+            if (!isCommentOnly(line) && bareLiteral.containsMatchIn(line)) {
+                "InputCoordinator.kt:${index + 1}: ${line.trim()}"
+            } else null
+        }
+        assertWithMessage(
+            "ARC-097: InputCoordinator must not pass a bare SuggestionOrigin enum literal as a " +
+                "swipe origin — route it through forRoutedEngine so the engine→origin mapping " +
+                "has exactly one implementation.\nFound:\n" + literalHits.joinToString("\n")
+        ).that(literalHits).isEmpty()
+    }
+
+    // ------------------------------------------------- 2026-09-07 remediation sweep
+
+    @Test
+    fun `remediation sweep - the dead KeyboardGrid and MaxHeightListView classes are gone`() {
+        // Found while closing the 2026-09-06 audit: KeyboardGrid is a zero-caller a-z
+        // neural-era orphan (B-2's sibling — its stale keep rule claimed "nearest key
+        // detection during swipe", which lives in ProbabilisticKeyDetector); MaxHeight-
+        // ListView's only consumer was ClipboardPinView, deleted as dead legacy (D-9).
+        for (relative in listOf(
+            "tribixbite/cleverkeys/KeyboardGrid.kt",
+            "tribixbite/cleverkeys/MaxHeightListView.kt",
+        )) {
+            assertWithMessage(
+                "$relative is a zero-caller orphan — deleted 2026-09-07; do not resurrect it."
+            ).that(File(mainKotlin, relative).exists()).isFalse()
+        }
+
+        val hits = occurrences(Regex("\\b(KeyboardGrid|MaxHeightListView)\\b"))
+        assertWithMessage(
+            "KeyboardGrid/MaxHeightListView must not be referenced by production code.\nFound:\n" +
+                hits.joinToString("\n")
+        ).that(hits).isEmpty()
+
+        // Same blanket-keep blind spot as B-2: a kept class is invisible to R8's
+        // unused-code analysis, so the keep rule must die with the class.
+        val keepHits = File("proguard-rules.pro").readLines().mapIndexedNotNull { index, line ->
+            if (!line.trim().startsWith("#") && line.contains("KeyboardGrid")) {
+                "proguard-rules.pro:${index + 1}: ${line.trim()}"
+            } else null
+        }
+        assertWithMessage(
+            "proguard-rules.pro must not keep the deleted KeyboardGrid.\nFound:\n" +
+                keepHits.joinToString("\n")
+        ).that(keepHits).isEmpty()
+    }
+
+    // ------------------------------------------------- 2026-09-10 APK diet, round 2
+
+    /**
+     * `SwipeMLTrainer` was 332 lines of training *theatre*: `performBasicTraining` bucketed
+     * traces by word, ran an O(n²) nearest-neighbour pass over every sample, and paced the
+     * progress callbacks with `Thread.sleep(200/300/50)` so a UI would look busy. Nothing
+     * trained, nothing was persisted, and — decisively — nothing called it. It survived R8
+     * only because `proguard-rules.pro` blanket-keeps `tribixbite.cleverkeys.ml.**`, which is
+     * the same shrinker blind spot as ARC-084 and the KeyboardGrid sweep above.
+     *
+     * Its one downstream casualty is `SwipeMLDataStore.exportToNDJSON(): File`, whose only
+     * caller in the tree was `SwipeMLTrainer.exportForExternalTraining()`. That overload also
+     * carried the pre-I-5 whole-table materialisation (`loadAllData()` into a `FileWriter`
+     * loop) that the streaming `exportToNDJSON(OutputStream)` — still live, wired to the
+     * Settings export picker via `SettingsSwipeDataHandlers` — exists to avoid. The
+     * `exportToJSON(): File` sibling is NOT dead (SwipeDebugActivity's Export button) and
+     * must stay.
+     */
+    @Test
+    fun `APK diet - the fake SwipeMLTrainer and its unstreamed NDJSON export are gone`() {
+        assertWithMessage(
+            "tribixbite/cleverkeys/ml/SwipeMLTrainer.kt is a zero-caller orphan whose " +
+                "'training' was Thread.sleep progress theatre — deleted 2026-09-10; do not " +
+                "resurrect it."
+        ).that(File(mainKotlin, "tribixbite/cleverkeys/ml/SwipeMLTrainer.kt").exists()).isFalse()
+
+        val hits = occurrences(Regex("""\bSwipeMLTrainer\b"""))
+        assertWithMessage(
+            "SwipeMLTrainer must not be referenced by production code.\nFound:\n" +
+                hits.joinToString("\n")
+        ).that(hits).isEmpty()
+
+        // The blanket `-keep class tribixbite.cleverkeys.ml.** { *; }` is why a dead class in
+        // this package ships regardless of R8: nothing here may re-add a caller.
+        val dataStore = source("tribixbite/cleverkeys/ml/SwipeMLDataStore.kt")
+        assertWithMessage(
+            "SwipeMLDataStore.exportToNDJSON(): File was SwipeMLTrainer's only consumer, and " +
+                "it materialised the whole table (loadAllData() → FileWriter) — the exact OOM " +
+                "shape I-5 removed from the JSON path. The streaming " +
+                "exportToNDJSON(OutputStream) overload is the live one."
+        ).that(dataStore).doesNotContain("fun exportToNDJSON(): File")
+
+        assertWithMessage(
+            "the streaming NDJSON overload must survive — Settings' export picker calls it"
+        ).that(dataStore).contains("fun exportToNDJSON(outputStream: OutputStream): Int")
+        assertWithMessage("the playground's File-based JSON export is live and must survive")
+            .that(dataStore).contains("fun exportToJSON(): File")
+    }
+
+    // ------------------------------------------------- audit L1 (2026-10-20)
+
+    @Test
+    fun `audit L1 - KeyboardDimensionsHelper holds no suggestion bar and no debug logger`() {
+        // ARC-099 left `_suggestionBar`/`setSuggestionBar` write-only, and the debug-mode
+        // plumbing (`setDebugMode`, `DebugLogger`, `sendDebugLog`) had no reader inside the
+        // class either; both were fed only by SuggestionBarPropagator / DebugModePropagator.
+        // Like the chains above, the blanket proguard keep hid them from every build signal.
+        val helper = source("tribixbite/cleverkeys/KeyboardDimensionsHelper.kt")
+        for (member in listOf("_suggestionBar", "setSuggestionBar", "setDebugMode", "DebugLogger", "sendDebugLog")) {
+            assertWithMessage("KeyboardDimensionsHelper must not reintroduce dead member $member")
+                .that(helper.lines().filterNot(::isCommentOnly).joinToString("\n")).doesNotContain(member)
+        }
+        val hits = occurrences(Regex("""keyboardDimensionsHelper\??\.(setSuggestionBar|setDebugMode)\b"""))
+        assertWithMessage("no propagator may feed the deleted helper setters.\nFound:\n" + hits.joinToString("\n"))
+            .that(hits).isEmpty()
+    }
+
+    @Test
+    fun `audit L1 - VibratorCompat has no system-haptic cache`() {
+        // isSystemHapticEnabled was @Suppress("unused") with its 5 s cache and
+        // invalidateSettingsCache; performHapticFeedback already honours the system setting.
+        val vibrator = source("tribixbite/cleverkeys/VibratorCompat.kt")
+        assertWithMessage("VibratorCompat's dead system-haptic cache must stay deleted")
+            .that(vibrator).doesNotContain("isSystemHapticEnabled")
+        assertWithMessage("its invalidateSettingsCache hook must stay deleted")
+            .that(vibrator).doesNotContain("invalidateSettingsCache")
+    }
+}

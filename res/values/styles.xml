@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+  <!-- Emoji pane -->
+  <style name="emojiGridButton">
+    <item name="android:layout_width">fill_parent</item>
+    <item name="android:layout_height">fill_parent</item>
+    <item name="android:gravity">center</item>
+    <item name="android:textSize">@dimen/emoji_text_size</item>
+    <item name="android:textColor">?attr/emoji_color</item>
+  </style>
+  <!-- Clipboard pane -->
+  <style name="clipboardEntry">
+    <item name="android:layout_weight">1</item>
+    <item name="android:layout_width">fill_parent</item>
+    <item name="android:layout_height">wrap_content</item>
+    <!-- marginStart/End + marginTop/Bottom instead of layout_marginHorizontal/Vertical
+         (those require API 26; the split attrs are API 17-safe with identical rendering). -->
+    <item name="android:layout_marginStart">14dp</item>
+    <item name="android:layout_marginEnd">14dp</item>
+    <item name="android:layout_marginTop">14dp</item>
+    <item name="android:layout_marginBottom">14dp</item>
+    <item name="android:textSize">16sp</item>
+    <item name="android:textColor">?attr/colorLabel</item>
+  </style>
+  <style name="clipboardEntryButton">
+    <item name="android:layout_width">24dp</item>
+    <item name="android:layout_height">24dp</item>
+    <!-- marginStart/End instead of layout_marginHorizontal (API 26 -> API 17-safe). -->
+    <item name="android:layout_marginStart">2dp</item>
+    <item name="android:layout_marginEnd">2dp</item>
+    <item name="android:backgroundTint">?attr/colorLabel</item>
+    <item name="android:backgroundTintMode">src_in</item>
+  </style>
+  <!-- appTheme uses NoActionBar. This value came from the former res/values-v21/
+       and res/values-night-v21/ overrides, which shadowed this unqualified entry on
+       every device (minSdk has always been ≥21, so the -v21 qualifier matched all APIs). Those
+       obsolete-SDK folders were merged here to preserve the effective NoActionBar
+       parent; day and night both resolve to this single declaration. -->
+  <style name="appTheme" parent="Theme.AppCompat.DayNight.NoActionBar"/>
+  <!-- Launcher activity theme with edge-to-edge support -->
+  <!-- ARC-111: DayNight so the launcher follows the system theme; the bar-icon
+       appearance (windowLightStatusBar) is set at runtime in LauncherActivity
+       from the current uiMode, so it is not pinned here. Material3 DayNight keeps
+       the same edge-to-edge compatibility with Compose as the old Dark parent. -->
+  <style name="launcherTheme" parent="Theme.Material3.DayNight.NoActionBar">
+    <item name="android:windowBackground">@android:color/transparent</item>
+    <item name="android:statusBarColor">@android:color/transparent</item>
+    <item name="android:navigationBarColor">@android:color/transparent</item>
+    <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+    <item name="android:windowTranslucentStatus">false</item>
+    <item name="android:windowTranslucentNavigation">false</item>
+  </style>
+  <style name="settingsTheme" parent="appTheme">
+    <!-- Setting this in the activity theme so it propagate to nested
+         preference screens. -->
+    <item name="android:fitsSystemWindows">true</item>
+  </style>
+
+  <!-- Swipe Debug Log screen: dark #1e1e1e window background painted by the theme
+       (not the layout root) so the opaque root no longer double-paints over the
+       window background (fixes Overdraw). Everything else inherits settingsTheme. -->
+  <style name="swipeDebugTheme" parent="settingsTheme">
+    <item name="android:windowBackground">#1e1e1e</item>
+  </style>
+
+  <!-- Subkey assign/edit screen (docs/specs/subkey-popover.md): a transparent window over the
+       app being typed in; the Compose dialogs inside draw their own scrim. -->
+  <style name="subkeyAssignTheme" parent="appTheme">
+    <item name="android:windowIsTranslucent">true</item>
+    <item name="android:windowBackground">@android:color/transparent</item>
+    <item name="android:windowNoTitle">true</item>
+    <item name="android:backgroundDimEnabled">false</item>
+    <item name="android:windowAnimationStyle">@android:style/Animation.Dialog</item>
+  </style>
+
+  <!-- Transparent IME Theme to prevent white bar during animation -->
+  <style name="CleverKeysIMETheme" parent="android:Theme.DeviceDefault.InputMethod">
+    <item name="android:windowBackground">@android:color/transparent</item>
+    <item name="android:colorBackground">@android:color/transparent</item>
+    <item name="android:windowContentOverlay">@null</item>
+    <item name="android:windowIsTranslucent">true</item>
+    <item name="android:backgroundDimEnabled">false</item>
+    <item name="android:statusBarColor">@android:color/transparent</item>
+    <item name="android:navigationBarColor">@android:color/transparent</item>
+  </style>
+</resources>

@@ -1,0 +1,1271 @@
+package tribixbite.cleverkeys.langpack
+
+import tribixbite.cleverkeys.IoFailureReason
+import tribixbite.cleverkeys.PackImportFailure
+import android.content.ContentResolver
+import android.content.Context
+import android.net.Uri
+import android.util.Log
+import com.google.common.truth.Truth.assertThat
+import com.google.common.truth.Truth.assertWithMessage
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.mockkStatic
+import io.mockk.unmockkAll
+import io.mockk.unmockkStatic
+import org.junit.After
+import org.junit.Before
+import org.junit.Test
+import java.io.File
+import java.io.FileOutputStream
+import java.io.RandomAccessFile
+import java.nio.file.Files
+import java.security.MessageDigest
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
+import tribixbite.cleverkeys.swipe.ctc.CtcPackModel
+
+/**
+ * The shipped promise behind every "downloadable language packs" release note, end to end
+ * through the REAL [LanguagePackManager].
+ *
+ * Rows pinned (release record, `docs/RELEASE_RECORD.md`):
+ *
+ * | version | note |
+ * |---|---|
+ * | v1.1.95 | "Downloadable language packs (NL, ID, MS, SW, TL)" |
+ * | v1.1.96 | "Fix crash when importing large language packs (Spanish 236k words caused OOM)" |
+ * | v1.1.97 | "Downloadable language packs (Dutch, Indonesian, Malay, Swahili, Tagalog)" |
+ * | v1.1.97 | "FIXED: OOM crash on large language packs" |
+ * | v1.2.6  | "Language packs added — sv ships bundled, el and tr as importable packs" |
+ * | v1.2.8  | "Language packs added (re-published from v1.2.6)" |
+ *
+ * ## Why mock tier and not pure
+ *
+ * [LanguagePackManager] takes a `Context` (for `filesDir` / `cacheDir` / `contentResolver`),
+ * logs through `android.util.Log`, and parses the manifest with `org.json.JSONObject`. Under
+ * `runMockTests` the android.jar stubs supply the types, MockK supplies the behaviour, and the
+ * REAL `org.json` (a `testImplementation` dependency, ahead of android.jar on the classpath —
+ * see the comment at `build.gradle:108`) supplies a working JSON parser. Nothing here is
+ * re-implemented: every assertion is about a value the production class produced.
+ *
+ * ## What "no OOM on a large pack" means TODAY
+ *
+ * The v1.1.96 note bundled two fixes. The second — "limited secondary dictionary trie
+ * insertions to top 30k most frequent words" — lived in the neural beam search and went away
+ * with it (ADR-011, 2026-08-18). What survives, and what a user importing a 236k-word pack
+ * still depends on, is that **the import path never materialises the dictionary in memory**:
+ * the ZIP entry is streamed to disk with a bounded copy and validation reads a 16-byte header. Oversized entry counts are now refused (GH #184).
+ * [aPackFarLargerThanAnyBufferImportsByStreaming] proves that with a dictionary an order of
+ * magnitude bigger than the Spanish one that originally crashed, and
+ * [theImportPathNeverReadsAWholeEntryIntoMemory] is the anti-regression guard: a refactor to
+ * `outFile.writeBytes(zis.readBytes())` would restore the crash while every behavioural test
+ * above stayed green, so the shape of the copy is pinned at the source.
+ */
+class LanguagePackImportTest {
+
+    private lateinit var filesDir: File
+    private lateinit var cacheDir: File
+    private lateinit var scratch: File
+    private lateinit var context: Context
+    private lateinit var resolver: ContentResolver
+    private lateinit var manager: LanguagePackManager
+
+    /** V2 `CKDT` magic + version, little-endian, exactly as `validateDictionary` decodes it. */
+    private val ckdtV2Header = byteArrayOf(
+        0x43, 0x4B, 0x44, 0x54, // "CKDT"
+        0x02, 0x00, 0x00, 0x00, // version 2
+    )
+
+    @Before
+    fun setup() {
+        mockkStatic(Log::class)
+        every { Log.d(any(), any<String>()) } returns 0
+        every { Log.i(any(), any<String>()) } returns 0
+        every { Log.w(any(), any<String>()) } returns 0
+        every { Log.e(any(), any<String>()) } returns 0
+        every { Log.e(any(), any<String>(), any()) } returns 0
+
+        scratch = Files.createTempDirectory("ck-langpack").toFile()
+        filesDir = File(scratch, "files").apply { mkdirs() }
+        cacheDir = File(scratch, "cache").apply { mkdirs() }
+
+        resolver = mockk()
+        context = mockk()
+        every { context.filesDir } returns filesDir
+        every { context.cacheDir } returns cacheDir
+        every { context.contentResolver } returns resolver
+        every { context.applicationContext } returns context
+
+        manager = LanguagePackManager(context)
+    }
+
+    @After
+    fun teardown() {
+        unmockkAll()
+        scratch.deleteRecursively()
+    }
+
+    // ------------------------------------------------------------------ fixtures
+
+    /**
+     * A manifest JSON with the fields `LanguagePackManager.parseManifest` reads.
+     *
+     * @param model when non-null, the manifest declares a `model.onnx` member and carries the
+     *   sha256 of these bytes — the pack's own statement about what it contains.
+     */
+    private fun manifestJson(
+        code: String,
+        name: String,
+        version: Int = 1,
+        author: String = "",
+        wordCount: Int = 0,
+        hasPrefixBoost: Boolean = false,
+        model: ByteArray? = null,
+    ): String {
+        val modelField = model?.let {
+            ""","model":{"file":"model.onnx","sha256":"${sha256(it)}"}"""
+        } ?: ""
+        return """
+            {"code":"$code","name":"$name","version":$version,"author":"$author",
+             "wordCount":$wordCount,"hasPrefixBoost":$hasPrefixBoost$modelField}
+        """.trimIndent()
+    }
+
+    /** Deterministic filler standing in for an ONNX graph; the importer never parses it. */
+    private fun modelBytes(size: Int): ByteArray = ByteArray(size) { (it % 241).toByte() }
+
+    private fun sha256(bytes: ByteArray): String =
+        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+
+    /** A V2-valid dictionary body of [size] bytes: real header, deterministic filler. */
+    private fun dictionaryBytes(size: Int = 64): ByteArray {
+        require(size >= ckdtV2Header.size)
+        val out = ByteArray(size)
+        ckdtV2Header.copyInto(out)
+        for (i in ckdtV2Header.size until size) out[i] = (i % 251).toByte()
+        if (size >= 16) {
+            java.nio.ByteBuffer.wrap(out).order(java.nio.ByteOrder.LITTLE_ENDIAN).putInt(12, 1)
+        }
+        return out
+    }
+
+    /** Build a pack ZIP on disk from `entry name -> bytes`. */
+    private fun packZip(fileName: String, entries: List<Pair<String, ByteArray>>): File {
+        val zip = File(scratch, fileName)
+        ZipOutputStream(FileOutputStream(zip)).use { zos ->
+            for ((name, bytes) in entries) {
+                zos.putNextEntry(ZipEntry(name))
+                zos.write(bytes)
+                zos.closeEntry()
+            }
+        }
+        return zip
+    }
+
+    /** A complete, valid pack: manifest + dictionary (+ optional extras). */
+    private fun validPack(
+        code: String,
+        name: String,
+        wordCount: Int = 0,
+        dictionarySize: Int = 64,
+        extras: List<Pair<String, ByteArray>> = emptyList(),
+        manifest: String = manifestJson(code, name, wordCount = wordCount),
+    ): File = packZip(
+        "$code.zip",
+        listOf(
+            "manifest.json" to manifest.toByteArray(),
+            "dictionary.bin" to dictionaryBytes(dictionarySize),
+        ) + extras
+    )
+
+    /** Run the production entry point against [zip]. */
+    private fun import(zip: File): ImportResult {
+        val uri = mockk<Uri>()
+        every { resolver.openInputStream(uri) } returns zip.inputStream()
+        return manager.importLanguagePack(uri)
+    }
+
+    private fun installedDir(code: String) = File(File(filesDir, "langpacks"), code)
+
+    // ---------------------------------------------- v1.1.95 / v1.1.97: the five packs
+
+    /**
+     * The exact five language codes both notes named. A pack is imported per code and then
+     * asked for back through the public surface — install location, `isInstalled`,
+     * `getDictionaryPath` and `getInstalledPacks` all have to agree.
+     */
+    @Test
+    fun theFiveAnnouncedPacksImportAndAreThenInstalled() {
+        val announced = listOf(
+            "nl" to "Dutch",
+            "id" to "Indonesian",
+            "ms" to "Malay",
+            "sw" to "Swahili",
+            "tl" to "Tagalog",
+        )
+
+        for ((code, name) in announced) {
+            val result = import(validPack(code, name, wordCount = 1234))
+            assertWithMessage("importing the $name pack").that(result)
+                .isEqualTo(ImportResult.Success(LanguagePackManifest(code, name, 1, "", 1234, false)))
+
+            assertWithMessage("$code must land in files/langpacks/$code/dictionary.bin")
+                .that(File(installedDir(code), "dictionary.bin").exists()).isTrue()
+            assertWithMessage("$code must report installed").that(manager.isInstalled(code)).isTrue()
+            assertThat(manager.getDictionaryPath(code)?.absolutePath)
+                .isEqualTo(File(installedDir(code), "dictionary.bin").absolutePath)
+        }
+
+        // getInstalledPacks() enumerates every one of them, sorted by DISPLAY NAME (not code,
+        // not filesystem order — `listFiles()` order is undefined and must not leak through).
+        assertThat(manager.getInstalledPacks().map { it.name })
+            .containsExactly("Dutch", "Indonesian", "Malay", "Swahili", "Tagalog").inOrder()
+        assertThat(manager.getInstalledPacks().map { it.code })
+            .containsExactly("nl", "id", "ms", "sw", "tl").inOrder()
+    }
+
+    /**
+     * A language NOT in the app's bundled `CtcLanguageSupport.SUPPORTED` table still imports —
+     * that is precisely what "importable pack" means in the v1.2.6 note for `el` and `tr`.
+     */
+    @Test
+    fun greekAndTurkishImportAsPacksEvenThoughOnlySvIsBundled() {
+        assertThat(import(validPack("el", "Greek", wordCount = 90_000)))
+            .isEqualTo(ImportResult.Success(LanguagePackManifest("el", "Greek", 1, "", 90_000, false)))
+        assertThat(import(validPack("tr", "Turkish", wordCount = 120_000)))
+            .isEqualTo(ImportResult.Success(LanguagePackManifest("tr", "Turkish", 1, "", 120_000, false)))
+
+        assertThat(manager.getInstalledPacks().map { it.code }).containsExactly("el", "tr")
+
+        // `sv` is the bundled half of the same note: it ships as an asset, so it must NOT need
+        // an import to exist. Asserted against the shipped file, not against a mock.
+        val bundledSwedish = File("src/main/assets/dictionaries/sv_enhanced.bin")
+        assertWithMessage(
+            "sv is announced as BUNDLED — ${bundledSwedish.path} must ship in the APK assets " +
+                "(run from project root)"
+        ).that(bundledSwedish.isFile).isTrue()
+        assertWithMessage("the bundled Swedish dictionary must be the same V2 CKDT format the " +
+            "importer validates")
+            .that(bundledSwedish.inputStream().use { it.readNBytes(8) }.toList())
+            .isEqualTo(ckdtV2Header.toList())
+    }
+
+    /**
+     * The REAL shipped Swedish dictionary, wrapped as a pack, passes the importer's own
+     * validation. Proves the validator and the dictionary builder still agree on the format —
+     * a drift there would reject every pack built by `scripts/build_wordlist.py`.
+     */
+    @Test
+    fun theShippedSwedishDictionaryValidatesAsAPackDictionary() {
+        val bundled = File("src/main/assets/dictionaries/sv_enhanced.bin")
+        assertWithMessage("expected ${bundled.path} (run from project root)")
+            .that(bundled.isFile).isTrue()
+
+        val zip = packZip(
+            "sv-real.zip",
+            listOf(
+                "manifest.json" to manifestJson("sv", "Swedish", wordCount = 40_000).toByteArray(),
+                "dictionary.bin" to bundled.readBytes(),
+            )
+        )
+
+        assertThat(import(zip))
+            .isEqualTo(ImportResult.Success(LanguagePackManifest("sv", "Swedish", 1, "", 40_000, false)))
+        assertWithMessage("the installed copy must be byte-identical to the shipped dictionary")
+            .that(File(installedDir("sv"), "dictionary.bin").length())
+            .isEqualTo(bundled.length())
+    }
+
+    // ------------------------------------------------- optional pack members are carried
+
+    @Test
+    fun unigramsContractionsAndPrefixBoostAreCopiedWhenPresent() {
+        val zip = packZip(
+            "nl-full.zip",
+            listOf(
+                "manifest.json" to manifestJson("nl", "Dutch", wordCount = 7).toByteArray(),
+                "dictionary.bin" to dictionaryBytes(),
+                "unigrams.txt" to "de 100\nhet 90\n".toByteArray(),
+                "contractions.json" to """{"cest":"c'est"}""".toByteArray(),
+                "prefix_boost.bin" to ByteArray(512) { 7 },
+            )
+        )
+
+        assertThat(import(zip)).isInstanceOf(ImportResult.Success::class.java)
+
+        assertThat(manager.getUnigramsPath("nl")?.readText()).isEqualTo("de 100\nhet 90\n")
+        assertThat(manager.getContractionsPath("nl")?.readText()).isEqualTo("""{"cest":"c'est"}""")
+        // prefix_boost.bin has had no consumer since ADR-011, but is still ACCEPTED and copied
+        // so packs built against the old format keep installing. Pinning the length proves the
+        // copy is real, not a create-empty.
+        assertThat(manager.getPrefixBoostPath("nl")?.length()).isEqualTo(512L)
+    }
+
+    @Test
+    fun aPackWithoutOptionalMembersInstallsAndReportsThemAbsent() {
+        assertThat(import(validPack("ms", "Malay"))).isInstanceOf(ImportResult.Success::class.java)
+
+        assertThat(manager.getUnigramsPath("ms")).isNull()
+        assertThat(manager.getContractionsPath("ms")).isNull()
+        assertThat(manager.getPrefixBoostPath("ms")).isNull()
+        assertThat(manager.getModelPath("ms")).isNull()
+        assertThat(manager.isInstalled("ms")).isTrue()
+    }
+
+    // ------------------------------------------------------- the model member (APK diet)
+    //
+    // The six per-script CTC encoders left the APK on 2026-09-10 and travel in their packs
+    // instead. Two independent checks stand between a pack file and ORT, and they answer
+    // different questions:
+    //
+    //   1. HERE, at import: does the pack match its OWN manifest? Catches a corrupt download or
+    //      a truncated copy, and reports it as a failed import instead of a silently degraded
+    //      language.
+    //   2. At load (`CtcPackModel`): is it byte-identical to the artifact THIS APP pins? That
+    //      is the security property, and it deliberately does not trust anything the pack says
+    //      about itself — a pack's manifest is written by whoever wrote the pack.
+    //
+    // Check 1 alone would be security theatre (a hostile pack signs its own homework); check 2
+    // alone would turn a bad download into an unexplained fallback to geometric. Both.
+
+    @Test
+    fun aPackCarryingItsDeclaredModelInstallsItVerbatim() {
+        val model = modelBytes(2048)
+        val zip = validPack(
+            "ru", "Russian",
+            manifest = manifestJson("ru", "Russian", model = model),
+            extras = listOf("model.onnx" to model),
+        )
+        assertThat(import(zip)).isInstanceOf(ImportResult.Success::class.java)
+
+        val installed = manager.getModelPath("ru")
+        assertWithMessage("a declared, hash-matching model must land on disk beside the dictionary")
+            .that(installed).isNotNull()
+        assertThat(installed!!.readBytes()).isEqualTo(model)
+        assertThat(installed.path).isEqualTo(File(installedDir("ru"), "model.onnx").path)
+    }
+
+    @Test
+    fun aModelWhoseHashDisagreesWithTheManifestIsRejected() {
+        val declared = modelBytes(2048)
+        val actual = modelBytes(2048).also { it[100] = (it[100] + 1).toByte() }
+        val zip = validPack(
+            "ru", "Russian",
+            manifest = manifestJson("ru", "Russian", model = declared),
+            extras = listOf("model.onnx" to actual),
+        )
+        assertWithMessage(
+            "a pack whose model does not match its own manifest is corrupt — say so, rather " +
+                "than installing bytes that will silently never load"
+        ).that(import(zip)).isEqualTo(ImportResult.Error(PackImportFailure.ModelChecksumMismatch("model.onnx")))
+        assertWithMessage("a rejected pack must install nothing")
+            .that(File(filesDir, "langpacks").listFiles()?.toList().orEmpty()).isEmpty()
+    }
+
+    @Test
+    fun aManifestDeclaringAModelTheZipDoesNotCarryIsRejected() {
+        val zip = validPack(
+            "ru", "Russian",
+            manifest = manifestJson("ru", "Russian", model = modelBytes(2048)),
+        )
+        assertThat(import(zip)).isEqualTo(ImportResult.Error(PackImportFailure.MissingMember("model.onnx")))
+    }
+
+    /**
+     * An undeclared model is DROPPED, not rejected. Nothing can verify it — the manifest is the
+     * pack's own statement of its contents — and the load side would refuse it anyway, so
+     * failing the whole import would punish a user for a stray file in someone else's zip.
+     */
+    @Test
+    fun anUndeclaredModelIsSkippedAndTheRestOfThePackStillInstalls() {
+        val zip = validPack("ru", "Russian", extras = listOf("model.onnx" to modelBytes(2048)))
+        assertThat(import(zip)).isInstanceOf(ImportResult.Success::class.java)
+        assertThat(manager.isInstalled("ru")).isTrue()
+        assertWithMessage("an unverifiable model must not be installed")
+            .that(manager.getModelPath("ru")).isNull()
+    }
+
+    @Test
+    fun aModelOverTheSizeCapIsRejectedWithoutBeingWrittenWhole() {
+        val oversize = modelBytes(CtcPackModel.MAX_PACK_MODEL_BYTES.toInt() + 1024)
+        val zip = validPack(
+            "ru", "Russian",
+            manifest = manifestJson("ru", "Russian", model = oversize),
+            extras = listOf("model.onnx" to oversize),
+        )
+        assertThat(import(zip)).isEqualTo(ImportResult.Error(PackImportFailure.ModelTooLarge("model.onnx", 8)))
+        assertWithMessage(
+            "the cap must abort the EXTRACTION, not merely refuse afterwards — otherwise a pack " +
+                "naming a multi-gigabyte model fills the cache dir before anything rejects it"
+        ).that(
+            cacheDir.listFiles().orEmpty()
+                .flatMap { it.listFiles()?.toList().orEmpty() }
+                .filter { it.name == "model.onnx" }
+                .map { it.length() }
+        ).isEmpty()
+    }
+
+    /**
+     * The security property, stated where a reader of the importer will meet it: a pack can
+     * declare any model it likes and have the import accept it, and the app STILL will not run
+     * it. Only byte-identity with a hash compiled into this APK is loadable.
+     */
+    @Test
+    fun anInternallyConsistentPackModelIsStillNotLoadableUnlessItIsThePinnedArtifact() {
+        val impostor = modelBytes(4096)
+        val zip = validPack(
+            "ru", "Russian",
+            manifest = manifestJson("ru", "Russian", model = impostor),
+            extras = listOf("model.onnx" to impostor),
+        )
+        assertWithMessage("the pack agrees with itself, so the import succeeds")
+            .that(import(zip)).isInstanceOf(ImportResult.Success::class.java)
+        assertThat(manager.getModelPath("ru")).isNotNull()
+        assertWithMessage(
+            "…and the load side refuses it anyway. The importer's hash check is an integrity " +
+                "check on the download; the app's pin is what keeps ORT off user-supplied bytes"
+        ).that(CtcPackModel.verifiedPackModel(filesDir, "ru")).isNull()
+    }
+
+    // ------------------------------------------------------------- rejection surface
+
+    @Test
+    fun aPackMissingItsManifestIsRejectedWithThatReason() {
+        val zip = packZip("bad.zip", listOf("dictionary.bin" to dictionaryBytes()))
+        assertThat(import(zip)).isEqualTo(ImportResult.Error(PackImportFailure.MissingMember("manifest.json")))
+        assertWithMessage("a rejected pack must install nothing")
+            .that(File(filesDir, "langpacks").listFiles()?.toList().orEmpty()).isEmpty()
+    }
+
+    @Test
+    fun aPackMissingItsDictionaryIsRejectedWithThatReason() {
+        val zip = packZip(
+            "bad.zip",
+            listOf("manifest.json" to manifestJson("nl", "Dutch").toByteArray())
+        )
+        assertThat(import(zip)).isEqualTo(ImportResult.Error(PackImportFailure.MissingMember("dictionary.bin")))
+    }
+
+    @Test
+    fun aManifestWithoutTheRequiredFieldsIsRejected() {
+        val zip = packZip(
+            "bad.zip",
+            listOf(
+                "manifest.json" to """{"name":"Nameless"}""".toByteArray(), // no "code"
+                "dictionary.bin" to dictionaryBytes(),
+            )
+        )
+        assertThat(import(zip)).isEqualTo(ImportResult.Error(PackImportFailure.InvalidMember("manifest.json")))
+    }
+
+    @Test
+    fun aDictionaryWithTheWrongMagicOrVersionIsRejected() {
+        val wrongMagic = dictionaryBytes().also { it[0] = 'X'.code.toByte() }
+        assertThat(
+            import(packZip("m.zip", listOf(
+                "manifest.json" to manifestJson("nl", "Dutch").toByteArray(),
+                "dictionary.bin" to wrongMagic,
+            )))
+        ).isEqualTo(ImportResult.Error(PackImportFailure.InvalidMember("dictionary.bin")))
+
+        val v1 = dictionaryBytes().also { it[4] = 1 }
+        assertWithMessage("the pre-V2 'DICT'-era layout must not be accepted").that(
+            import(packZip("v.zip", listOf(
+                "manifest.json" to manifestJson("nl", "Dutch").toByteArray(),
+                "dictionary.bin" to v1,
+            )))
+        ).isEqualTo(ImportResult.Error(PackImportFailure.InvalidMember("dictionary.bin")))
+    }
+
+    @Test
+    fun aTruncatedDictionaryIsRejected() {
+        // `validateDictionary` requires at least 48 bytes: a 40-byte header-only file is not a
+        // lexicon and must not be installed as one.
+        assertThat(
+            import(packZip("t.zip", listOf(
+                "manifest.json" to manifestJson("nl", "Dutch").toByteArray(),
+                "dictionary.bin" to dictionaryBytes(40),
+            )))
+        ).isEqualTo(ImportResult.Error(PackImportFailure.InvalidMember("dictionary.bin")))
+    }
+
+    @Test
+    fun anUnreadableUriIsRejectedWithoutThrowing() {
+        val uri = mockk<Uri>()
+        every { resolver.openInputStream(uri) } returns null
+        assertThat(manager.importLanguagePack(uri)).isEqualTo(ImportResult.Error(PackImportFailure.Io(IoFailureReason.FILE_NOT_FOUND, "Cannot open file")))
+    }
+
+    /**
+     * A ZIP entry naming a traversal path must not escape the install directory: the importer
+     * refuses traversal instead of silently flattening it into a valid pack.
+     */
+    @Test
+    fun aTraversalEntryNameCannotEscapeTheTempDirectory() {
+        val zip = packZip(
+            "evil.zip",
+            listOf(
+                "../../manifest.json" to manifestJson("nl", "Dutch").toByteArray(),
+                "../../../dictionary.bin" to dictionaryBytes(),
+                "../../../../pwned.txt" to "owned".toByteArray(),
+            )
+        )
+
+        assertThat(import(zip)).isEqualTo(
+            ImportResult.Error(PackImportFailure.InvalidMember("../../manifest.json"))
+        )
+        assertWithMessage("nothing may be written above the app's cache/files roots")
+            .that(File(scratch.parentFile, "pwned.txt").exists()).isFalse()
+        assertThat(File(scratch, "pwned.txt").exists()).isFalse()
+    }
+
+    // -------------------------------------------------- manifest.code traversal (G-1)
+
+    /**
+     * G-1 (comprehensive audit 2026-09-06): zip ENTRY names are sanitized, but the
+     * manifest's `code` was used verbatim as a path component of the install directory.
+     * A hostile pack with `"code":"../evil"` must be rejected, not installed to
+     * `files/evil/`.
+     */
+    @Test
+    fun aTraversalManifestCodeIsRejectedAndInstallsNothing() {
+        val zip = packZip(
+            "evil-code.zip",
+            listOf(
+                "manifest.json" to manifestJson("../evil", "Evil").toByteArray(),
+                "dictionary.bin" to dictionaryBytes(),
+            )
+        )
+
+        assertWithMessage("a traversal code must be rejected, not installed outside langpacks/")
+            .that(import(zip)).isInstanceOf(ImportResult.Error::class.java)
+        assertWithMessage("nothing may be installed at files/evil/")
+            .that(File(filesDir, "evil").exists()).isFalse()
+        assertThat(manager.getInstalledPacks()).isEmpty()
+    }
+
+    /**
+     * G-1, the destructive half: `code=".."` resolves the install dir to filesDir itself,
+     * and the reimport branch then `deleteRecursively()`s it — wiping ALL app data
+     * (langpacks, customizations, learned stores). The import must fail and every
+     * pre-existing file must survive.
+     */
+    @Test
+    fun aDotDotManifestCodeCannotWipeTheAppFilesDirectory() {
+        // A sentinel standing in for the rest of the app's files (customizations, stores…).
+        val sentinel = File(filesDir, "short_swipe_customizations.json").apply {
+            writeText("""{"version":2,"mappings":{}}""")
+        }
+        // And an installed pack that must survive too.
+        import(validPack("nl", "Dutch"))
+        assertThat(manager.isInstalled("nl")).isTrue()
+
+        val zip = packZip(
+            "wipe.zip",
+            listOf(
+                "manifest.json" to manifestJson("..", "Wipe").toByteArray(),
+                "dictionary.bin" to dictionaryBytes(),
+            )
+        )
+
+        assertWithMessage("code \"..\" must be rejected before any filesystem mutation")
+            .that(import(zip)).isInstanceOf(ImportResult.Error::class.java)
+        assertWithMessage("the app's files must survive a hostile pack import")
+            .that(sentinel.exists()).isTrue()
+        assertWithMessage("previously installed packs must survive a hostile pack import")
+            .that(manager.isInstalled("nl")).isTrue()
+    }
+
+    /**
+     * G-1 companion: an EMPTY code resolves to the langpacks dir itself — the reimport
+     * branch would wipe every installed pack at once.
+     */
+    @Test
+    fun anEmptyManifestCodeCannotWipeTheLangpacksDirectory() {
+        import(validPack("nl", "Dutch"))
+
+        val zip = packZip(
+            "empty-code.zip",
+            listOf(
+                "manifest.json" to manifestJson("", "Empty").toByteArray(),
+                "dictionary.bin" to dictionaryBytes(),
+            )
+        )
+
+        assertThat(import(zip)).isInstanceOf(ImportResult.Error::class.java)
+        assertWithMessage("installed packs must survive an empty-code pack")
+            .that(manager.isInstalled("nl")).isTrue()
+    }
+
+    /**
+     * The validation guard must not over-reject: every shipped pack-code shape keeps
+     * importing. `scripts/dictionaries/langpack-*.zip` all carry plain ISO codes today
+     * ("en", "ru", …) but the build tooling names variant packs like `en-web-50k`,
+     * so hyphenated/underscored variant codes stay legal.
+     */
+    @Test
+    fun realWorldPackCodeShapesAreStillAccepted() {
+        for (code in listOf("en", "sv", "pt", "en-web-50k", "en-opensubtitles", "pt_br")) {
+            assertWithMessage("code \"$code\" is a legitimate pack code and must import")
+                .that(import(validPack(code, "Pack $code")))
+                .isInstanceOf(ImportResult.Success::class.java)
+            assertThat(manager.isInstalled(code)).isTrue()
+        }
+    }
+
+    /**
+     * Every pack published from `scripts/dictionaries/` imports through the real importer AND
+     * carries its data attribution (2026-09-26 data-licensing audit,
+     * `docs/audit/2026-09-26-data-licensing-audit.md`). The word data is CC BY-SA, whose terms
+     * travel with the copy: a pack downloaded on its own must hold the credit, the licence and
+     * the change note, so both the manifest keys and the `NOTICE.txt` member are pinned here,
+     * as is the fact that the installed manifest keeps them on the device. A pack rebuilt
+     * without them (or a new pack added without a `PACK_SOURCES` row) fails this test.
+     */
+    @Test
+    fun everyShippedPackImportsAndCarriesItsAttribution() {
+        val packs = File("scripts/dictionaries").listFiles { f ->
+            f.name.startsWith("langpack-") && f.name.endsWith(".zip")
+        }?.sortedBy { it.name }.orEmpty()
+        assertWithMessage("expected shipped packs under scripts/dictionaries (run from project root)")
+            .that(packs).isNotEmpty()
+        assertWithMessage("langpack-en-norvig-50k.zip has no redistribution grant and was removed")
+            .that(packs.map { it.name }).doesNotContain("langpack-en-norvig-50k.zip")
+
+        for (pack in packs) {
+            val (manifest, notice) = java.util.zip.ZipFile(pack).use { zf ->
+                val m = zf.getEntry("manifest.json")
+                    ?.let { e -> zf.getInputStream(e).use { it.readBytes().toString(Charsets.UTF_8) } }
+                val n = zf.getEntry("NOTICE.txt")
+                    ?.let { e -> zf.getInputStream(e).use { it.readBytes().toString(Charsets.UTF_8) } }
+                m to n
+            }
+            assertWithMessage("${pack.name}: manifest.json").that(manifest).isNotNull()
+            val json = org.json.JSONObject(manifest!!)
+            assertWithMessage("${pack.name}: manifest license")
+                .that(json.optString("license")).isEqualTo("GPL-3.0-only")
+            val attribution = json.optString("attribution")
+            assertWithMessage("${pack.name}: manifest attribution names an upstream licence")
+                .that(attribution).containsMatch("CC BY-SA [34]\\.0|Apache-2\\.0")
+            assertWithMessage("${pack.name}: manifest attribution carries the change note")
+                .that(attribution).contains("Modified: converted to a CleverKeys frequency list.")
+            assertWithMessage("${pack.name}: manifest source is a URL")
+                .that(json.optString("source")).startsWith("https://")
+            assertWithMessage("${pack.name}: NOTICE.txt member").that(notice).isNotNull()
+            assertWithMessage("${pack.name}: NOTICE.txt carries the change note")
+                .that(notice).contains("Modified: converted to a CleverKeys frequency list.")
+
+            val code = json.getString("code")
+            assertWithMessage("${pack.name} must import through the real importer")
+                .that(import(pack)).isInstanceOf(ImportResult.Success::class.java)
+            val installed = org.json.JSONObject(File(installedDir(code), "manifest.json").readText())
+            assertWithMessage("${pack.name}: the installed manifest keeps the attribution on the device")
+                .that(installed.optString("attribution")).isEqualTo(attribution)
+
+            // What the language-pack manager UI reads back: the parsed record and the notice.
+            val listed = manager.getInstalledPacks().single { it.code == code }
+            assertWithMessage("${pack.name}: getInstalledPacks() exposes the licence")
+                .that(listed.license).isEqualTo("GPL-3.0-only")
+            assertWithMessage("${pack.name}: getInstalledPacks() exposes the attribution")
+                .that(listed.attribution).isEqualTo(attribution)
+            assertWithMessage("${pack.name}: getInstalledPacks() exposes the source")
+                .that(listed.source).isEqualTo(json.optString("source"))
+            assertWithMessage("${pack.name}: NOTICE.txt is kept on the device, byte-for-byte")
+                .that(manager.readNotice(code)).isEqualTo(notice)
+        }
+    }
+
+    // ------------------------------------------ data attribution (licensing audit follow-up)
+    //
+    // The attribution keys and NOTICE.txt are what CC BY-SA requires to travel with the data;
+    // the UI shows them per installed pack. Packs installed before 2026-09-27 have neither,
+    // and a pack is untrusted input, so absent and malformed values must parse to null rather
+    // than fail the import or render garbage.
+
+    private fun attributedManifest(
+        code: String,
+        name: String,
+        extraFields: String,
+    ): String = """{"code":"$code","name":"$name","version":2,"wordCount":5$extraFields}"""
+
+    @Test
+    fun attributionKeysAreParsedIntoTheManifest() {
+        val manifest = attributedManifest(
+            "sw", "Swahili",
+            ""","license":"GPL-3.0-only","attribution":"Swwiki by Kevin Donnelly (CC BY-SA 3.0)","source":"https://kevindonnelly.org.uk/swahili/swwiki/""""
+        )
+        val result = import(validPack("sw", "Swahili", manifest = manifest))
+        assertThat(result).isInstanceOf(ImportResult.Success::class.java)
+        val parsed = (result as ImportResult.Success).manifest
+        assertThat(parsed.license).isEqualTo("GPL-3.0-only")
+        assertThat(parsed.attribution).isEqualTo("Swwiki by Kevin Donnelly (CC BY-SA 3.0)")
+        assertThat(parsed.source).isEqualTo("https://kevindonnelly.org.uk/swahili/swwiki/")
+    }
+
+    @Test
+    fun aPackWithoutAttributionKeysParsesThemAsNull() {
+        // The shape of every pack built before the 2026-09-26 audit.
+        val result = import(validPack("nl", "Dutch", wordCount = 3))
+        val parsed = (result as ImportResult.Success).manifest
+        assertThat(parsed.license).isNull()
+        assertThat(parsed.attribution).isNull()
+        assertThat(parsed.source).isNull()
+        assertWithMessage("an old pack still compares equal to its pre-attribution record")
+            .that(parsed).isEqualTo(LanguagePackManifest("nl", "Dutch", 1, "", 3, false))
+        assertWithMessage("an old pack has no notice on disk")
+            .that(manager.readNotice("nl")).isNull()
+    }
+
+    @Test
+    fun malformedAttributionValuesAreIgnoredWithoutFailingTheImport() {
+        val manifest = attributedManifest(
+            "tl", "Tagalog",
+            ""","license":42,"attribution":null,"source":{"url":"https://example.org"}"""
+        )
+        val result = import(validPack("tl", "Tagalog", manifest = manifest))
+        assertWithMessage("wrong-typed attribution keys must not reject an otherwise valid pack")
+            .that(result).isInstanceOf(ImportResult.Success::class.java)
+        val parsed = (result as ImportResult.Success).manifest
+        assertWithMessage("a number is not a licence identifier").that(parsed.license).isNull()
+        assertWithMessage("JSON null must not become the text \"null\"").that(parsed.attribution).isNull()
+        assertWithMessage("an object is not a source").that(parsed.source).isNull()
+    }
+
+    @Test
+    fun blankAttributionValuesAreTreatedAsAbsentAndOthersAreTrimmed() {
+        val manifest = attributedManifest(
+            "ms", "Malay",
+            ""","license":"   ","attribution":"","source":"  https://github.com/rspeer/wordfreq  """"
+        )
+        val parsed = (import(validPack("ms", "Malay", manifest = manifest)) as ImportResult.Success).manifest
+        assertThat(parsed.license).isNull()
+        assertThat(parsed.attribution).isNull()
+        assertThat(parsed.source).isEqualTo("https://github.com/rspeer/wordfreq")
+    }
+
+    @Test
+    fun anOversizedAttributionIsCappedSoAHostilePackCannotFloodTheDialog() {
+        val huge = "x".repeat(LanguagePackManager.MAX_ATTRIBUTION_FIELD_CHARS * 4)
+        val manifest = attributedManifest("id", "Indonesian", ""","attribution":"$huge"""")
+        val parsed = (import(validPack("id", "Indonesian", manifest = manifest)) as ImportResult.Success).manifest
+        assertThat(parsed.attribution?.length).isEqualTo(LanguagePackManager.MAX_ATTRIBUTION_FIELD_CHARS)
+    }
+
+    @Test
+    fun attributionSurvivesARestartBecauseItIsReadBackFromTheInstalledManifest() {
+        val manifest = attributedManifest(
+            "de", "German",
+            ""","license":"GPL-3.0-only","attribution":"wordfreq (CC BY-SA 4.0)","source":"https://github.com/rspeer/wordfreq""""
+        )
+        import(validPack("de", "German", manifest = manifest))
+
+        // A fresh manager over the same filesDir is what the app sees after a process restart.
+        val afterRestart = LanguagePackManager(context).getInstalledPacks().single()
+        assertThat(afterRestart.license).isEqualTo("GPL-3.0-only")
+        assertThat(afterRestart.attribution).isEqualTo("wordfreq (CC BY-SA 4.0)")
+        assertThat(afterRestart.source).isEqualTo("https://github.com/rspeer/wordfreq")
+    }
+
+    @Test
+    fun noticeTxtIsInstalledAndReadableAfterImport() {
+        val notice = "CleverKeys language pack: German (de)\nwordfreq -- CC BY-SA 4.0\n"
+        val zip = validPack("de", "German", extras = listOf("NOTICE.txt" to notice.toByteArray()))
+        assertThat(import(zip)).isInstanceOf(ImportResult.Success::class.java)
+
+        assertThat(File(installedDir("de"), "NOTICE.txt").readText()).isEqualTo(notice)
+        assertThat(manager.readNotice("de")).isEqualTo(notice)
+        assertWithMessage("a fresh manager (process restart) still finds the notice")
+            .that(LanguagePackManager(context).readNotice("de")).isEqualTo(notice)
+    }
+
+    @Test
+    fun reimportingWithoutANoticeRemovesTheStaleOne() {
+        import(validPack("de", "German", extras = listOf("NOTICE.txt" to "old".toByteArray())))
+        assertThat(manager.readNotice("de")).isEqualTo("old")
+        import(validPack("de", "German"))
+        assertWithMessage("a replaced pack must not keep the previous version's credits")
+            .that(manager.readNotice("de")).isNull()
+    }
+
+    @Test
+    fun anOversizedNoticeIsReadBackTruncatedToTheCap() {
+        val big = "y".repeat(LanguagePackManager.MAX_NOTICE_CHARS + 5000)
+        assertThat(import(validPack("de", "German"))).isInstanceOf(ImportResult.Success::class.java)
+        assertThat(import(validPack("de", "German", extras = listOf("NOTICE.txt" to big.toByteArray()))))
+            .isEqualTo(ImportResult.Error(PackImportFailure.MemberTooLarge("NOTICE.txt", 64)))
+        // Older installs can predate the extraction cap; the UI still bounds their notice.
+        File(installedDir("de"), "NOTICE.txt").writeText(big)
+        assertThat(manager.readNotice("de")?.length).isEqualTo(LanguagePackManager.MAX_NOTICE_CHARS)
+    }
+
+    @Test
+    fun readNoticeForAPackThatIsNotInstalledIsNull() {
+        assertThat(manager.readNotice("fr")).isNull()
+    }
+
+    // ------------------------------------------------------- re-import and enumeration
+
+    @Test
+    fun reimportingAPackReplacesItRatherThanMerging() {
+        import(packZip("v1.zip", listOf(
+            "manifest.json" to manifestJson("nl", "Dutch", version = 1, wordCount = 10).toByteArray(),
+            "dictionary.bin" to dictionaryBytes(),
+            "unigrams.txt" to "old\n".toByteArray(),
+        )))
+        assertThat(manager.getUnigramsPath("nl")?.readText()).isEqualTo("old\n")
+
+        // v2 of the same pack ships WITHOUT unigrams — the stale file must not survive.
+        import(packZip("v2.zip", listOf(
+            "manifest.json" to manifestJson("nl", "Dutch", version = 2, wordCount = 20).toByteArray(),
+            "dictionary.bin" to dictionaryBytes(),
+        )))
+
+        assertThat(manager.getInstalledPacks())
+            .containsExactly(LanguagePackManifest("nl", "Dutch", 2, "", 20, false))
+        assertWithMessage("the previous version's unigrams must be gone, not merged")
+            .that(manager.getUnigramsPath("nl")).isNull()
+    }
+
+    /**
+     * G-6 (comprehensive audit 2026-09-06): reimport used to `deleteRecursively()` the
+     * installed pack BEFORE copying the replacement. A mid-copy IO failure (disk full)
+     * then lost the working pack AND left a manifest-only ghost that `getInstalledPacks()`
+     * lists while `isInstalled()` says absent. Invariant: after a failed reimport the
+     * previous pack still works, or at minimum the pack is FULLY absent — never limbo.
+     *
+     * The failure is injected by making every `copyTo` whose destination is a
+     * `dictionary.bin` under the langpacks tree throw (the extraction copy into cacheDir
+     * is untouched, so validation succeeds and the install phase is reached).
+     */
+    @Test
+    fun aFailedReimportNeverDestroysTheInstalledPack() {
+        import(packZip("v1.zip", listOf(
+            "manifest.json" to manifestJson("nl", "Dutch", version = 1, wordCount = 10).toByteArray(),
+            "dictionary.bin" to dictionaryBytes(),
+        )))
+        assertThat(manager.isInstalled("nl")).isTrue()
+
+        // copyTo lives in the multifile-class PART (FilesKt__UtilsKt); the FilesKt facade
+        // only bridges to it, and mocking the facade does not intercept the delegated call.
+        mockkStatic("kotlin.io.FilesKt__UtilsKt")
+        every {
+            any<File>().copyTo(
+                match { it.name == "dictionary.bin" && it.parentFile?.parentFile?.name == "langpacks" },
+                any(),
+                any()
+            )
+        } throws java.io.IOException("simulated disk full")
+
+        val result = import(packZip("v2.zip", listOf(
+            "manifest.json" to manifestJson("nl", "Dutch", version = 2, wordCount = 20).toByteArray(),
+            "dictionary.bin" to dictionaryBytes(),
+        )))
+
+        unmockkStatic("kotlin.io.FilesKt__UtilsKt")
+
+        assertWithMessage("the failed import must be reported as an error")
+            .that(result).isInstanceOf(ImportResult.Error::class.java)
+        assertWithMessage(
+            "after a failed reimport the previously working v1 pack must still be installed " +
+                "— losing it to a disk-full mid-copy is the G-6 bug"
+        ).that(manager.isInstalled("nl")).isTrue()
+        assertWithMessage("the surviving pack must be v1, not a half-copied v2")
+            .that(manager.getInstalledPacks())
+            .containsExactly(LanguagePackManifest("nl", "Dutch", 1, "", 10, false))
+        assertWithMessage("no manifest-only ghost: every listed pack must also be installed")
+            .that(manager.getInstalledPacks().all { manager.isInstalled(it.code) }).isTrue()
+    }
+
+    @Test
+    fun deletingAPackRemovesItFromEveryQuery() {
+        import(validPack("sw", "Swahili"))
+        assertThat(manager.isInstalled("sw")).isTrue()
+
+        assertThat(manager.deletePack("sw")).isTrue()
+
+        assertThat(manager.isInstalled("sw")).isFalse()
+        assertThat(manager.getDictionaryPath("sw")).isNull()
+        assertThat(manager.getInstalledPacks()).isEmpty()
+        assertWithMessage("deleting a pack that was never installed reports false, not a crash")
+            .that(manager.deletePack("sw")).isFalse()
+    }
+
+    @Test
+    fun availableLanguagesAreTheBundledPairPlusEveryInstalledPackSortedByName() {
+        import(validPack("nl", "Dutch"))
+        import(validPack("tl", "Tagalog"))
+
+        assertThat(manager.getAllAvailableLanguages()).containsExactly(
+            LanguageInfo("nl", "Dutch", LanguageSource.PACK),
+            LanguageInfo("en", "English", LanguageSource.BUNDLED),
+            LanguageInfo("es", "Spanish", LanguageSource.BUNDLED),
+            LanguageInfo("tl", "Tagalog", LanguageSource.PACK),
+        ).inOrder()
+    }
+
+    @Test
+    fun aPackThatShadowsABundledLanguageDoesNotDuplicateTheEntry() {
+        import(validPack("es", "Spanish"))
+
+        assertWithMessage("es is bundled; an imported es pack must not produce two Spanish rows")
+            .that(manager.getAllAvailableLanguages().count { it.code == "es" }).isEqualTo(1)
+        assertThat(manager.getAllAvailableLanguages().single { it.code == "es" }.source)
+            .isEqualTo(LanguageSource.BUNDLED)
+    }
+
+    // --------------------------------------------------------- v1.1.96 / v1.1.97: OOM
+
+    /**
+     * 12 MB of dictionary — roughly ten times the 236k-word Spanish pack that originally
+     * crashed the importer — imports and arrives byte-exact.
+     *
+     * The ZIP is deflate-compressed to a few KB, so the only thing this can exercise is the
+     * DECOMPRESSED path: if any step buffered the whole entry, the peak would be the full 12 MB
+     * rather than `copyTo`'s 8 KB window.
+     */
+    @Test
+    fun aPackFarLargerThanAnyBufferImportsByStreaming() {
+        val bigSize = 12 * 1024 * 1024
+        val zip = packZip(
+            "big.zip",
+            listOf(
+                "manifest.json" to manifestJson("es", "Spanish", wordCount = 1).toByteArray(),
+                "dictionary.bin" to dictionaryBytes(bigSize),
+            )
+        )
+
+        assertThat(import(zip)).isEqualTo(
+            ImportResult.Success(LanguagePackManifest("es", "Spanish", 1, "", 1, false))
+        )
+
+        val installed = File(installedDir("es"), "dictionary.bin")
+        assertWithMessage("every byte of the pack must reach disk")
+            .that(installed.length()).isEqualTo(bigSize.toLong())
+
+        // Header intact and an interior byte at 11 MB matches the generator — proves the copy
+        // is complete and in order, not truncated at some buffer boundary.
+        RandomAccessFile(installed, "r").use { raf ->
+            val head = ByteArray(8)
+            raf.readFully(head)
+            assertThat(head.toList()).isEqualTo(ckdtV2Header.toList())
+
+            val probe = 11 * 1024 * 1024
+            raf.seek(probe.toLong())
+            assertThat(raf.readByte()).isEqualTo((probe % 251).toByte())
+        }
+
+        assertWithMessage("the extraction scratch directory must be cleaned up afterwards")
+            .that(cacheDir.listFiles()?.toList().orEmpty()).isEmpty()
+    }
+
+    /**
+     * Anti-regression guard for the OOM fix itself.
+     *
+     * The behavioural test above passes on a machine with enough heap even if the importer
+     * slurped the entry — the crash it guards is memory pressure on a phone, which no JVM test
+     * can reproduce faithfully. What CAN be pinned is the bounded streaming extraction
+     * rather than whole-entry buffering and no whole-entry read anywhere in the import path.
+     */
+    @Test
+    fun theImportPathNeverReadsAWholeEntryIntoMemory() {
+        val source = File("src/main/kotlin/tribixbite/cleverkeys/langpack/LanguagePackManager.kt")
+        assertWithMessage("expected ${source.path} (run from project root)")
+            .that(source.isFile).isTrue()
+        val text = source.readText()
+
+        val body = text.substringAfter("private fun importFromStream(")
+            .substringBefore("private fun parseManifest(")
+        assertWithMessage("importFromStream was renamed or moved — re-point this guard")
+            .that(body).isNotEmpty()
+
+        assertWithMessage(
+            "the ZIP entry must be streamed to disk. `copyBounded` keeps peak " +
+                "memory at one 8KB buffer regardless of pack size — the whole point of the " +
+                "v1.1.96 / v1.1.97 OOM fix."
+        ).that(body).contains("copyBounded(zis, fos, cap)")
+
+        for (slurp in listOf("readBytes()", "readAllBytes()", "zis.readText()")) {
+            assertWithMessage(
+                "found `$slurp` in importFromStream — that materialises an entire pack entry " +
+                    "in memory and reintroduces the OOM on large packs (Spanish, 236k words)."
+            ).that(body).doesNotContain(slurp)
+        }
+
+        // The validator only ever needs the header; reading more would scale with pack size.
+        val validator = text.substringAfter("private fun validateDictionary(")
+            .substringBefore("fun getInstalledPacks(")
+        assertWithMessage("validateDictionary must read a fixed-size header, not the file")
+            .that(validator).contains("ByteArray(16)")
+        assertThat(validator).doesNotContain("readBytes()")
+    }
+    @Test
+    fun oversizedCanonicalCountIsRefusedEvenWhenManifestClaimsOneWord() {
+        val dictionary = dictionaryBytes().also {
+            java.nio.ByteBuffer.wrap(it).order(java.nio.ByteOrder.LITTLE_ENDIAN).putInt(12, 1_000_000)
+        }
+        val zip = packZip("million.zip", listOf(
+            "manifest.json" to manifestJson("el", "Greek", wordCount = 1).toByteArray(),
+            "dictionary.bin" to dictionary,
+        ))
+        assertThat(import(zip)).isEqualTo(
+            ImportResult.Error(PackImportFailure.DictionaryTooLarge(1_000_000, 100_000))
+        )
+        assertThat(installedDir("el").exists()).isFalse()
+        assertThat(cacheDir.listFiles()?.toList().orEmpty()).isEmpty()
+    }
+
+    @Test
+    fun oversizedUpdatePreservesPreviouslyInstalledDictionary() {
+        val original = packZip("original.zip", listOf("manifest.json" to manifestJson("el", "Greek").toByteArray(), "dictionary.bin" to dictionaryBytes()))
+        assertThat(import(original)).isInstanceOf(ImportResult.Success::class.java)
+        val before = File(installedDir("el"), "dictionary.bin").readBytes()
+        val dictionary = dictionaryBytes().also {
+            java.nio.ByteBuffer.wrap(it).order(java.nio.ByteOrder.LITTLE_ENDIAN).putInt(12, 100_001)
+        }
+        val zip = packZip("update.zip", listOf(
+            "manifest.json" to manifestJson("el", "Greek").toByteArray(),
+            "dictionary.bin" to dictionary,
+        ))
+        assertThat(import(zip)).isEqualTo(
+            ImportResult.Error(PackImportFailure.DictionaryTooLarge(100_001, 100_000))
+        )
+        assertThat(File(installedDir("el"), "dictionary.bin").readBytes().toList()).isEqualTo(before.toList())
+    }
+
+    /**
+     * gh #184: a pack installed before the word cap existed stays on disk and the loader now
+     * refuses it. Settings asks [LanguagePackManager.installedDictionaryProblem] so the user
+     * sees why the pack is unused; a valid installed pack reports no problem.
+     */
+    @Test
+    fun anInstalledPackOverTheWordCapReportsWhyItIsNotLoaded() {
+        val zip = packZip("ok.zip", listOf("manifest.json" to manifestJson("el", "Greek").toByteArray(), "dictionary.bin" to dictionaryBytes()))
+        assertThat(import(zip)).isInstanceOf(ImportResult.Success::class.java)
+        assertThat(manager.installedDictionaryProblem("el")).isNull()
+
+        // Simulate a pre-cap install: the header on disk claims more words than the cap.
+        val onDisk = File(installedDir("el"), "dictionary.bin")
+        val bytes = onDisk.readBytes()
+        java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN).putInt(12, 236_000)
+        onDisk.writeBytes(bytes)
+
+        assertThat(manager.installedDictionaryProblem("el"))
+            .isEqualTo(PackImportFailure.DictionaryTooLarge(236_000, 100_000))
+        assertThat(manager.installedDictionaryProblem("zz")).isNull()  // not installed
+    }
+
+    @Test
+    fun duplicateFlattenedMemberIsRefused() {
+        val zip = packZip("duplicate.zip", listOf(
+            "manifest.json" to manifestJson("el", "Greek").toByteArray(),
+            "dictionary.bin" to dictionaryBytes(),
+            "wrapper/dictionary.bin" to dictionaryBytes(),
+        ))
+        assertThat(import(zip)).isEqualTo(
+            ImportResult.Error(PackImportFailure.InvalidMember("dictionary.bin"))
+        )
+        assertThat(cacheDir.listFiles()?.toList().orEmpty()).isEmpty()
+    }
+
+    @Test
+    fun oversizedDictionaryBytesAreRefusedDuringExtraction() {
+        val zip = packZip("large-bytes.zip", listOf(
+            "manifest.json" to manifestJson("el", "Greek").toByteArray(),
+            "dictionary.bin" to dictionaryBytes(16 * 1024 * 1024 + 1),
+        ))
+        assertThat(import(zip)).isEqualTo(
+            ImportResult.Error(PackImportFailure.MemberTooLarge("dictionary.bin", 16 * 1024))
+        )
+        assertThat(cacheDir.listFiles()?.toList().orEmpty()).isEmpty()
+    }
+
+    @Test
+    fun oversizedManifestIsRefusedWithAccurateKiBLimit() {
+        val zip = packZip("manifest-cap.zip", listOf(
+            "manifest.json" to ByteArray(64 * 1024 + 1) { 32 },
+            "dictionary.bin" to dictionaryBytes(),
+        ))
+        assertThat(import(zip)).isEqualTo(
+            ImportResult.Error(PackImportFailure.MemberTooLarge("manifest.json", 64))
+        )
+        assertThat(cacheDir.listFiles()?.toList().orEmpty()).isEmpty()
+    }
+
+    @Test
+    fun excessiveArchiveEntryCountIsRefused() {
+        val zip = packZip("entries.zip", (0 until 65).map {
+            "entry-$it" to byteArrayOf(1)
+        })
+        assertThat(import(zip)).isEqualTo(
+            ImportResult.Error(PackImportFailure.InvalidMember("entry-64"))
+        )
+        assertThat(cacheDir.listFiles()?.toList().orEmpty()).isEmpty()
+    }
+
+    @Test
+    fun aggregateArchiveCapRejectsIndividuallyAllowedMembers() {
+        val member = dictionaryBytes(16 * 1024 * 1024)
+        val zip = packZip("aggregate.zip", listOf(
+            "manifest.json" to manifestJson("el", "Greek").toByteArray(),
+            "dictionary.bin" to member,
+            "extra-1.bin" to member,
+            "extra-2.bin" to member,
+            "extra-3.bin" to member,
+        ))
+        assertThat(import(zip)).isEqualTo(
+            ImportResult.Error(PackImportFailure.MemberTooLarge("ZIP", 64 * 1024))
+        )
+        assertThat(installedDir("el").exists()).isFalse()
+        assertThat(cacheDir.listFiles()?.toList().orEmpty()).isEmpty()
+    }
+
+    // ------------------------------------------- todo item 11: the final install swap
+
+    /** Thrown by [CrashingOps] to stand in for the process dying between two filesystem calls. */
+    private class SimulatedProcessDeath : Error("simulated process death")
+
+    /**
+     * Real filesystem behaviour until [crashAfter] mutating calls have completed; the next
+     * mutating call throws [SimulatedProcessDeath] and every call after it does nothing, so
+     * the importer's `finally` cleanup cannot tidy up the way a real process death would not.
+     */
+    private class CrashingOps(private val crashAfter: Int) : PackFileOps {
+        var crashed = false
+            private set
+        private var mutations = 0
+
+        override fun exists(file: File) = PackFileOps.Real.exists(file)
+        override fun list(dir: File) = PackFileOps.Real.list(dir)
+        override fun rename(from: File, to: File) = mutate { PackFileOps.Real.rename(from, to) }
+        override fun deleteRecursively(file: File) = mutate { PackFileOps.Real.deleteRecursively(file) }
+
+        private fun mutate(op: () -> Boolean): Boolean {
+            if (crashed) return false
+            if (mutations == crashAfter) {
+                crashed = true
+                throw SimulatedProcessDeath()
+            }
+            mutations++
+            return op()
+        }
+    }
+
+    /** v1 and v2 of one pack, distinguishable by manifest version AND dictionary bytes. */
+    private fun greekV1() = packZip("el-v1.zip", listOf(
+        "manifest.json" to manifestJson("el", "Greek", version = 1, wordCount = 10).toByteArray(),
+        "dictionary.bin" to dictionaryBytes(64),
+    ))
+
+    private fun greekV2() = packZip("el-v2.zip", listOf(
+        "manifest.json" to manifestJson("el", "Greek", version = 2, wordCount = 20).toByteArray(),
+        "dictionary.bin" to dictionaryBytes(96),
+    ))
+
+    private fun importWith(target: LanguagePackManager, zip: File): ImportResult {
+        val uri = mockk<Uri>()
+        every { resolver.openInputStream(uri) } returns zip.inputStream()
+        return target.importLanguagePack(uri)
+    }
+
+    /** Every entry under files/langpacks whose name starts with a dot (staging, backup, trash). */
+    private fun leftoverDotDirs(): List<String> =
+        File(filesDir, "langpacks").listFiles().orEmpty().map { it.name }.filter { it.startsWith(".") }
+
+    /**
+     * The swap's last step failing must not cost the user the pack they already had. The old
+     * code deleted the installed directory first and then renamed the staged one into place,
+     * so a rename that returned false left NO pack — and reported the failure as if nothing
+     * had changed.
+     */
+    @Test
+    fun aFailedFinalRenameKeepsThePreviouslyInstalledPack() {
+        assertThat(import(greekV1())).isInstanceOf(ImportResult.Success::class.java)
+        val before = File(installedDir("el"), "dictionary.bin").readBytes()
+
+        val finalDir = installedDir("el")
+        val refusesTheStagedRename = object : PackFileOps by PackFileOps.Real {
+            override fun rename(from: File, to: File): Boolean =
+                if (from.name.startsWith(".staging-") && to.absolutePath == finalDir.absolutePath) false
+                else PackFileOps.Real.rename(from, to)
+        }
+        val failing = LanguagePackManager(context, refusesTheStagedRename)
+
+        assertThat(importWith(failing, greekV2()))
+            .isEqualTo(ImportResult.Error(PackImportFailure.InstallFailed))
+        assertWithMessage("a refused final rename must leave v1 installed (todo item 11)")
+            .that(manager.isInstalled("el")).isTrue()
+        assertThat(File(installedDir("el"), "dictionary.bin").readBytes().toList()).isEqualTo(before.toList())
+        assertThat(manager.getInstalledPacks())
+            .containsExactly(LanguagePackManifest("el", "Greek", 1, "", 10, false))
+        assertThat(leftoverDotDirs()).isEmpty()
+    }
+
+    /**
+     * Real filesystem, no seam: an old pack directory that cannot be fully deleted (here, a
+     * subdirectory without write permission). The old delete-then-rename removed the
+     * manifest and dictionary, failed on the locked entry, and then could not rename into the
+     * still-existing directory — the pack was gone. The swap now never deletes the installed
+     * pack before the replacement is in place, so the update succeeds and the undeletable
+     * remainder lives on only as an invisible backup directory.
+     */
+    @Test
+    fun anOldPackThatCannotBeFullyDeletedIsStillReplacedCleanly() {
+        assertThat(import(greekV1())).isInstanceOf(ImportResult.Success::class.java)
+        val locked = File(installedDir("el"), "locked").apply { mkdirs() }
+        File(locked, "pinned").writeText("x")
+        assertThat(locked.setWritable(false)).isTrue()
+        try {
+            assertThat(import(greekV2()))
+                .isEqualTo(ImportResult.Success(LanguagePackManifest("el", "Greek", 2, "", 20, false)))
+            assertThat(manager.isInstalled("el")).isTrue()
+            assertThat(File(installedDir("el"), "dictionary.bin").length()).isEqualTo(96)
+            assertThat(manager.getInstalledPacks().map { it.version }).containsExactly(2)
+        } finally {
+            File(filesDir, "langpacks").walkTopDown().forEach { it.setWritable(true) }
+        }
+    }
+
+    /**
+     * Process death at every point of a pack UPDATE, then a fresh manager on the same storage
+     * (what the next app start sees). Whatever step the process died at, the next start must
+     * find exactly one complete pack — v1 or v2, with manifest and dictionary from the same
+     * version — and no staging or backup directories left behind.
+     */
+    @Test
+    fun processDeathAtAnyStepOfAnUpdateLeavesOneCompletePackAfterRecovery() {
+        var crashAfter = 0
+        while (true) {
+            // Fresh storage per crash point.
+            scratch.resolve("files").deleteRecursively()
+            filesDir.mkdirs()
+            val baseline = LanguagePackManager(context)
+            assertThat(importWith(baseline, greekV1())).isInstanceOf(ImportResult.Success::class.java)
+
+            val ops = CrashingOps(crashAfter)
+            val dying = LanguagePackManager(context, ops)
+            val outcome = runCatching { importWith(dying, greekV2()) }
+            if (!ops.crashed) {
+                assertThat(outcome.getOrThrow()).isInstanceOf(ImportResult.Success::class.java)
+                break
+            }
+            assertThat(outcome.exceptionOrNull()).isInstanceOf(SimulatedProcessDeath::class.java)
+
+            val nextStart = LanguagePackManager(context)
+            val packs = nextStart.getInstalledPacks()
+            assertWithMessage("crash after $crashAfter mutations: the pack must survive")
+                .that(nextStart.isInstalled("el")).isTrue()
+            assertWithMessage("crash after $crashAfter mutations: exactly one listed pack")
+                .that(packs.map { it.code }).containsExactly("el")
+            val expectedSize = if (packs.single().version == 1) 64L else 96L
+            assertWithMessage("crash after $crashAfter mutations: manifest and dictionary agree")
+                .that(nextStart.getDictionaryPath("el")!!.length()).isEqualTo(expectedSize)
+            assertWithMessage("crash after $crashAfter mutations: no leftovers")
+                .that(leftoverDotDirs()).isEmpty()
+            crashAfter++
+        }
+        assertWithMessage("the swap must have at least one crash window under test")
+            .that(crashAfter).isAtLeast(2)
+    }
+
+}

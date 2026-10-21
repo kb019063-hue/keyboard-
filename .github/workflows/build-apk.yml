@@ -1,0 +1,132 @@
+# Build installable debug APKs.
+#
+# This is the project's build system. The dev sandbox has no JDK, no Android SDK and no route to
+# Maven Central / dl.google.com, so APKs are produced here and installed from the Actions artifact
+# or the rolling `dev-builds` release.
+#
+# Deliberate choices, and why:
+#   * `assembleDebug` only -- NOT `test`. Upstream's drift tests assert on repository files this
+#     fork does not vendor (`docs/RELEASE_RECORD.md`, `.github/scripts/emulator-ci.sh`,
+#     `fastlane/`), so they would fail for reasons unrelated to code correctness.
+#     See docs/PROVENANCE.md.
+#   * No ImageMagick / icon-generation step. `res/mipmap-*` launcher icons are committed, and
+#     upstream's `scripts/generate_icons.sh` is a CI convenience, not a Gradle task.
+#   * No keystore secret. `debug.keystore` is committed (force-added past the `*.keystore`
+#     gitignore rule), so every build shares one signature and installs as an UPGRADE over the
+#     previous one instead of requiring an uninstall.
+#   * Python 3 is already on ubuntu-latest. `build.gradle` execs six stdlib-only generators at
+#     build time; no pip step is needed.
+
+name: Build APK
+
+on:
+  push:
+    branches:
+      - arena/23fde500-keyboard
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # Single-module project rooted at the repo: APKs land in build/outputs/apk/debug/.
+      # ABI splits are enabled in build.gradle (armeabi-v7a, arm64-v8a, x86_64; no universal).
+      - name: Build debug APKs
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Report APK sizes
+        run: |
+          cd build/outputs/apk/debug
+          ls -la
+          for f in *.apk; do
+            printf '%-52s %6s MB\n' "$f" "$(du -m "$f" | cut -f1)"
+          done
+
+      - name: Compute short SHA
+        id: meta
+        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Stable per-ABI filenames: the rolling release below overwrites the same asset names every
+      # run, giving one permanent download URL per ABI. The build number lives in the artifact name
+      # and the release body instead.
+      - name: Rename APKs
+        run: |
+          cd build/outputs/apk/debug
+          for apk in *.apk; do
+            case "$apk" in
+              *arm64-v8a*)   new="keyboard-arm64-v8a.apk"   ;;
+              *armeabi-v7a*) new="keyboard-armeabi-v7a.apk" ;;
+              *x86_64*)      new="keyboard-x86_64.apk"      ;;
+              *)             new="keyboard-$apk"             ;;
+            esac
+            [ "$apk" = "$new" ] || mv "$apk" "$new"
+          done
+          ls -la
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: keyboard-debug-${{ steps.meta.outputs.sha }}
+          path: build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      # Rolling prerelease. `arm64-v8a` is the one to install on any phone from 2017 onward.
+      - name: Publish rolling dev release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dev-builds
+          name: Dev builds (rolling)
+          prerelease: true
+          files: build/outputs/apk/debug/*.apk
+          body: |
+            Latest debug APKs. This release is overwritten on every successful build, so these
+            links are permanent.
+
+            | Field | Value |
+            |---|---|
+            | Branch | `${{ github.ref_name }}` |
+            | Commit | `${{ steps.meta.outputs.sha }}` |
+            | Built | ${{ github.event.head_commit.timestamp || 'manual dispatch' }} |
+
+            **Which file?** `keyboard-arm64-v8a.apk` for essentially any phone from 2017 onward.
+            `keyboard-armeabi-v7a.apk` for older 32-bit devices. `keyboard-x86_64.apk` for
+            emulators and Chromebooks.
+
+            Installs as an **upgrade** over the previous build — the debug keystore is stable, so
+            no uninstall is needed.
+
+            After installing: Settings → System → Languages & input → On-screen keyboard → enable it.
+
+      - name: Upload failure reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-reports-${{ steps.meta.outputs.sha }}
+          path: |
+            build/reports
+            build/outputs/logs
+          if-no-files-found: ignore
+          retention-days: 14

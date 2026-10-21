@@ -1,0 +1,542 @@
+package tribixbite.cleverkeys
+
+import android.content.Context
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Typeface
+import android.util.AttributeSet
+import android.view.ContextThemeWrapper
+import androidx.compose.ui.graphics.compositeOver
+import tribixbite.cleverkeys.theme.KeyboardColorScheme
+import kotlin.math.min
+
+/**
+ * Theme class for keyboard rendering.
+ *
+ * Supports two modes:
+ * 1. XML-based themes: Created via constructor(Context, AttributeSet) - reads from res/values/themes.xml
+ * 2. Runtime themes: Created via constructor(Context, KeyboardColorScheme) - uses Compose color scheme
+ *
+ * This unified approach allows both built-in XML themes and user-defined/decorative themes
+ * to work with the same rendering pipeline.
+ */
+class Theme {
+    // Key colors
+    val colorKey: Int
+    val colorKeyActivated: Int
+
+    // Label colors
+    @JvmField
+    val lockedColor: Int
+    @JvmField
+    val activatedColor: Int
+    @JvmField
+    val labelColor: Int
+    @JvmField
+    val subLabelColor: Int
+    @JvmField
+    val secondaryLabelColor: Int
+    @JvmField
+    val greyedLabelColor: Int
+
+    // Key borders
+    val keyBorderRadius: Float
+    val keyBorderWidth: Float
+    val keyBorderWidthActivated: Float
+    val keyBorderColorLeft: Int
+    val keyBorderColorTop: Int
+    val keyBorderColorRight: Int
+    val keyBorderColorBottom: Int
+
+    @JvmField
+    val colorNavBar: Int
+    @JvmField
+    val isLightNavBar: Boolean
+
+    /** Keyboard container background color — used to apply custom/decorative backgrounds
+     *  that can't be resolved from XML theme attributes. */
+    @JvmField
+    val colorKeyboardBackground: Int
+
+    // ---------------------------------------------------------------------------------
+    // Audit 2026-09-06 H-4 (maintainer fork resolved: WIRE): the nine Theme-Creator
+    // fields below used to be collected and persisted but consumed by nothing. Each now
+    // has a Theme representation with a consumer:
+    //  - colorKeyLocked/Modifier/Special → per-role key backgrounds (Computed.keyForRole,
+    //    selected in Keyboard2View.onDraw via Computed.roleOf)
+    //  - keyBorderColorActivated → the ACTIVATED key frame's border paint (Computed.Key)
+    //  - rippleColor → press feedback on SuggestionBar chips / icon buttons
+    //  - suggestionTextColor/BackgroundColor/HighConfidenceColor → SuggestionBar text,
+    //    bar background and first-suggestion highlight
+    //  - colorKeyboardSurface → elevated surfaces (SuggestionBar provenance popup)
+    // XML themes have no attrs for these; their values default to the exact colours the
+    // consumers used before the wiring, so built-in themes render pixel-identically.
+    // ---------------------------------------------------------------------------------
+
+    /** Background of a LOCKED modifier key (caps lock etc.). */
+    @JvmField
+    val colorKeyLocked: Int
+
+    /** Background of modifier keys (shift/ctrl/alt) at rest. */
+    @JvmField
+    val colorKeyModifier: Int
+
+    /** Background of special action keys (enter, backspace, switchers) at rest. */
+    @JvmField
+    val colorKeySpecial: Int
+
+    /** Border colour of the ACTIVATED (pressed/locked) key frame. */
+    val keyBorderColorActivated: Int
+
+    /** Press-ripple colour; 0 = keep the platform default ripple (XML themes). */
+    @JvmField
+    val rippleColor: Int
+
+    /** Suggestion-bar text colour. */
+    @JvmField
+    val suggestionTextColor: Int
+
+    /** Suggestion-bar background colour. */
+    @JvmField
+    val suggestionBackgroundColor: Int
+
+    /** Highlight colour for the top / high-confidence suggestion. */
+    @JvmField
+    val suggestionHighConfidenceColor: Int
+
+    /**
+     * Prompt chips ("+word" exact-add, "Don't ask"): the theme's sub-label colour, unless it is
+     * unreadable on the bar. All three suggestion text roles pass through
+     * [SuggestionBarPalette.resolve] against [suggestionBackgroundColor].
+     */
+    @JvmField
+    val suggestionSecondaryTextColor: Int
+
+    /** Surface colour for elevated elements (popups) hosted by keyboard views. */
+    @JvmField
+    val colorKeyboardSurface: Int
+
+    /**
+     * Primary constructor for XML-based themes.
+     * Reads colors from styled attributes defined in res/values/themes.xml
+     */
+    constructor(context: Context, attrs: AttributeSet?) {
+        getKeyFont(context) // _key_font will be accessed
+        val s = context.theme.obtainStyledAttributes(attrs, R.styleable.keyboard, 0, 0)
+        colorKey = s.getColor(R.styleable.keyboard_colorKey, 0)
+        colorKeyActivated = s.getColor(R.styleable.keyboard_colorKeyActivated, 0)
+        colorNavBar = s.getColor(R.styleable.keyboard_navigationBarColor, 0)
+        isLightNavBar = s.getBoolean(R.styleable.keyboard_windowLightNavigationBar, false)
+        labelColor = s.getColor(R.styleable.keyboard_colorLabel, 0)
+        activatedColor = s.getColor(R.styleable.keyboard_colorLabelActivated, 0)
+        lockedColor = s.getColor(R.styleable.keyboard_colorLabelLocked, 0)
+        subLabelColor = s.getColor(R.styleable.keyboard_colorSubLabel, 0)
+        secondaryLabelColor = adjustLight(
+            labelColor,
+            s.getFloat(R.styleable.keyboard_secondaryDimming, 0.25f)
+        )
+        greyedLabelColor = adjustLight(
+            labelColor,
+            s.getFloat(R.styleable.keyboard_greyedDimming, 0.5f)
+        )
+        keyBorderRadius = s.getDimension(R.styleable.keyboard_keyBorderRadius, 0f)
+        keyBorderWidth = s.getDimension(R.styleable.keyboard_keyBorderWidth, 0f)
+        keyBorderWidthActivated = s.getDimension(R.styleable.keyboard_keyBorderWidthActivated, 0f)
+        keyBorderColorLeft = s.getColor(R.styleable.keyboard_keyBorderColorLeft, colorKey)
+        keyBorderColorTop = s.getColor(R.styleable.keyboard_keyBorderColorTop, colorKey)
+        keyBorderColorRight = s.getColor(R.styleable.keyboard_keyBorderColorRight, colorKey)
+        keyBorderColorBottom = s.getColor(R.styleable.keyboard_keyBorderColorBottom, colorKey)
+        colorKeyboardBackground = s.getColor(R.styleable.keyboard_colorKeyboard, 0)
+        s.recycle()
+
+        // H-4: no XML attrs exist for the Theme-Creator fields — default each to the
+        // colour its consumer used before the wiring (behaviour-preserving for XML themes).
+        colorKeyLocked = colorKeyActivated
+        colorKeyModifier = colorKey
+        colorKeySpecial = colorKey
+        keyBorderColorActivated = keyBorderColorTop
+        rippleColor = 0 // platform-default ripple
+        suggestionBackgroundColor = colorKey
+        // colorLabelActivated was designed for colorKeyActivated, not the bar (colorKey):
+        // readable only after SuggestionBarPalette (Cobalt's was the bar colour itself).
+        val bar = SuggestionBarPalette.resolve(labelColor, activatedColor, subLabelColor, colorKey)
+        suggestionTextColor = bar.text
+        suggestionHighConfidenceColor = bar.highlight
+        suggestionSecondaryTextColor = bar.secondary
+        colorKeyboardSurface = colorKey
+    }
+
+    /**
+     * Secondary constructor for runtime themes.
+     * Accepts a KeyboardColorScheme (from decorative themes or custom user themes)
+     * and maps it to the rendering properties.
+     *
+     * This enables decorative themes (Ruby, Sapphire, etc.) and user-created themes
+     * to work with the actual keyboard renderer.
+     */
+    constructor(context: Context, colorScheme: KeyboardColorScheme, density: Float = context.resources.displayMetrics.density) {
+        getKeyFont(context) // Initialize font
+
+        // Map KeyboardColorScheme to Theme properties
+        colorKey = colorScheme.keyDefault.toArgb()
+        colorKeyActivated = colorScheme.keyActivated.toArgb()
+        labelColor = colorScheme.keyLabel.toArgb()
+        activatedColor = colorScheme.keyLabel.toArgb() // Use same for activated
+        lockedColor = colorScheme.keyLabel.toArgb() // Use same for locked
+        subLabelColor = colorScheme.keySubLabel.toArgb()
+        secondaryLabelColor = colorScheme.keySecondaryLabel.toArgb()
+        greyedLabelColor = adjustLight(labelColor, 0.5f)
+
+        // Border colors - use the scheme's border color for all sides
+        val borderColor = colorScheme.keyBorder.toArgb()
+        keyBorderColorLeft = borderColor
+        keyBorderColorTop = borderColor
+        keyBorderColorRight = borderColor
+        keyBorderColorBottom = borderColor
+
+        // Default border dimensions (can be customized later)
+        keyBorderRadius = 8f * density  // 8dp default
+        keyBorderWidth = 1f * density   // 1dp default
+        keyBorderWidthActivated = 2f * density  // 2dp when activated
+
+        // Nav bar - derive from keyboard background
+        colorNavBar = colorScheme.keyboardBackground.toArgb()
+        isLightNavBar = isColorLight(colorNavBar)
+
+        // Keyboard container background — applied programmatically by Keyboard2View
+        // for runtime themes (custom/decorative), overriding the XML ?attr/colorKeyboard
+        colorKeyboardBackground = colorScheme.keyboardBackground.toArgb()
+
+        // H-4: the nine Theme-Creator fields, straight from the scheme. The per-role key
+        // backgrounds are pre-composited over keyDefault because the shipped schemes
+        // express them as translucent TINTS (e.g. primary at 20% alpha) while the key
+        // paint's alpha channel is owned by the user's keyOpacity setting — compositing
+        // at colour level preserves the intended appearance under any opacity.
+        colorKeyLocked = colorScheme.keyLocked
+            .compositeOver(colorScheme.keyDefault).toArgb()
+        colorKeyModifier = colorScheme.keyModifier
+            .compositeOver(colorScheme.keyDefault).toArgb()
+        colorKeySpecial = colorScheme.keySpecial
+            .compositeOver(colorScheme.keyDefault).toArgb()
+        keyBorderColorActivated = colorScheme.keyBorderActivated.toArgb()
+        rippleColor = colorScheme.ripple.toArgb()
+        suggestionBackgroundColor = colorScheme.suggestionBackground.toArgb()
+        val bar = SuggestionBarPalette.resolve(
+            colorScheme.suggestionText.toArgb(),
+            colorScheme.suggestionHighConfidence.toArgb(),
+            subLabelColor,
+            suggestionBackgroundColor,
+        )
+        suggestionTextColor = bar.text
+        suggestionHighConfidenceColor = bar.highlight
+        suggestionSecondaryTextColor = bar.secondary
+        colorKeyboardSurface = colorScheme.keyboardSurface.toArgb()
+    }
+
+    /** Interpolate the 'value' component toward its opposite by 'alpha'. */
+    private fun adjustLight(color: Int, alpha: Float): Int {
+        val hsv = FloatArray(3)
+        Color.colorToHSV(color, hsv)
+        val v = hsv[2]
+        hsv[2] = alpha - (2 * alpha - 1) * v
+        return Color.HSVToColor(hsv)
+    }
+
+    /** Determine if a color is light (for nav bar icon color) */
+    private fun isColorLight(color: Int): Boolean {
+        val darkness = 1 - (0.299 * Color.red(color) + 0.587 * Color.green(color) + 0.114 * Color.blue(color)) / 255
+        return darkness < 0.5
+    }
+
+    /** Convert Compose Color to Android ARGB Int */
+    private fun androidx.compose.ui.graphics.Color.toArgb(): Int {
+        return android.graphics.Color.argb(
+            (alpha * 255).toInt(),
+            (red * 255).toInt(),
+            (green * 255).toInt(),
+            (blue * 255).toInt()
+        )
+    }
+
+    fun initIndicationPaint(align: Paint.Align, font: Typeface?): Paint {
+        return Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textAlign = align
+            if (font != null) {
+                typeface = font
+            }
+        }
+    }
+
+    class Computed(
+        theme: Theme,
+        config: Config,
+        keyWidth: Float,
+        layout: KeyboardData
+    ) {
+        @JvmField
+        val vertical_margin: Float
+        @JvmField
+        val horizontal_margin: Float
+        @JvmField
+        val margin_top: Float
+        @JvmField
+        val margin_left: Float
+        @JvmField
+        val row_height: Float
+        @JvmField
+        val indication_paint: Paint
+
+        @JvmField
+        val key: Key
+        @JvmField
+        val key_activated: Key
+        // H-4: per-role key frames so the Theme-Creator's Key Locked / Key Modifier /
+        // Key Special colours render. For XML themes their colours equal the defaults
+        // (see Theme's XML constructor), so these draw identically to key/key_activated.
+        @JvmField
+        val key_locked: Key
+        @JvmField
+        val key_modifier: Key
+        @JvmField
+        val key_special: Key
+
+        init {
+            // Rows height is proportional to the keyboard height, meaning it doesn't
+            // change for layouts with more or less rows. 3.95 is the usual height of
+            // a layout in KeyboardData unit. The keyboard will be higher if the
+            // layout has more rows and smaller if it has less because rows stay the
+            // same height.
+            //
+            // Only layouts explicitly opting into numpad_height use full-height scaling.
+            // bottom_row=false also describes compact custom text/macro layouts (#90).
+            // With scale_numpad_height enabled,
+            // use the actual keysHeight as divisor so rows scale up to fill the full
+            // keyboard height, making keys easier to hit on small screens (#58).
+            val heightDivisor = if (config.scale_numpad_height && layout.numpad_height) {
+                layout.keysHeight
+            } else {
+                3.95f
+            }
+            row_height = min(
+                config.screenHeightPixels * config.keyboardHeightPercent / 100 / heightDivisor,
+                config.screenHeightPixels / layout.keysHeight
+            )
+            vertical_margin = config.key_vertical_margin * row_height
+            horizontal_margin = config.key_horizontal_margin * keyWidth
+            // Add half of the key margin on the left and on the top as it's also
+            // added on the right and on the bottom of every keys.
+            margin_top = config.marginTop + vertical_margin / 2
+            margin_left = horizontal_margin / 2
+            key = Key(theme, config, keyWidth, false)
+            key_activated = Key(theme, config, keyWidth, true)
+            // Locked keys keep the activated border/width treatment (they ARE held down),
+            // only the fill colour differs; modifier/special are at-rest variants.
+            key_locked = Key(theme, config, keyWidth, true, theme.colorKeyLocked)
+            key_modifier = Key(theme, config, keyWidth, false, theme.colorKeyModifier)
+            key_special = Key(theme, config, keyWidth, false, theme.colorKeySpecial)
+            indication_paint = init_label_paint(config, null).apply {
+                color = theme.subLabelColor
+            }
+        }
+
+        /**
+         * H-4: which computed key frame a key renders with — pure so the mapping is
+         * pinnable off-device (the draw loop feeds it kind + pointer state).
+         */
+        enum class KeyRole { NORMAL, ACTIVATED, LOCKED, MODIFIER, SPECIAL }
+
+        /** The computed frame for [role] (see [roleOf]). */
+        fun keyForRole(role: KeyRole): Key = when (role) {
+            KeyRole.NORMAL -> key
+            KeyRole.ACTIVATED -> key_activated
+            KeyRole.LOCKED -> key_locked
+            KeyRole.MODIFIER -> key_modifier
+            KeyRole.SPECIAL -> key_special
+        }
+
+        class Key(
+            theme: Theme,
+            config: Config,
+            keyWidth: Float,
+            activated: Boolean,
+            /**
+             * H-4: per-role background override (0 = none — same "unset colour"
+             * convention the rest of the theme plumbing uses). Border treatment still
+             * follows [activated].
+             */
+            bgColorOverride: Int = 0
+        ) {
+            @JvmField
+            val bg_paint = Paint()
+            @JvmField
+            val border_paint: Paint
+            @JvmField
+            val border_width: Float
+            @JvmField
+            val border_radius: Float
+            private val _label_paint: Paint
+            private val _special_label_paint: Paint
+            private val _sublabel_paint: Paint
+            private val _special_sublabel_paint: Paint
+            private val _label_alpha_bits: Int
+
+            init {
+                bg_paint.color = when {
+                    bgColorOverride != 0 -> bgColorOverride
+                    activated -> theme.colorKeyActivated
+                    else -> theme.colorKey
+                }
+
+                if (config.borderConfig) {
+                    border_radius = config.customBorderRadius * keyWidth
+                    border_width = config.customBorderLineWidth
+                } else {
+                    border_radius = theme.keyBorderRadius
+                    border_width = if (activated) theme.keyBorderWidthActivated else theme.keyBorderWidth
+                }
+
+                bg_paint.alpha = if (activated) config.keyActivatedOpacity else config.keyOpacity
+                // H-4: the activated frame's border uses the Theme-Creator's "Border
+                // Activated" colour (XML themes default it to keyBorderColorTop).
+                border_paint = init_border_paint(
+                    config,
+                    border_width,
+                    if (activated) theme.keyBorderColorActivated else theme.keyBorderColorTop
+                )
+                _label_paint = init_label_paint(config, null)
+                _special_label_paint = init_label_paint(config, _key_font)
+                _sublabel_paint = init_label_paint(config, null)
+                _special_sublabel_paint = init_label_paint(config, _key_font)
+                _label_alpha_bits = (config.labelBrightness and 0xFF) shl 24
+            }
+
+            fun label_paint(special_font: Boolean, color: Int, text_size: Float): Paint {
+                val p = if (special_font) _special_label_paint else _label_paint
+                p.color = (color and 0x00FFFFFF) or _label_alpha_bits
+                p.textSize = text_size
+                return p
+            }
+
+            fun sublabel_paint(
+                special_font: Boolean,
+                color: Int,
+                text_size: Float,
+                align: Paint.Align
+            ): Paint {
+                val p = if (special_font) _special_sublabel_paint else _sublabel_paint
+                p.color = (color and 0x00FFFFFF) or _label_alpha_bits
+                p.textSize = text_size
+                p.textAlign = align
+                return p
+            }
+        }
+
+        companion object {
+            /**
+             * H-4: map a key's [KeyValue.Kind] + pointer state to its frame role.
+             * Pressed state wins (locked > activated); at rest, modifiers get the
+             * Key Modifier fill and action keys (key events, IME events, editing
+             * actions — enter, backspace, switchers, copy/paste) the Key Special fill.
+             */
+            @JvmStatic
+            fun roleOf(kind: KeyValue.Kind?, isKeyDown: Boolean, isLocked: Boolean): KeyRole = when {
+                isKeyDown && isLocked -> KeyRole.LOCKED
+                isKeyDown -> KeyRole.ACTIVATED
+                kind == KeyValue.Kind.Modifier -> KeyRole.MODIFIER
+                kind == KeyValue.Kind.Keyevent ||
+                    kind == KeyValue.Kind.Event ||
+                    kind == KeyValue.Kind.Editing -> KeyRole.SPECIAL
+                else -> KeyRole.NORMAL
+            }
+
+            private fun init_border_paint(config: Config, border_width: Float, color: Int): Paint {
+                return Paint().apply {
+                    style = Paint.Style.STROKE
+                    strokeWidth = border_width
+                    // Audit H-6: colour FIRST, then alpha — setColor writes the full ARGB
+                    // (the colour's own alpha included), so the reverse order discarded
+                    // keyOpacity and borders stayed opaque on a translucent keyboard.
+                    // Same contract as bg_paint in Key.init (color = …, then alpha = …).
+                    setColor(color)
+                    alpha = config.keyOpacity
+                }
+            }
+
+            private fun init_label_paint(config: Config, font: Typeface?): Paint {
+                return Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    textAlign = Paint.Align.CENTER
+                    if (font != null) {
+                        typeface = font
+                    }
+                }
+            }
+        }
+    }
+
+    companion object {
+        private var _key_font: Typeface? = null
+
+        @JvmStatic
+        fun getKeyFont(context: Context): Typeface {
+            if (_key_font == null) {
+                _key_font = Typeface.createFromAsset(context.assets, "special_font.ttf")
+            }
+            return _key_font!!
+        }
+    }
+}
+
+/**
+ * The suggestion bar's text colours, resolved against the bar background.
+ *
+ * Android-free (pure JVM testable), so it lives beside [Theme] rather than in it.
+ */
+object SuggestionBarPalette {
+    /** Minimum contrast of any suggestion text role against the bar (WCAG 1.4.11). */
+    const val MIN_CONTRAST = 3.0
+
+    /** The three text roles the bar draws, all on the same background. */
+    data class Colors(val text: Int, val highlight: Int, val secondary: Int)
+
+    /**
+     * Resolve the colours [Theme] hands the bar: each role keeps its theme colour when it reaches
+     * [MIN_CONTRAST] against [background]; otherwise the highlight and prompt roles fall back to
+     * the (resolved) text colour — the highlight is still told apart by its bold face — and the
+     * text itself falls back to black or white, whichever contrasts more. Readable colours are
+     * returned unchanged, so a theme that already works renders exactly as before.
+     *
+     * Needed because XML themes have no suggestion attrs: [Theme] borrows `colorLabelActivated`,
+     * which those themes designed for `colorKeyActivated`, not for the bar's `colorKey`
+     * (Cobalt/Pine/ePaper Black: the highlight equalled the background).
+     */
+    fun resolve(text: Int, highlight: Int, secondary: Int, background: Int): Colors {
+        val readableText = if (readable(text, background)) text else {
+            val black = 0xFF000000.toInt()
+            val white = 0xFFFFFFFF.toInt()
+            if (contrastRatio(black, background) >= contrastRatio(white, background)) black else white
+        }
+        return Colors(
+            text = readableText,
+            highlight = if (readable(highlight, background)) highlight else readableText,
+            secondary = if (readable(secondary, background)) secondary else readableText,
+        )
+    }
+
+    private fun readable(color: Int, background: Int): Boolean =
+        contrastRatio(color, background) >= MIN_CONTRAST
+
+    /** WCAG 2.x contrast ratio of two colours (alpha ignored), 1.0..21.0. */
+    fun contrastRatio(a: Int, b: Int): Double {
+        val la = relativeLuminance(a)
+        val lb = relativeLuminance(b)
+        return (maxOf(la, lb) + 0.05) / (minOf(la, lb) + 0.05)
+    }
+
+    private fun relativeLuminance(color: Int): Double {
+        fun channel(shift: Int): Double {
+            val c = ((color ushr shift) and 0xFF) / 255.0
+            return if (c <= 0.03928) c / 12.92 else Math.pow((c + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0)
+    }
+}

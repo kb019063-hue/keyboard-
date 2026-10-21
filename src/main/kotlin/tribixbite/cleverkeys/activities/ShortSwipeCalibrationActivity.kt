@@ -1,0 +1,699 @@
+package tribixbite.cleverkeys
+
+import android.content.Intent
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import tribixbite.cleverkeys.Defaults
+import tribixbite.cleverkeys.theme.KeyboardTheme
+import kotlin.math.sqrt
+import kotlin.math.roundToInt
+
+/**
+ * Short Swipe Calibration Activity
+ *
+ * Allows users to:
+ * 1. See a tutorial graphic showing how short swipes work
+ * 2. Configure min/max distance thresholds with sliders
+ * 3. Practice on an interactive area with real-time feedback
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+class ShortSwipeCalibrationActivity : ComponentActivity() {
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        val prefs = DirectBootAwarePreferences.get_shared_preferences(this)
+        // Read through Config's typed surface, not raw prefs: gesture prefs carry units
+        // (% of key diagonal) and Config is the single canonical reader. (Raw reads here
+        // are also rejected by GesturePrefAccessDriftTest.)
+        val cfg = runCatching { Config.globalConfig() }.getOrNull()
+
+        setContent {
+            KeyboardTheme {
+                ShortSwipeCalibrationScreen(
+                    initialMinDistance = cfg?.short_gesture_min_distance?.v ?: Defaults.SHORT_GESTURE_MIN_DISTANCE,
+                    initialMaxDistance = cfg?.short_gesture_max_distance?.v ?: Defaults.SHORT_GESTURE_MAX_DISTANCE,
+                    onSave = { min, max ->
+                        prefs.edit()
+                            .putInt("short_gesture_min_distance", min)
+                            .putInt("short_gesture_max_distance", max)
+                            .apply()
+                        Config.globalConfig().refresh(resources, null)
+                    },
+                    onBack = { finish() }
+                )
+            }
+        }
+    }
+}
+
+/** How a practice-pad gesture was classified against the configured thresholds. */
+private enum class CalibrationGesture { TAP, SHORT, LONG }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ShortSwipeCalibrationScreen(
+    initialMinDistance: Int,
+    initialMaxDistance: Int,
+    onSave: (Int, Int) -> Unit,
+    onBack: () -> Unit
+) {
+    var minDistance by remember { mutableFloatStateOf(initialMinDistance.toFloat()) }
+    var maxDistance by remember { mutableFloatStateOf(initialMaxDistance.toFloat()) }
+    // Last classified practice gesture (null until the first one) and its length in % of the
+    // key diagonal. The feedback line is resolved from these at composition time so it is
+    // localized and follows a locale change, instead of caching an English sentence in state.
+    var feedbackGesture by remember { mutableStateOf<CalibrationGesture?>(null) }
+    var feedbackPct by remember { mutableIntStateOf(0) }
+    val feedbackText = when (feedbackGesture) {
+        null -> stringResource(R.string.calibration_feedback_idle)
+        CalibrationGesture.TAP -> stringResource(R.string.calibration_feedback_tap, feedbackPct)
+        CalibrationGesture.SHORT -> stringResource(R.string.calibration_feedback_short, feedbackPct)
+        CalibrationGesture.LONG -> stringResource(R.string.calibration_feedback_long, feedbackPct)
+    }
+    var feedbackColor by remember { mutableStateOf(Color.Gray) }
+    var lastDistance by remember { mutableFloatStateOf(0f) }
+
+    // The thresholds are PERCENT OF KEY DIAGONAL (the engine compares displacement against
+    // getKeyHypotenuse(key) * pct/100 of the actual touched key). The practice pad has no
+    // real key, so convert through a representative key: width = narrow-side/10 (standard
+    // 10-column layout), height from the configured keyboard height over 4 letter rows.
+    val context = LocalContext.current
+    val refKeyDiagonalPx = remember {
+        val dm = context.resources.displayMetrics
+        val keyW = minOf(dm.widthPixels, dm.heightPixels) / 10f
+        val heightPct = try {
+            Config.globalConfig().keyboardHeightPercent
+        } catch (e: Exception) {
+            0
+        }
+        val keyH = if (heightPct > 0) dm.heightPixels * heightPct / 100f / 4f else keyW * 1.5f
+        sqrt(keyW * keyW + keyH * keyH)
+    }
+
+    val scrollState = rememberScrollState()
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.calibration_title)) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back))
+                    }
+                },
+                actions = {
+                    IconButton(onClick = {
+                        minDistance = Defaults.SHORT_GESTURE_MIN_DISTANCE.toFloat()
+                        maxDistance = Defaults.SHORT_GESTURE_MAX_DISTANCE.toFloat()
+                        onSave(minDistance.roundToInt(), maxDistance.roundToInt())
+                    }) {
+                        Icon(Icons.Default.Refresh, stringResource(R.string.calibration_reset_defaults_desc))
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
+            )
+        }
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(paddingValues)
+                .padding(16.dp)
+                .verticalScroll(scrollState),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Section 1: Tutorial Graphic
+            TutorialSection()
+
+            Spacer(Modifier.height(24.dp))
+
+            // Section 2: Configuration Sliders
+            ConfigurationSection(
+                minDistance = minDistance,
+                maxDistance = maxDistance,
+                onMinChange = {
+                    minDistance = it
+                    if (minDistance > maxDistance) maxDistance = minDistance
+                    onSave(minDistance.roundToInt(), maxDistance.roundToInt())
+                },
+                onMaxChange = {
+                    maxDistance = it
+                    if (maxDistance < minDistance) minDistance = maxDistance
+                    onSave(minDistance.roundToInt(), maxDistance.roundToInt())
+                }
+            )
+
+            Spacer(Modifier.height(24.dp))
+
+            // Section 3: Practice Area
+            PracticeSection(
+                minDistance = minDistance,
+                maxDistance = maxDistance,
+                refKeyDiagonalPx = refKeyDiagonalPx,
+                feedbackText = feedbackText,
+                feedbackColor = feedbackColor,
+                lastDistance = lastDistance,
+                onGestureDetected = { distance ->
+                    lastDistance = distance
+                    // Convert measured px displacement to % of the reference key diagonal
+                    // so feedback matches how the engine interprets the thresholds.
+                    val pct = if (refKeyDiagonalPx > 0f) distance / refKeyDiagonalPx * 100f else 0f
+                    feedbackPct = pct.toInt()
+                    when {
+                        pct < minDistance -> {
+                            feedbackGesture = CalibrationGesture.TAP
+                            feedbackColor = Color.White
+                        }
+                        pct <= maxDistance -> {
+                            feedbackGesture = CalibrationGesture.SHORT
+                            feedbackColor = Color(0xFF4CAF50) // Green
+                        }
+                        else -> {
+                            feedbackGesture = CalibrationGesture.LONG
+                            feedbackColor = Color(0xFF2196F3) // Blue
+                        }
+                    }
+                }
+            )
+
+            Spacer(Modifier.height(24.dp))
+
+            // Section 4: Navigation to Per-Key Customization
+            PerKeyCustomizationButton()
+        }
+    }
+}
+
+@Composable
+private fun TutorialSection() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        ),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = stringResource(R.string.calibration_how_title),
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+            // Tutorial Graphic: Key with gesture arrows
+            SwipeTutorialGraphic(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(100.dp)
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+            Text(
+                text = stringResource(R.string.calibration_how_body),
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                lineHeight = 20.sp
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                GestureLegendItem(
+                    stringResource(R.string.calibration_legend_tap), Color.White,
+                    stringResource(R.string.calibration_legend_tap_range)
+                )
+                GestureLegendItem(
+                    stringResource(R.string.calibration_legend_short), Color(0xFF4CAF50),
+                    stringResource(R.string.calibration_legend_short_range)
+                )
+                GestureLegendItem(
+                    stringResource(R.string.calibration_legend_long), Color(0xFF2196F3),
+                    stringResource(R.string.calibration_legend_long_range)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SwipeTutorialGraphic(modifier: Modifier = Modifier) {
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val onSurfaceColor = MaterialTheme.colorScheme.onSurface
+    val surfaceColor = MaterialTheme.colorScheme.surface
+
+    Canvas(modifier = modifier) {
+        val keyWidth = size.width * 0.25f
+        val keyHeight = size.height * 0.6f
+        val keyY = (size.height - keyHeight) / 2
+
+        // Draw 3 keys
+        val keySpacing = (size.width - keyWidth * 3) / 4
+
+        for (i in 0 until 3) {
+            val keyX = keySpacing + i * (keyWidth + keySpacing)
+
+            // Key background
+            drawRoundRect(
+                color = surfaceColor,
+                topLeft = Offset(keyX, keyY),
+                size = androidx.compose.ui.geometry.Size(keyWidth, keyHeight),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(8f)
+            )
+
+            // Key border
+            drawRoundRect(
+                color = onSurfaceColor.copy(alpha = 0.3f),
+                topLeft = Offset(keyX, keyY),
+                size = androidx.compose.ui.geometry.Size(keyWidth, keyHeight),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(8f),
+                style = Stroke(width = 2f)
+            )
+
+            // Key labels
+            val centerX = keyX + keyWidth / 2
+            val centerY = keyY + keyHeight / 2
+
+            when (i) {
+                0 -> {
+                    // Tap indicator (dot)
+                    drawCircle(
+                        color = Color.White,
+                        radius = 8f,
+                        center = Offset(centerX, centerY)
+                    )
+                }
+                1 -> {
+                    // Short swipe arrow
+                    val arrowPath = Path().apply {
+                        moveTo(centerX - 15f, centerY)
+                        lineTo(centerX + 15f, centerY)
+                        lineTo(centerX + 8f, centerY - 7f)
+                        moveTo(centerX + 15f, centerY)
+                        lineTo(centerX + 8f, centerY + 7f)
+                    }
+                    drawPath(
+                        path = arrowPath,
+                        color = Color(0xFF4CAF50),
+                        style = Stroke(width = 3f)
+                    )
+                }
+                2 -> {
+                    // Long swipe arrow
+                    val arrowPath = Path().apply {
+                        moveTo(centerX - 25f, centerY)
+                        lineTo(centerX + 25f, centerY)
+                        lineTo(centerX + 18f, centerY - 7f)
+                        moveTo(centerX + 25f, centerY)
+                        lineTo(centerX + 18f, centerY + 7f)
+                    }
+                    drawPath(
+                        path = arrowPath,
+                        color = Color(0xFF2196F3),
+                        style = Stroke(width = 3f)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GestureLegendItem(label: String, color: Color, range: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            modifier = Modifier
+                .size(12.dp)
+                .background(color, RoundedCornerShape(2.dp))
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = label,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            color = color
+        )
+        Text(
+            text = range,
+            fontSize = 10.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun ConfigurationSection(
+    minDistance: Float,
+    maxDistance: Float,
+    onMinChange: (Float) -> Unit,
+    onMaxChange: (Float) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Text(
+                text = stringResource(R.string.calibration_thresholds_title),
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            Spacer(Modifier.height(20.dp))
+
+            // Minimum Distance Slider
+            Text(
+                text = stringResource(R.string.calibration_tap_swipe_title),
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = stringResource(R.string.calibration_tap_swipe_desc),
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Slider(
+                    value = minDistance,
+                    onValueChange = onMinChange,
+                    // Same range/granularity as the Settings "Min Distance" slider
+                    valueRange = SettingsRanges.SHORT_GESTURE_MIN_DISTANCE.toSliderRange(),
+                    steps = sliderSteps(SettingsRanges.SHORT_GESTURE_MIN_DISTANCE.toSliderRange(), 1f),
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = stringResource(R.string.calibration_percent_value, minDistance.roundToInt()),
+                    modifier = Modifier.width(60.dp),
+                    textAlign = TextAlign.End,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // Maximum Distance Slider
+            Text(
+                text = stringResource(R.string.calibration_boundary_title),
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = stringResource(R.string.calibration_boundary_desc),
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Slider(
+                    value = maxDistance,
+                    onValueChange = onMaxChange,
+                    // Same range/granularity as the Settings "Max Distance" slider
+                    valueRange = SettingsRanges.SHORT_GESTURE_MAX_DISTANCE.toSliderRange(),
+                    steps = sliderSteps(SettingsRanges.SHORT_GESTURE_MAX_DISTANCE.toSliderRange(), 1f),
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = stringResource(R.string.calibration_percent_value, maxDistance.roundToInt()),
+                    modifier = Modifier.width(60.dp),
+                    textAlign = TextAlign.End,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Reusable button for navigating to Per-Key Customization activity.
+ * Used in both ShortSwipeCalibrationActivity and SettingsActivity.
+ */
+@Composable
+fun PerKeyCustomizationButton() {
+    val context = LocalContext.current
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                context.startActivity(Intent(context, ShortSwipeCustomizationActivity::class.java))
+            },
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer
+        ),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(text = "⌨️", fontSize = 28.sp)
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.calibration_customize_title),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
+                Text(
+                    text = stringResource(R.string.calibration_customize_desc),
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
+                )
+            }
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                contentDescription = null,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun PracticeSection(
+    minDistance: Float,          // % of key diagonal
+    maxDistance: Float,          // % of key diagonal (the short/long boundary)
+    refKeyDiagonalPx: Float,     // representative key diagonal for %<->px conversion
+    feedbackText: String,
+    feedbackColor: Color,
+    lastDistance: Float,
+    onGestureDetected: (Float) -> Unit
+) {
+    // px equivalents of the % thresholds, for live drawing/comparison
+    val minPx = minDistance / 100f * refKeyDiagonalPx
+    val maxPx = maxDistance / 100f * refKeyDiagonalPx
+    var startOffset by remember { mutableStateOf(Offset.Zero) }
+    var currentOffset by remember { mutableStateOf(Offset.Zero) }
+    var isDragging by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = stringResource(R.string.calibration_practice_title),
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            Text(
+                text = stringResource(R.string.calibration_practice_desc),
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+            // Feedback display
+            Text(
+                text = feedbackText,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = feedbackColor,
+                modifier = Modifier.height(30.dp)
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+            // Interactive practice area
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(120.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .pointerInput(Unit) {
+                        detectDragGestures(
+                            onDragStart = { offset ->
+                                startOffset = offset
+                                currentOffset = offset
+                                isDragging = true
+                            },
+                            onDragEnd = {
+                                val dx = currentOffset.x - startOffset.x
+                                val dy = currentOffset.y - startOffset.y
+                                val distance = sqrt(dx * dx + dy * dy)
+                                onGestureDetected(distance)
+                                isDragging = false
+                            },
+                            onDragCancel = {
+                                isDragging = false
+                            },
+                            onDrag = { change, _ ->
+                                currentOffset = change.position
+                                change.consume()
+                            }
+                        )
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                // Draw drag indicator
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    if (isDragging) {
+                        // Draw start point
+                        drawCircle(
+                            color = Color.White.copy(alpha = 0.5f),
+                            radius = 20f,
+                            center = startOffset
+                        )
+
+                        // Draw current point
+                        val dx = currentOffset.x - startOffset.x
+                        val dy = currentOffset.y - startOffset.y
+                        val currentDistance = sqrt(dx * dx + dy * dy)
+
+                        val lineColor = when {
+                            currentDistance < minPx -> Color.White
+                            currentDistance <= maxPx -> Color(0xFF4CAF50)
+                            else -> Color(0xFF2196F3)
+                        }
+
+                        // Draw line from start to current
+                        drawLine(
+                            color = lineColor,
+                            start = startOffset,
+                            end = currentOffset,
+                            strokeWidth = 4f
+                        )
+
+                        // Draw current point
+                        drawCircle(
+                            color = lineColor,
+                            radius = 12f,
+                            center = currentOffset
+                        )
+                    }
+
+                    // Draw threshold circles around center
+                    val center = Offset(size.width / 2, size.height / 2)
+
+                    // Min threshold circle (px equivalent of the % threshold)
+                    drawCircle(
+                        color = Color.White.copy(alpha = 0.2f),
+                        radius = minPx,
+                        center = center,
+                        style = Stroke(width = 1f)
+                    )
+
+                    // Max threshold circle (px equivalent of the % boundary)
+                    drawCircle(
+                        color = Color(0xFF4CAF50).copy(alpha = 0.2f),
+                        radius = maxPx,
+                        center = center,
+                        style = Stroke(width = 1f)
+                    )
+                }
+
+                if (!isDragging) {
+                    Text(
+                        text = stringResource(R.string.calibration_touch_here),
+                        fontSize = 16.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // Visual threshold indicator
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = stringResource(R.string.calibration_min_readout, minDistance.roundToInt()),
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.7f)
+                )
+                Text(
+                    text = stringResource(R.string.calibration_max_readout, maxDistance.roundToInt()),
+                    fontSize = 12.sp,
+                    color = Color(0xFF4CAF50).copy(alpha = 0.7f)
+                )
+            }
+        }
+    }
+}
