@@ -115,15 +115,24 @@ PY
 # every downstream UI assertion for a reason unrelated to what they test -- run 39606860203 lost
 # three checks that way. Dismiss it with "Wait" (keeps the app alive, unlike "Close app") and
 # let the real assertions run. Returns 0 if a dialog was dismissed, 1 if none was present.
+# The dialog does NOT always take mCurrentFocus. Run 39684027086 had "Quickstep isn't responding"
+# with Wait/Close app on screen while focus still reported the launcher window, so the focus-only
+# gate above let one dialog sink four unrelated assertions. The accessibility dump is the reliable
+# witness, so take one here and accept either signal: focus, or an "…responding" line alongside a
+# Wait button (both required, so an ordinary screen mentioning the word cannot trigger a dismissal).
 dismiss_anr() {
-  case "$(focus)" in *"Application Not Responding"*) ;; *) return 1 ;; esac
-  ANR_SEEN=$((ANR_SEEN + 1))
-  info "ANR dialog on screen -- anr events: $(anrln)"
+  local f="$OUT/ui-anr.xml" c hit=""
   adb shell uiautomator dump /sdcard/ui-anr.xml > /dev/null 2>&1
-  adb pull /sdcard/ui-anr.xml "$OUT/ui-anr.xml" > /dev/null 2>&1
-  local c
-  c=$(nodecenter "$OUT/ui-anr.xml" '^wait$')
-  [ -n "${c:-}" ] || c=$(nodecenter "$OUT/ui-anr.xml" 'wait')
+  adb pull /sdcard/ui-anr.xml "$f" > /dev/null 2>&1
+  case "$(focus)" in *"Application Not Responding"*) hit=focus ;; esac
+  if [ -z "$hit" ] && grep -qiE "responding" "$f" 2>/dev/null; then
+    [ -n "$(nodecenter "$f" 'wait')" ] && hit=dump
+  fi
+  [ -n "$hit" ] || return 1
+  ANR_SEEN=$((ANR_SEEN + 1))
+  info "ANR dialog on screen (detected via $hit) -- anr events: $(anrln)"
+  c=$(nodecenter "$f" '^wait$')
+  [ -n "${c:-}" ] || c=$(nodecenter "$f" 'wait')
   if [ -n "${c:-}" ]; then
     info "tapping 'Wait' at $c"
     adb shell input tap $c
@@ -204,6 +213,15 @@ sleep 6
 shot 01-launcher
 dismiss_anr || true
 FOCUS=$(focus)
+# Dismissing the dialog is not enough on its own: an ANR covering the launch swallows it, so the
+# activity has to be started again. This is the retry run 39684027086 never got.
+if ! printf '%s' "$FOCUS" | grep -q "LauncherActivity" && dismiss_anr; then
+  info "ANR dialog dismissed -- relaunching LauncherActivity"
+  adb shell am start -W -n "$PKG/$NS.LauncherActivity" > "$OUT/am-start-retry.log" 2>&1
+  sleep 6
+  shot 01b-launcher-retry
+  FOCUS=$(focus)
+fi
 CRASH=$(crashln)
 if [ -n "$CRASH" ]; then
   fail "CRASH after launching LauncherActivity: $CRASH"
@@ -343,6 +361,13 @@ for attempt in 1 2 3 4 5 6; do
   # cmd_show_text_menu_desc, a command DESCRIPTION that appears solely inside the picker dialog.
   # Note the dump escapes the header's emoji as a numeric entity (&#129520;), which this pattern
   # tolerates by matching the word rather than the glyph.
+  # An ANR dialog over the settings screen would otherwise burn all six attempts looking like a
+  # missing header, which is what run 39684027086 reported.
+  if grep -qiE "responding" "$F" 2>/dev/null; then
+    info "attempt $attempt: ANR dialog over the settings screen -- dismissing"
+    dismiss_anr || true
+    continue
+  fi
   if grep -qE 'text="[^"]*Toolbar' "$F" 2>/dev/null; then HDR="$F"; break; fi
   info "attempt $attempt: no toolbar header on screen, scrolling"
   scrollup
