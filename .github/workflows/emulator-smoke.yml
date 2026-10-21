@@ -107,15 +107,19 @@ jobs:
           } | tee artifacts/00-diagnostics.txt
           # Annotations are the ONLY CI output the dev sandbox can read -- logs come from
           # results-receiver.actions.githubusercontent.com and artifacts from
-          # *.blob.core.windows.net, both outside its allowlist. Surface the decisive lines here.
-          if grep -qE 'vmx|svm' /proc/cpuinfo; then
-            echo "::notice::diag: CPU virtualisation flags present ($(grep -oE 'vmx|svm' /proc/cpuinfo | sort -u | tr '\n' ' '))"
+          # *.blob.core.windows.net, both outside its allowlist. GitHub stores ~20 per check run
+          # and silently drops the rest, so this step emits ONE consolidated line rather than four.
+          # `emulator -accel-check` is deliberately NOT here: the emulator binary does not exist
+          # yet at this point, which is why it reported "No such file or directory" on every run so
+          # far. It lives in scripts/ci/pre-emulator-diag.sh, which the action runs after it has
+          # provisioned the SDK.
+          VIRT=$(grep -oE 'vmx|svm' /proc/cpuinfo | sort -u | tr '\n' ' ')
+          DIAG="diag: runner=$(nproc)vCPU/$(free -h | awk '/^Mem:/{print $2}') ubuntu$(. /etc/os-release && echo "$VERSION_ID") virt='${VIRT:-NONE}' /dev/kvm=$(stat -c '%A %U:%G' /dev/kvm 2>&1) ANDROID_HOME=$SDK emulator_present=$([ -x "$SDK/emulator/emulator" ] && echo yes || echo no)"
+          if [ -n "$VIRT" ]; then
+            echo "::notice::$DIAG"
           else
-            echo "::error::diag: NO vmx/svm in /proc/cpuinfo -- nested virtualisation unavailable, emulator cannot be accelerated"
+            echo "::error::$DIAG -- NO vmx/svm: nested virtualisation unavailable, the emulator cannot be accelerated"
           fi
-          echo "::notice::diag: /dev/kvm -> $(ls -l /dev/kvm 2>&1 | head -1)"
-          echo "::notice::diag: accel-check -> $("$SDK/emulator/emulator" -accel-check 2>&1 | head -2 | tr '\n' ' ')"
-          echo "::notice::diag: runner -> $(nproc) vCPU, $(free -h | awk '/^Mem:/{print $2}') RAM, $(. /etc/os-release && echo "$PRETTY_NAME")"
 
       # API 34 matches compileSdk. `default` = AOSP image: smaller and faster to boot than
       # google_apis, and this app uses no Play Services.
@@ -139,6 +143,9 @@ jobs:
           disable-animations: true
           disable-spellchecker: true
           emulator-boot-timeout: 1800
+          # Fires after SDK provisioning but before launch -- the only point where the emulator
+          # binary exists, so the only place `accel-check` can give a real verdict.
+          pre-emulator-launch-script: bash scripts/ci/pre-emulator-diag.sh
           script: bash scripts/ci/emulator-smoke.sh
 
       - name: Upload evidence (diagnostics, screenshots, dumps, logcat)
