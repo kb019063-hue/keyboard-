@@ -4,14 +4,30 @@
 # dumps as evidence, so a green run means somebody has actually SEEN the keyboard render and
 # commit text -- not merely that it compiled.
 #
-# Why this works on GitHub-hosted runners: ubuntu-latest x86_64 runners expose /dev/kvm, but its
-# default permissions (crw-rw---- root:kvm) exclude the runner user. Without the udev rule below
-# the emulator silently falls back to `-accel off` software emulation and effectively hangs, so
-# the KVM step is mandatory, not an optimisation.
+# ── Why the diagnostics step exists ──────────────────────────────────────────────────────────
+# The first attempt failed with "Timeout waiting for emulator to boot" after burning the whole
+# 900 s allowance, even though the `Enable KVM` step passed (so /dev/kvm exists). A KVM-accelerated
+# API 34 image boots in 1-3 minutes, so a 15-minute timeout points at the emulator having silently
+# fallen back to software emulation -- the device node can exist while the KVM ioctls still fail,
+# and `-accel off` produces a boot that never completes rather than an error.
 #
-# Cost note: no AVD snapshot cache yet -- a cold boot costs several minutes per run. Worth adding
-# caching once this workflow is stable. The build runs BEFORE the emulator launches so Gradle and
-# the emulator do not compete for the runner's 4 vCPUs.
+# CI logs cannot be read from the dev sandbox (they are served from
+# results-receiver.actions.githubusercontent.com, which is outside its allowed hosts; only
+# api.github.com annotations get through). So the runner has to report for itself: the diagnostics
+# step writes /dev/kvm permissions, group membership, CPU virtualisation flags and the verdict of
+# `emulator -accel-check` into artifacts/ BEFORE the emulator launches. That file is uploaded even
+# when the boot times out, which is the only way to see the cause from here.
+#
+# Mitigations applied in this revision:
+#   * `sudo chmod 777 /dev/kvm` alongside the udev rule -- belt and braces, because the rule only
+#     helps if udev actually re-triggers the node.
+#   * `target: default` (AOSP) instead of `google_apis`: a materially smaller system image, so less
+#     download and a faster boot. Nothing in this app needs Play Services.
+#   * boot timeout 900 -> 1800 s, job timeout 60 -> 90 min, and cores/ram raised so the guest is
+#     not starved on a 4 vCPU / 16 GB runner.
+#
+# The build runs BEFORE the emulator launches so Gradle and the guest do not compete for vCPUs.
+# No AVD snapshot cache yet -- cold boot costs minutes per run. Worth adding once boot is reliable.
 
 name: Emulator smoke test
 
@@ -32,14 +48,14 @@ concurrency:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -62,24 +78,51 @@ jobs:
             | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-          ls -l /dev/kvm
+          # The udev rule only takes effect if the node is actually re-triggered; this is the
+          # fallback that works unconditionally.
+          sudo chmod 777 /dev/kvm || echo "chmod /dev/kvm failed (device may not exist)"
 
-      # API 34 matches compileSdk. google_apis (not playstore) so the image is rootable and
-      # `run-as` works on our debuggable build.
-      # disable-spellchecker avoids the framework spell-checker popup, a known source of
-      # flakiness when asserting on text fields.
+      # Writes evidence that survives an emulator-boot timeout. Must run before the emulator step.
+      - name: Acceleration diagnostics (survives boot failure)
+        run: |
+          mkdir -p artifacts
+          {
+            echo "=== date / runner ==="
+            date -u; nproc; free -h; lsb_release -a 2>/dev/null || cat /etc/os-release
+            echo; echo "=== /dev/kvm ==="
+            ls -l /dev/kvm 2>&1
+            echo; echo "=== identity and groups ==="
+            id
+            echo; echo "=== CPU virtualisation flags (vmx=Intel, svm=AMD) ==="
+            grep -oE 'vmx|svm' /proc/cpuinfo | sort | uniq -c || echo "  NONE -- no nested virtualisation"
+            echo; echo "=== ANDROID_HOME ==="
+            echo "ANDROID_HOME=${ANDROID_HOME:-unset}  ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-unset}"
+            SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+            ls -d "$SDK"/* 2>&1 | head
+            echo; echo "=== emulator -accel-check (the decisive verdict) ==="
+            "$SDK/emulator/emulator" -accel-check 2>&1 || echo "  accel-check exited $?"
+            echo; echo "=== installed system images ==="
+            "$SDK/cmdline-tools/latest/bin/sdkmanager" --list_installed 2>/dev/null | head -20 || true
+          } | tee artifacts/00-diagnostics.txt
+
+      # API 34 matches compileSdk. `default` = AOSP image: smaller and faster to boot than
+      # google_apis, and this app uses no Play Services.
+      # disable-spellchecker avoids the framework spell-checker popup, a known source of flakiness
+      # when asserting on text fields.
       - name: Run smoke test on emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
           arch: x86_64
-          target: google_apis
+          target: default
+          cores: 4
+          ram-size: 4096M
           disable-animations: true
           disable-spellchecker: true
-          emulator-boot-timeout: 900
+          emulator-boot-timeout: 1800
           script: bash scripts/ci/emulator-smoke.sh
 
-      - name: Upload evidence (screenshots, dumps, logcat)
+      - name: Upload evidence (diagnostics, screenshots, dumps, logcat)
         if: always()
         uses: actions/upload-artifact@v4
         with:
