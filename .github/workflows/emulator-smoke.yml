@@ -127,8 +127,15 @@ jobs:
           api-level: 34
           arch: x86_64
           target: default
-          cores: 4
-          ram-size: 4096M
+          # A real device profile matters: without one the action creates a 320x640 AVD, and
+          # LauncherActivity stacks three SetupCards above its test field
+          # (activities/LauncherActivity.kt ~470-505), so the OutlinedTextField falls below the
+          # fold and never reaches the a11y tree. Run 39588742284 failed on exactly that.
+          profile: pixel_7
+          # Sized to the actual runner. Diagnostics reported 2 vCPU / 7.7 GB, not the 4 vCPU /
+          # 16 GB assumed earlier -- cores: 4 with ram-size: 4096M oversubscribes a 2 vCPU host.
+          cores: 2
+          ram-size: 2048M
           disable-animations: true
           disable-spellchecker: true
           emulator-boot-timeout: 1800

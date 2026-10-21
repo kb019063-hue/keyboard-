@@ -124,9 +124,23 @@ sleep 6
 shot 01-launcher
 
 echo "== 5. focus the text field so the IME must render =="
-adb shell uiautomator dump /sdcard/ui.xml > /dev/null 2>&1
-adb pull /sdcard/ui.xml "$OUT/ui-launcher.xml" > /dev/null 2>&1
-CENTER=$(python3 - "$OUT/ui-launcher.xml" <<'PY' 2>/dev/null
+# LauncherActivity stacks three SetupCards ABOVE its test field
+# (activities/LauncherActivity.kt ~470-505), so on a short viewport the OutlinedTextField sits
+# below the fold and never appears in the a11y tree. Run 39588742284 failed on exactly that, at
+# 320x640. Scroll and re-dump rather than assuming first-load visibility.
+SCREEN=$(adb shell wm size 2>/dev/null | tr -d '\r' | grep -oE '[0-9]+x[0-9]+' | tail -1)
+SW=${SCREEN%%x*}; SH=${SCREEN##*x}
+case "$SW$SH" in (*[!0-9]*|"") SW=1080; SH=2400 ;; esac   # unparseable -> sane default
+info "display: ${SW}x${SH} (from 'wm size': '${SCREEN:-none}')"
+
+CENTER=""
+ATTEMPTS=0
+for attempt in 1 2 3 4; do
+  ATTEMPTS=$attempt
+  adb shell uiautomator dump /sdcard/ui.xml > /dev/null 2>&1
+  adb pull /sdcard/ui.xml "$OUT/ui-launcher-$attempt.xml" > /dev/null 2>&1
+  cp -f "$OUT/ui-launcher-$attempt.xml" "$OUT/ui-launcher.xml" 2>/dev/null || true
+  CENTER=$(python3 - "$OUT/ui-launcher-$attempt.xml" <<'PY' 2>/dev/null
 import re, sys
 try:
     xml = open(sys.argv[1], encoding="utf-8", errors="replace").read()
@@ -145,8 +159,16 @@ for p in pats:
                 sys.exit(0)
 PY
 )
+  if [ -n "${CENTER:-}" ]; then
+    info "text field found on attempt $attempt at $CENTER"
+    break
+  fi
+  info "attempt $attempt: no text field in the a11y tree, scrolling down"
+  adb shell input swipe $((SW / 2)) $((SH * 3 / 4)) $((SW / 2)) $((SH / 4)) 300
+  sleep 3
+done
+
 if [ -n "${CENTER:-}" ]; then
-  info "text field centre: $CENTER"
   adb shell input tap $CENTER
   sleep 5
   shot 02-keyboard-shown
@@ -159,8 +181,11 @@ if [ -n "${CENTER:-}" ]; then
     info "show-request state: $(grep -oE 'mShowRequested=[a-z]*|mServedView=[^ ,]*' "$OUT/dumpsys-input_method-shown.txt" | head -2 | tr '\n' ' ')"
   fi
 else
-  fail "no text field found in the a11y dump -- cannot raise the keyboard"
-  info "dump root classes: $(grep -oE 'class="[^"]*"' "$OUT/ui-launcher.xml" 2>/dev/null | sort -u | head -6 | tr '\n' ' ')"
+  fail "no text field found after $ATTEMPTS dump/scroll attempts -- cannot raise the keyboard"
+  # What WAS on screen? Classes and visible strings are the fastest way to tell "we landed on the
+  # wrong screen" from "the field exists but Compose did not expose it to the a11y tree".
+  info "classes seen: $(grep -ohE 'class="[^"]*"' "$OUT"/ui-launcher-*.xml 2>/dev/null | sort -u | head -8 | tr '\n' ' ')"
+  info "text seen: $(grep -ohE 'text="[^"]{1,40}"' "$OUT"/ui-launcher-*.xml 2>/dev/null | sort -u | head -8 | tr '\n' ' ')"
 fi
 
 echo "== 6. commit text through the IME =="
