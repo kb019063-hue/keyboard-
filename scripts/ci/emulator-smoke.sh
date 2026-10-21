@@ -62,6 +62,60 @@ focus()   { adb shell dumpsys window 2>/dev/null | grep -oE 'mCurrentFocus=Windo
 crashln() { adb logcat -d -b crash -v brief 2>/dev/null | grep -vE '^[[:space:]]*$' | head -4 | tr '\n' ' ' | tr -d '\r'; }
 dispsz()  { adb shell wm size 2>/dev/null | tr -d '\r' | grep -oE '[0-9]+x[0-9]+' | tail -1; }
 
+# Which process stopped responding. THE decisive probe for an ANR dialog: it distinguishes "the
+# emulator's launcher is slow" (system flakiness, 2 vCPU + software GL) from "our IME hung the
+# host app's main thread", which is the one way our own code could legitimately cause it -- an
+# IME runs inside every process that shows a text field, and the launcher has a search field.
+anrln()   { adb logcat -d -b events -v brief 2>/dev/null | grep -iE 'am_anr|am_kill' | tail -3 | tr '\n' ' ' | tr -d '\r'; }
+
+# Center of the first node in $1 whose text/content-desc matches regex $2; empty if none.
+nodecenter() {
+  python3 - "$1" "$2" <<'PY' 2>/dev/null
+import re, sys
+try:
+    xml = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+except Exception:
+    sys.exit(0)
+pat = re.compile(sys.argv[2], re.I)
+for m in re.finditer(r'<node[^>]*>', xml):
+    tag = m.group(0)
+    # Real dumps emit every attribute, usually with empty values, so joining them can leave a
+    # trailing space that would defeat an anchored pattern like ^wait$.
+    label = " ".join(re.findall(r'(?:text|content-desc)="([^"]*)"', tag)).strip()
+    if not label or not pat.search(label):
+        continue
+    b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', tag)
+    if b:
+        x1, y1, x2, y2 = map(int, b.groups())
+        if (x2 - x1) > 10 and (y2 - y1) > 10:
+            print(f"{(x1 + x2) // 2} {(y1 + y2) // 2}")
+            sys.exit(0)
+PY
+}
+
+# An "Application Not Responding" dialog sits above every window, so ONE transient ANR fails
+# every downstream UI assertion for a reason unrelated to what they test -- run 39606860203 lost
+# three checks that way. Dismiss it with "Wait" (keeps the app alive, unlike "Close app") and
+# let the real assertions run. Returns 0 if a dialog was dismissed, 1 if none was present.
+dismiss_anr() {
+  case "$(focus)" in *"Application Not Responding"*) ;; *) return 1 ;; esac
+  info "ANR dialog on screen -- anr events: $(anrln)"
+  adb shell uiautomator dump /sdcard/ui-anr.xml > /dev/null 2>&1
+  adb pull /sdcard/ui-anr.xml "$OUT/ui-anr.xml" > /dev/null 2>&1
+  local c
+  c=$(nodecenter "$OUT/ui-anr.xml" '^wait$')
+  [ -n "${c:-}" ] || c=$(nodecenter "$OUT/ui-anr.xml" 'wait')
+  if [ -n "${c:-}" ]; then
+    info "tapping 'Wait' at $c"
+    adb shell input tap $c
+  else
+    info "no 'Wait' button found; sending BACK"
+    adb shell input keyevent KEYCODE_BACK
+  fi
+  sleep 4
+  return 0
+}
+
 # --- locate the x86_64 split (the emulator is x86_64; ARM splits cannot run on it) ---
 APK="${APK:-}"
 [ -z "$APK" ] && APK=$(find build/outputs/apk/debug -name '*x86_64*.apk' 2>/dev/null | head -1)
@@ -85,6 +139,7 @@ fi
 # Clear both buffers so the crash checks below see only OUR app, not boot noise.
 adb logcat -c > /dev/null 2>&1
 adb logcat -c -b crash > /dev/null 2>&1
+adb logcat -c -b events > /dev/null 2>&1
 
 echo "== 2. install =="
 if adb install -r -g "$APK" > "$OUT/install.log" 2>&1; then
@@ -128,6 +183,7 @@ echo "== 4. launcher screen is really foreground, and did not crash =="
 adb shell am start -W -n "$PKG/$NS.LauncherActivity" > "$OUT/am-start.log" 2>&1
 sleep 6
 shot 01-launcher
+dismiss_anr || true
 FOCUS=$(focus)
 CRASH=$(crashln)
 if [ -n "$CRASH" ]; then
@@ -135,7 +191,7 @@ if [ -n "$CRASH" ]; then
 elif printf '%s' "$FOCUS" | grep -q "LauncherActivity"; then
   pass "LauncherActivity foreground: $FOCUS"
 else
-  fail "LauncherActivity not foreground: focus='$FOCUS' am='$(peek "$OUT/am-start.log" 120)'"
+  fail "LauncherActivity not foreground: focus='$FOCUS' anr='$(anrln)' am='$(peek "$OUT/am-start.log" 120)'"
 fi
 
 echo "== 5. reach a text field, then prove the keyboard renders and is bound =="
@@ -150,6 +206,7 @@ info "display ${SW}x${SH}"
 CENTER=""; ATTEMPTS=0
 for attempt in 1 2 3 4; do
   ATTEMPTS=$attempt
+  dismiss_anr || true
   adb shell uiautomator dump /sdcard/ui.xml > /dev/null 2>&1
   adb pull /sdcard/ui.xml "$OUT/ui-launcher-$attempt.xml" > /dev/null 2>&1
   cp -f "$OUT/ui-launcher-$attempt.xml" "$OUT/ui-launcher.xml" 2>/dev/null || true
@@ -181,19 +238,20 @@ done
 if [ -z "${CENTER:-}" ]; then
   # One dense error: what was on screen, and whether anything crashed. Classes and visible strings
   # distinguish "wrong screen" from "field exists but Compose hid it from the a11y tree".
-  fail "no text field after $ATTEMPTS dump/scroll attempts: screen=${SW}x${SH} focus='$FOCUS' crash='${CRASH:-none}' classes=[$(grep -ohE 'class="[^"]*"' "$OUT"/ui-launcher-*.xml 2>/dev/null | sort -u | head -6 | tr '\n' ' ')] text=[$(grep -ohE 'text="[^"]{1,30}"' "$OUT"/ui-launcher-*.xml 2>/dev/null | sort -u | head -6 | tr '\n' ' ')]"
+  fail "no text field after $ATTEMPTS dump/scroll attempts: screen=${SW}x${SH} focus='$FOCUS' crash='${CRASH:-none}' anr='$(anrln)' classes=[$(grep -ohE 'class="[^"]*"' "$OUT"/ui-launcher-*.xml 2>/dev/null | sort -u | head -6 | tr '\n' ' ')] text=[$(grep -ohE 'text="[^"]{1,30}"' "$OUT"/ui-launcher-*.xml 2>/dev/null | sort -u | head -6 | tr '\n' ' ')]"
 else
   adb shell input tap $CENTER
   sleep 6
   shot 02-keyboard-shown
   adb shell dumpsys input_method > "$OUT/dumpsys-input_method-shown.txt" 2>&1
   SHOWN=$(grep -oE 'mInputShown=[a-z]*' "$OUT/dumpsys-input_method-shown.txt" | head -1 | tr -d '\r')
+  dismiss_anr || true
   CUR=$(curime); FOCUS2=$(focus); CRASH2=$(crashln)
   # Now mCurId IS meaningful: an editor has focus, so the IME has been bound.
   if [ "$SHOWN" = "mInputShown=true" ] && printf '%s' "$CUR" | grep -q "$PKG"; then
     pass "KEYBOARD RENDERED AND BOUND: $SHOWN $CUR"
   else
-    fail "keyboard not up: shown='${SHOWN:-none}' ${CUR:-mCurId=none} focus='$FOCUS2' crash='${CRASH2:-none}' tap=$CENTER"
+    fail "keyboard not up: shown='${SHOWN:-none}' ${CUR:-mCurId=none} focus='$FOCUS2' crash='${CRASH2:-none}' anr='$(anrln)' tap=$CENTER"
   fi
 
   echo "== 6. commit text through the IME =="
@@ -234,11 +292,12 @@ adb shell input keyevent KEYCODE_BACK; sleep 2
 adb shell am start -W -n "$PKG/$NS.SettingsActivity" > "$OUT/am-settings.log" 2>&1
 sleep 6
 shot 04-settings
+dismiss_anr || true
 FOCUS3=$(focus)
 if printf '%s' "$FOCUS3" | grep -q "SettingsActivity"; then
   pass "SettingsActivity foreground"
 else
-  fail "SettingsActivity not foreground: focus='$FOCUS3' am='$(peek "$OUT/am-settings.log" 120)'"
+  fail "SettingsActivity not foreground: focus='$FOCUS3' anr='$(anrln)' am='$(peek "$OUT/am-settings.log" 120)'"
 fi
 # ThemeSettingsActivity hosts KeyboardPreviewHost -> a real Keyboard2View rendered with the active
 # theme and layout: a direct visual check of the keyboard needing no IME connection at all.
