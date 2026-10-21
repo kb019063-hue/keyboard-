@@ -29,6 +29,13 @@ object ToolbarConfig {
     const val SEPARATOR = ","
 
     /**
+     * Upper bound on buttons. The row scrolls rather than shrinking below its 40dp minimum, so
+     * this is not a layout constraint but a usability one: past a dozen or so the button you want
+     * is more likely to be off-screen than the swipe you replaced. The Add control disables at it.
+     */
+    const val MAX_TOOLBAR_KEYS = 12
+
+    /**
      * The `removed` placeholder a blanked short-swipe slot stores. It is a valid registry entry
      * but meaningless as a button, so it is filtered out rather than rendered dead.
      */

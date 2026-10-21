@@ -148,6 +148,7 @@ internal fun sectionTitleRes(sectionKey: String): Int = when (sectionKey) {
     "swipeTyping" -> R.string.settings_section_swipe_typing
     "appearance" -> R.string.settings_section_appearance
     "swipeTrail" -> R.string.settings_section_swipe_trail
+    "toolbar" -> R.string.settings_section_toolbar
     "input" -> R.string.settings_section_input
     "swipeCorrections" -> R.string.settings_section_autocorrection
     "gestureTuning" -> R.string.settings_section_gesture_tuning
@@ -178,6 +179,7 @@ internal fun SettingsActivity.expanderFor(sectionKey: String): () -> Unit = {
         "swipeTyping" -> swipeTypingSectionExpanded = true
         "appearance" -> appearanceSectionExpanded = true
         "swipeTrail" -> swipeTrailSectionExpanded = true
+        "toolbar" -> toolbarSectionExpanded = true
         "input" -> inputSectionExpanded = true
         "swipeCorrections" -> swipeCorrectionsSectionExpanded = true
         "gestureTuning" -> gestureTuningSectionExpanded = true

@@ -51,6 +51,7 @@ class SettingsViewModel : ViewModel() {
     /** No longer default-expanded since Theme moved to Activities. */
     var appearanceSectionExpanded by mutableStateOf(false)
     var swipeTrailSectionExpanded by mutableStateOf(false)
+    var toolbarSectionExpanded by mutableStateOf(false)
     var inputSectionExpanded by mutableStateOf(false)
     var swipeCorrectionsSectionExpanded by mutableStateOf(false)
     var gestureTuningSectionExpanded by mutableStateOf(false)

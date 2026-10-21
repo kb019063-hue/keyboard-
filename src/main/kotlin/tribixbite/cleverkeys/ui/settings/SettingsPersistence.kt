@@ -1,6 +1,7 @@
 package tribixbite.cleverkeys.ui.settings
 
 import tribixbite.cleverkeys.KeyboardHeightPrefs
+import tribixbite.cleverkeys.ToolbarConfig
 import android.content.Intent
 import android.content.SharedPreferences
 import android.widget.Toast
@@ -400,6 +401,11 @@ internal fun SettingsActivity.loadCurrentSettings() {
         // ARC-051 (six keys) + ARC-085 (swipe_correction_preset): the DEPRECATED_KEYS that used
         // to be read here are not loaded at all — see the note on the removed SettingsActivity
         // fields.
+
+        // Toolbar (HeliBoard gap analysis phase 1). parse() drops any name the command registry no
+        // longer knows, so a command removed by a future upstream merge cannot leave a dead button.
+        toolbarEnabled = prefs.getSafeBoolean(ToolbarConfig.PREF_ENABLED, Defaults.TOOLBAR_ENABLED)
+        toolbarKeys = ToolbarConfig.parse(prefs.getSafeString(ToolbarConfig.PREF_KEYS, Defaults.TOOLBAR_KEYS))
 
         // Swipe trail appearance settings
         swipeTrailEnabled = prefs.getSafeBoolean("swipe_trail_enabled", Defaults.SWIPE_TRAIL_ENABLED)

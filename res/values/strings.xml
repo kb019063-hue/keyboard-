@@ -480,6 +480,29 @@
     <string name="settings_section_privacy">🔒 Privacy &amp; Data</string>
     <string name="settings_section_swipe_trail">✨ Swipe Trail</string>
 
+    <!-- Toolbar: one-tap command row above the suggestion strip (HeliBoard gap analysis phase 1).
+         English only for now. That is consistent with the ~10 strings already untranslated across
+         the 21 locale files, and deliberate: TranslationCoverageDriftTest rejects a wholesale copy
+         of the English value as "translated", so machine-filling 21 locales would fail it and read
+         worse than an honest fallback. Button labels need no new strings at all -- they come from
+         each command's own cmd_<id> resource, so they are already translated in 21 locales. -->
+    <string name="settings_section_toolbar">🧰 Toolbar</string>
+    <string name="toolbar_enable_title">Show toolbar</string>
+    <string name="toolbar_enable_desc">A row of one-tap buttons above the suggestions: undo, copy, paste, cursor moves and more.</string>
+    <string name="toolbar_keys_title">Buttons</string>
+    <string name="toolbar_keys_empty">No buttons yet. Add one below.</string>
+    <!-- A bare ratio, not a count with a noun: avoids needing <plurals> for "1 button". -->
+    <string name="toolbar_keys_count">%1$d / %2$d</string>
+    <string name="toolbar_add_button">Add</string>
+    <string name="toolbar_reset_defaults">Reset</string>
+    <string name="toolbar_move_up">Move up</string>
+    <string name="toolbar_move_down">Move down</string>
+    <string name="toolbar_remove_button">Remove</string>
+    <string name="toolbar_picker_title">Choose a command</string>
+    <string name="toolbar_picker_search_hint">Search commands</string>
+    <string name="toolbar_picker_no_results">No commands match that search.</string>
+    <string name="toolbar_picker_already_added">Already on the toolbar</string>
+
     <!-- AccessibilitySection -->
     <string name="accessibility_system_vibration_title">Use System Vibration</string>
     <string name="accessibility_system_vibration_desc">Use your phone\'s built-in haptic pattern (lowest latency). Turn off to set a custom duration.</string>

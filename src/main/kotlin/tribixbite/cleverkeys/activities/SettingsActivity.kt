@@ -432,6 +432,11 @@ class SettingsActivity : ComponentActivity(), SharedPreferences.OnSharedPreferen
     // preference change while being read by nothing.
     // Do not re-add them — a backing field here is what makes a dead key look alive.
 
+    // Toolbar (HeliBoard gap analysis phase 1). The list holds CommandRegistry names; ToolbarConfig
+    // owns the serialized form and drops names the registry no longer knows.
+    internal var toolbarEnabled by mutableStateOf(Defaults.TOOLBAR_ENABLED)
+    internal var toolbarKeys by mutableStateOf(ToolbarConfig.DEFAULT_KEYS)
+
     // Swipe trail appearance settings
     internal var swipeTrailEnabled by mutableStateOf(Defaults.SWIPE_TRAIL_ENABLED)
     internal var swipeTrailEffect by mutableStateOf(Defaults.SWIPE_TRAIL_EFFECT)
@@ -542,6 +547,9 @@ class SettingsActivity : ComponentActivity(), SharedPreferences.OnSharedPreferen
     internal var swipeTrailSectionExpanded: Boolean
         get() = settingsViewModel.swipeTrailSectionExpanded
         set(value) { settingsViewModel.swipeTrailSectionExpanded = value }
+    internal var toolbarSectionExpanded: Boolean
+        get() = settingsViewModel.toolbarSectionExpanded
+        set(value) { settingsViewModel.toolbarSectionExpanded = value }
     internal var inputSectionExpanded: Boolean
         get() = settingsViewModel.inputSectionExpanded
         set(value) { settingsViewModel.inputSectionExpanded = value }
