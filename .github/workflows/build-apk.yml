@@ -24,6 +24,11 @@ on:
     branches:
       - arena/23fde500-keyboard
       - main
+    # A docs-only change cannot alter an APK, and each push costs a ~6 min build plus a ~9 min
+    # emulator run. workflow_dispatch still always runs, so nothing becomes unbuildable silently.
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
   workflow_dispatch:
 
 permissions:
