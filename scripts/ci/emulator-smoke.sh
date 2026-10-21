@@ -341,6 +341,8 @@ for attempt in 1 2 3 4 5 6; do
   F="$OUT/ui-tb-hdr-$attempt.xml"; dumpui "$F"
   # 'text="…Toolbar' rather than a bare 'Toolbar': the only other string containing the word is
   # cmd_show_text_menu_desc, a command DESCRIPTION that appears solely inside the picker dialog.
+  # Note the dump escapes the header's emoji as a numeric entity (&#129520;), which this pattern
+  # tolerates by matching the word rather than the glyph.
   if grep -qE 'text="[^"]*Toolbar' "$F" 2>/dev/null; then HDR="$F"; break; fi
   info "attempt $attempt: no toolbar header on screen, scrolling"
   scrollup
@@ -351,18 +353,47 @@ if [ -z "$HDR" ]; then
   fail "toolbar section header never appeared after 6 dump/scroll attempts: texts=[$(texts "$OUT"/ui-tb-hdr-*.xml)]"
 else
   pass "toolbar section header present in the settings list"
-  C=$(nodecenter "$HDR" 'Toolbar')
-  [ -n "$C" ] && { adb shell input tap $C; sleep 3; }
-  E="$OUT/ui-tb-expanded.xml"; dumpui "$E"
-  if grep -qE 'text="Show toolbar"' "$E" 2>/dev/null; then
-    TBUI_VERDICT=switch
+  # Tap the header only once it sits in a safe vertical band. Run 39681883670 found the header at
+  # the bottom of the list and tapped y=2195 of a 2400px screen -- inside the gesture nav bar, so
+  # the section never expanded and the check failed for a reason that has nothing to do with the
+  # code under test. Nudge the list until the centre is comfortably on screen, then tap.
+  SAFE_LO=$((SH * 20 / 100)); SAFE_HI=$((SH * 75 / 100))
+  EXPANDED=""; SRC="$HDR"; LASTC=""; LASTE="$HDR"
+  for try in 1 2 3; do
+    for nudge in 1 2 3; do
+      C=$(nodecenter "$SRC" 'Toolbar'); [ -z "$C" ] && break
+      CY=${C#* }
+      [ "$CY" -ge "$SAFE_LO" ] && [ "$CY" -le "$SAFE_HI" ] && break
+      # Too low: content moves up. Too high: content moves down. Quarter-screen steps so the
+      # header cannot be scrolled clean past the viewport in one go.
+      if [ "$CY" -gt "$SAFE_HI" ]; then
+        adb shell input swipe $((SW / 2)) $((SH * 60 / 100)) $((SW / 2)) $((SH * 40 / 100)) 300
+      else
+        adb shell input swipe $((SW / 2)) $((SH * 40 / 100)) $((SW / 2)) $((SH * 60 / 100)) 300
+      fi
+      sleep 2
+      N="$OUT/ui-tb-nudge-$try-$nudge.xml"; dumpui "$N"
+      # Only adopt the new dump if the header is still in it, so an overshoot cannot lose the target.
+      grep -qE 'text="[^"]*Toolbar' "$N" 2>/dev/null && SRC="$N"
+    done
+    C=$(nodecenter "$SRC" 'Toolbar'); LASTC="$C"
+    [ -n "$C" ] && { adb shell input tap $C; sleep 3; }
+    E="$OUT/ui-tb-expanded-$try.xml"; dumpui "$E"; LASTE="$E"
+    # A single tap on a collapsed header can only expand it, so re-tapping is safe -- but only
+    # after re-reading the screen, since the list may have shifted under the tap.
+    if grep -qE 'text="Show toolbar"' "$E" 2>/dev/null; then EXPANDED="$E"; break; fi
+    info "attempt $try: tapped '${C:-none}' (band $SAFE_LO-$SAFE_HI), section still collapsed"
+  done
+
+  if [ -n "$EXPANDED" ]; then
+    E="$EXPANDED"; TBUI_VERDICT=switch
     pass "expanding the section composed the 'Show toolbar' switch"
     # The Add button can sit below the fold once the button list is expanded, so hunt for it
     # rather than failing on the first miss.
     A=""
     for a2 in 1 2 3; do
       A=$(nodecenter "$E" '^add$'); [ -n "$A" ] && break
-      scrollup; E="$OUT/ui-tb-expanded-$a2.xml"; dumpui "$E"
+      scrollup; E="$OUT/ui-tb-add-$a2.xml"; dumpui "$E"
     done
     [ -n "$A" ] && { adb shell input tap $A; sleep 3; }
     P="$OUT/ui-tb-picker.xml"; dumpui "$P"; shot 06-toolbar-picker
@@ -370,8 +401,7 @@ else
       # Anchored: each text node must EQUAL a catalogue label. The switch description also says
       # "undo, copy, paste", but as part of a longer sentence, so it cannot match these.
       # `grep -o | sort -u | wc -l`, NOT `grep -c`: a real uiautomator dump is ONE line, so -c
-      # would report 1 no matter how many catalogue labels rendered. Caught by the fake-adb
-      # harness, whose multi-line dumps would have hidden it.
+      # would report 1 no matter how many catalogue labels rendered.
       N=$(grep -oE 'text="(Undo|Redo|Copy|Paste|Cursor Left|Voice Typing|Select Word)"' "$P" 2>/dev/null | sort -u | wc -l)
       if [ "${N:-0}" -eq 0 ]; then
         # The dialog opened but rendered no catalogue entries at all -- ALL_COMMANDS empty or the
@@ -390,7 +420,7 @@ else
     adb shell input keyevent KEYCODE_BACK; sleep 2
   else
     TBUI_VERDICT=no-switch
-    fail "header found but expanding it did not compose the switch: tapped '${C:-NOT-FOUND}': texts=[$(texts "$E")]"
+    fail "header found but 3 expand attempts never composed the switch: last tapped '${LASTC:-NOT-FOUND}' band=$SAFE_LO-$SAFE_HI screen=${SW}x${SH}: texts=[$(texts "$LASTE")]"
   fi
 fi
 
