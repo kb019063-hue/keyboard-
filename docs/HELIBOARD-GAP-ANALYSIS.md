@@ -48,6 +48,29 @@ Design notes per part live in `docs/PHASE3-PART1-KEY-SOUND-DESIGN.md`,
 `docs/PHASE3-PART4-SPLIT-DESIGN.md`; each records what no emulator run can prove and therefore
 what the phone check must cover.
 
+### What CI proves about them on a real emulator
+
+`scripts/ci/emulator-smoke.sh` section 7d runs on an x86_64 emulator for every push. It reaches each
+control through the settings **search bar** instead of by scrolling: sections 7b and 7c leave two
+sections expanded, so the list is several screens long by then and any fixed scroll budget is a coin
+flip — runs 39781367258 and 39783242401 each lost a check that way, one scrolling down from a deep
+position, one running out of budget climbing from the top. Search is deterministic, and it doubles as
+proof that the generated index carries the new settings: `scripts/generate_settings_search_index.py`
+derives 176 entries from the controls themselves, among them `Incognito Mode`, `Floating Keyboard`,
+`Floating Keyboard Width`, `Split Keyboard` and `Split Gap`. The scroll route survives as a fallback,
+so a search regression cannot mask a settings one.
+
+Asserted: that each of the three switches composes inside its own section, and — the part composition
+cannot show — that switching floating on narrows the **input-method window** itself (its `dumpsys
+window` frame is narrower than the screen), which is the entire mechanism of part 3. That assertion
+only fires once the switch reads `checked="true"` in the dump; an unconfirmed tap degrades to a
+reported warning, because a harness that guesses would blame the product for its own miss.
+
+Reported, never asserted: the switch state after tapping incognito and split, a screenshot in each
+state, and any window frame that could not be attributed to the input method with confidence.
+Incognito and floating stay enabled for the remainder of the run, so section 8's crash buffer also
+covers them combined with the one-handed mode 7c switched on.
+
 Still open, deliberately: the **system spell-checker provider** (a new service, and the only gap
 that creates a fresh licensing obligation — HeliBoard's spell checker is Apache-2.0 code that
 would need a `LICENSE-Apache-2.0` alongside the GPL), **theme background images**, and the

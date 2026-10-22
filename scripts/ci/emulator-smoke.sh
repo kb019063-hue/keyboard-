@@ -659,50 +659,195 @@ else
 fi
 
 echo "== 7d. phase-3 feature switches (incognito, floating, split) =="
-# Composition-level evidence for the three phase-3 settings controls, plus a best-effort probe of
-# the one thing only a device can show: that enabling floating narrows the input-method WINDOW
-# itself, not merely a view inside it. All three sections are collapsed on a fresh install, so
-# each check is two-stage like 7c: bring the section header into the safe band, tap it, then look
-# for the switch the expansion composes. Assertions stop at composition -- what a dump can prove.
-# Whether a tap flipped a Compose switch, and what the window frame became, are reported as
-# evidence, never asserted: a harness limitation must not sink a run whose real checks passed.
-adb shell am start -W -n "$PKG/$NS.SettingsActivity" > "$OUT/am-settings-nf.log" 2>&1
-sleep 5
+# Composition evidence for the three phase-3 controls, reached through the settings SEARCH BAR
+# instead of by scrolling. Runs 39781367258 and 39783242401 are why: 7b and 7c leave the Toolbar
+# and Appearance sections expanded, so the list is several screens long by the time 7d starts and
+# every fixed scroll budget is a coin flip -- run 29 failed because its hunt started deep and
+# scrollup only reveals LOWER items, run 30 failed because it started at the top and ran out of
+# budget before Privacy. Search is deterministic: the bar sits at a known place at the top of the
+# screen, result rows are titled with the setting name, and tapping one runs executeSearchAction ->
+# collapseAllSections + expandSection + scrollToSetting, which polls up to 1.5 s for the control to
+# register its position and then puts it at the top of the viewport (SettingsSearch.kt:42-67). It
+# also proves the generated search index -- regenerated for parts 2-4, now 176 entries -- really
+# carries the new controls, which nothing else in this suite checks. The scroll route stays as a
+# fallback, so a search regression cannot mask a settings regression, and NF_ROUTE/NF_SEARCH say
+# which tier answered.
+# Beyond composition, floating gets the one check only a device can give: that enabling it narrows
+# the input-method WINDOW itself (WindowLayoutUtils.applyFloatingWindowLayoutParams), not merely a
+# view inside it. Tap outcomes stay evidence, never assertions -- whether a Compose switch flipped
+# is not something a dump can prove, and a harness limitation must not sink a run whose real checks
+# passed. Floating and incognito are deliberately left ENABLED afterwards: the rest of the run then
+# exercises the keyboard in that state, and section 8's crash buffer is the assertion that catches
+# a bad interaction with the one-handed mode 7c left on.
 NF_VERDICT=ok
+NF_SRC=""
+NF_ROUTE=none
+NF_SEARCH=no
 
-# Expand the section whose header matches $2 until the switch titled $3 is composed; NF_SRC ends
-# up holding the dump that shows it. Returns 1 if six dump/scroll attempts never even find the
-# header, or three expand attempts never compose the switch.
-nf_expand() {
-  local pre="$1" hdr="$2" sw="$3"
-  local lo=$((SH * 20 / 100)) hi=$((SH * 75 / 100))
-  local f src="" c cy attempt try nudge
-  NF_SRC=""
-  # Start every hunt from the TOP of the settings list. Run 39781367258 proved why: the incognito
-  # check leaves Privacy expanded and the list scrolled deep (its dump showed Advanced and
-  # "Forget Learned"), and scrollup only reveals LOWER items -- so a header above the window was
-  # unreachable and the hunt reported "never composed" for a switch that was merely above the
-  # fold. Eight downward swipes reach the top from anywhere in a nineteen-section list, which
-  # makes "not on screen after this" a statement about depth, not about direction.
-  for nudge in 1 2 3 4 5 6 7 8; do
+# Twelve downward swipes: reach the top of the settings list from anywhere in it. Needed by both
+# tiers -- the search bar is inside the scrolling Column (SettingsScreen.kt:106-139), so a list
+# left scrolled deep by an earlier section hides it exactly like it hides a section header. Twelve
+# rather than eight because the offline harness models NO fling momentum (a 960px drag moves the
+# list 960px, where a device flings further), and eight only just reached the top from the bottom
+# of a list with two sections expanded.
+nf_totop() {
+  local n
+  for n in 1 2 3 4 5 6 7 8 9 10 11 12; do
     adb shell input swipe $((SW / 2)) $((SH * 30 / 100)) $((SW / 2)) $((SH * 70 / 100)) 250
     sleep 1
   done
-  for attempt in 1 2 3 4 5 6; do
-    f="$OUT/ui-$pre-hdr-$attempt.xml"; dumpui "$f"
+}
+
+# Dump, test, scroll down, repeat. Twelve big steps (85% -> 15% of the screen) because with two
+# sections left expanded by 7b/7c the list runs to several screens. Winner lands in NF_SRC.
+nf_scan() {  # $1 = dump-name prefix, $2 = text regex
+  local pre="$1" re="$2" f n
+  for n in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    f="$OUT/ui-$pre-scan-$n.xml"; dumpui "$f"
     if grep -qiE "responding" "$f" 2>/dev/null; then
-      info "attempt $attempt: ANR dialog over the settings screen -- dismissing"
+      info "scan $n: ANR dialog over the settings screen -- dismissing"
       dismiss_anr || true
       continue
     fi
-    if grep -qE "text=\"[^\"]*$sw" "$f" 2>/dev/null; then NF_SRC="$f"; return 0; fi
-    if grep -qE "text=\"[^\"]*$hdr" "$f" 2>/dev/null; then src="$f"; break; fi
-    info "attempt $attempt: no '$hdr' header on screen, scrolling"
-    scrollup
+    if grep -qE "text=\"[^\"]*$re" "$f" 2>/dev/null; then NF_SRC="$f"; return 0; fi
+    adb shell input swipe $((SW / 2)) $((SH * 85 / 100)) $((SW / 2)) $((SH * 15 / 100)) 200
+    sleep 2
   done
-  [ -n "$src" ] || return 1
-  for try in 1 2 3; do
-    for nudge in 1 2 3; do
+  return 1
+}
+
+# Centre of the TOPMOST text field in a dump. In SettingsActivity that is the search bar; in
+# LauncherActivity it is the "test your new keyboard here" field that brings the keyboard up.
+nf_topfield() {  # $1 = dump
+  python3 - "$1" <<'PY' 2>/dev/null
+import re, sys
+try:
+    xml = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+except Exception:
+    sys.exit(0)
+best = None
+for m in re.finditer(r'<node[^>]*>', xml):
+    tag = m.group(0)
+    if not re.search(r'class="[^"]*(?:EditText|TextField)[^"]*"', tag):
+        continue
+    b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', tag)
+    if not b:
+        continue
+    x1, y1, x2, y2 = map(int, b.groups())
+    if (x2 - x1) < 20 or (y2 - y1) < 10:
+        continue
+    if best is None or y1 < best[0]:
+        best = (y1, (x1 + x2) // 2, (y1 + y2) // 2)
+if best:
+    print("%d %d" % (best[1], best[2]))
+PY
+}
+
+# Tap target for a settings row. SettingsSwitch makes the whole Row clickable (7c relies on the same
+# fact), but an unanchored pattern can resolve to the WRONG node: "Floating Keyboard" is also a
+# prefix of the "Floating Keyboard Width" slider, and 7c was bitten by a section header that differs
+# from its switch only by case. So try the exact label first and only then fall back to a substring.
+nf_tapcenter() {  # $1 = dump, $2 = exact row title
+  local c
+  c=$(nodecenter "$1" "^$2\$")
+  [ -n "$c" ] || c=$(nodecenter "$1" "$2")
+  printf '%s' "$c"
+}
+
+# State of the switch whose label matches $2, as "<checked> <diagnostics>". Compose merges a
+# SettingsSwitch row into one semantics node carrying both the title and the toggle state, so this
+# reads THE switch rather than "some switch on screen is checked". The diagnostics ride along
+# because whether real dumps expose `checked` on that node is not something this sandbox can verify:
+# if they do not, 7d must degrade to reporting that, never to asserting a state change it cannot
+# confirm. Prints "none no-match" when no node carries the label at all.
+nf_switchstate() {  # $1 = dump, $2 = row title
+  python3 - "$1" "$2" <<'PY' 2>/dev/null
+import re, sys
+try:
+    xml = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+except Exception:
+    print("none unreadable-dump"); sys.exit(0)
+title = sys.argv[2].lower()
+exact, partial = [], []
+for m in re.finditer(r'<node[^>]*>', xml):
+    tag = m.group(0)
+    label = " ".join(re.findall(r'(?:text|content-desc)="([^"]*)"', tag)).strip()
+    if not label:
+        continue
+    if label.lower() == title:
+        exact.append(tag)
+    elif title in label.lower():
+        partial.append(tag)
+tag = (exact or partial or [None])[0]
+if tag is None:
+    print("none no-match"); sys.exit(0)
+def attr(name):
+    m = re.search(name + r'="([^"]*)"', tag)
+    return m.group(1) if m else "?"
+print("%s checkable=%s class=%s label=%s" % (attr("checked"), attr("checkable"),
+                                             attr("class"), attr("text")[:24]))
+PY
+}
+
+# Failure evidence for a 7d hunt. Plain `texts` (sorted-unique head -8 across EVERY dump of the
+# hunt) proved worthless in run 39783242401: numeric emoji entities sort before letters, so all
+# eight slots went to section icons and the annotation never said what the hunt had looked at.
+# Report the NEWEST dump alone, plus every section header the hunt ever saw.
+nf_evidence() {  # $1 = dump-name prefix
+  local last n
+  last=$(ls -1t "$OUT"/ui-"$1"-*.xml 2>/dev/null | head -1)
+  n=$(ls -1 "$OUT"/ui-"$1"-*.xml 2>/dev/null | wc -l | tr -d ' ')
+  printf 'dumps=%s newest=%s texts=[%s] sections=[%s]' \
+    "${n:-0}" "$(basename "${last:-none}")" \
+    "$(grep -ohE 'text="[^"]{1,26}"' "${last:-/dev/null}" 2>/dev/null | sort -u | head -6 | tr '\n' ' ')" \
+    "$(grep -ohE 'text="[^"]*(Privacy|Appearance)[^"]{0,10}"' "$OUT"/ui-"$1"-*.xml 2>/dev/null | sort -u | head -3 | tr '\n' ' ')"
+}
+
+# Reach the control titled $3 and leave the dump that shows it in NF_SRC.
+#   Tier 1 (search): fresh SettingsActivity, climb to the top, tap the search bar, type $2, the
+#     result row titled $3 must compose, tap it -> all sections collapse, the right one expands and
+#     the control scrolls to the top of the viewport.
+#   Tier 2 (scroll): only if tier 1 never produced the result row -- climb, scan down for the
+#     section header $4, centre it in the tap-safe band, tap to expand, then scan for the control.
+nf_reach() {  # $1 = prefix, $2 = search query, $3 = control title, $4 = section header regex
+  local pre="$1" q="$2" title="$3" hdr="$4"
+  local f c n cy src
+  local lo=$((SH * 20 / 100)) hi=$((SH * 75 / 100))
+  NF_SRC=""; NF_ROUTE=none; NF_SEARCH=no
+  adb shell am start -W -n "$PKG/$NS.SettingsActivity" > "$OUT/am-settings-$pre.log" 2>&1
+  sleep 5
+  nf_totop
+  f="$OUT/ui-$pre-land.xml"; dumpui "$f"
+  c=$(nf_topfield "$f")
+  if [ -n "$c" ]; then
+    adb shell input tap $c; sleep 2
+    adb shell input text "$q" > /dev/null 2>&1
+    sleep 3
+    f="$OUT/ui-$pre-search.xml"; dumpui "$f"
+    if grep -qE "text=\"[^\"]*$title" "$f" 2>/dev/null; then
+      NF_SEARCH=yes
+      c=$(nodecenter "$f" "$title")
+      if [ -n "$c" ]; then
+        # 7 s: executeSearchAction polls up to 1.5 s for the control's position, scrolls, then
+        # highlights for 2 s. Dumping mid-scroll would read a frame that is about to change.
+        adb shell input tap $c; sleep 7
+        f="$OUT/ui-$pre-after.xml"; dumpui "$f"
+        if grep -qE "text=\"[^\"]*$title" "$f" 2>/dev/null; then NF_SRC="$f"; NF_ROUTE=search; return 0; fi
+        if nf_scan "$pre" "$title"; then NF_ROUTE=search; return 0; fi
+      fi
+    fi
+  fi
+  # Tier 2: the scroll route, attempted TWICE. Tapping a header is a toggle, and an earlier section
+  # of this suite may have left the target expanded -- the offline harness's nosearch scenario fails
+  # on exactly that, collapsing Appearance and then scanning twelve screens for a control that is no
+  # longer composed. So: climb, find the header, centre it in the tap-safe band, tap, scan; if the
+  # control never composed, climb back and tap the header a second time, which reopens the section.
+  local round
+  for round in 1 2; do
+    nf_totop
+    nf_scan "$pre-hdr$round" "$hdr" || return 1
+    src="$NF_SRC"
+    for n in 1 2 3; do
       c=$(nodecenter "$src" "$hdr"); [ -z "$c" ] && break
       cy=${c#* }
       [ "$cy" -ge "$lo" ] && [ "$cy" -le "$hi" ] && break
@@ -712,81 +857,152 @@ nf_expand() {
         adb shell input swipe $((SW / 2)) $((SH * 40 / 100)) $((SW / 2)) $((SH * 60 / 100)) 300
       fi
       sleep 2
-      f="$OUT/ui-$pre-nudge-$try-$nudge.xml"; dumpui "$f"
+      f="$OUT/ui-$pre-hnudge-$round-$n.xml"; dumpui "$f"
       grep -qE "text=\"[^\"]*$hdr" "$f" 2>/dev/null && src="$f"
     done
     c=$(nodecenter "$src" "$hdr")
-    [ -n "$c" ] && { adb shell input tap $c; sleep 3; }
-    f="$OUT/ui-$pre-exp-$try.xml"; dumpui "$f"
-    if grep -qE "text=\"[^\"]*$sw" "$f" 2>/dev/null; then NF_SRC="$f"; return 0; fi
-    info "expand attempt $try: tapped '${c:-none}', '$sw' still not composed"
+    if [ -n "$c" ]; then adb shell input tap $c; sleep 4; fi
+    if nf_scan "$pre-exp$round" "$title"; then NF_ROUTE=scroll; return 0; fi
   done
   return 1
 }
 
+# The device-only half of part 3. Composition proves the switch exists; only a frame proves that
+# turning it on resizes the input-method WINDOW, which is the whole mechanism (width 80 percent of
+# the screen by default, gravity TOP|START at an explicit x/y). Asserted only when the evidence is
+# unambiguous -- the keyboard must be up AND the window must be identified as the input method by
+# its own header line -- because a mis-parsed window would be a harness lie, not a product defect.
+# Anything less confident goes out as a warning annotation, which is also the first test of whether
+# warnings survive annotation storage at all (notices are capped at about 12, errors survive).
+nf_frame_probe() {
+  local f c shown frameout w W1 W2 CONF WHDR _r
+  adb shell am start -W -n "$PKG/$NS.LauncherActivity" > "$OUT/am-launcher-nf.log" 2>&1
+  sleep 6
+  c=""
+  for f in 1 2 3; do
+    dumpui "$OUT/ui-nfframe-$f.xml"
+    c=$(nf_topfield "$OUT/ui-nfframe-$f.xml")
+    [ -n "$c" ] && break
+    adb shell input swipe $((SW / 2)) $((SH * 3 / 4)) $((SW / 2)) $((SH / 4)) 300
+    sleep 3
+  done
+  if [ -z "$c" ]; then
+    ann warning "NFFRAME no text field to focus after 3 attempts, floating window unmeasured: focus='$(focus)' classes=[$(grep -ohE 'class="[^"]*"' "$OUT"/ui-nfframe-*.xml 2>/dev/null | sort -u | head -4 | tr '\n' ' ')]"
+    return 0
+  fi
+  adb shell input tap $c; sleep 7
+  shot 09-floating-keyboard
+  adb shell dumpsys input_method > "$OUT/dumpsys-input_method-floating.txt" 2>&1
+  shown=$(grep -oE 'mInputShown=[a-z]*' "$OUT/dumpsys-input_method-floating.txt" 2>/dev/null | head -1 | tr -d '\r')
+  adb shell dumpsys window windows > "$OUT/window-frames.txt" 2>&1
+  # One line: "<x1> <x2> <confidence> <header>", confidence 2 = the window's own header line names
+  # the input method, 1 = it names our package. Extra candidates follow as "ALT <header>" lines.
+  python3 - "$OUT/window-frames.txt" "$PKG" > "$OUT/nfframe.txt" 2>/dev/null <<'PY'
+import re, sys
+try:
+    txt = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+except Exception:
+    sys.exit(0)
+pkg = (sys.argv[2] if len(sys.argv) > 2 else "").lower()
+best = None
+alts = []
+for block in re.split(r'(?m)^(?=\s*Window #)', txt):
+    head = block.split("\n", 1)[0].strip()
+    m = re.search(r'mFrame=\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]', block)
+    if not m:
+        continue
+    hl = head.lower()
+    conf = 2 if "inputmethod" in hl else (1 if pkg and pkg in hl else 0)
+    if not conf:
+        continue
+    x1, _y1, x2, _y2 = map(int, m.groups())
+    if best is None or conf > best[0]:
+        if best is not None:
+            alts.append(best[3])
+        best = (conf, x1, x2, head[:64])
+    else:
+        alts.append(head[:64])
+if best:
+    print("%d %d %d %s" % (best[1], best[2], best[0], best[3]))
+for a in alts[:2]:
+    print("ALT %s" % a)
+PY
+  frameout=$(head -1 "$OUT/nfframe.txt" 2>/dev/null)
+  if [ -n "$frameout" ]; then
+    W1=${frameout%% *}; _r=${frameout#* }
+    W2=${_r%% *}; _r=${_r#* }
+    CONF=${_r%% *}; WHDR=${_r#* }
+  else
+    W1=""; W2=""; CONF=0; WHDR=""
+  fi
+  if [ "$CONF" = "2" ] && [ "$shown" = "mInputShown=true" ] && [ -n "$W1" ] && [ -n "$W2" ]; then
+    w=$((W2 - W1))
+    if [ "$w" -gt 0 ] && [ "$w" -lt "$SW" ]; then
+      pass "floating narrowed the input-method WINDOW to ${w}px of ${SW}px: $WHDR"
+    else
+      NF_VERDICT=$([ "$NF_VERDICT" = "ok" ] && echo frm || echo "$NF_VERDICT")
+      fail "floating left the input-method window ${w}px wide on a ${SW}px screen: shown=${shown:-none} frame=[${W1},${W2}] header='$WHDR' candidates=$(wc -l < "$OUT/nfframe.txt" 2>/dev/null | tr -d ' ' || echo 0)"
+    fi
+  else
+    ann warning "NFFRAME not assertable (evidence only): shown=${shown:-none} conf=${CONF:-0} frame=[${W1:-?},${W2:-?}] header='${WHDR:-none}' alt=[$(grep '^ALT' "$OUT/nfframe.txt" 2>/dev/null | cut -c5-64 | tr '\n' '|')] focus='$(focus)'"
+  fi
+}
+
 # --- incognito, under Privacy ---
-if nf_expand nfinc 'Privacy' 'Incognito Mode'; then
-  pass "incognito switch composed under the Privacy section"
-  C=$(nodecenter "$NF_SRC" 'Incognito Mode')
+if nf_reach nfinc incognito 'Incognito Mode' 'Privacy'; then
+  HS=$(grep -qE 'text="[^"]*Privacy' "$NF_SRC" 2>/dev/null && echo yes || echo no)
+  pass "incognito switch composed under Privacy (route=$NF_ROUTE search-result=$NF_SEARCH header-in-same-dump=$HS)"
+  C=$(nf_tapcenter "$NF_SRC" 'Incognito Mode')
   if [ -n "$C" ]; then
     adb shell input tap $C; sleep 3
     D="$OUT/ui-nfinc-on.xml"; dumpui "$D"
-    grep -qE 'checked="true"' "$D" 2>/dev/null \
-      && info "a switch reports checked after tapping incognito (evidence, not asserted)"
+    info "incognito switch state after tapping at $C: $(nf_switchstate "$D" 'Incognito Mode') (evidence, not asserted)"
     shot 08-incognito-on
   fi
 else
   NF_VERDICT=inc
-  fail "incognito switch never composed under Privacy: texts=[$(texts "$OUT"/ui-nfinc-*.xml)]"
+  fail "incognito switch never composed (route=$NF_ROUTE search-result=$NF_SEARCH): $(nf_evidence nfinc)"
 fi
 
-# --- floating and split, both under Appearance ---
-if nf_expand nfflt 'Appearance' 'Floating Keyboard'; then
-  pass "floating keyboard switch composed under the Appearance section"
-  C=$(nodecenter "$NF_SRC" 'Floating Keyboard')
-  if [ -n "$C" ]; then
-    adb shell input tap $C; sleep 3
-    # The window-frame probe: with floating on and a keyboard up, the input-method window's frame
-    # must be narrower than the screen. Getting a keyboard up from here needs a focused text
-    # field, which this section cannot guarantee, so absence of the window is a harness
-    # limitation and reports as info; a PRESENT window that is still full width is the real
-    # signal, and even then only evidence -- the assertion budget stays on composition.
-    adb shell input keyevent KEYCODE_BACK > /dev/null 2>&1
-    sleep 3
-    FR="$OUT/window-frames.txt"
-    adb shell dumpsys window windows > "$FR" 2>&1
-    FRAME=$(grep -A6 'InputMethod' "$FR" 2>/dev/null | grep -oE 'mFrame=\[[0-9-]+,[0-9-]+\]\[[0-9-]+,[0-9-]+\]' | head -1)
-    if [ -n "$FRAME" ]; then
-      X1=$(printf '%s' "$FRAME" | sed 's/mFrame=\[\([-0-9]*\),.*/\1/')
-      X2=$(printf '%s' "$FRAME" | sed 's/.*\]\[\([-0-9]*\),.*/\1/')
-      W=$((X2 - X1))
-      if [ "$W" -gt 0 ] && [ "$W" -lt "$SW" ]; then
-        pass "floating narrowed the input-method window to ${W}px of ${SW}px"
-      else
-        info "input-method window frame width ${W}px vs screen ${SW}px (evidence, not asserted)"
-      fi
-    else
-      info "no input-method window up to measure (harness limitation): floating frame unprobed"
-    fi
-  fi
-  # Split lives in the same expanded section, possibly below the fold: hunt, do not assume.
-  SPLIT_SEEN=""
-  for attempt in 1 2 3 4; do
-    D="$OUT/ui-nfspl-$attempt.xml"; dumpui "$D"
-    if grep -qE 'text="[^"]*Split Keyboard' "$D" 2>/dev/null; then SPLIT_SEEN="$D"; break; fi
-    scrollup
-  done
-  if [ -n "$SPLIT_SEEN" ]; then
-    pass "split keyboard switch composed under the Appearance section"
-    C=$(nodecenter "$SPLIT_SEEN" 'Split Keyboard')
-    [ -n "$C" ] && { adb shell input tap $C; sleep 3; shot 09-split-on; }
+# --- floating, under Appearance, then the window-frame probe ---
+if nf_reach nfflt floating 'Floating Keyboard' 'Appearance'; then
+  HS=$(grep -qE 'text="[^"]*Appearance' "$NF_SRC" 2>/dev/null && echo yes || echo no)
+  pass "floating keyboard switch composed under Appearance (route=$NF_ROUTE search-result=$NF_SEARCH header-in-same-dump=$HS)"
+  C=$(nf_tapcenter "$NF_SRC" 'Floating Keyboard')
+  if [ -n "$C" ]; then adb shell input tap $C; sleep 4; fi
+  D="$OUT/ui-nfflt-on.xml"; dumpui "$D"
+  shot 08b-floating-switch
+  SWST=$(nf_switchstate "$D" 'Floating Keyboard')
+  info "floating switch state after tapping at ${C:-none}: $SWST"
+  # The frame probe asserts a CONSEQUENCE of the switch being on, so it only runs once the switch is
+  # confirmed on. Tapping a Compose row and hoping is how a harness turns into a liar: if the tap
+  # missed, the window is legitimately full width and the failure would blame the product.
+  if [ "${SWST%% *}" = "true" ]; then
+    nf_frame_probe
   else
-    NF_VERDICT=$([ "$NF_VERDICT" = "ok" ] && echo spl || echo "$NF_VERDICT")
-    fail "split keyboard switch never composed under Appearance: texts=[$(texts "$OUT"/ui-nfspl-*.xml)]"
+    ann warning "NFFRAME skipped, floating never confirmed on: state='$SWST' tap='${C:-none}' checked-nodes=$(grep -o 'checked="true"' "$D" 2>/dev/null | wc -l | tr -d ' ') focus='$(focus)'"
   fi
 else
   NF_VERDICT=$([ "$NF_VERDICT" = "ok" ] && echo flt || echo "$NF_VERDICT")
-  fail "floating keyboard switch never composed under Appearance: texts=[$(texts "$OUT"/ui-nfflt-*.xml)]"
+  fail "floating keyboard switch never composed (route=$NF_ROUTE search-result=$NF_SEARCH): $(nf_evidence nfflt)"
+fi
+
+# --- split, under Appearance. Reached by its own search: the floating probe left us in
+# LauncherActivity with a keyboard up, and "split" also matches the Split Gap slider, so the
+# assertion is on the full title, which only the switch row carries. ---
+if nf_reach nfspl split 'Split Keyboard' 'Appearance'; then
+  HS=$(grep -qE 'text="[^"]*Appearance' "$NF_SRC" 2>/dev/null && echo yes || echo no)
+  pass "split keyboard switch composed under Appearance (route=$NF_ROUTE search-result=$NF_SEARCH header-in-same-dump=$HS)"
+  C=$(nf_tapcenter "$NF_SRC" 'Split Keyboard')
+  if [ -n "$C" ]; then
+    adb shell input tap $C; sleep 3
+    D="$OUT/ui-nfspl-on.xml"; dumpui "$D"
+    info "split switch state after tapping at $C: $(nf_switchstate "$D" 'Split Keyboard') (evidence, not asserted)"
+    shot 10-split-on
+  fi
+else
+  NF_VERDICT=$([ "$NF_VERDICT" = "ok" ] && echo spl || echo "$NF_VERDICT")
+  fail "split keyboard switch never composed (route=$NF_ROUTE search-result=$NF_SEARCH): $(nf_evidence nfspl)"
 fi
 
 # ThemeSettingsActivity hosts KeyboardPreviewHost -> a real Keyboard2View rendered with the active
