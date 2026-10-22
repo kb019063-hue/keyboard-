@@ -1,0 +1,5 @@
+    A=""
+    for a2 in 1 2 3; do
+      A=$(nodecenter "$E" '^add$'); [ -n "$A" ] && break
+      scrollup; E="$OUT/ui-tb-add-$a2.xml"; dumpui "$E"
+    done

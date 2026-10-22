@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+"""Scenarios for the offline 7d harness, and what each one must produce.
+
+`write <name>`  -> a fresh state.json for fakeadb.py
+`expect <name>` -> "<fails> <nf-verdict> <frame-assertion> <required-warning-substring>"
+`names`         -> every scenario, in run order
+
+Each scenario is a way the real device has already behaved, or a way it could behave that must not
+turn into a false accusation against the keyboard:
+
+happy        everything works; the frame probe asserts and passes
+run30        the state runs 39781367258 and 39783242401 died in: two sections left expanded by 7b/7c
+             and the list scrolled to the bottom, so the search bar itself is off screen
+nosearch     search renders no results, so the scroll fallback must carry all three checks, including
+             the second header tap for a section an earlier check left open
+noscrollto   executeSearchAction expands the section but the control never registers a scroll
+             position, so the control is composed somewhere below the fold
+nochecked    dumps expose no checked/checkable attributes at all -> the frame probe must stand down
+             and say so, never guess
+tapdeaf      the tap lands but the switch does not flip -> same: stand down, do not blame the product
+framefull    floating IS confirmed on and the input-method window is still full width -> the one
+             genuine defect this probe exists to catch, so it must FAIL
+framepkg     the input-method window is titled with the package rather than InputMethodService, so it
+             cannot be identified with confidence -> report, do not assert
+noime        no text field to focus, so no window to measure -> report, do not assert
+"""
+import json
+import os
+import sys
+
+NFOFF = os.environ.get("NFOFF_DIR", "/tmp/nfoff")
+
+SWITCHES = ["Incognito Mode", "Floating Keyboard", "Split Keyboard", "One-Handed Mode", "Key Sound",
+            "Dark Mode", "Show Number Row", "Swipe Trail", "Haptic Feedback"]
+
+
+def base():
+    return {
+        "pkg": "tribixbite.cleverkeys.debug",
+        "screen": "settings",
+        "scroll": 0,
+        "launcher_scroll": 0,
+        "expanded": {},
+        "query": "",
+        "checked": {k: False for k in SWITCHES},
+        "focused_field": None,
+        "ime_shown": False,
+        "window_mode": "narrow",
+        "search_broken": False,
+        "no_scroll_to": False,
+        "hide_checked": False,
+        "tap_deaf": False,
+        "no_launcher_field": False,
+        "calls": [],
+        "taps": [],
+    }
+
+
+# name -> (state mutations, expected fails, expected nf verdict,
+#          expected frame assertion [pass|fail|none], required warning substring)
+SCENARIOS = {
+    "happy":       ({},                                                        0, "ok",  "pass", ""),
+    "run30":       ({"expanded": {"appearance": True, "toolbar": True},
+                     "scroll": 10 ** 6},                                       0, "ok",  "pass", ""),
+    "nosearch":    ({"expanded": {"appearance": True, "toolbar": True},
+                     "scroll": 10 ** 6, "search_broken": True},                0, "ok",  "pass", ""),
+    "noscrollto":  ({"no_scroll_to": True},                                    0, "ok",  "pass", ""),
+    "nochecked":   ({"hide_checked": True},                                    0, "ok",  "none", "NFFRAME skipped"),
+    "tapdeaf":     ({"tap_deaf": True},                                        0, "ok",  "none", "NFFRAME skipped"),
+    "framefull":   ({"window_mode": "full"},                                   1, "frm", "fail", ""),
+    "framepkg":    ({"window_mode": "pkg"},                                    0, "ok",  "none", "not assertable"),
+    "noime":       ({"no_launcher_field": True},                               0, "ok",  "none", "no text field"),
+}
+
+
+def main():
+    if len(sys.argv) < 2:
+        print(__doc__)
+        return 2
+    cmd = sys.argv[1]
+    if cmd == "names":
+        print(" ".join(SCENARIOS))
+        return 0
+    name = sys.argv[2]
+    if name not in SCENARIOS:
+        sys.stderr.write("unknown scenario %s\n" % name)
+        return 2
+    if cmd == "write":
+        state = base()
+        state.update(SCENARIOS[name][0])
+        os.makedirs(NFOFF, exist_ok=True)
+        with open(os.path.join(NFOFF, "state.json"), "w") as f:
+            json.dump(state, f)
+        return 0
+    if cmd == "expect":
+        _m, fails, nf, frame, warn = SCENARIOS[name]
+        print("%d %s %s %s" % (fails, nf, frame, warn))
+        return 0
+    sys.stderr.write("unknown command %s\n" % cmd)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

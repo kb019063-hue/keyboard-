@@ -42,6 +42,9 @@ on:
     paths-ignore:
       - 'docs/**'
       - '**.md'
+      # The offline harness runs section 7d against a fake adb on a laptop; CI never invokes it, so
+      # a change there cannot alter an APK or a smoke verdict.
+      - 'scripts/ci/offline/**'
 
 permissions:
   contents: read

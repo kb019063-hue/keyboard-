@@ -471,9 +471,15 @@ else
     pass "expanding the section composed the 'Show toolbar' switch"
     # The Add button can sit below the fold once the button list is expanded, so hunt for it
     # rather than failing on the first miss.
+    # Test-then-scroll, so EVERY dump the hunt takes is actually tested. Run 39789396340 lost this
+    # check to an off-by-one: the old loop scrolled after its third test and then fell out, leaving
+    # ui-tb-add-3.xml unexamined -- and the very next dump, taken from the same scroll position,
+    # showed text="Add" sitting right there. Three scrolls, four tests.
     A=""
-    for a2 in 1 2 3; do
-      A=$(nodecenter "$E" '^add$'); [ -n "$A" ] && break
+    for a2 in 1 2 3 4; do
+      A=$(nodecenter "$E" '^add$')
+      [ -n "$A" ] && break
+      [ "$a2" -eq 4 ] && break
       scrollup; E="$OUT/ui-tb-add-$a2.xml"; dumpui "$E"
     done
     [ -n "$A" ] && { adb shell input tap $A; sleep 3; }
@@ -496,7 +502,9 @@ else
       fi
     else
       TBUI_VERDICT=no-picker
-      fail "picker did not open: 'Choose a command' absent after tapping Add at '${A:-NOT-FOUND}': texts=[$(texts "$P")]"
+      # add-nodes counts the literal text="Add" in the last dump tested and in the picker dump, so a
+      # NOT-FOUND tap says at once whether the button was absent or merely unmatched by ^add$.
+      fail "picker did not open: 'Choose a command' absent after tapping Add at '${A:-NOT-FOUND}': add-nodes=$(grep -o 'text="Add"' "$E" 2>/dev/null | wc -l | tr -d ' ')/$(grep -o 'text="Add"' "$P" 2>/dev/null | wc -l | tr -d ' ') last-dump=$(basename "$E") texts=[$(texts "$P")]"
     fi
     adb shell input keyevent KEYCODE_BACK; sleep 2
   else
@@ -768,26 +776,58 @@ try:
 except Exception:
     print("none unreadable-dump"); sys.exit(0)
 title = sys.argv[2].lower()
-exact, partial = [], []
+
+def attr(tag, name):
+    m = re.search(name + r'="([^"]*)"', tag)
+    return m.group(1) if m else "?"
+
+nodes = []
 for m in re.finditer(r'<node[^>]*>', xml):
     tag = m.group(0)
     label = " ".join(re.findall(r'(?:text|content-desc)="([^"]*)"', tag)).strip()
-    if not label:
-        continue
-    if label.lower() == title:
-        exact.append(tag)
-    elif title in label.lower():
-        partial.append(tag)
-tag = (exact or partial or [None])[0]
-if tag is None:
+    b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', tag)
+    nodes.append((tag, label, tuple(map(int, b.groups())) if b else None))
+
+# A SettingsSwitch row is TWO nodes in a real dump, which run 39789396340 established the hard way:
+# the title is an android.widget.TextView with checkable="false" checked="false", and the toggle
+# beside it carries the state with no label at all. Reading the title node therefore always reports
+# "false" and would have silently disabled the window-frame assertion for good. So find the title,
+# then take the checkable node sharing its row band.
+pick = None
+for tag, label, b in nodes:
+    if label and label.lower() == title:
+        pick = (tag, label, b); break
+if pick is None:
+    for tag, label, b in nodes:
+        if label and title in label.lower():
+            pick = (tag, label, b); break
+if pick is None:
     print("none no-match"); sys.exit(0)
-def attr(name):
-    m = re.search(name + r'="([^"]*)"', tag)
-    return m.group(1) if m else "?"
-print("%s checkable=%s class=%s label=%s" % (attr("checked"), attr("checkable"),
-                                             attr("class"), attr("text")[:24]))
+tag, label, bounds = pick
+if bounds:
+    x1, y1, x2, y2 = bounds
+    band = max(24, y2 - y1)
+    cy = (y1 + y2) // 2
+    mates = sorted(
+        [(abs((bb[1] + bb[3]) // 2 - cy), t, l, bb) for t, l, bb in nodes
+         if bb and t is not tag and attr(t, "checkable") == "true"
+         and y1 - band <= (bb[1] + bb[3]) // 2 <= y2 + band])
+    if mates:
+        # nearest to the title's own centre, not merely first in document order: a neighbouring row's
+        # toggle can fall inside a generous band and would report the wrong switch's state.
+        _d, t, l, bb = mates[0]
+        print("%s checkable=true class=%s label='%s' row-mates=%d title-class=%s"
+              % (attr(t, "checked"), attr(t, "class"), l[:14], len(mates), attr(tag, "class")))
+        sys.exit(0)
+print("%s checkable=%s class=%s label=%s (title node itself, no toggle beside it)"
+      % (attr(tag, "checked"), attr(tag, "checkable"), attr(tag, "class"), label[:20]))
 PY
 }
+
+# Nodes reporting checked="true" anywhere in a dump. The second, independent way to confirm a tap
+# landed, for dumps where the toggle cannot be tied to its title row: whatever the count was before
+# the tap, one more afterwards means something on that row turned on.
+nf_checkedcount() { grep -o 'checked="true"' "$1" 2>/dev/null | wc -l | tr -d ' '; }
 
 # Failure evidence for a 7d hunt. Plain `texts` (sorted-unique head -8 across EVERY dump of the
 # hunt) proved worthless in run 39783242401: numeric emoji entities sort before letters, so all
@@ -968,19 +1008,22 @@ fi
 if nf_reach nfflt floating 'Floating Keyboard' 'Appearance'; then
   HS=$(grep -qE 'text="[^"]*Appearance' "$NF_SRC" 2>/dev/null && echo yes || echo no)
   pass "floating keyboard switch composed under Appearance (route=$NF_ROUTE search-result=$NF_SEARCH header-in-same-dump=$HS)"
+  PRE=$(nf_checkedcount "$NF_SRC")
   C=$(nf_tapcenter "$NF_SRC" 'Floating Keyboard')
   if [ -n "$C" ]; then adb shell input tap $C; sleep 4; fi
   D="$OUT/ui-nfflt-on.xml"; dumpui "$D"
   shot 08b-floating-switch
+  POST=$(nf_checkedcount "$D")
   SWST=$(nf_switchstate "$D" 'Floating Keyboard')
-  info "floating switch state after tapping at ${C:-none}: $SWST"
+  info "floating switch: tap=${C:-none} state='$SWST' checked-nodes ${PRE:-0}->${POST:-0}"
   # The frame probe asserts a CONSEQUENCE of the switch being on, so it only runs once the switch is
-  # confirmed on. Tapping a Compose row and hoping is how a harness turns into a liar: if the tap
-  # missed, the window is legitimately full width and the failure would blame the product.
-  if [ "${SWST%% *}" = "true" ]; then
+  # confirmed on -- either by the toggle beside the title row, or by the checked count rising across
+  # the tap. Tapping a Compose row and hoping is how a harness turns into a liar: if the tap missed,
+  # the window is legitimately full width and the failure would blame the product.
+  if [ "${SWST%% *}" = "true" ] || [ "${POST:-0}" -gt "${PRE:-0}" ]; then
     nf_frame_probe
   else
-    ann warning "NFFRAME skipped, floating never confirmed on: state='$SWST' tap='${C:-none}' checked-nodes=$(grep -o 'checked="true"' "$D" 2>/dev/null | wc -l | tr -d ' ') focus='$(focus)'"
+    ann warning "NFFRAME skipped, floating never confirmed on: state='$SWST' checked-nodes=${PRE:-0}->${POST:-0} tap='${C:-none}' focus='$(focus)'"
   fi
 else
   NF_VERDICT=$([ "$NF_VERDICT" = "ok" ] && echo flt || echo "$NF_VERDICT")
