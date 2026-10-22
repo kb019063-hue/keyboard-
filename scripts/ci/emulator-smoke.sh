@@ -94,6 +94,12 @@ anrln()   { adb logcat -d -b events -v brief 2>/dev/null | grep -iE 'am_anr|am_k
 anr_pkg() { adb logcat -d -b events -v brief 2>/dev/null | grep -iE 'am_anr' | tail -1 \
             | grep -oE '\[[0-9]+,[0-9]+,[A-Za-z0-9_.]+' | head -1 | cut -d, -f3 | tr -d '\r'; }
 
+# The subject line of the ANR dialog on screen, e.g. "Quickstep isn't responding". The dialog names
+# the app by its LABEL, which is the one witness that survives when the events buffer holds no
+# am_anr -- run 39755499504 wedged exactly that way: am_kill lines only, so an am_anr-based trigger
+# never fired and the launcher was left holding "Wait" twenty-one times.
+anr_subject() { grep -oE 'text="[^"]*responding[^"]*"' "$1" 2>/dev/null | head -1 | sed 's/^text="//; s/"$//'; }
+
 # Center of the first node in $1 whose text/content-desc matches regex $2; empty if none.
 nodecenter() {
   python3 - "$1" "$2" <<'PY' 2>/dev/null
@@ -146,9 +152,23 @@ dismiss_anr() {
   # it re-ANRed 21 times and every assertion downstream failed against a launcher that never
   # came back. For any package that is not ours, close it instead: the launcher restarts by
   # itself, the device recovers, and the checks that follow measure our keyboard again.
-  local apkg; apkg=$(anr_pkg)
-  if [ -n "${PKG:-}" ] && [ -n "${apkg:-}" ] && [ "${apkg#"$PKG"}" = "$apkg" ]; then
-    info "ANR belongs to $apkg, not $PKG -- closing it so the device recovers"
+  # Two independent witnesses say "this ANR is not ours". (1) The events buffer names a foreign
+  # process in its latest am_anr. (2) The dialog's subject line does not carry our brand: the
+  # label is "Mr. Brown's Keyboard" in every locale -- the brand was deliberately never
+  # translated -- so a subject without "Brown" is somebody else's dialog. Witness 2 matters
+  # because the events buffer can hold no am_anr at all (run 39755499504), and witness 1 matters
+  # because it yields the package name needed to force-stop.
+  local apkg subj foreign=""
+  apkg=$(anr_pkg); subj=$(anr_subject "$f")
+  if [ -n "${PKG:-}" ]; then
+    if [ -n "${apkg:-}" ] && [ "${apkg#"$PKG"}" = "$apkg" ]; then
+      foreign="$apkg"
+    elif [ -n "$subj" ] && [ "${subj#*Brown}" = "$subj" ]; then
+      foreign="$subj"
+    fi
+  fi
+  if [ -n "$foreign" ]; then
+    info "ANR belongs to $foreign, not $PKG -- closing it so the device recovers"
     c=$(nodecenter "$f" '^close app$'); [ -n "${c:-}" ] || c=$(nodecenter "$f" 'close app')
     if [ -n "${c:-}" ]; then
       info "tapping 'Close app' at $c"
@@ -157,7 +177,11 @@ dismiss_anr() {
       info "no 'Close app' button found; sending BACK"
       adb shell input keyevent KEYCODE_BACK
     fi
-    adb shell am force-stop "$apkg" > /dev/null 2>&1
+    # force-stop only when a package name is actually known; a label alone cannot be stopped,
+    # and the Close-app tap has already done the recovery in that case.
+    if [ -n "${apkg:-}" ] && [ "${apkg#"$PKG"}" = "$apkg" ]; then
+      adb shell am force-stop "$apkg" > /dev/null 2>&1
+    fi
     sleep 4
     return 0
   fi
