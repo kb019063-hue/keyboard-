@@ -519,14 +519,16 @@ else
     shot 07-one-handed-collapsed
     E="$OH_EXP"
 
-    # Side and width are gated behind the switch, so on a fresh install (default off) they must be
-    # ABSENT. Checked BEFORE the toggle: that is what proves the gate is real rather than a control
-    # that was always composed and merely greyed out.
+    # Side and width are gated behind the switch, so on a fresh install (default off) they must not
+    # be on screen. Only a necessary condition, and deliberately not a stronger claim: a control
+    # below the fold is missing from a dump without being missing from the UI, which is the whole
+    # subject of the hunt further down. What makes the pair meaningful is that the same control
+    # DOES appear once the switch is on.
     if grep -qE 'text="Keyboard width"' "$E" 2>/dev/null; then
       info "'Keyboard width' visible before any toggle -- a previous run left the pref enabled"
       OH_VERDICT=pre-on
     else
-      pass "side/width controls correctly absent while one-handed mode is off"
+      pass "side/width controls not on screen while one-handed mode is off"
     fi
 
     # SettingsSwitch makes the whole Row clickable, so the title's centre is a valid tap target.
@@ -554,19 +556,33 @@ else
         C2=$(nodecenter "$N" '^One-handed mode$'); [ -n "$C2" ] && C="$C2"
       fi
       adb shell input tap $C; sleep 3
-      T="$OUT/ui-oh-toggled.xml"; dumpui "$T"; shot 08-one-handed-toggled
-      if grep -qE 'text="Keyboard width"' "$T" 2>/dev/null; then
+      # HUNT for the width control instead of failing on the first miss. Run 39727796466 reported
+      # oh=no-width with the toolbar section's own rows on screen ("10 / 12", "Add", "Copy",
+      # "Cursor Left", ...): 7b leaves that section EXPANDED, and its ten button rows sit directly
+      # above this one, so the switch landed at y=1726 of 2400 and the controls it reveals composed
+      # below the fold. The section was still expanded in that dump ("One-handed mode" present), so
+      # the tap had hit the row -- the assertion was simply looking one screenful too high. Same
+      # trap 7b's Add-button hunt exists for.
+      T=""; W=""
+      for w in 1 2 3 4; do
+        T="$OUT/ui-oh-toggled-$w.xml"; dumpui "$T"
+        if grep -qE 'text="Keyboard width"' "$T" 2>/dev/null; then W="$T"; break; fi
+        info "attempt $w: 'Keyboard width' not on screen yet, scrolling"
+        scrollup
+      done
+      shot 08-one-handed-toggled
+      if [ -n "$W" ]; then
         OH_VERDICT=toggled
         pass "toggling the switch revealed the width control (state var + recomposition wired)"
         # 'Side' is a short common word, so a miss is reported rather than failed.
-        if grep -qE 'text="Side"' "$T" 2>/dev/null; then
+        if grep -qE 'text="Side"' "$W" 2>/dev/null; then
           pass "the side dropdown composed alongside it"
         else
-          info "the side dropdown title was not on screen (may sit below the fold)"
+          info "the side dropdown title was not in the same dump (it may sit above the fold now)"
         fi
       else
         OH_VERDICT=no-width
-        fail "tapping the switch at '$C' did not reveal 'Keyboard width': texts=[$(texts "$T")]"
+        fail "tapping the switch at '$C' never revealed 'Keyboard width' after 4 dump/scroll attempts: texts=[$(texts "$OUT"/ui-oh-toggled-*.xml)]"
       fi
 
       # Best-effort persistence check. DirectBootAwarePreferences writes

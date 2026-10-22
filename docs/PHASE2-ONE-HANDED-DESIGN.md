@@ -212,13 +212,32 @@ the switch, **the side and width controls are absent while it is off**, turning 
 and the value reaches device-protected storage (best-effort — `run-as` does not always reach
 `/data/user_de/0`, and a harness limit must not sink a run whose UI assertions passed).
 
-The header reads `One-Handed Mode` and the switch row `One-handed mode`. `nodecenter` matches
-case-insensitively and returns the first hit in document order, and the header sits *above* the
-switch — so an unanchored pattern resolved to the header and tapping it **collapsed the section**
-instead of flipping the switch. The offline fake-adb harness caught this: it resolves each tap
-against the dump it last served, and reported both taps landing on the header. The switch lookup is
-now anchored `^One-handed mode$`, which the emoji-prefixed header cannot match. All seven harness
-scenarios pass, including the three failure paths (`no-header`, `no-switch`, `no-width`).
+Two bugs, both found before they could waste a phone test:
+
+**The header/switch collision.** The header reads `One-Handed Mode` and the switch row
+`One-handed mode`. `nodecenter` matches case-insensitively and returns the first hit in document
+order, and the header sits *above* the switch — so an unanchored pattern resolved to the header and
+tapping it **collapsed the section** instead of flipping the switch. The offline fake-adb harness
+caught this: it resolves each tap against the dump it last served, and reported both taps landing
+on the header. The switch lookup is now anchored `^One-handed mode$`, which the emoji-prefixed
+header cannot match.
+
+**The below-the-fold control.** Smoke run 18 then failed `oh=no-width`, and its annotation carried
+the evidence: the post-tap screen held `"10 / 12"`, `"Add"`, `"Copy"`, `"Cursor Left"`, `"Paste"`,
+`"Redo"` — the *toolbar* section's own rows. §7b leaves that section expanded, and its ten button
+rows sit directly above this one, so the switch landed at y=1726 of 2400 and the controls it
+reveals composed below the fold. `"One-handed mode"` was still in that dump, which proved the tap
+had hit the row rather than the header; the assertion was simply looking one screenful too high.
+§7c now hunts across four dump/scroll attempts, the same remedy §7b's Add button needed.
+
+The pre-toggle absence check is deliberately worded as a *necessary* condition, not a proof of the
+gate: a control below the fold is missing from a dump without being missing from the UI. What makes
+the pair meaningful is that the same control does appear once the switch is on.
+
+All eight harness scenarios pass — `happy`, `belowfold` (the run-18 replay), `lowhdr` (header
+outside the safe tap band, exercising the nudge), `anr` (dialog dismissed, section still reached),
+`noprefs` (protected storage unreadable, reported not failed) — plus the three failure paths
+(`no-header`, `no-switch`, `no-width`).
 
 Still to be confirmed by hand on a real device: that `ViewGroup.dispatchTransformedTouchEvent`'s
 inverse matrix makes taps on visually-shrunk keys land correctly. That is the one assumption the
