@@ -93,6 +93,8 @@ Port from HeliBoard, in rough priority order:
 
 1. **Theme depth** — dynamic colour (Android 12+), follow-system day/night, background images.
 2. **Form factors** — one-handed mode, split keyboard, floating keyboard.
+   **Shipped** (phase 2 and phase 3, 2026-10-22), together with key-press sound and an
+   incognito toggle; design notes in `docs/PHASE3-*.md`.
 3. **D-Pad / arrow key row** and toolbar-key polish.
 4. **Backup & restore** of settings plus learned-word data.
 5. **Broader layout/language coverage.**

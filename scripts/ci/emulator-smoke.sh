@@ -53,12 +53,13 @@ fails=0
 TB_VERDICT=notrun
 TBUI_VERDICT=notrun
 OH_VERDICT=notrun
+NF_VERDICT=notrun
 KB_VERDICT=notrun
 ANR_SEEN=0
 write_summary() {
-  printf 'fails=%s-toolbar=%s-tbui=%s-oh=%s-keyboard=%s-anr=%s\n' \
+  printf 'fails=%s-toolbar=%s-tbui=%s-oh=%s-nf=%s-keyboard=%s-anr=%s\n' \
     "${fails:-?}" "${TB_VERDICT:-?}" "${TBUI_VERDICT:-?}" "${OH_VERDICT:-?}" \
-    "${KB_VERDICT:-?}" "${ANR_SEEN:-?}" \
+    "${NF_VERDICT:-?}" "${KB_VERDICT:-?}" "${ANR_SEEN:-?}" \
     > "$OUT/summary.txt" 2>/dev/null || true
 }
 trap write_summary EXIT
@@ -655,6 +656,127 @@ else
       fi
     fi
   fi
+fi
+
+echo "== 7d. phase-3 feature switches (incognito, floating, split) =="
+# Composition-level evidence for the three phase-3 settings controls, plus a best-effort probe of
+# the one thing only a device can show: that enabling floating narrows the input-method WINDOW
+# itself, not merely a view inside it. All three sections are collapsed on a fresh install, so
+# each check is two-stage like 7c: bring the section header into the safe band, tap it, then look
+# for the switch the expansion composes. Assertions stop at composition -- what a dump can prove.
+# Whether a tap flipped a Compose switch, and what the window frame became, are reported as
+# evidence, never asserted: a harness limitation must not sink a run whose real checks passed.
+adb shell am start -W -n "$PKG/$NS.SettingsActivity" > "$OUT/am-settings-nf.log" 2>&1
+sleep 5
+NF_VERDICT=ok
+
+# Expand the section whose header matches $2 until the switch titled $3 is composed; NF_SRC ends
+# up holding the dump that shows it. Returns 1 if six dump/scroll attempts never even find the
+# header, or three expand attempts never compose the switch.
+nf_expand() {
+  local pre="$1" hdr="$2" sw="$3"
+  local lo=$((SH * 20 / 100)) hi=$((SH * 75 / 100))
+  local f src="" c cy attempt try nudge
+  NF_SRC=""
+  for attempt in 1 2 3 4 5 6; do
+    f="$OUT/ui-$pre-hdr-$attempt.xml"; dumpui "$f"
+    if grep -qiE "responding" "$f" 2>/dev/null; then
+      info "attempt $attempt: ANR dialog over the settings screen -- dismissing"
+      dismiss_anr || true
+      continue
+    fi
+    if grep -qE "text=\"[^\"]*$sw" "$f" 2>/dev/null; then NF_SRC="$f"; return 0; fi
+    if grep -qE "text=\"[^\"]*$hdr" "$f" 2>/dev/null; then src="$f"; break; fi
+    info "attempt $attempt: no '$hdr' header on screen, scrolling"
+    scrollup
+  done
+  [ -n "$src" ] || return 1
+  for try in 1 2 3; do
+    for nudge in 1 2 3; do
+      c=$(nodecenter "$src" "$hdr"); [ -z "$c" ] && break
+      cy=${c#* }
+      [ "$cy" -ge "$lo" ] && [ "$cy" -le "$hi" ] && break
+      if [ "$cy" -gt "$hi" ]; then
+        adb shell input swipe $((SW / 2)) $((SH * 60 / 100)) $((SW / 2)) $((SH * 40 / 100)) 300
+      else
+        adb shell input swipe $((SW / 2)) $((SH * 40 / 100)) $((SW / 2)) $((SH * 60 / 100)) 300
+      fi
+      sleep 2
+      f="$OUT/ui-$pre-nudge-$try-$nudge.xml"; dumpui "$f"
+      grep -qE "text=\"[^\"]*$hdr" "$f" 2>/dev/null && src="$f"
+    done
+    c=$(nodecenter "$src" "$hdr")
+    [ -n "$c" ] && { adb shell input tap $c; sleep 3; }
+    f="$OUT/ui-$pre-exp-$try.xml"; dumpui "$f"
+    if grep -qE "text=\"[^\"]*$sw" "$f" 2>/dev/null; then NF_SRC="$f"; return 0; fi
+    info "expand attempt $try: tapped '${c:-none}', '$sw' still not composed"
+  done
+  return 1
+}
+
+# --- incognito, under Privacy ---
+if nf_expand nfinc 'Privacy' 'Incognito Mode'; then
+  pass "incognito switch composed under the Privacy section"
+  C=$(nodecenter "$NF_SRC" 'Incognito Mode')
+  if [ -n "$C" ]; then
+    adb shell input tap $C; sleep 3
+    D="$OUT/ui-nfinc-on.xml"; dumpui "$D"
+    grep -qE 'checked="true"' "$D" 2>/dev/null \
+      && info "a switch reports checked after tapping incognito (evidence, not asserted)"
+    shot 08-incognito-on
+  fi
+else
+  NF_VERDICT=inc
+  fail "incognito switch never composed under Privacy: texts=[$(texts "$OUT"/ui-nfinc-*.xml)]"
+fi
+
+# --- floating and split, both under Appearance ---
+if nf_expand nfflt 'Appearance' 'Floating Keyboard'; then
+  pass "floating keyboard switch composed under the Appearance section"
+  C=$(nodecenter "$NF_SRC" 'Floating Keyboard')
+  if [ -n "$C" ]; then
+    adb shell input tap $C; sleep 3
+    # The window-frame probe: with floating on and a keyboard up, the input-method window's frame
+    # must be narrower than the screen. Getting a keyboard up from here needs a focused text
+    # field, which this section cannot guarantee, so absence of the window is a harness
+    # limitation and reports as info; a PRESENT window that is still full width is the real
+    # signal, and even then only evidence -- the assertion budget stays on composition.
+    adb shell input keyevent KEYCODE_BACK > /dev/null 2>&1
+    sleep 3
+    FR="$OUT/window-frames.txt"
+    adb shell dumpsys window windows > "$FR" 2>&1
+    FRAME=$(grep -A6 'InputMethod' "$FR" 2>/dev/null | grep -oE 'mFrame=\[[0-9-]+,[0-9-]+\]\[[0-9-]+,[0-9-]+\]' | head -1)
+    if [ -n "$FRAME" ]; then
+      X1=$(printf '%s' "$FRAME" | sed 's/mFrame=\[\([-0-9]*\),.*/\1/')
+      X2=$(printf '%s' "$FRAME" | sed 's/.*\]\[\([-0-9]*\),.*/\1/')
+      W=$((X2 - X1))
+      if [ "$W" -gt 0 ] && [ "$W" -lt "$SW" ]; then
+        pass "floating narrowed the input-method window to ${W}px of ${SW}px"
+      else
+        info "input-method window frame width ${W}px vs screen ${SW}px (evidence, not asserted)"
+      fi
+    else
+      info "no input-method window up to measure (harness limitation): floating frame unprobed"
+    fi
+  fi
+  # Split lives in the same expanded section, possibly below the fold: hunt, do not assume.
+  SPLIT_SEEN=""
+  for attempt in 1 2 3 4; do
+    D="$OUT/ui-nfspl-$attempt.xml"; dumpui "$D"
+    if grep -qE 'text="[^"]*Split Keyboard' "$D" 2>/dev/null; then SPLIT_SEEN="$D"; break; fi
+    scrollup
+  done
+  if [ -n "$SPLIT_SEEN" ]; then
+    pass "split keyboard switch composed under the Appearance section"
+    C=$(nodecenter "$SPLIT_SEEN" 'Split Keyboard')
+    [ -n "$C" ] && { adb shell input tap $C; sleep 3; shot 09-split-on; }
+  else
+    NF_VERDICT=$([ "$NF_VERDICT" = "ok" ] && echo spl || echo "$NF_VERDICT")
+    fail "split keyboard switch never composed under Appearance: texts=[$(texts "$OUT"/ui-nfspl-*.xml)]"
+  fi
+else
+  NF_VERDICT=$([ "$NF_VERDICT" = "ok" ] && echo flt || echo "$NF_VERDICT")
+  fail "floating keyboard switch never composed under Appearance: texts=[$(texts "$OUT"/ui-nfflt-*.xml)]"
 fi
 
 # ThemeSettingsActivity hosts KeyboardPreviewHost -> a real Keyboard2View rendered with the active

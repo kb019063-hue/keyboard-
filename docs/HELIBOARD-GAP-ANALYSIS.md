@@ -29,6 +29,31 @@ implementations. Where a count is given, it is files matching the anchored patte
 | `PAGE_UP` / `PAGE_DOWN` | toolbar keys | **0** | Missing |
 | Translations | **117** locales | 23 | Missing, but low value per unit effort (see below) |
 
+## As shipped — the four typing gaps closed (2026-10-22)
+
+The table above is the analysis as it stood when the build was designed. Six of its rows are now
+closed in this tree; the commits are the ones that carry each feature and its CI-green run.
+
+| Capability | Shipped in | Mechanism |
+|---|---|---|
+| Toolbar keys | phase 1, `164049a` | `KeyboardToolbar` sibling above `topPane`; `ToolbarConfig` |
+| One-handed mode | phase 2, `025900b` | `scaleX` on a wrapper root; stop control in the gap |
+| Key-press sound | phase 3 part 1, `86e2862` | SoundPool + synthesised `res/raw/key_click.wav`; `KeyClickSound` |
+| Incognito toggle | phase 3 part 2, `86ba866` | `IncognitoPolicy` folded at read time; Privacy switch + 🕶️ command |
+| Floating keyboard | phase 3 part 3, `d3d31aa` | IME window LayoutParams + `FloatingRoot` grip and knob |
+| Split keyboard | phase 3 part 4, `799cb5e` | `KeyboardGeometry.rowSpans`: one shared walk for draw, hit-test, a11y |
+
+Design notes per part live in `docs/PHASE3-PART1-KEY-SOUND-DESIGN.md`,
+`docs/PHASE3-PART2-INCOGNITO-DESIGN.md`, `docs/PHASE3-PART3-FLOATING-DESIGN.md` and
+`docs/PHASE3-PART4-SPLIT-DESIGN.md`; each records what no emulator run can prove and therefore
+what the phone check must cover.
+
+Still open, deliberately: the **system spell-checker provider** (a new service, and the only gap
+that creates a fresh licensing obligation — HeliBoard's spell checker is Apache-2.0 code that
+would need a `LICENSE-Apache-2.0` alongside the GPL), **theme background images**, and the
+**translation gap** (machine-translating 94 locales is out of scope for a personal fork; the
+drift test defines which strings must stay complete).
+
 ## What CleverKeys already has — do not rebuild
 
 This matters more than the gap table, because it is where the naive "port the feature" instinct
