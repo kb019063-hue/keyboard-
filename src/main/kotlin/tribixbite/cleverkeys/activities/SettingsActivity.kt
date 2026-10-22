@@ -284,6 +284,9 @@ class SettingsActivity : ComponentActivity(), SharedPreferences.OnSharedPreferen
     internal var clipboardHistoryEnabled by mutableStateOf(Defaults.CLIPBOARD_HISTORY_ENABLED)
     // Incognito mode (phase 3 part 2): suspends learning/autocorrect/autocap/clipboard history
     internal var incognitoEnabled by mutableStateOf(Defaults.INCOGNITO_ENABLED)
+    // Floating keyboard (phase 3 part 3)
+    internal var floatingEnabled by mutableStateOf(Defaults.FLOATING_ENABLED)
+    internal var floatingWidthPercent by mutableStateOf(Defaults.FLOATING_WIDTH_PERCENT.toFloat())
     internal var clipboardHistoryLimit by mutableIntStateOf(Defaults.CLIPBOARD_HISTORY_LIMIT_FALLBACK)
     internal var clipboardHistoryDuration by mutableIntStateOf(Defaults.CLIPBOARD_HISTORY_DURATION_FALLBACK)  // Minutes; -1 = never expire
     internal var clipboardPaneHeightPercent by mutableIntStateOf(Defaults.CLIPBOARD_PANE_HEIGHT_PERCENT)

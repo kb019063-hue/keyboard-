@@ -486,6 +486,13 @@ object Defaults {
     // Incognito mode: suspends learning, autocorrect, auto-capitalisation and clipboard history
     // without rewriting any of their preferences (see IncognitoPolicy). Off by default.
     const val INCOGNITO_ENABLED = false
+    // Floating keyboard (phase 3 part 3): a smaller, draggable window instead of the full-width
+    // one. Keys and clamps live in FloatingConfig; these mirror its defaults the way every other
+    // Defaults entry mirrors its owner.
+    const val FLOATING_ENABLED = FloatingConfig.DEFAULT_ENABLED
+    const val FLOATING_WIDTH_PERCENT = FloatingConfig.DEFAULT_WIDTH_PERCENT
+    const val FLOATING_X_FRACTION = FloatingConfig.DEFAULT_X_FRACTION
+    const val FLOATING_Y_FRACTION = FloatingConfig.DEFAULT_Y_FRACTION
 
     // Accessibility
     const val STICKY_KEYS_ENABLED = false
@@ -950,6 +957,10 @@ class Config private constructor(
     @JvmField var context_aware_predictions_enabled = Defaults.CONTEXT_AWARE_PREDICTIONS_ENABLED // Phase 7.1: Dynamic N-gram learning
     @JvmField var personalized_learning_enabled = Defaults.PERSONALIZED_LEARNING_ENABLED // Phase 7.2: Personalized word frequency learning
     @JvmField var incognito_enabled = Defaults.INCOGNITO_ENABLED
+    @JvmField var floating_enabled = Defaults.FLOATING_ENABLED
+    @JvmField var floating_width_percent = Defaults.FLOATING_WIDTH_PERCENT
+    @JvmField var floating_x_fraction = Defaults.FLOATING_X_FRACTION
+    @JvmField var floating_y_fraction = Defaults.FLOATING_Y_FRACTION
 
     // The five preferences incognito suspends, folded at read time (IncognitoPolicy). Behaviour
     // code reads these; the Settings UI reads the raw fields, so what the user sees is always
@@ -1334,6 +1345,10 @@ class Config private constructor(
         context_aware_predictions_enabled = _prefs.getBoolean("context_aware_predictions_enabled", Defaults.CONTEXT_AWARE_PREDICTIONS_ENABLED)
         personalized_learning_enabled = _prefs.getBoolean("personalized_learning_enabled", Defaults.PERSONALIZED_LEARNING_ENABLED)
         incognito_enabled = _prefs.getBoolean("incognito_enabled", Defaults.INCOGNITO_ENABLED)
+        floating_enabled = _prefs.getBoolean(FloatingConfig.PREF_ENABLED, Defaults.FLOATING_ENABLED)
+        floating_width_percent = safeGetInt(_prefs, FloatingConfig.PREF_WIDTH_PERCENT, Defaults.FLOATING_WIDTH_PERCENT)
+        floating_x_fraction = _prefs.getFloat(FloatingConfig.PREF_X_FRACTION, Defaults.FLOATING_X_FRACTION)
+        floating_y_fraction = _prefs.getFloat(FloatingConfig.PREF_Y_FRACTION, Defaults.FLOATING_Y_FRACTION)
         on_device_learning_enabled = _prefs.getBoolean("on_device_learning_enabled", Defaults.ON_DEVICE_LEARNING_ENABLED)
         next_word_prediction_enabled = _prefs.getBoolean("next_word_prediction_enabled", Defaults.NEXT_WORD_PREDICTION_ENABLED)
         context_source = safeGetString(_prefs, "context_source", Defaults.CONTEXT_SOURCE)

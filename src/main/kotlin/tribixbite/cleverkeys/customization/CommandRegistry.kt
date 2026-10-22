@@ -256,6 +256,11 @@ object CommandRegistry {
         Command("incognito_toggle", R.string.cmd_incognito_toggle, R.string.cmd_incognito_toggle_desc,
             Category.EVENTS, symbol = "\uD83D\uDD76\uFE0F",
             keywords = listOf("incognito", "private", "privacy", "secret", "mask", "anonymous")),
+        // Floating keyboard: a window glyph. Two UTF-16 units, inside the <=4 ShortSwipeMapping
+        // enforces, and not a Private Use Area code point, so it needs no key-font entry.
+        Command("floating_toggle", R.string.cmd_floating_toggle, R.string.cmd_floating_toggle_desc,
+            Category.EVENTS, symbol = "\uD83E\uDE9F",
+            keywords = listOf("floating", "float", "window", "small", "overlay", "drag", "move")),
 
         // ========== MODIFIERS ==========
         Command("shift", R.string.cmd_shift, R.string.cmd_shift_desc, Category.MODIFIERS,

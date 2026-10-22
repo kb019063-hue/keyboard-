@@ -1,7 +1,14 @@
 package tribixbite.cleverkeys.ui.settings.sections
 
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
+import tribixbite.cleverkeys.Config
+import tribixbite.cleverkeys.FloatingConfig
 import tribixbite.cleverkeys.FoldStateTracker
 import tribixbite.cleverkeys.KeyboardHeightPrefs
 import tribixbite.cleverkeys.R
@@ -22,6 +29,43 @@ internal fun SettingsActivity.AppearanceSection() {
                 onExpandChange = { appearanceSectionExpanded = it }
             ) {
                 // Theme Manager moved to Activities section at top
+
+                // ── FLOATING KEYBOARD (phase 3 part 3) ──────────────────────
+                // A smaller keyboard window the user can drag by its grip and widen or narrow by
+                // its corner knob. Parked in Appearance because it changes where the keyboard is
+                // on the screen, which is what this section is about.
+                Text(
+                    text = stringResource(R.string.settings_floating_title),
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+                SettingsSwitch(
+                    title = stringResource(R.string.settings_floating_title),
+                    description = stringResource(R.string.settings_floating_desc),
+                    checked = floatingEnabled,
+                    onCheckedChange = { enabled ->
+                        floatingEnabled = enabled
+                        saveSetting(FloatingConfig.PREF_ENABLED, enabled)
+                        // Immediate, like the other live switches: the open keyboard re-wraps and
+                        // the window relayouts through the service's preference handler.
+                        Config.globalConfig()?.floating_enabled = enabled
+                    }
+                )
+                if (floatingEnabled) {
+                    SettingsSlider(
+                        title = stringResource(R.string.settings_floating_width_title),
+                        description = stringResource(R.string.settings_floating_width_desc),
+                        value = floatingWidthPercent,
+                        valueRange = FloatingConfig.MIN_WIDTH_PERCENT.toFloat()..FloatingConfig.MAX_WIDTH_PERCENT.toFloat(),
+                        increment = 5f,
+                        onValueChange = {
+                            floatingWidthPercent = it
+                            saveSetting(FloatingConfig.PREF_WIDTH_PERCENT, it.toInt())
+                            Config.globalConfig()?.floating_width_percent = it.toInt()
+                        },
+                        displayValue = "${floatingWidthPercent.toInt()}%"
+                    )
+                }
 
                 SettingsSlider(
                     title = stringResource(R.string.appearance_height_portrait_title),

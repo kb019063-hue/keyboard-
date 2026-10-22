@@ -1159,6 +1159,7 @@ class Keyboard2View @JvmOverloads constructor(
                 "one_handed_toggle" -> { service.toggleOneHandedMode(); true }
                 "one_handed_side" -> { service.switchOneHandedSide(); true }
                 "incognito_toggle" -> { service.toggleIncognito(); true }
+                "floating_toggle" -> { service.toggleFloating(); true }
                 else -> false
             }
 

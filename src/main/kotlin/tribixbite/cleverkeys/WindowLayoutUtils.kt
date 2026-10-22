@@ -254,4 +254,49 @@ object WindowLayoutUtils {
         // Also clear inputArea background
         inputArea.setBackgroundColor(Color.TRANSPARENT)
     }
+
+    /**
+     * Floating-keyboard window geometry (phase 3 part 3): resize and reposition the input method
+     * window itself, or restore the platform's full-width bottom-anchored default.
+     *
+     * A separate function rather than a fourth parameter on [updateSoftInputWindowLayoutParams]
+     * because that signature is pinned by WindowLayoutUtilsTest's mockk verifications, and because
+     * the two concerns differ: the existing function sets height, input-area gravity and the
+     * transparent backgrounds that hide OEM white bars, and must keep doing exactly that whether
+     * or not the keyboard floats. This one owns width, window gravity and the x/y offsets.
+     *
+     * Gravity TOP|START with explicit offsets is the unambiguous half of the window-manager
+     * contract: with BOTTOM gravity the sign of y flips meaning, and a floating window dragged by
+     * the user must map one-to-one onto stored fractions. Height is left as the WRAP_CONTENT the
+     * caller set, so the window hugs the keyboard instead of reserving empty space below it.
+     *
+     * Attributes are only reassigned when something actually changed: assigning Window.attributes
+     * asks the window manager for a relayout, and a drag gesture calls this on every move event.
+     */
+    fun applyFloatingWindowLayoutParams(window: Window, floating: FloatingWindow?) {
+        val attrs = window.attributes ?: return
+        val changed = if (floating == null) {
+            val restore = attrs.width != ViewGroup.LayoutParams.MATCH_PARENT ||
+                attrs.gravity != Gravity.BOTTOM || attrs.x != 0 || attrs.y != 0
+            if (restore) {
+                attrs.width = ViewGroup.LayoutParams.MATCH_PARENT
+                attrs.gravity = Gravity.BOTTOM
+                attrs.x = 0
+                attrs.y = 0
+            }
+            restore
+        } else {
+            val topStart = Gravity.TOP or Gravity.START
+            val move = attrs.width != floating.widthPx || attrs.gravity != topStart ||
+                attrs.x != floating.x || attrs.y != floating.y
+            if (move) {
+                attrs.width = floating.widthPx
+                attrs.gravity = topStart
+                attrs.x = floating.x
+                attrs.y = floating.y
+            }
+            move
+        }
+        if (changed) window.attributes = attrs
+    }
 }

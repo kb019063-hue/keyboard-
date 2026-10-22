@@ -175,6 +175,14 @@
     <string name="cmd_incognito_toggle_desc">Turn incognito mode on or off</string>
     <string name="incognito_toast_on">Incognito mode on</string>
     <string name="incognito_toast_off">Incognito mode off</string>
+    <string name="settings_floating_title">Floating Keyboard</string>
+    <string name="settings_floating_desc">Show a smaller keyboard window you can drag and resize</string>
+    <string name="settings_floating_width_title">Floating Keyboard Width</string>
+    <string name="settings_floating_width_desc">How wide the floating keyboard is</string>
+    <string name="cmd_floating_toggle">Floating Keyboard</string>
+    <string name="cmd_floating_toggle_desc">Turn floating keyboard mode on or off</string>
+    <string name="floating_toast_on">Floating keyboard on</string>
+    <string name="floating_toast_off">Floating keyboard off</string>
 
     <!-- Accessibility Section -->
     <string name="settings_section_accessibility">♿ Accessibility</string>

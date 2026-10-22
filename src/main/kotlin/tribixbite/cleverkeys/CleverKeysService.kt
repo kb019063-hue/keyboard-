@@ -123,6 +123,7 @@ class CleverKeysService : InputMethodService(),
      * within, and why the handler still reads it through a provider for consistency.
      */
     private var _oneHandedRoot: OneHandedRoot? = null
+    private var _floatingRoot: FloatingRoot? = null
     private var _inputViewContainer: LinearLayout? = null
 
     // Prediction context tracking (v1.32.342: extracted to PredictionContextTracker)
@@ -895,10 +896,110 @@ class CleverKeysService : InputMethodService(),
         // container this root sits inside, and sets that container's background transparent, which
         // is what lets the gap beside a shrunken keyboard show the app behind it.
         val root = oneHandedRoot().host(shown)
-        root.scaleSuppressed = _minimizer.style != null
-        super.setInputView(root)
+        // Floating mode (phase 3 part 3) wraps the one-handed root from the outside, so the grip
+        // and resize knob are never scaled with the keys; and while floating, one-handed scaling
+        // is suppressed, because two independent shrinks stacking would leave the keyboard smaller
+        // than either setting says. Minimized wins over both, as before.
+        root.scaleSuppressed = _minimizer.style != null || floatingActive()
+        val floated = floatingRoot().host(root)
+        floated.setState(floatingActive())
+        super.setInputView(floated)
         updateSoftInputWindowLayoutParams()
         root.requestApplyInsets()
+    }
+
+    /**
+     * The floating wrapper root, created on first use and kept for the service's lifetime, like
+     * [oneHandedRoot]. The handles report movement; the service owns what movement means -- the
+     * persisted fractions and the window geometry -- so [FloatingConfig] stays the only place the
+     * maths lives and the view stays arithmetic-free.
+     */
+    private fun floatingRoot(): FloatingRoot = _floatingRoot ?: FloatingRoot(this).also { fr ->
+        fr.onDrag = { dx, dy -> moveFloating(dx, dy) }
+        fr.onDragEnd = { persistFloatingPosition() }
+        fr.onResize = { dx -> resizeFloating(dx) }
+        fr.onResizeEnd = { persistFloatingWidth() }
+        _floatingRoot = fr
+    }
+
+    /**
+     * Floating applies only to a visible, non-minimized keyboard: a minimized bar or button is
+     * already small, and wrapping the window around it would shrink the one thing left to tap.
+     * Fullscreen is unreachable here (onEvaluateFullscreenMode is hardcoded false) but the check
+     * costs nothing and says what the mode refuses to fight.
+     */
+    private fun floatingActive(): Boolean =
+        (_config?.floating_enabled == true) && !isFullscreenMode && _minimizer.style == null
+
+    /** The resolved geometry for the window manager, or null for the platform default. */
+    private fun currentFloatingWindow(): FloatingWindow? {
+        val cfg = _config ?: return null
+        if (!floatingActive()) return null
+        val dm = resources.displayMetrics
+        return FloatingConfig.window(dm.widthPixels, dm.heightPixels,
+            cfg.floating_width_percent, cfg.floating_x_fraction, cfg.floating_y_fraction)
+    }
+
+    /** Grip dragged: fold the pixel delta back into the stored fractions and relayout now. */
+    private fun moveFloating(dx: Int, dy: Int) {
+        val cfg = _config ?: return
+        val dm = resources.displayMetrics
+        val travel = dm.widthPixels - FloatingConfig.widthPixels(dm.widthPixels, cfg.floating_width_percent)
+        if (travel > 0) {
+            cfg.floating_x_fraction = FloatingConfig.clampXFraction(cfg.floating_x_fraction + dx.toFloat() / travel)
+        }
+        cfg.floating_y_fraction = FloatingConfig.clampYFraction(cfg.floating_y_fraction + dy.toFloat() / dm.heightPixels)
+        updateSoftInputWindowLayoutParams()
+    }
+
+    /** Knob dragged horizontally: one percent of width per percent of screen width moved. */
+    private fun resizeFloating(dx: Int) {
+        val cfg = _config ?: return
+        val dm = resources.displayMetrics
+        cfg.floating_width_percent = FloatingConfig.clampWidthPercent(
+            cfg.floating_width_percent + dx * 100 / dm.widthPixels
+        )
+        updateSoftInputWindowLayoutParams()
+    }
+
+    /** Grip released: the position it ended at becomes the stored position. */
+    private fun persistFloatingPosition() {
+        val cfg = _config ?: return
+        DirectBootAwarePreferences.get_shared_preferences(this).edit()
+            .putFloat(FloatingConfig.PREF_X_FRACTION, cfg.floating_x_fraction)
+            .putFloat(FloatingConfig.PREF_Y_FRACTION, cfg.floating_y_fraction)
+            .apply()
+    }
+
+    /** Knob released: same for the width. */
+    private fun persistFloatingWidth() {
+        val cfg = _config ?: return
+        DirectBootAwarePreferences.get_shared_preferences(this).edit()
+            .putInt(FloatingConfig.PREF_WIDTH_PERCENT, cfg.floating_width_percent)
+            .apply()
+    }
+
+    /**
+     * Re-apply floating state to an already-open keyboard: the handles' visibility, the one-handed
+     * suppression and the window geometry. Called from [onSharedPreferenceChanged] so a toggle from
+     * Settings or the toolbar command reaches the open keyboard with no IME restart, the same
+     * contract one-handed mode keeps.
+     */
+    private fun applyFloatingToOpenKeyboard() {
+        val active = floatingActive()
+        _oneHandedRoot?.scaleSuppressed = _minimizer.style != null || active
+        _floatingRoot?.setState(active)
+        updateSoftInputWindowLayoutParams()
+    }
+
+    /** `floating_toggle` command; writes the same preference the Settings switch writes. */
+    fun toggleFloating() {
+        val next = !(_config?.floating_enabled ?: false)
+        DirectBootAwarePreferences.get_shared_preferences(this).edit()
+            .putBoolean(FloatingConfig.PREF_ENABLED, next)
+            .apply()
+        Toast.makeText(this, getString(if (next) R.string.floating_toast_on else R.string.floating_toast_off),
+            Toast.LENGTH_SHORT).show()
     }
 
     /** The one-handed wrapper root, created on first use and kept for the service's lifetime. */
@@ -1205,6 +1306,10 @@ class CleverKeysService : InputMethodService(),
         val window = window?.window ?: return
         val inputArea = window.findViewById<View>(android.R.id.inputArea)
         WindowLayoutUtils.updateSoftInputWindowLayoutParams(window, inputArea, isFullscreenMode)
+        // Folded here, not at the two call sites, because this private wrapper is the one choke
+        // point every window-params update passes through -- the same reasoning that put the
+        // incognito fold in Config's computed reads instead of its callers.
+        WindowLayoutUtils.applyFloatingWindowLayoutParams(window, currentFloatingWindow())
     }
 
     override fun onCurrentInputMethodSubtypeChanged(subtype: InputMethodSubtype) {
@@ -1359,6 +1464,13 @@ class CleverKeysService : InputMethodService(),
         }
 
         _preferenceUIUpdateHandler?.handlePreferenceChange(key)
+
+        // Floating state lives on this service (the wrapper root and the window geometry), not in
+        // PreferenceUIUpdateHandler, so it is applied here where both are reachable.
+        if (key == FloatingConfig.PREF_ENABLED || key == FloatingConfig.PREF_WIDTH_PERCENT ||
+            key == FloatingConfig.PREF_X_FRACTION || key == FloatingConfig.PREF_Y_FRACTION) {
+            applyFloatingToOpenKeyboard()
+        }
     }
 
     override fun onEvaluateFullscreenMode(): Boolean {
