@@ -1,5 +1,6 @@
 package tribixbite.cleverkeys.ui.settings
 
+import tribixbite.cleverkeys.FloatingConfig
 import tribixbite.cleverkeys.KeyboardHeightPrefs
 import tribixbite.cleverkeys.OneHandedConfig
 import tribixbite.cleverkeys.ToolbarConfig
