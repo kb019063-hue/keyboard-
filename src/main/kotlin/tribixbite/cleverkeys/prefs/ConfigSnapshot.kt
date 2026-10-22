@@ -116,6 +116,14 @@ data class ConfigSnapshot(
     val swipe_trail_color: Int,
     /** Trail stroke width in dp. */
     val swipe_trail_width: Float,
+
+    // ---- Split keyboard — KeyboardGeometry.kt (phase 3 part 4). Defaulted so every existing
+    // named-argument construction, including the test helper, keeps compiling; buildSnapshot
+    // always passes them explicitly. ----
+    /** Whether the keyboard is drawn as two halves with a gap between them. */
+    val split_enabled: Boolean = false,
+    /** The gap between the halves, as a percent of the content width. */
+    val split_gap_percent: Int = 10,
     /** Glow radius in dp. */
     val swipe_trail_glow_radius: Float,
 

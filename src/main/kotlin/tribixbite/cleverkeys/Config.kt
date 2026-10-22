@@ -1541,6 +1541,8 @@ class Config private constructor(
      * fails to compile here rather than silently publishing a placeholder.
      */
     private fun buildSnapshot(): ConfigSnapshot = ConfigSnapshot(
+        split_enabled = split_enabled,
+        split_gap_percent = split_gap_percent,
         circle_sensitivity = circle_sensitivity,
         tap_duration_threshold = tap_duration_threshold,
         double_tap_lock_shift = double_tap_lock_shift,

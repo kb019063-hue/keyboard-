@@ -1484,7 +1484,10 @@ class CleverKeysService : InputMethodService(),
         // Split mode needs no service-side state: the next draw and the next hit-test both read
         // the geometry params fresh, so a relayout is all the change requires.
         if (key == SplitConfig.PREF_ENABLED || key == SplitConfig.PREF_GAP_PERCENT) {
-            requestLayout()
+            // Split holds no service-side state: the next draw and the next hit-test both read
+            // the geometry params fresh, so all the change needs is a redraw. The service is not
+            // a View, so ask the keyboard for one.
+            if (::_keyboardView.isInitialized) _keyboardView.invalidate()
         }
     }
 
