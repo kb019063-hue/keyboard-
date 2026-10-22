@@ -3,6 +3,7 @@ package tribixbite.cleverkeys
 import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.Context
+import android.widget.Toast
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
@@ -918,6 +919,23 @@ class CleverKeysService : InputMethodService(),
      */
     fun toggleOneHandedMode() {
         setOneHandedEnabled(!(_config?.one_handed_enabled ?: false))
+    }
+
+    /**
+     * `incognito_toggle` command: suspend learning, autocorrect, auto-capitalisation and
+     * clipboard history until toggled again. The write goes through the same preferences the
+     * Settings switch writes, so ConfigurationManager's refresh and this service's
+     * onSharedPreferenceChanged apply it to an open keyboard with no IME restart -- one code path,
+     * not two that could disagree. The toast is the only confirmation a toolbar key can give:
+     * unlike one-handed mode there is no visible geometry change to notice.
+     */
+    fun toggleIncognito() {
+        val next = !(_config?.incognito_enabled ?: false)
+        DirectBootAwarePreferences.get_shared_preferences(this).edit()
+            .putBoolean("incognito_enabled", next)
+            .apply()
+        Toast.makeText(this, getString(if (next) R.string.incognito_toast_on else R.string.incognito_toast_off),
+            Toast.LENGTH_SHORT).show()
     }
 
     /** Move the shrunken keyboard to the other edge (`one_handed_side` command). */

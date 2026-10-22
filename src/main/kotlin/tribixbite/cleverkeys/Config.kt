@@ -483,6 +483,9 @@ object Defaults {
     // learning-on via the old defaults, and an upgrade must not silently change
     // what the keyboard does. Learning remains on-device only and clearable.
     const val ON_DEVICE_LEARNING_ENABLED = false
+    // Incognito mode: suspends learning, autocorrect, auto-capitalisation and clipboard history
+    // without rewriting any of their preferences (see IncognitoPolicy). Off by default.
+    const val INCOGNITO_ENABLED = false
 
     // Accessibility
     const val STICKY_KEYS_ENABLED = false
@@ -946,6 +949,21 @@ class Config private constructor(
     @JvmField var prediction_frequency_scale = Defaults.PREDICTION_FREQUENCY_SCALE
     @JvmField var context_aware_predictions_enabled = Defaults.CONTEXT_AWARE_PREDICTIONS_ENABLED // Phase 7.1: Dynamic N-gram learning
     @JvmField var personalized_learning_enabled = Defaults.PERSONALIZED_LEARNING_ENABLED // Phase 7.2: Personalized word frequency learning
+    @JvmField var incognito_enabled = Defaults.INCOGNITO_ENABLED
+
+    // The five preferences incognito suspends, folded at read time (IncognitoPolicy). Behaviour
+    // code reads these; the Settings UI reads the raw fields, so what the user sees is always
+    // their own choice and never an incognito-time derivative.
+    /** Master learning gate as the learning stores must see it. */
+    val learningEffective: Boolean get() = IncognitoPolicy.allows(on_device_learning_enabled, incognito_enabled)
+    /** Autocorrect as the commit/correct paths must see it. */
+    val autocorrectEffective: Boolean get() = IncognitoPolicy.allows(autocorrect_enabled, incognito_enabled)
+    /** Swipe final-word autocorrect, likewise suspended. */
+    val swipeFinalAutocorrectEffective: Boolean get() = IncognitoPolicy.allows(swipe_final_autocorrect_enabled, incognito_enabled)
+    /** Auto-capitalisation as the shift logic must see it. */
+    val autocapEffective: Boolean get() = IncognitoPolicy.allows(autocapitalisation, incognito_enabled)
+    /** Clipboard history capture as the history service must see it. */
+    val clipboardHistoryEffective: Boolean get() = IncognitoPolicy.allows(clipboard_history_enabled, incognito_enabled)
     @JvmField var on_device_learning_enabled = Defaults.ON_DEVICE_LEARNING_ENABLED // MASTER privacy gate over ALL typing-behavior learning (Task A 2026-08-06; opt-in on fresh installs since v2.0, upgrades seeded ON by the v4 migration)
     @JvmField var next_word_prediction_enabled = Defaults.NEXT_WORD_PREDICTION_ENABLED // Gboard-style next-word: shipped LM, plus learned context when learning is on
     @JvmField var context_source = Defaults.CONTEXT_SOURCE // which context LM feeds scoring: both | learned_only | static_only
@@ -1315,6 +1333,7 @@ class Config private constructor(
         prediction_frequency_scale = safeGetFloat(_prefs, "prediction_frequency_scale", Defaults.PREDICTION_FREQUENCY_SCALE)
         context_aware_predictions_enabled = _prefs.getBoolean("context_aware_predictions_enabled", Defaults.CONTEXT_AWARE_PREDICTIONS_ENABLED)
         personalized_learning_enabled = _prefs.getBoolean("personalized_learning_enabled", Defaults.PERSONALIZED_LEARNING_ENABLED)
+        incognito_enabled = _prefs.getBoolean("incognito_enabled", Defaults.INCOGNITO_ENABLED)
         on_device_learning_enabled = _prefs.getBoolean("on_device_learning_enabled", Defaults.ON_DEVICE_LEARNING_ENABLED)
         next_word_prediction_enabled = _prefs.getBoolean("next_word_prediction_enabled", Defaults.NEXT_WORD_PREDICTION_ENABLED)
         context_source = safeGetString(_prefs, "context_source", Defaults.CONTEXT_SOURCE)

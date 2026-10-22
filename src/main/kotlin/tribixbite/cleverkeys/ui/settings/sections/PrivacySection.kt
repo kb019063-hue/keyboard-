@@ -92,6 +92,24 @@ internal fun SettingsActivity.PrivacySection() {
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
 
+                // ── INCOGNITO MODE (phase 3 part 2) ─────────────────────────
+                // Suspends learning, autocorrect, auto-capitalisation and clipboard history
+                // without rewriting any of them: every behaviour site reads its preference
+                // folded with incognito through Config.*Effective (IncognitoPolicy), so turning
+                // this off restores exactly what the user had before, with no migration.
+                SettingsSwitch(
+                    title = stringResource(R.string.settings_incognito_title),
+                    description = stringResource(R.string.settings_incognito_desc),
+                    checked = incognitoEnabled,
+                    onCheckedChange = { enabled ->
+                        incognitoEnabled = enabled
+                        saveSetting("incognito_enabled", enabled)
+                        // Immediate, like the learning switch below: the open keyboard's next
+                        // keystroke honours it without waiting for a Config refresh round-trip.
+                        Config.globalConfig()?.incognito_enabled = enabled
+                    }
+                )
+
                 // ── MASTER on-device learning gate (Task A 2026-08-06) ──────
                 // One clear switch that stops ALL typing-behavior learning at
                 // the write layer: context LM (bigrams/trigrams), personalization

@@ -361,7 +361,7 @@ class WordPredictor : Predictor {
     private var lastLearningGates: LearningGates? = null
 
     private fun learningGates(value: Config? = config): LearningGates = LearningGates(
-        value?.on_device_learning_enabled ?: false,
+        value?.learningEffective ?: false,
         value?.context_aware_predictions_enabled ?: false,
         value?.personalized_learning_enabled ?: false,
         value?.primary_language
@@ -759,7 +759,7 @@ class WordPredictor : Predictor {
         personalizationEngine?.let { engine ->
             engine.setEnabled(
                 LearningGate.canLearnPersonalization(
-                    config.on_device_learning_enabled,
+                    config.learningEffective,
                     config.personalized_learning_enabled
                 )
             )
@@ -789,12 +789,12 @@ class WordPredictor : Predictor {
      * makes the store inert, not just frozen.
      */
     private fun canUseAdaptation(): Boolean =
-        LearningGate.canUseAdaptation(config?.on_device_learning_enabled ?: false)
+        LearningGate.canUseAdaptation(config?.learningEffective ?: false)
 
     /** Mirror the master gate into the adaptation store's own enabled flag. */
     private fun syncAdaptationEnabled() {
         config?.let { cfg ->
-            adaptationManager?.setEnabled(LearningGate.canUseAdaptation(cfg.on_device_learning_enabled))
+            adaptationManager?.setEnabled(LearningGate.canUseAdaptation(cfg.learningEffective))
         }
     }
 
@@ -1177,7 +1177,7 @@ class WordPredictor : Predictor {
         }
         lastRecordedCommit = null
 
-        val master = (config?.on_device_learning_enabled ?: false) && fieldAllowsPersonalizedLearning
+        val master = (config?.learningEffective ?: false) && fieldAllowsPersonalizedLearning
         val contextAware = config?.context_aware_predictions_enabled ?: false
         if (LearningGate.canLearnContext(master, contextAware) && window.size >= 2) {
             // Same predicate as the record, so a skipped (unlearnable) n-gram is not decremented.
@@ -1245,7 +1245,7 @@ class WordPredictor : Predictor {
         // Null config fails CLOSED (M2) — same gate as getNextWordCandidates and
         // calculateUnifiedScore's boost read.
         val canUse = LearningGate.canUseLearnedContext(
-            config?.on_device_learning_enabled ?: false,
+            config?.learningEffective ?: false,
             config?.context_aware_predictions_enabled ?: false
         )
         if (!canUse) return null
@@ -1274,7 +1274,7 @@ class WordPredictor : Predictor {
         // next-word candidates come exclusively from learned data. Null config
         // fails CLOSED (M2).
         val canUse = LearningGate.canUseLearnedContext(
-            config?.on_device_learning_enabled ?: false,
+            config?.learningEffective ?: false,
             config?.context_aware_predictions_enabled ?: false
         )
         if (!canUse) return emptyList()
@@ -1318,7 +1318,7 @@ class WordPredictor : Predictor {
     override fun getPersonalizationBoostFor(word: String): Float {
         // Null config fails CLOSED (M2).
         val canUse = LearningGate.canLearnPersonalization(
-            config?.on_device_learning_enabled ?: false,
+            config?.learningEffective ?: false,
             config?.personalized_learning_enabled ?: false
         )
         if (!canUse) return 0f
@@ -1385,7 +1385,7 @@ class WordPredictor : Predictor {
     private fun canPurgeLearnedTypos(): Boolean {
         if (closed) return false
         val cfg = config ?: return false
-        if (!LearningGate.canUseLearnedContext(cfg.on_device_learning_enabled, cfg.context_aware_predictions_enabled)) return false
+        if (!LearningGate.canUseLearnedContext(cfg.learningEffective, cfg.context_aware_predictions_enabled)) return false
         return contextModel != null
     }
 
@@ -2723,7 +2723,7 @@ class WordPredictor : Predictor {
 
         // Null config fails CLOSED (M2).
         val canUseLearned = LearningGate.canUseLearnedContext(
-            config?.on_device_learning_enabled ?: false,
+            config?.learningEffective ?: false,
             config?.context_aware_predictions_enabled ?: false
         )
         val dynamicContextBoost = if (canUseLearned && contextModel != null && context.isNotEmpty()) {
@@ -2734,7 +2734,7 @@ class WordPredictor : Predictor {
 
         // Personalization boost read: master AND feature gate, fail closed (M2).
         val personalizationEnabled = LearningGate.canLearnPersonalization(
-            config?.on_device_learning_enabled ?: false,
+            config?.learningEffective ?: false,
             config?.personalized_learning_enabled ?: false
         )
         val personalizationBoost = if (personalizationEnabled && personalizationEngine != null) {
@@ -3116,7 +3116,7 @@ class WordPredictor : Predictor {
         tuning: AutocorrectTuning,
         probe: ((ChannelProbe) -> Unit)? = null,
     ): String {
-        if (config?.autocorrect_enabled != true || typedWord.isEmpty()) {
+        if (config?.autocorrectEffective != true || typedWord.isEmpty()) {
             return typedWord
         }
 

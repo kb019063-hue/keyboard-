@@ -194,7 +194,13 @@ class PrivacyManager(private val context: Context) {
         // Enforced here at the write layer — MLDataCollector checks this before
         // any SwipeMLDataStore.storeSwipeData call.
         return LearningGate.canCollectSwipeMl(
-            mainPrefs.getBoolean("on_device_learning_enabled", Defaults.ON_DEVICE_LEARNING_ENABLED),
+            // Incognito folds in here too: this sync path reads the prefs directly rather than
+            // going through Config, so it must apply the same fold itself or a notification
+            // would report learning as live while incognito suspends it.
+            IncognitoPolicy.allows(
+                mainPrefs.getBoolean("on_device_learning_enabled", Defaults.ON_DEVICE_LEARNING_ENABLED),
+                mainPrefs.getBoolean("incognito_enabled", Defaults.INCOGNITO_ENABLED)
+            ),
             mainPrefs.getBoolean("privacy_collect_swipe", Defaults.PRIVACY_COLLECT_SWIPE)
         )
     }

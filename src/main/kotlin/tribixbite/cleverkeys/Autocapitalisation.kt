@@ -35,7 +35,7 @@ class Autocapitalisation(
         this.ic = ic
         // Check inputType for CAP_MODE flags
         capsMode = info.inputType and SUPPORTED_CAPS_MODES
-        val autocapEnabled = Config.globalConfig().autocapitalisation
+        val autocapEnabled = Config.globalConfig().autocapEffective
 
         vlog { "AUTOCAP started: setting=$autocapEnabled, capsMode=$capsMode, inputType=0x${info.inputType.toString(16)}" }
 

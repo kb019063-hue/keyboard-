@@ -219,7 +219,7 @@ class ClipboardHistoryService private constructor(ctx: Context) {
             registerClipboardListener()
             return
         }
-        val historyEnabled = Config.globalConfigOrNull()?.clipboard_history_enabled ?: false
+        val historyEnabled = Config.globalConfigOrNull()?.clipboardHistoryEffective ?: false
         if (!historyEnabled) return
         // API 24-25: ClipDescription has no set timestamp, so a catch-up could only tell clips
         // apart by reading the whole clip over Binder on every keyboard show. It is also
@@ -283,7 +283,7 @@ class ClipboardHistoryService private constructor(ctx: Context) {
      * Returns status message indicating if clipboard monitoring is active.
      */
     fun getClipboardStatus(): String {
-        if (!Config.globalConfig().clipboard_history_enabled)
+        if (!Config.globalConfig().clipboardHistoryEffective)
             return "Clipboard history disabled in settings"
 
         if (!_isListenerRegistered) {
@@ -389,7 +389,7 @@ class ClipboardHistoryService private constructor(ctx: Context) {
     /** Add clipboard entries to the history, skipping consecutive duplicates and
         empty strings. */
     fun addClip(clip: String?) {
-        if (!Config.globalConfig().clipboard_history_enabled) return
+        if (!Config.globalConfig().clipboardHistoryEffective) return
         // OS-listener path: sanitize + optionally rewrite the OS clipboard, non-private insert.
         storeClip(clip, rewriteOsClipboard = true, isPrivate = false, sourcePackage = null)
     }
@@ -957,7 +957,7 @@ class ClipboardHistoryService private constructor(ctx: Context) {
      */
     private fun processClipUri(uri: Uri) {
         try {
-            if (!Config.globalConfig().clipboard_history_enabled) return
+            if (!Config.globalConfig().clipboardHistoryEffective) return
 
             val mimeType = _context.contentResolver.getType(uri) ?: "application/octet-stream"
 
@@ -1038,7 +1038,7 @@ class ClipboardHistoryService private constructor(ctx: Context) {
         mediaPath: String,
         contentHash: String
     ) {
-        if (!Config.globalConfig().clipboard_history_enabled) return
+        if (!Config.globalConfig().clipboardHistoryEffective) return
 
         val ttlMs = getHistoryTtlMs()
         val expiryTime = if (ttlMs == Long.MAX_VALUE) Long.MAX_VALUE else System.currentTimeMillis() + ttlMs

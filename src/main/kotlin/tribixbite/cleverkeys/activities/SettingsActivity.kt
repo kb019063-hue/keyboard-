@@ -282,6 +282,8 @@ class SettingsActivity : ComponentActivity(), SharedPreferences.OnSharedPreferen
     internal var soundVolume by mutableStateOf(Defaults.SOUND_VOLUME.toFloat())
     internal var debugEnabled by mutableStateOf(Defaults.DEBUG_ENABLED)
     internal var clipboardHistoryEnabled by mutableStateOf(Defaults.CLIPBOARD_HISTORY_ENABLED)
+    // Incognito mode (phase 3 part 2): suspends learning/autocorrect/autocap/clipboard history
+    internal var incognitoEnabled by mutableStateOf(Defaults.INCOGNITO_ENABLED)
     internal var clipboardHistoryLimit by mutableIntStateOf(Defaults.CLIPBOARD_HISTORY_LIMIT_FALLBACK)
     internal var clipboardHistoryDuration by mutableIntStateOf(Defaults.CLIPBOARD_HISTORY_DURATION_FALLBACK)  // Minutes; -1 = never expire
     internal var clipboardPaneHeightPercent by mutableIntStateOf(Defaults.CLIPBOARD_PANE_HEIGHT_PERCENT)

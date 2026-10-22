@@ -618,7 +618,7 @@ class SuggestionHandler(
     )
 
     private fun autocorrectSettings() = AutocorrectSettings(
-        config.autocorrect_enabled,
+        config.autocorrectEffective,
         config.autocorrect_min_word_length,
         config.autocorrect_char_match_threshold,
         config.autocorrect_max_length_diff,
@@ -643,7 +643,7 @@ class SuggestionHandler(
         val predictor = predictionCoordinator.getWordPredictor()
         return SpaceCommitResolver.resolve(
             typed = word,
-            autocorrectEnabled = config.autocorrect_enabled && predictor != null,
+            autocorrectEnabled = config.autocorrectEffective && predictor != null,
             inTerminal = inTerminal,
             stemUnmerged = stemUnmerged,
             capitalizeI = ::capitalizeIWord,
@@ -1006,7 +1006,7 @@ class SuggestionHandler(
         val casedPredictions = predictionCoordinator.getWordPredictor()
             ?.applyUserWordCaseToList(predictions) ?: predictions
         val autocapAtCursor = !shiftActive && !shiftLocked &&
-            Autocapitalisation.shouldCapitalizeAtCursor(ic, editorInfo, config.autocapitalisation)
+            Autocapitalisation.shouldCapitalizeAtCursor(ic, editorInfo, config.autocapEffective)
         val transformedPredictions = casedPredictions.map {
             applyShiftTransformation(it, shiftActive || autocapAtCursor, shiftLocked)
         }
@@ -1392,7 +1392,7 @@ class SuggestionHandler(
             specialPromptActive = specialPromptActive,
             inTermuxApp = isTerminalEditor(editorInfo),
             hasContext = hasContext,
-            onDeviceLearningEnabled = config.on_device_learning_enabled,
+            onDeviceLearningEnabled = config.learningEffective,
             contextAwareEnabled = config.context_aware_predictions_enabled,
             fieldAllowsPersonalizedLearning = fieldAllowsPersonalizedLearning // M5
         )
@@ -1571,7 +1571,7 @@ class SuggestionHandler(
             // SKIP for known contractions, raw predictions, and manual selections
             // Never in a terminal: a shell token is not prose (`ls` must not become `is`), the
             // same rule the typed-word autocorrect at the space already follows.
-            if (config.swipe_final_autocorrect_enabled && predictionCoordinator.getWordPredictor() != null &&
+            if (config.swipeFinalAutocorrectEffective && predictionCoordinator.getWordPredictor() != null &&
                 !isTerminalEditor(editorInfo)
             ) {
                 var correctedWord = predictionCoordinator.getWordPredictor()?.autoCorrect(processedWord)
@@ -1994,7 +1994,7 @@ class SuggestionHandler(
             // the score. The auto-inserted word's other learning (context LM + vocabulary via
             // updateContext below) is kept, and rolled back if the user replaces or undoes it.
             if (isManualSelection && !inPasswordField &&
-                LearningGate.canLearnAdaptation(config.on_device_learning_enabled) &&
+                LearningGate.canLearnAdaptation(config.learningEffective) &&
                 fieldAllowsPersonalizedLearning
             ) {
                 predictionCoordinator.getAdaptationManager()?.recordSelection(processedWord.trim())
@@ -2535,7 +2535,7 @@ class SuggestionHandler(
      * and never a password field (tracked mode or the live editor, as W8 does elsewhere).
      */
     private fun swipeCorrectionsAllowed(editorInfo: EditorInfo?): Boolean =
-        LearningGate.canLearnSwipeCorrections(config.on_device_learning_enabled) &&
+        LearningGate.canLearnSwipeCorrections(config.learningEffective) &&
             fieldAllowsPersonalizedLearning &&
             !isPasswordMode &&
             !SuggestionBar.isPasswordField(editorInfo)
@@ -3825,7 +3825,7 @@ class SuggestionHandler(
                 // Bar highlight == space commit (2026-10-11): run the dictionary-sweeping
                 // correction HERE, on the worker, so the main-thread resolve in the post below
                 // (and the space press) hits the memo. Its guards are evaluated there.
-                val wouldCorrect = config.autocorrect_enabled && !inTerminal &&
+                val wouldCorrect = config.autocorrectEffective && !inTerminal &&
                     memoizedAutoCorrect(predictionCoordinator.getWordPredictor(), partial) != partial
                 if (Thread.currentThread().isInterrupted) return@cancelAndSubmit
 

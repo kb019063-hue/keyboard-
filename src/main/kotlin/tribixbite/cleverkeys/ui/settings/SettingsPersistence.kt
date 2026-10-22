@@ -282,6 +282,7 @@ internal fun SettingsActivity.loadCurrentSettings() {
         soundEnabled = prefs.getSafeBoolean("sound_enabled", Defaults.SOUND_ENABLED)
         soundVolume = prefs.getSafeInt("sound_volume", Defaults.SOUND_VOLUME).toFloat()
         clipboardHistoryEnabled = prefs.getSafeBoolean("clipboard_history_enabled", Defaults.CLIPBOARD_HISTORY_ENABLED)
+        incognitoEnabled = prefs.getSafeBoolean("incognito_enabled", Defaults.INCOGNITO_ENABLED)
         clipboardHistoryLimit = prefs.getSafeString("clipboard_history_limit", Defaults.CLIPBOARD_HISTORY_LIMIT).toIntOrNull() ?: Defaults.CLIPBOARD_HISTORY_LIMIT_FALLBACK
         clipboardHistoryDuration = prefs.getSafeString("clipboard_history_duration", Defaults.CLIPBOARD_HISTORY_DURATION).toIntOrNull() ?: Defaults.CLIPBOARD_HISTORY_DURATION_FALLBACK
         clipboardPaneHeightPercent = Config.safeGetInt(prefs, "clipboard_pane_height_percent", Defaults.CLIPBOARD_PANE_HEIGHT_PERCENT)
@@ -384,6 +385,7 @@ internal fun SettingsActivity.loadCurrentSettings() {
         backspaceUndoAutocorrect = prefs.getSafeBoolean("backspace_undo_autocorrect", Defaults.BACKSPACE_UNDO_AUTOCORRECT)
         suggestionBarOpacity = Config.safeGetInt(prefs, "suggestion_bar_opacity", Defaults.SUGGESTION_BAR_OPACITY)
         autoCorrectEnabled = prefs.getSafeBoolean("autocorrect_enabled", Defaults.AUTOCORRECT_ENABLED)
+        incognitoEnabled = prefs.getSafeBoolean("incognito_enabled", Defaults.INCOGNITO_ENABLED)
         customTerminalPackages = prefs.getSafeString("custom_terminal_packages", Defaults.CUSTOM_TERMINAL_PACKAGES)
         imeDefaultPromptEnabled = prefs.getSafeBoolean("ime_default_prompt_enabled", Defaults.IME_DEFAULT_PROMPT_ENABLED)
         vibrationDuration = prefs.getSafeInt("vibrate_duration", Defaults.VIBRATE_DURATION)

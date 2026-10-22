@@ -250,6 +250,12 @@ object CommandRegistry {
         Command("one_handed_side", R.string.cmd_one_handed_side, R.string.cmd_one_handed_side_desc,
             Category.EVENTS, symbol = "1H\u21C4",
             keywords = listOf("one", "handed", "side", "switch", "flip", "left", "right", "mirror")),
+        // Incognito: a mask, because that is what every browser's private mode taught the symbol
+        // to mean. Three UTF-16 units (surrogate pair + variation selector), inside the <=4 that
+        // ShortSwipeMapping enforces and getDisplayInfo falls back past.
+        Command("incognito_toggle", R.string.cmd_incognito_toggle, R.string.cmd_incognito_toggle_desc,
+            Category.EVENTS, symbol = "\uD83D\uDD76\uFE0F",
+            keywords = listOf("incognito", "private", "privacy", "secret", "mask", "anonymous")),
 
         // ========== MODIFIERS ==========
         Command("shift", R.string.cmd_shift, R.string.cmd_shift_desc, Category.MODIFIERS,

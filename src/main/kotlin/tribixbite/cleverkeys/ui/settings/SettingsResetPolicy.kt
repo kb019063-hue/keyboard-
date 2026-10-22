@@ -138,6 +138,7 @@ object SettingsResetPolicy {
 
         // Clipboard — keys kept in sync with ui/settings/sections/ClipboardSection.kt
         put("clipboard_history_enabled", Defaults.CLIPBOARD_HISTORY_ENABLED)
+        put("incognito_enabled", Defaults.INCOGNITO_ENABLED)
         put("clipboard_pane_height_percent", Defaults.CLIPBOARD_PANE_HEIGHT_PERCENT)
         put("clipboard_history_limit", Defaults.CLIPBOARD_HISTORY_LIMIT_FALLBACK)
         put("clipboard_history_duration", Defaults.CLIPBOARD_HISTORY_DURATION)

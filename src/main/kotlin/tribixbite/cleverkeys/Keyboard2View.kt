@@ -1158,6 +1158,7 @@ class Keyboard2View @JvmOverloads constructor(
                 // and the executor has no service reference to do it with.
                 "one_handed_toggle" -> { service.toggleOneHandedMode(); true }
                 "one_handed_side" -> { service.switchOneHandedSide(); true }
+                "incognito_toggle" -> { service.toggleIncognito(); true }
                 else -> false
             }
 
