@@ -1,6 +1,7 @@
 package tribixbite.cleverkeys.ui.settings
 
 import tribixbite.cleverkeys.FloatingConfig
+import tribixbite.cleverkeys.SplitConfig
 import tribixbite.cleverkeys.KeyboardHeightPrefs
 import tribixbite.cleverkeys.OneHandedConfig
 import tribixbite.cleverkeys.ToolbarConfig
@@ -286,6 +287,8 @@ internal fun SettingsActivity.loadCurrentSettings() {
         incognitoEnabled = prefs.getSafeBoolean("incognito_enabled", Defaults.INCOGNITO_ENABLED)
         floatingEnabled = prefs.getSafeBoolean(FloatingConfig.PREF_ENABLED, Defaults.FLOATING_ENABLED)
         floatingWidthPercent = prefs.getSafeInt(FloatingConfig.PREF_WIDTH_PERCENT, Defaults.FLOATING_WIDTH_PERCENT).toFloat()
+        splitEnabled = prefs.getSafeBoolean(SplitConfig.PREF_ENABLED, Defaults.SPLIT_ENABLED)
+        splitGapPercent = prefs.getSafeInt(SplitConfig.PREF_GAP_PERCENT, Defaults.SPLIT_GAP_PERCENT).toFloat()
         clipboardHistoryLimit = prefs.getSafeString("clipboard_history_limit", Defaults.CLIPBOARD_HISTORY_LIMIT).toIntOrNull() ?: Defaults.CLIPBOARD_HISTORY_LIMIT_FALLBACK
         clipboardHistoryDuration = prefs.getSafeString("clipboard_history_duration", Defaults.CLIPBOARD_HISTORY_DURATION).toIntOrNull() ?: Defaults.CLIPBOARD_HISTORY_DURATION_FALLBACK
         clipboardPaneHeightPercent = Config.safeGetInt(prefs, "clipboard_pane_height_percent", Defaults.CLIPBOARD_PANE_HEIGHT_PERCENT)
@@ -391,6 +394,8 @@ internal fun SettingsActivity.loadCurrentSettings() {
         incognitoEnabled = prefs.getSafeBoolean("incognito_enabled", Defaults.INCOGNITO_ENABLED)
         floatingEnabled = prefs.getSafeBoolean(FloatingConfig.PREF_ENABLED, Defaults.FLOATING_ENABLED)
         floatingWidthPercent = prefs.getSafeInt(FloatingConfig.PREF_WIDTH_PERCENT, Defaults.FLOATING_WIDTH_PERCENT).toFloat()
+        splitEnabled = prefs.getSafeBoolean(SplitConfig.PREF_ENABLED, Defaults.SPLIT_ENABLED)
+        splitGapPercent = prefs.getSafeInt(SplitConfig.PREF_GAP_PERCENT, Defaults.SPLIT_GAP_PERCENT).toFloat()
         customTerminalPackages = prefs.getSafeString("custom_terminal_packages", Defaults.CUSTOM_TERMINAL_PACKAGES)
         imeDefaultPromptEnabled = prefs.getSafeBoolean("ime_default_prompt_enabled", Defaults.IME_DEFAULT_PROMPT_ENABLED)
         vibrationDuration = prefs.getSafeInt("vibrate_duration", Defaults.VIBRATE_DURATION)

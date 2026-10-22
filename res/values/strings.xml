@@ -183,6 +183,14 @@
     <string name="cmd_floating_toggle_desc">Turn floating keyboard mode on or off</string>
     <string name="floating_toast_on">Floating keyboard on</string>
     <string name="floating_toast_off">Floating keyboard off</string>
+    <string name="settings_split_title">Split Keyboard</string>
+    <string name="settings_split_desc">Split the keyboard into two halves for thumb typing</string>
+    <string name="settings_split_gap_title">Split Gap</string>
+    <string name="settings_split_gap_desc">How wide the gap between the two halves is</string>
+    <string name="cmd_split_toggle">Split Keyboard</string>
+    <string name="cmd_split_toggle_desc">Turn split keyboard mode on or off</string>
+    <string name="split_toast_on">Split keyboard on</string>
+    <string name="split_toast_off">Split keyboard off</string>
 
     <!-- Accessibility Section -->
     <string name="settings_section_accessibility">♿ Accessibility</string>

@@ -261,6 +261,10 @@ object CommandRegistry {
         Command("floating_toggle", R.string.cmd_floating_toggle, R.string.cmd_floating_toggle_desc,
             Category.EVENTS, symbol = "\uD83E\uDE9F",
             keywords = listOf("floating", "float", "window", "small", "overlay", "drag", "move")),
+        // Split keyboard: two arrows pushing apart say it without words. Two UTF-16 units.
+        Command("split_toggle", R.string.cmd_split_toggle, R.string.cmd_split_toggle_desc,
+            Category.EVENTS, symbol = "\u21E4\u21E5",
+            keywords = listOf("split", "halves", "two", "thumb", "gap", "divide")),
 
         // ========== MODIFIERS ==========
         Command("shift", R.string.cmd_shift, R.string.cmd_shift_desc, Category.MODIFIERS,

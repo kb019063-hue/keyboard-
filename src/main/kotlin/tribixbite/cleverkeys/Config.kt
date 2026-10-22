@@ -493,6 +493,9 @@ object Defaults {
     const val FLOATING_WIDTH_PERCENT = FloatingConfig.DEFAULT_WIDTH_PERCENT
     const val FLOATING_X_FRACTION = FloatingConfig.DEFAULT_X_FRACTION
     const val FLOATING_Y_FRACTION = FloatingConfig.DEFAULT_Y_FRACTION
+    // Split keyboard (phase 3 part 4): two halves with a gap between them.
+    const val SPLIT_ENABLED = SplitConfig.DEFAULT_ENABLED
+    const val SPLIT_GAP_PERCENT = SplitConfig.DEFAULT_GAP_PERCENT
 
     // Accessibility
     const val STICKY_KEYS_ENABLED = false
@@ -961,6 +964,8 @@ class Config private constructor(
     @JvmField var floating_width_percent = Defaults.FLOATING_WIDTH_PERCENT
     @JvmField var floating_x_fraction = Defaults.FLOATING_X_FRACTION
     @JvmField var floating_y_fraction = Defaults.FLOATING_Y_FRACTION
+    @JvmField var split_enabled = Defaults.SPLIT_ENABLED
+    @JvmField var split_gap_percent = Defaults.SPLIT_GAP_PERCENT
 
     // The five preferences incognito suspends, folded at read time (IncognitoPolicy). Behaviour
     // code reads these; the Settings UI reads the raw fields, so what the user sees is always
@@ -1349,6 +1354,8 @@ class Config private constructor(
         floating_width_percent = safeGetInt(_prefs, FloatingConfig.PREF_WIDTH_PERCENT, Defaults.FLOATING_WIDTH_PERCENT)
         floating_x_fraction = _prefs.getFloat(FloatingConfig.PREF_X_FRACTION, Defaults.FLOATING_X_FRACTION)
         floating_y_fraction = _prefs.getFloat(FloatingConfig.PREF_Y_FRACTION, Defaults.FLOATING_Y_FRACTION)
+        split_enabled = _prefs.getBoolean(SplitConfig.PREF_ENABLED, Defaults.SPLIT_ENABLED)
+        split_gap_percent = safeGetInt(_prefs, SplitConfig.PREF_GAP_PERCENT, Defaults.SPLIT_GAP_PERCENT)
         on_device_learning_enabled = _prefs.getBoolean("on_device_learning_enabled", Defaults.ON_DEVICE_LEARNING_ENABLED)
         next_word_prediction_enabled = _prefs.getBoolean("next_word_prediction_enabled", Defaults.NEXT_WORD_PREDICTION_ENABLED)
         context_source = safeGetString(_prefs, "context_source", Defaults.CONTEXT_SOURCE)

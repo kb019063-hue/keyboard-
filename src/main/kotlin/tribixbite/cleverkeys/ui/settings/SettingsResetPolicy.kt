@@ -143,6 +143,8 @@ object SettingsResetPolicy {
         put("floating_width_percent", Defaults.FLOATING_WIDTH_PERCENT)
         put("floating_x_fraction", Defaults.FLOATING_X_FRACTION)
         put("floating_y_fraction", Defaults.FLOATING_Y_FRACTION)
+        put("split_enabled", Defaults.SPLIT_ENABLED)
+        put("split_gap_percent", Defaults.SPLIT_GAP_PERCENT)
         put("clipboard_pane_height_percent", Defaults.CLIPBOARD_PANE_HEIGHT_PERCENT)
         put("clipboard_history_limit", Defaults.CLIPBOARD_HISTORY_LIMIT_FALLBACK)
         put("clipboard_history_duration", Defaults.CLIPBOARD_HISTORY_DURATION)

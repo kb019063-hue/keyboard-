@@ -1160,6 +1160,7 @@ class Keyboard2View @JvmOverloads constructor(
                 "one_handed_side" -> { service.switchOneHandedSide(); true }
                 "incognito_toggle" -> { service.toggleIncognito(); true }
                 "floating_toggle" -> { service.toggleFloating(); true }
+                "split_toggle" -> { service.toggleSplit(); true }
                 else -> false
             }
 
@@ -1510,11 +1511,19 @@ class Keyboard2View @JvmOverloads constructor(
         // One capture per hit-test query: marginTop and marginLeft must come from the same
         // configuration or a tap can be resolved against a rect that never existed.
         val snap = _config.snapshot
+        // Split mode (phase 3 part 4): the gap and the scale that compensates it, derived from
+        // the same content width _keyWidth itself comes from, so halves plus gap fill exactly the
+        // width the unsplit keyboard filled. Off by default: gap 0 and scale 1 reproduce the old
+        // geometry bit for bit.
+        val contentWidth = (width - _marginLeft - _marginRight).toInt()
+        val gapPx = if (snap.split_enabled) SplitConfig.gapPixels(contentWidth, snap.split_gap_percent) else 0
         return KeyboardGeometry.Params(
             keyWidth = _keyWidth,
             rowHeight = tc.row_height,
             marginTop = snap.marginTop,
             marginLeft = maxOf(snap.margin_left, _insets_left.toFloat()),
+            splitGap = gapPx.toFloat(),
+            splitScale = SplitConfig.keyWidthScale(contentWidth, gapPx),
         )
     }
 
@@ -1790,14 +1799,20 @@ class Keyboard2View @JvmOverloads constructor(
         // index lookup per key — is skipped entirely when the feature is unused.
         val hasCustomMappings = _shortSwipeManager.hasCustomMappings
         var y = tc.margin_top
+        // Split mode (phase 3 part 4): the drawn keys take their x from the same walk the tap
+        // hit-test uses (KeyboardGeometry.rowSpans), so what the finger finds is what the eye
+        // sees. geometryParams carries the gap and its compensating scale; startX adds the
+        // theme's per-row margin this path layers on top of the view's own.
+        val gp = geometryParams() ?: return
 
         for (row in keyboard.rows) {
             y += row.shift * tc.row_height
-            var x = _marginLeft + tc.margin_left
             val keyH = row.height * tc.row_height - tc.vertical_margin
+            val spans = KeyboardGeometry.rowSpans(row, gp, startX = _marginLeft + tc.margin_left)
 
-            for (k in row.keys) {
-                x += k.shift * _keyWidth
+            for (span in spans) {
+                val k = span.key
+                val x = span.xLeft
                 // Audit H-8 (#77 residual): the pane loc-strip can null EVERY slot of a
                 // key (numeric's `loc switch_greekmath` cell with the checkbox off).
                 // Such a cell must render as empty space, not a blank dead key frame —
@@ -1805,10 +1820,11 @@ class Keyboard2View @JvmOverloads constructor(
                 // exactly the strip artefact. Geometry is preserved (x advances by the
                 // cell's width), keeping every other key in place.
                 if (keyCellIsEmpty(k)) {
-                    x += _keyWidth * k.width
+                    // Geometry is already preserved: rowSpans advanced past this cell, exactly
+                    // as the old manual advance did (audit H-8).
                     continue
                 }
-                val keyW = _keyWidth * k.width - tc.horizontal_margin
+                val keyW = (span.xRight - span.xLeft) - tc.horizontal_margin
                 val isKeyDown = _pointers.isKeyDown(k)
                 // Audit H-4: role-aware frame selection so the Theme-Creator's
                 // Key Locked / Key Modifier / Key Special colours render. For XML
@@ -1847,7 +1863,6 @@ class Keyboard2View @JvmOverloads constructor(
                 if (hasCustomMappings)
                     drawCustomMappings(canvas, k, x, y, keyW, keyH, tc, snap, mainLabelW)
                 drawIndication(canvas, k, x, y, keyW, keyH, tc)
-                x += _keyWidth * k.width
             }
             y += row.height * tc.row_height
         }

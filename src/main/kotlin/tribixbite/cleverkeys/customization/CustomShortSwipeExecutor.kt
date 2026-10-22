@@ -368,6 +368,7 @@ class CustomShortSwipeExecutor(private val context: Context) {
                 // is total, so an unlisted name becomes a String key and the executor would commit
                 // the literal text "one_handed_toggle" into the user's editor.
                 "one_handed_toggle", "one_handed_side", "incognito_toggle", "floating_toggle",
+                "split_toggle",
                 // Keyboard event commands - handled via KeyValue
                 "config", "switch_text", "switch_numeric", "switch_emoji",
                 "switch_back_emoji", "switch_clipboard", "switch_back_clipboard",

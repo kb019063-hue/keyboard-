@@ -992,6 +992,16 @@ class CleverKeysService : InputMethodService(),
         updateSoftInputWindowLayoutParams()
     }
 
+    /** `split_toggle` command; writes the same preference the Settings switch writes. */
+    fun toggleSplit() {
+        val next = !(_config?.split_enabled ?: false)
+        DirectBootAwarePreferences.get_shared_preferences(this).edit()
+            .putBoolean(SplitConfig.PREF_ENABLED, next)
+            .apply()
+        Toast.makeText(this, getString(if (next) R.string.split_toast_on else R.string.split_toast_off),
+            Toast.LENGTH_SHORT).show()
+    }
+
     /** `floating_toggle` command; writes the same preference the Settings switch writes. */
     fun toggleFloating() {
         val next = !(_config?.floating_enabled ?: false)
@@ -1470,6 +1480,11 @@ class CleverKeysService : InputMethodService(),
         if (key == FloatingConfig.PREF_ENABLED || key == FloatingConfig.PREF_WIDTH_PERCENT ||
             key == FloatingConfig.PREF_X_FRACTION || key == FloatingConfig.PREF_Y_FRACTION) {
             applyFloatingToOpenKeyboard()
+        }
+        // Split mode needs no service-side state: the next draw and the next hit-test both read
+        // the geometry params fresh, so a relayout is all the change requires.
+        if (key == SplitConfig.PREF_ENABLED || key == SplitConfig.PREF_GAP_PERCENT) {
+            requestLayout()
         }
     }
 

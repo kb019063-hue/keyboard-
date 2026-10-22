@@ -9,6 +9,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import tribixbite.cleverkeys.Config
 import tribixbite.cleverkeys.FloatingConfig
+import tribixbite.cleverkeys.SplitConfig
 import tribixbite.cleverkeys.FoldStateTracker
 import tribixbite.cleverkeys.KeyboardHeightPrefs
 import tribixbite.cleverkeys.R
@@ -51,6 +52,40 @@ internal fun SettingsActivity.AppearanceSection() {
                         Config.globalConfig()?.floating_enabled = enabled
                     }
                 )
+                // ── SPLIT KEYBOARD (phase 3 part 4) ───────────────────────
+                // Two halves with a gap between them, for thumb typing on a wide screen. The
+                // gap slider is the only extra control: the halves' width follows from it,
+                // because halves plus gap always fill exactly the unsplit width.
+                Text(
+                    text = stringResource(R.string.settings_split_title),
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                )
+                SettingsSwitch(
+                    title = stringResource(R.string.settings_split_title),
+                    description = stringResource(R.string.settings_split_desc),
+                    checked = splitEnabled,
+                    onCheckedChange = { enabled ->
+                        splitEnabled = enabled
+                        saveSetting(SplitConfig.PREF_ENABLED, enabled)
+                        Config.globalConfig()?.split_enabled = enabled
+                    }
+                )
+                if (splitEnabled) {
+                    SettingsSlider(
+                        title = stringResource(R.string.settings_split_gap_title),
+                        description = stringResource(R.string.settings_split_gap_desc),
+                        value = splitGapPercent,
+                        valueRange = SplitConfig.MIN_GAP_PERCENT.toFloat()..SplitConfig.MAX_GAP_PERCENT.toFloat(),
+                        increment = 1f,
+                        onValueChange = {
+                            splitGapPercent = it
+                            saveSetting(SplitConfig.PREF_GAP_PERCENT, it.toInt())
+                            Config.globalConfig()?.split_gap_percent = it.toInt()
+                        },
+                        displayValue = "${splitGapPercent.toInt()}%"
+                    )
+                }
                 if (floatingEnabled) {
                     SettingsSlider(
                         title = stringResource(R.string.settings_floating_width_title),

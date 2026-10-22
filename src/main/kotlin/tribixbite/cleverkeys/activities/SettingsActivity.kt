@@ -287,6 +287,9 @@ class SettingsActivity : ComponentActivity(), SharedPreferences.OnSharedPreferen
     // Floating keyboard (phase 3 part 3)
     internal var floatingEnabled by mutableStateOf(Defaults.FLOATING_ENABLED)
     internal var floatingWidthPercent by mutableStateOf(Defaults.FLOATING_WIDTH_PERCENT.toFloat())
+    // Split keyboard (phase 3 part 4)
+    internal var splitEnabled by mutableStateOf(Defaults.SPLIT_ENABLED)
+    internal var splitGapPercent by mutableStateOf(Defaults.SPLIT_GAP_PERCENT.toFloat())
     internal var clipboardHistoryLimit by mutableIntStateOf(Defaults.CLIPBOARD_HISTORY_LIMIT_FALLBACK)
     internal var clipboardHistoryDuration by mutableIntStateOf(Defaults.CLIPBOARD_HISTORY_DURATION_FALLBACK)  // Minutes; -1 = never expire
     internal var clipboardPaneHeightPercent by mutableIntStateOf(Defaults.CLIPBOARD_PANE_HEIGHT_PERCENT)

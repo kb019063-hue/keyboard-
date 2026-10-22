@@ -2,6 +2,7 @@ package tribixbite.cleverkeys.a11y
 
 import tribixbite.cleverkeys.KeyValue
 import tribixbite.cleverkeys.KeyboardData
+import tribixbite.cleverkeys.SplitConfig
 
 /**
  * Pure-JVM keyboard hit-test geometry, extracted verbatim from
@@ -41,7 +42,14 @@ object KeyboardGeometry {
         val rowHeight: Float,
         val marginTop: Float,
         val marginLeft: Float,
+        /** Horizontal gap inserted at each row's midpoint in split mode; 0 otherwise. */
+        val splitGap: Float = 0f,
+        /** Key-width multiplier compensating splitGap so halves plus gap fill the row. */
+        val splitScale: Float = 1f,
     )
+
+    /** One key's horizontal span within its row, split gap and scale already applied. */
+    data class KeySpan(val key: KeyboardData.Key, val xLeft: Float, val xRight: Float)
 
     /** Float-edged bounds of one virtual key cell (hit-test geometry). */
     data class KeyBounds(val left: Float, val top: Float, val right: Float, val bottom: Float)
@@ -114,16 +122,15 @@ object KeyboardGeometry {
             return null
         }
 
-        for (key in row.keys) {
-            val xLeft = x + key.shift * params.keyWidth
-            val xRight = xLeft + key.width * params.keyWidth
-
+        // Same walk as [computeKeyRects], so a tap lands on the key that is drawn there --
+        // including inside the split gap, which falls to the key on its right exactly as the
+        // inter-key gaps above fall to the key after them.
+        for (span in rowSpans(row, params)) {
             // GAP FIX: If touch is in the gap before this key (xLeft),
             // consider it part of this key for swiping purposes.
-            if (tx < xRight) {
-                return key
+            if (tx < span.xRight) {
+                return span.key
             }
-            x = xRight
         }
 
         // GAP FIX: If we reached here, tx > last key's right edge.
@@ -183,30 +190,65 @@ object KeyboardGeometry {
         for (row in rows) {
             val yTop = y + row.shift * params.rowHeight
             val yBottom = y + (row.shift + row.height) * params.rowHeight
-            var x = params.marginLeft
 
-            for (key in row.keys) {
-                val xLeft = x + key.shift * params.keyWidth
-                val xRight = xLeft + key.width * params.keyWidth
-
-                val kv = key.keys[0]
+            // The ONE horizontal walk: [rowSpans] carries the split gap and its compensating
+            // scale, so rects, hit-tests and the drawn keys all agree by construction.
+            for (span in rowSpans(row, params)) {
+                val kv = span.key.keys[0]
                 if (kv != null) {
                     rects.add(
                         KeyRect(
                             virtualId = virtualId++,
-                            key = key,
+                            key = span.key,
                             kv = kv,
-                            bounds = KeyBounds(xLeft, yTop, xRight, yBottom),
+                            bounds = KeyBounds(span.xLeft, yTop, span.xRight, yBottom),
                         )
                     )
                 }
-                x = xRight
             }
 
             y = yBottom
         }
 
         return rects
+    }
+
+    /**
+     * Every key's horizontal span in one row, in order, with split mode applied.
+     *
+     * With [Params.splitGap] zero and [Params.splitScale] one this reproduces the accumulation
+     * the three geometry consumers used to perform independently -- `x += shift * keyWidth`, then
+     * the key's width -- exactly, in the same float operation order, so splitting off is a
+     * no-op rather than a rounding change. Placeholder cells (null primary value) still advance
+     * the cursor and still get a span; [computeKeyRects] drops them from rects, and the draw path
+     * renders them as empty space, as both always have.
+     *
+     * [startX] lets the draw path, whose row origin adds the theme's per-row margin on top of the
+     * view's, share this walk without adopting [Params.marginLeft].
+     */
+    internal fun rowSpans(
+        row: KeyboardData.Row,
+        params: Params,
+        startX: Float = params.marginLeft
+    ): List<KeySpan> {
+        val kw = params.keyWidth * params.splitScale
+        var totalUnits = 0f
+        for (k in row.keys) totalUnits += k.shift + k.width
+        val out = ArrayList<KeySpan>(row.keys.size)
+        var x = startX
+        var cumUnits = 0f
+        for (k in row.keys) {
+            val leftUnits = cumUnits + k.shift
+            if (params.splitGap > 0f && SplitConfig.isRightHalf(totalUnits, leftUnits)) {
+                x += params.splitGap
+            }
+            val xLeft = x + k.shift * kw
+            val xRight = xLeft + k.width * kw
+            out.add(KeySpan(k, xLeft, xRight))
+            x = xRight
+            cumUnits += k.shift + k.width
+        }
+        return out
     }
 
     /**
