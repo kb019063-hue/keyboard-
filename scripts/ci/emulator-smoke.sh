@@ -88,6 +88,12 @@ dispsz()  { adb shell wm size 2>/dev/null | tr -d '\r' | grep -oE '[0-9]+x[0-9]+
 # IME runs inside every process that shows a text field, and the launcher has a search field.
 anrln()   { adb logcat -d -b events -v brief 2>/dev/null | grep -iE 'am_anr|am_kill' | tail -3 | tr '\n' ' ' | tr -d '\r'; }
 
+# The package named in the most recent am_anr event, e.g. com.android.launcher3. am_anr lines look
+# like "[0,<pid>,<process>,<flags>,<reason>]", so field 3 after stripping the bracket is the
+# process name. Empty when the events buffer holds no am_anr (a dialog can outlive its event).
+anr_pkg() { adb logcat -d -b events -v brief 2>/dev/null | grep -iE 'am_anr' | tail -1 \
+            | grep -oE '\[[0-9]+,[0-9]+,[A-Za-z0-9_.]+' | head -1 | cut -d, -f3 | tr -d '\r'; }
+
 # Center of the first node in $1 whose text/content-desc matches regex $2; empty if none.
 nodecenter() {
   python3 - "$1" "$2" <<'PY' 2>/dev/null
@@ -133,6 +139,29 @@ dismiss_anr() {
   [ -n "$hit" ] || return 1
   ANR_SEEN=$((ANR_SEEN + 1))
   info "ANR dialog on screen (detected via $hit) -- anr events: $(anrln)"
+
+  # Whose ANR is it? "Wait" is the right answer for OUR app (it keeps the process alive so the
+  # real assertions can run) and the WRONG answer for a wedged system process: run 39753071748
+  # had Quickstep -- the emulator's own launcher -- ANRing, and tapping Wait left it wedged, so
+  # it re-ANRed 21 times and every assertion downstream failed against a launcher that never
+  # came back. For any package that is not ours, close it instead: the launcher restarts by
+  # itself, the device recovers, and the checks that follow measure our keyboard again.
+  local apkg; apkg=$(anr_pkg)
+  if [ -n "${PKG:-}" ] && [ -n "${apkg:-}" ] && [ "${apkg#"$PKG"}" = "$apkg" ]; then
+    info "ANR belongs to $apkg, not $PKG -- closing it so the device recovers"
+    c=$(nodecenter "$f" '^close app$'); [ -n "${c:-}" ] || c=$(nodecenter "$f" 'close app')
+    if [ -n "${c:-}" ]; then
+      info "tapping 'Close app' at $c"
+      adb shell input tap $c
+    else
+      info "no 'Close app' button found; sending BACK"
+      adb shell input keyevent KEYCODE_BACK
+    fi
+    adb shell am force-stop "$apkg" > /dev/null 2>&1
+    sleep 4
+    return 0
+  fi
+
   c=$(nodecenter "$f" '^wait$')
   [ -n "${c:-}" ] || c=$(nodecenter "$f" 'wait')
   if [ -n "${c:-}" ]; then
