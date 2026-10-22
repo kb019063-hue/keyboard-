@@ -678,6 +678,16 @@ nf_expand() {
   local lo=$((SH * 20 / 100)) hi=$((SH * 75 / 100))
   local f src="" c cy attempt try nudge
   NF_SRC=""
+  # Start every hunt from the TOP of the settings list. Run 39781367258 proved why: the incognito
+  # check leaves Privacy expanded and the list scrolled deep (its dump showed Advanced and
+  # "Forget Learned"), and scrollup only reveals LOWER items -- so a header above the window was
+  # unreachable and the hunt reported "never composed" for a switch that was merely above the
+  # fold. Eight downward swipes reach the top from anywhere in a nineteen-section list, which
+  # makes "not on screen after this" a statement about depth, not about direction.
+  for nudge in 1 2 3 4 5 6 7 8; do
+    adb shell input swipe $((SW / 2)) $((SH * 30 / 100)) $((SW / 2)) $((SH * 70 / 100)) 250
+    sleep 1
+  done
   for attempt in 1 2 3 4 5 6; do
     f="$OUT/ui-$pre-hdr-$attempt.xml"; dumpui "$f"
     if grep -qiE "responding" "$f" 2>/dev/null; then
