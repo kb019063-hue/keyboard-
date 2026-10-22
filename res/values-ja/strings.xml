@@ -30,7 +30,7 @@
     <string name="key_descr_change_method">キーボードの切替</string>
     <string name="key_descr_voice_typing">音声入力</string>
     <string name="key_descr_copy">コピー</string>
-    <string name="key_descr_copy_private">プライベートコピー(Brown Keys のみ、システムのクリップボードには保存しない)</string>
+    <string name="key_descr_copy_private">プライベートコピー(Mr. Brown\'s Keyboard のみ、システムのクリップボードには保存しない)</string>
     <string name="key_descr_paste">貼り付け</string>
     <string name="key_descr_cut">切り取り</string>
     <string name="key_descr_selectAll">すべて選択</string>
@@ -99,8 +99,8 @@
     <string name="clipboard_edit_error">項目の更新に失敗しました</string>
 
     <!-- #156 Private copy -->
-    <string name="private_copy_toolbar_label">Brown Keys: プライベートコピー</string>
-    <string name="private_copy_toast">Brown Keys にプライベートにコピーしました</string>
+    <string name="private_copy_toolbar_label">Mr. Brown\'s Keyboard: プライベートコピー</string>
+    <string name="private_copy_toast">Mr. Brown\'s Keyboard にプライベートにコピーしました</string>
     <string name="private_copy_expose_dialog_title">システムのクリップボードにコピーしますか?</string>
     <string name="private_copy_expose_dialog_message">この項目はプライベートにコピーされています。システムのクリップボードにコピーすると、前面のアプリや他のクリップボードマネージャーにテキストが公開されます。それでもコピーしますか?</string>
     <string name="private_copy_expose_dialog_confirm">コピーする</string>
@@ -111,7 +111,7 @@
     <string name="clipboard_filter_private_only_hint">プライベートにコピーした項目(🔒)のみ表示</string>
 
     <!-- Settings Activity (Material 3) -->
-    <string name="settings_title">⚙️ Brown Keys 設定</string>
+    <string name="settings_title">⚙️ Mr. Brown\'s Keyboard 設定</string>
     <string name="settings_description">最適な入力体験のためにキーボードを設定します。</string>
 
     <!-- Swipe Typing Section -->
@@ -269,7 +269,7 @@
     <string name="short_swipe_reset_all">すべてリセット</string>
     <string name="short_swipe_tap_hint">下のキーをタップしてショートスワイプジェスチャーをカスタマイズしてください</string>
     <string name="short_swipe_instruction_title">カスタマイズするキーをタップしてください</string>
-    <string name="short_swipe_instruction_body">以下のキーボードはあなたの実際の Brown Keys キーボードです。\nキーをタップして、ショートスワイプのアクションを追加してください。</string>
+    <string name="short_swipe_instruction_body">以下のキーボードはあなたの実際の Mr. Brown\'s Keyboard キーボードです。\nキーをタップして、ショートスワイプのアクションを追加してください。</string>
     <string name="short_swipe_custom_mappings">カスタムマッピング</string>
     <string name="theme_settings_title">キーボードテーマ</string>
     <string name="theme_restart_keyboard">キーボードを再起動</string>
@@ -348,7 +348,7 @@
     <string name="accessibility_swipe_complete_title">スワイプ完了</string>
     <string name="accessibility_swipe_complete_desc">スワイプジェスチャー完了時に振動します</string>
     <string name="advanced_ime_prompt_title">既定のキーボードのリマインダー</string>
-    <string name="advanced_ime_prompt_desc">起動ごとに一度、Brown Keys を既定のキーボードに設定するよう通知します。オフにすると今後表示されません。</string>
+    <string name="advanced_ime_prompt_desc">起動ごとに一度、Mr. Brown\'s Keyboard を既定のキーボードに設定するよう通知します。オフにすると今後表示されません。</string>
     <string name="advanced_swipe_debug_log_title">スワイプデバッグログ</string>
     <string name="advanced_swipe_debug_log_desc">スワイプジェスチャーのリアルタイムパイプライン解析（logcat必須）</string>
     <string name="advanced_detailed_logging_title">詳細ログ</string>
@@ -452,11 +452,11 @@
     <string name="clipboard_swipe_deleted">削除しました</string>
     <string name="clipboard_swipe_undo">元に戻す</string>
     <string name="clipboard_private_copy_other_apps_title">他のアプリでプライベートコピー</string>
-    <string name="clipboard_private_copy_other_apps_desc">他のアプリのテキスト選択メニューに「プライベートコピー」を追加します。選択したテキストをBrown Keysのみにコピーし、システムのクリップボードには保存しません。有効にすると、他のアプリから見えるアプリエントリーが追加されます。</string>
+    <string name="clipboard_private_copy_other_apps_desc">他のアプリのテキスト選択メニューに「プライベートコピー」を追加します。選択したテキストをMr. Brown\'s Keyboardのみにコピーし、システムのクリップボードには保存しません。有効にすると、他のアプリから見えるアプリエントリーが追加されます。</string>
     <string name="clipboard_sanitize_links_title">トラッキングパラメーターを除去</string>
     <string name="clipboard_sanitize_links_desc">コピーしたURLからutm_*、fbclidなどを削除します。ClearURLsを利用しています。</string>
     <string name="clipboard_sanitize_system_title">システムクリップボードも浄化</string>
-    <string name="clipboard_sanitize_system_desc">コピーしたURLが浄化されたとき、システムのクリップボードも上書きします。これにより、Brown Keysのパネルだけでなく、すべてのアプリでの貼り付けが浄化されます。</string>
+    <string name="clipboard_sanitize_system_desc">コピーしたURLが浄化されたとき、システムのクリップボードも上書きします。これにより、Mr. Brown\'s Keyboardのパネルだけでなく、すべてのアプリでの貼り付けが浄化されます。</string>
     <string name="clipboard_embed_enrich_title">共有用にエンベッドを充実させる</string>
     <string name="clipboard_embed_enrich_desc">x.com→fxtwitter.com、reddit.com→rxddit.comなどに書き換えます</string>
     <string name="clipboard_custom_rules_title">カスタムルールを使用</string>
@@ -788,7 +788,7 @@
     <string name="gif_remove_all_body">インポートしたすべての GIF パック、サムネイル、データベースを削除します。この操作は元に戻せません。</string>
     <string name="gif_remove_all_confirm">すべて削除</string>
     <string name="gif_remove_pack_body">このパックのすべての GIF を削除し、ストレージ容量を解放します。</string>
-    <string name="privacy_section_intro">Brown Keys は完全にオフラインで動作し、データが端末外に出ることはありません。これらの任意の設定はデータを端末内に保存し、確認・エクスポート・削除できるようにします。エクスポートしたスワイプデータは、別の場所でモデルの学習に利用できます。</string>
+    <string name="privacy_section_intro">Mr. Brown\'s Keyboard は完全にオフラインで動作し、データが端末外に出ることはありません。これらの任意の設定はデータを端末内に保存し、確認・エクスポート・削除できるようにします。エクスポートしたスワイプデータは、別の場所でモデルの学習に利用できます。</string>
     <string name="privacy_on_device_learning_header">端末内学習</string>
     <string name="privacy_forget_learned_title">学習データも消去しますか?</string>
     <string name="privacy_forget_learned_body">学習はオフになりました — 新しい記録は行われません。すでに学習した内容（フレーズパターン、単語の使用状況、候補選択の履歴、スワイプの修正）もすべて削除しますか?この操作は元に戻せません。</string>
@@ -1023,7 +1023,7 @@
     <string name="calibration_touch_here">👆 ここをタッチ</string>
     <string name="calibration_min_readout">最小: %1$d%%</string>
     <string name="calibration_max_readout">最大: %1$d%%</string>
-    <string name="launcher_logo_desc">Brown Keys ロゴ</string>
+    <string name="launcher_logo_desc">Mr. Brown\'s Keyboard ロゴ</string>
     <string name="launcher_tagline">プライバシー、パワー、コントロール — 頭脳とともに。</string>
     <string name="launcher_step_enable">キーボードを有効化</string>
     <string name="launcher_step_select">キーボードを選択</string>
@@ -1237,11 +1237,11 @@
     <string name="clipboard_entry_duration_desc_default">項目が自動削除されるまでの保持期間(-1 = 無期限)</string>
     <string name="clipboard_entry_duration_never">無期限</string>
     <string name="clipboard_private_copy_header">🔒 プライベートコピー</string>
-    <string name="clipboard_private_copy_in_app_note">アプリ内: 「プライベートコピー」編集アクションは、ショートスワイプまたは追加キーに割り当てることができます(ショートスワイプのカスタマイズ)。現在の選択範囲を、システムのクリップボードには触れずに Brown Keys のプライベートクリップボードに保存します。プライベート項目には 🔒 バッジが表示されます。これをシステムのクリップボードにエクスポートするときは必ず事前に確認が表示され、平文バックアップには含まれません(暗号化バックアップには含まれます)。</string>
+    <string name="clipboard_private_copy_in_app_note">アプリ内: 「プライベートコピー」編集アクションは、ショートスワイプまたは追加キーに割り当てることができます(ショートスワイプのカスタマイズ)。現在の選択範囲を、システムのクリップボードには触れずに Mr. Brown\'s Keyboard のプライベートクリップボードに保存します。プライベート項目には 🔒 バッジが表示されます。これをシステムのクリップボードにエクスポートするときは必ず事前に確認が表示され、平文バックアップには含まれません(暗号化バックアップには含まれます)。</string>
     <string name="clipboard_url_handling_header">URL の処理</string>
     <string name="clipboard_custom_rules_browse">custom.substitutions.json を選択</string>
     <string name="clipboard_custom_rules_replace">カスタムルールを置き換え</string>
-    <string name="clipboard_url_handling_note">注: 浄化は Brown Keys がクリップを履歴に保存するときに実行されるため、Brown Keys のパネルからの貼り付けは常に浄化済みです。「システムクリップボードも浄化」がオンの場合は、Android のシステムクリップボードも浄化済みの URL で上書きされるため、他のアプリでの貼り付けも浄化されます(ベストエフォート — キーボードがクリップボードにアクセスできる間のみ)。オフの場合、他のアプリには元の URL がそのまま見えます。</string>
+    <string name="clipboard_url_handling_note">注: 浄化は Mr. Brown\'s Keyboard がクリップを履歴に保存するときに実行されるため、Mr. Brown\'s Keyboard のパネルからの貼り付けは常に浄化済みです。「システムクリップボードも浄化」がオンの場合は、Android のシステムクリップボードも浄化済みの URL で上書きされるため、他のアプリでの貼り付けも浄化されます(ベストエフォート — キーボードがクリップボードにアクセスできる間のみ)。オフの場合、他のアプリには元の URL がそのまま見えます。</string>
     <string name="input_context_source_both">内蔵 + 学習済み</string>
     <string name="input_context_source_learned_only">学習済みのみ</string>
     <string name="input_context_source_static_only">内蔵のみ</string>
@@ -1339,7 +1339,7 @@
     <string name="clipboard_backup_import_completed">クリップボードのインポートが完了しました。</string>
     <string name="clipboard_backup_import_merge_note">インポートした項目は、既存の履歴を上書きせずに統合されます。</string>
     <string name="clipboard_backup_import_failed_title">クリップボードのインポート失敗</string>
-    <string name="clipboard_backup_import_failed">クリップボード履歴をインポートできませんでした:\n\n%1$s\n\nファイルが有効な Brown Keys クリップボードバックアップであることを確認してください。</string>
+    <string name="clipboard_backup_import_failed">クリップボード履歴をインポートできませんでした:\n\n%1$s\n\nファイルが有効な Mr. Brown\'s Keyboard クリップボードバックアップであることを確認してください。</string>
     <string name="clipboard_backup_zip_export_success_title">クリップボードの完全エクスポート完了</string>
     <string name="clipboard_backup_zip_saved">メディアを含むクリップボードのバックアップを保存しました。</string>
     <string name="clipboard_backup_zip_restore_hint">画像、動画、その他のメディアを含むすべての項目を復元するには、「ZIP をインポート」を使用してください。</string>
@@ -1349,7 +1349,7 @@
     <string name="clipboard_backup_zip_import_completed">クリップボードの完全インポートが完了しました。</string>
     <string name="clipboard_backup_zip_media_restored_note">すべてのメディアファイルとサムネイルを復元しました。</string>
     <string name="clipboard_backup_zip_import_failed_title">クリップボード ZIP のインポート失敗</string>
-    <string name="clipboard_backup_zip_import_failed">クリップボード ZIP をインポートできませんでした:\n\n%1$s\n\nファイルが有効な Brown Keys クリップボード ZIP バックアップであることを確認してください。</string>
+    <string name="clipboard_backup_zip_import_failed">クリップボード ZIP をインポートできませんでした:\n\n%1$s\n\nファイルが有効な Mr. Brown\'s Keyboard クリップボード ZIP バックアップであることを確認してください。</string>
     <string name="dictionary_backup_export_success_title">辞書のエクスポート完了</string>
     <string name="dictionary_backup_export_disabled_words">無効化単語: %1$d</string>
     <string name="dictionary_backup_export_failed_title">辞書のエクスポート失敗</string>
@@ -1472,7 +1472,7 @@
     </plurals>
 
     <!-- 2026-09-29 hardcoded-UI sweep (activities): launcher, dictionary, layouts, short swipes, themes, playground, manifest labels (reviewer=model) -->
-    <string name="launcher_step_enable_desc">システム設定で Brown Keys をオンにします</string>
+    <string name="launcher_step_enable_desc">システム設定で Mr. Brown\'s Keyboard をオンにします</string>
     <string name="launcher_step_select_desc">既定の入力方法を切り替えます</string>
     <string name="launcher_step_calibrate_desc">キーごとに最大 8 つのサブキーアクションを設定します</string>
     <string name="dict_tab_active">有効</string>
@@ -1548,9 +1548,9 @@
     <string name="calibration_legend_short_range">最小 - 最大</string>
     <string name="calibration_legend_long_range">&gt; 最大</string>
     <string name="calibration_percent_value">%1$d%%</string>
-    <string name="theme_builtin_cleverkeysdark_name">Brown Keys ダーク</string>
+    <string name="theme_builtin_cleverkeysdark_name">Mr. Brown\'s Keyboard ダーク</string>
     <string name="theme_builtin_cleverkeysdark_desc">シルバーのアクセントが入ったディープパープル(デフォルト)</string>
-    <string name="theme_builtin_cleverkeyslight_name">Brown Keys ライト</string>
+    <string name="theme_builtin_cleverkeyslight_name">Mr. Brown\'s Keyboard ライト</string>
     <string name="theme_builtin_cleverkeyslight_desc">紫のアクセントが入ったシルバーのキー</string>
     <string name="theme_builtin_dark_name">ダーク</string>
     <string name="theme_builtin_dark_desc">青のアクセントが入ったクラシックなダークテーマ</string>
@@ -1808,11 +1808,11 @@
     </plurals>
     <!-- 2026-09-30 i18n: typed import/export/backup failure reasons and settings-import skip kinds (reviewer=model) -->
     <string name="io_error_file_not_found">ファイルが見つからないか、開けませんでした。</string>
-    <string name="io_error_permission_denied">Brown Keys にはこのファイルへのアクセスが許可されていません。</string>
+    <string name="io_error_permission_denied">Mr. Brown\'s Keyboard にはこのファイルへのアクセスが許可されていません。</string>
     <string name="io_error_invalid_format">ファイルの形式が想定と異なるか、ファイルが破損しています。</string>
-    <string name="io_error_newer_version">このファイルは新しいバージョンの Brown Keys で作成されています。アプリを更新してもう一度お試しください。</string>
+    <string name="io_error_newer_version">このファイルは新しいバージョンの Mr. Brown\'s Keyboard で作成されています。アプリを更新してもう一度お試しください。</string>
     <string name="io_error_out_of_space">ストレージの空き容量が不足しています。</string>
-    <string name="io_error_too_large">ファイルが大きすぎるため、Brown Keys で安全にインポートできません。</string>
+    <string name="io_error_too_large">ファイルが大きすぎるため、Mr. Brown\'s Keyboard で安全にインポートできません。</string>
     <string name="io_error_wrong_password_or_corrupt">バックアップパスワードが違うか、ファイルが破損または改ざんされています。</string>
     <string name="io_error_no_backup_password">このバックアップは暗号化されていますが、使用できるバックアップパスワードがありません。</string>
     <string name="io_error_wrong_backup_kind">このバックアップには、このインポートで想定している種類のデータが含まれていません。</string>
@@ -1858,7 +1858,7 @@
     <string name="cmd_copy">コピー</string>
     <string name="cmd_copy_desc">選択したテキストをクリップボードにコピー</string>
     <string name="cmd_copy_private">プライベートコピー</string>
-    <string name="cmd_copy_private_desc">選択範囲を Brown Keys にのみコピー(システムのクリップボードには入れない)</string>
+    <string name="cmd_copy_private_desc">選択範囲を Mr. Brown\'s Keyboard にのみコピー(システムのクリップボードには入れない)</string>
     <string name="cmd_paste">貼り付け</string>
     <string name="cmd_paste_desc">クリップボードから貼り付け</string>
     <string name="cmd_cut">切り取り</string>

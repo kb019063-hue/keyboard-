@@ -53,7 +53,7 @@
     <string name="key_descr_change_method">تعویض صفحه‌کلید</string>
     <string name="key_descr_voice_typing">تایپ صوتی</string>
     <string name="key_descr_copy">کپی</string>
-    <string name="key_descr_copy_private">کپی خصوصی (فقط داخل Brown Keys، نه در بریده‌دان سامانه)</string>
+    <string name="key_descr_copy_private">کپی خصوصی (فقط داخل Mr. Brown\'s Keyboard، نه در بریده‌دان سامانه)</string>
     <string name="key_descr_paste">چسباندن</string>
     <string name="key_descr_cut">بریدن</string>
     <string name="key_descr_selectAll">انتخاب همه</string>
@@ -124,8 +124,8 @@
     <string name="clipboard_edit_error">به‌روزرسانی مورد ناموفق بود</string>
 
     <!-- #156 Private copy -->
-    <string name="private_copy_toolbar_label">Brown Keys: کپی خصوصی</string>
-    <string name="private_copy_toast">به‌صورت خصوصی در Brown Keys کپی شد</string>
+    <string name="private_copy_toolbar_label">Mr. Brown\'s Keyboard: کپی خصوصی</string>
+    <string name="private_copy_toast">به‌صورت خصوصی در Mr. Brown\'s Keyboard کپی شد</string>
     <string name="private_copy_expose_dialog_title">در بریده‌دان سامانه کپی شود؟</string>
     <string name="private_copy_expose_dialog_message">این مورد به‌صورت خصوصی کپی شده بود. کپی آن در بریده‌دان سامانه، متن را در معرض برنامه پیش‌زمینه و دیگر مدیران بریده‌دان قرار می‌دهد. با این حال کپی شود؟</string>
     <string name="private_copy_expose_dialog_confirm">به هر حال کپی شود</string>
@@ -136,7 +136,7 @@
     <string name="clipboard_filter_private_only_hint">فقط موارد کپی‌شده به‌صورت خصوصی را نشان دهید (🔒)</string>
 
     <!-- Settings Activity (Material 3) -->
-    <string name="settings_title">⚙️ تنظیمات Brown Keys</string>
+    <string name="settings_title">⚙️ تنظیمات Mr. Brown\'s Keyboard</string>
     <string name="settings_description">تنظیمات صفحه‌کلید خود را برای بهترین تجربه تایپ پیکربندی کنید.</string>
 
     <!-- Swipe Typing Section -->
@@ -298,7 +298,7 @@
     <string name="short_swipe_reset_all">بازنشانی همه</string>
     <string name="short_swipe_tap_hint">برای سفارشی‌سازی اشاره کشیدن کوتاه، روی هر کلید زیر ضربه بزنید</string>
     <string name="short_swipe_instruction_title">برای سفارشی‌سازی یک کلید، آن را تایپ کنید</string>
-    <string name="short_swipe_instruction_body">صفحه‌کلید زیر همان صفحه‌کلید واقعی Brown Keys شماست.\nبرای افزودن اشاره کشیدن کوتاه، روی یک کلید ضربه بزنید.</string>
+    <string name="short_swipe_instruction_body">صفحه‌کلید زیر همان صفحه‌کلید واقعی Mr. Brown\'s Keyboard شماست.\nبرای افزودن اشاره کشیدن کوتاه، روی یک کلید ضربه بزنید.</string>
     <string name="short_swipe_custom_mappings">نگاشت‌های سفارشی</string>
 
     <!-- تنظیمات تم / Theme Settings -->
@@ -386,7 +386,7 @@
     <string name="accessibility_swipe_complete_title">اتمام کشیدن</string>
     <string name="accessibility_swipe_complete_desc">هنگام پایان اشاره کشیدن لرزش ایجاد شود</string>
     <string name="advanced_ime_prompt_title">یادآور صفحه‌کلید پیش‌فرض</string>
-    <string name="advanced_ime_prompt_desc">در هر بار روشن‌شدن دستگاه یک بار یادآوری می‌کند Brown Keys را صفحه‌کلید پیش‌فرض کنید. برای اینکه دیگر پرسیده نشود خاموش کنید.</string>
+    <string name="advanced_ime_prompt_desc">در هر بار روشن‌شدن دستگاه یک بار یادآوری می‌کند Mr. Brown\'s Keyboard را صفحه‌کلید پیش‌فرض کنید. برای اینکه دیگر پرسیده نشود خاموش کنید.</string>
     <string name="advanced_swipe_debug_log_title">گزارش اشکال‌زدایی کشیدن</string>
     <string name="advanced_swipe_debug_log_desc">تجزیه‌وتحلیل خط لوله بلادرنگ برای اشاره‌های کشیدن (نیاز به logcat دارد)</string>
     <string name="advanced_detailed_logging_title">گزارش‌گیری دقیق</string>
@@ -490,11 +490,11 @@
     <string name="clipboard_swipe_deleted">حذف شد</string>
     <string name="clipboard_swipe_undo">واگرد</string>
     <string name="clipboard_private_copy_other_apps_title">کپی خصوصی در برنامه‌های دیگر</string>
-    <string name="clipboard_private_copy_other_apps_desc">«کپی خصوصی» را به منوهای انتخاب متن برنامه‌های دیگر اضافه کنید. متن انتخاب‌شده را فقط در Brown Keys کپی می‌کند — هرگز در بریده‌دان سامانه. فعال‌سازی یک ورودی برنامه اضافه می‌کند که برنامه‌های دیگر می‌توانند ببینند.</string>
+    <string name="clipboard_private_copy_other_apps_desc">«کپی خصوصی» را به منوهای انتخاب متن برنامه‌های دیگر اضافه کنید. متن انتخاب‌شده را فقط در Mr. Brown\'s Keyboard کپی می‌کند — هرگز در بریده‌دان سامانه. فعال‌سازی یک ورودی برنامه اضافه می‌کند که برنامه‌های دیگر می‌توانند ببینند.</string>
     <string name="clipboard_sanitize_links_title">پاک‌سازی پارامترهای ردگیری</string>
     <string name="clipboard_sanitize_links_desc">utm_*، fbclid و غیره را از URLهایی که کپی می‌کنید حذف کنید. با ClearURLs.</string>
     <string name="clipboard_sanitize_system_title">همچنین بریده‌دان سامانه را پاک کنید</string>
-    <string name="clipboard_sanitize_system_desc">وقتی یک URL کپی‌شده پاک می‌شود، بریده‌دان سامانه را هم بازنویسی کنید تا الصاق در هر برنامه‌ای پاک‌سازی‌شده باشد — نه فقط پنل Brown Keys.</string>
+    <string name="clipboard_sanitize_system_desc">وقتی یک URL کپی‌شده پاک می‌شود، بریده‌دان سامانه را هم بازنویسی کنید تا الصاق در هر برنامه‌ای پاک‌سازی‌شده باشد — نه فقط پنل Mr. Brown\'s Keyboard.</string>
     <string name="clipboard_embed_enrich_title">غنی‌سازی جاسازی‌ها برای اشتراک‌گذاری</string>
     <string name="clipboard_embed_enrich_desc">x.com را به fxtwitter.com، reddit.com را به rxddit.com و غیره بازنویسی کنید.</string>
     <string name="clipboard_custom_rules_title">استفاده از قوانین سفارشی</string>
@@ -826,7 +826,7 @@
     <string name="gif_remove_all_body">این کار همهٔ بسته‌های گیف واردشده، بندانگشتی‌ها و پایگاه داده را حذف می‌کند. قابل بازگشت نیست.</string>
     <string name="gif_remove_all_confirm">حذف همه</string>
     <string name="gif_remove_pack_body">این کار همهٔ گیف‌های این بسته را حذف و فضای ذخیره‌سازی را آزاد می‌کند.</string>
-    <string name="privacy_section_intro">Brown Keys کاملاً آفلاین است — هیچ داده‌ای هرگز از دستگاه شما بیرون نمی‌رود. این تنظیمات اختیاری داده‌ها را به‌صورت محلی نگه می‌دارند تا بتوانید آن‌ها را ببینید، برون‌بری یا حذف کنید؛ داده‌های کشیدنِ برون‌بری‌شده را می‌توان برای آموزش مدل‌ها در جای دیگر به کار برد.</string>
+    <string name="privacy_section_intro">Mr. Brown\'s Keyboard کاملاً آفلاین است — هیچ داده‌ای هرگز از دستگاه شما بیرون نمی‌رود. این تنظیمات اختیاری داده‌ها را به‌صورت محلی نگه می‌دارند تا بتوانید آن‌ها را ببینید، برون‌بری یا حذف کنید؛ داده‌های کشیدنِ برون‌بری‌شده را می‌توان برای آموزش مدل‌ها در جای دیگر به کار برد.</string>
     <string name="privacy_on_device_learning_header">یادگیری روی دستگاه</string>
     <string name="privacy_forget_learned_title">داده‌های آموخته‌شده هم فراموش شوند؟</string>
     <string name="privacy_forget_learned_body">یادگیری اکنون خاموش است — چیز جدیدی ضبط نمی‌شود. آیا می‌خواهید هر آنچه تاکنون آموخته شده (الگوهای عبارت، کاربرد واژه‌ها، تاریخچهٔ انتخاب پیشنهادها و تصحیح‌های کشیدن) نیز حذف شود؟ قابل بازگشت نیست.</string>
@@ -1065,7 +1065,7 @@
     <string name="calibration_touch_here">👆 اینجا لمس کنید</string>
     <string name="calibration_min_readout">حداقل: %1$d%%</string>
     <string name="calibration_max_readout">حداکثر: %1$d%%</string>
-    <string name="launcher_logo_desc">نشان‌وارهٔ Brown Keys</string>
+    <string name="launcher_logo_desc">نشان‌وارهٔ Mr. Brown\'s Keyboard</string>
     <string name="launcher_tagline">حریم خصوصی، قدرت و کنترل — با یک مغز.</string>
     <string name="launcher_step_enable">فعال‌سازی صفحه‌کلید</string>
     <string name="launcher_step_select">انتخاب صفحه‌کلید</string>
@@ -1281,11 +1281,11 @@
     <string name="clipboard_entry_duration_desc_default">مدت نگه‌داری موارد پیش از حذف خودکار (‎-1 = هرگز)</string>
     <string name="clipboard_entry_duration_never">بدون انقضا</string>
     <string name="clipboard_private_copy_header">🔒 کپی خصوصی</string>
-    <string name="clipboard_private_copy_in_app_note">درون برنامه: کنش ویرایشی «کپی خصوصی» را می‌توان به یک کشیدن کوتاه یا کلید اضافی اختصاص داد (سفارشی‌سازی کشیدن کوتاه). این کنش انتخاب کنونی را بدون دست زدن به بریده‌دان سامانه، در بریده‌دان خصوصی Brown Keys ذخیره می‌کند. موارد خصوصی نشان 🔒 دارند؛ برون‌بری هر یک از آن‌ها به بریده‌دان سامانه همیشه ابتدا تأیید می‌خواهد، و پشتیبان‌های متن ساده آن‌ها را شامل نمی‌شوند (پشتیبان‌های رمزگذاری‌شده شامل می‌شوند).</string>
+    <string name="clipboard_private_copy_in_app_note">درون برنامه: کنش ویرایشی «کپی خصوصی» را می‌توان به یک کشیدن کوتاه یا کلید اضافی اختصاص داد (سفارشی‌سازی کشیدن کوتاه). این کنش انتخاب کنونی را بدون دست زدن به بریده‌دان سامانه، در بریده‌دان خصوصی Mr. Brown\'s Keyboard ذخیره می‌کند. موارد خصوصی نشان 🔒 دارند؛ برون‌بری هر یک از آن‌ها به بریده‌دان سامانه همیشه ابتدا تأیید می‌خواهد، و پشتیبان‌های متن ساده آن‌ها را شامل نمی‌شوند (پشتیبان‌های رمزگذاری‌شده شامل می‌شوند).</string>
     <string name="clipboard_url_handling_header">مدیریت URL</string>
     <string name="clipboard_custom_rules_browse">انتخاب فایل custom.substitutions.json</string>
     <string name="clipboard_custom_rules_replace">جایگزینی قواعد سفارشی</string>
-    <string name="clipboard_url_handling_note">توجه: پاک‌سازی هنگامی انجام می‌شود که Brown Keys یک کلیپ را در تاریخچهٔ خود ذخیره می‌کند، بنابراین چسباندن از پنل Brown Keys همیشه پاک‌سازی‌شده است. وقتی «همچنین بریده‌دان سامانه را پاک کنید» روشن باشد، بریده‌دان سامانهٔ اندروید نیز با URL پاک‌سازی‌شده بازنویسی می‌شود، بنابراین چسباندن در برنامه‌های دیگر هم پاک‌سازی‌شده است (با بیشترین تلاش — فقط تا زمانی که صفحه‌کلید به بریده‌دان دسترسی دارد). وقتی خاموش باشد، برنامه‌های دیگر همچنان URL اصلی را می‌بینند.</string>
+    <string name="clipboard_url_handling_note">توجه: پاک‌سازی هنگامی انجام می‌شود که Mr. Brown\'s Keyboard یک کلیپ را در تاریخچهٔ خود ذخیره می‌کند، بنابراین چسباندن از پنل Mr. Brown\'s Keyboard همیشه پاک‌سازی‌شده است. وقتی «همچنین بریده‌دان سامانه را پاک کنید» روشن باشد، بریده‌دان سامانهٔ اندروید نیز با URL پاک‌سازی‌شده بازنویسی می‌شود، بنابراین چسباندن در برنامه‌های دیگر هم پاک‌سازی‌شده است (با بیشترین تلاش — فقط تا زمانی که صفحه‌کلید به بریده‌دان دسترسی دارد). وقتی خاموش باشد، برنامه‌های دیگر همچنان URL اصلی را می‌بینند.</string>
     <string name="input_context_source_both">داخلی + آموخته</string>
     <string name="input_context_source_learned_only">فقط آموخته</string>
     <string name="input_context_source_static_only">فقط داخلی</string>
@@ -1391,7 +1391,7 @@
     <string name="clipboard_backup_import_completed">وارد کردن بریده‌دان کامل شد.</string>
     <string name="clipboard_backup_import_merge_note">موارد واردشده بدون بازنویسی با تاریخچهٔ موجود ادغام می‌شوند.</string>
     <string name="clipboard_backup_import_failed_title">وارد کردن بریده‌دان ناموفق بود</string>
-    <string name="clipboard_backup_import_failed">وارد کردن تاریخچهٔ بریده‌دان ناموفق بود:\n\n%1$s\n\nمطمئن شوید فایل یک پشتیبان معتبر بریده‌دان Brown Keys است.</string>
+    <string name="clipboard_backup_import_failed">وارد کردن تاریخچهٔ بریده‌دان ناموفق بود:\n\n%1$s\n\nمطمئن شوید فایل یک پشتیبان معتبر بریده‌دان Mr. Brown\'s Keyboard است.</string>
     <string name="clipboard_backup_zip_export_success_title">برون‌بری کامل بریده‌دان موفق بود</string>
     <string name="clipboard_backup_zip_saved">پشتیبان بریده‌دان همراه با رسانه ذخیره شد.</string>
     <string name="clipboard_backup_zip_restore_hint">برای بازیابی همهٔ موارد، از جمله تصاویر، ویدیوها و دیگر رسانه‌ها، از «وارد کردن ZIP» استفاده کنید.</string>
@@ -1401,7 +1401,7 @@
     <string name="clipboard_backup_zip_import_completed">وارد کردن کامل بریده‌دان کامل شد.</string>
     <string name="clipboard_backup_zip_media_restored_note">همهٔ فایل‌های رسانه و تصاویر بندانگشتی بازیابی شدند.</string>
     <string name="clipboard_backup_zip_import_failed_title">وارد کردن ZIP بریده‌دان ناموفق بود</string>
-    <string name="clipboard_backup_zip_import_failed">وارد کردن ZIP بریده‌دان ناموفق بود:\n\n%1$s\n\nمطمئن شوید فایل یک پشتیبان ZIP معتبر بریده‌دان Brown Keys است.</string>
+    <string name="clipboard_backup_zip_import_failed">وارد کردن ZIP بریده‌دان ناموفق بود:\n\n%1$s\n\nمطمئن شوید فایل یک پشتیبان ZIP معتبر بریده‌دان Mr. Brown\'s Keyboard است.</string>
     <string name="dictionary_backup_export_success_title">برون‌بری واژه‌نامه موفق بود</string>
     <string name="dictionary_backup_export_disabled_words">واژه‌های غیرفعال: %1$d</string>
     <string name="dictionary_backup_export_failed_title">برون‌بری واژه‌نامه ناموفق بود</string>
@@ -1547,7 +1547,7 @@
     </plurals>
 
     <!-- 2026-09-29 hardcoded-UI sweep (activities): launcher, dictionary, layouts, short swipes, themes, playground, manifest labels (reviewer=model) -->
-    <string name="launcher_step_enable_desc">Brown Keys را در تنظیمات سامانه روشن کنید</string>
+    <string name="launcher_step_enable_desc">Mr. Brown\'s Keyboard را در تنظیمات سامانه روشن کنید</string>
     <string name="launcher_step_select_desc">روش ورودی پیش‌فرض خود را تغییر دهید</string>
     <string name="launcher_step_calibrate_desc">تا ۸ کنش زیرکلید برای هر کلید پیکربندی کنید</string>
     <string name="dict_tab_active">فعال</string>
@@ -1623,9 +1623,9 @@
     <string name="calibration_legend_short_range">کمینه - بیشینه</string>
     <string name="calibration_legend_long_range">&gt; بیشینه</string>
     <string name="calibration_percent_value">%1$d%%</string>
-    <string name="theme_builtin_cleverkeysdark_name">Brown Keys تیره</string>
+    <string name="theme_builtin_cleverkeysdark_name">Mr. Brown\'s Keyboard تیره</string>
     <string name="theme_builtin_cleverkeysdark_desc">بنفش تیره با جزئیات نقره‌ای (پیش‌فرض)</string>
-    <string name="theme_builtin_cleverkeyslight_name">Brown Keys روشن</string>
+    <string name="theme_builtin_cleverkeyslight_name">Mr. Brown\'s Keyboard روشن</string>
     <string name="theme_builtin_cleverkeyslight_desc">کلیدهای نقره‌ای با جزئیات بنفش</string>
     <string name="theme_builtin_dark_name">تیره</string>
     <string name="theme_builtin_dark_desc">تم تیرهٔ کلاسیک با جزئیات آبی</string>
@@ -1892,11 +1892,11 @@
     </plurals>
     <!-- 2026-09-30 i18n: typed import/export/backup failure reasons and settings-import skip kinds (reviewer=model) -->
     <string name="io_error_file_not_found">فایل پیدا نشد یا باز نشد.</string>
-    <string name="io_error_permission_denied">Brown Keys اجازهٔ دسترسی به این فایل را ندارد.</string>
+    <string name="io_error_permission_denied">Mr. Brown\'s Keyboard اجازهٔ دسترسی به این فایل را ندارد.</string>
     <string name="io_error_invalid_format">قالب فایل آن چیزی نیست که انتظار می‌رفت، یا فایل آسیب دیده است.</string>
-    <string name="io_error_newer_version">این فایل با نسخهٔ جدیدتری از Brown Keys ساخته شده است. برنامه را به‌روزرسانی کنید و دوباره امتحان کنید.</string>
+    <string name="io_error_newer_version">این فایل با نسخهٔ جدیدتری از Mr. Brown\'s Keyboard ساخته شده است. برنامه را به‌روزرسانی کنید و دوباره امتحان کنید.</string>
     <string name="io_error_out_of_space">فضای ذخیره‌سازی کافی نیست.</string>
-    <string name="io_error_too_large">فایل بزرگ‌تر از آن است که Brown Keys بتواند آن را با اطمینان وارد کند.</string>
+    <string name="io_error_too_large">فایل بزرگ‌تر از آن است که Mr. Brown\'s Keyboard بتواند آن را با اطمینان وارد کند.</string>
     <string name="io_error_wrong_password_or_corrupt">گذرواژهٔ پشتیبان نادرست است، یا فایل آسیب دیده یا تغییر کرده است.</string>
     <string name="io_error_no_backup_password">این پشتیبان رمزگذاری شده است و هیچ گذرواژهٔ پشتیبانی در دسترس نیست.</string>
     <string name="io_error_wrong_backup_kind">این پشتیبان نوع داده‌ای را که این واردسازی انتظار دارد در بر ندارد.</string>
@@ -1942,7 +1942,7 @@
     <string name="cmd_copy">کپی</string>
     <string name="cmd_copy_desc">کپی متن انتخاب‌شده در بریده‌دان</string>
     <string name="cmd_copy_private">کپی خصوصی</string>
-    <string name="cmd_copy_private_desc">کپی فقط در Brown Keys، هرگز در بریده‌دان سامانه</string>
+    <string name="cmd_copy_private_desc">کپی فقط در Mr. Brown\'s Keyboard، هرگز در بریده‌دان سامانه</string>
     <string name="cmd_paste">چسباندن</string>
     <string name="cmd_paste_desc">چسباندن از بریده‌دان</string>
     <string name="cmd_cut">بریدن</string>

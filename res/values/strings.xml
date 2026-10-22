@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <string name="app_name" translatable="false">Brown Keys</string>
+    <string name="app_name" translatable="false">Mr. Brown\'s Keyboard</string>
     <string name="pref_layout_e_system">System settings</string>
     <string name="pref_layout_e_custom">Custom layout</string>
     <string name="pref_layouts_add">Add an alternate layout</string>
@@ -21,7 +21,7 @@
     <string name="key_descr_change_method">Switch keyboard</string>
     <string name="key_descr_voice_typing">Voice typing</string>
     <string name="key_descr_copy">Copy</string>
-    <string name="key_descr_copy_private">Private copy (into Brown Keys only, not the system clipboard)</string>
+    <string name="key_descr_copy_private">Private copy (into Mr. Brown\'s Keyboard only, not the system clipboard)</string>
     <string name="key_descr_paste">Paste</string>
     <string name="key_descr_cut">Cut</string>
     <string name="key_descr_selectAll">Select all</string>
@@ -95,8 +95,8 @@
     <string name="clipboard_edit_error">Failed to update entry</string>
 
     <!-- #156 Private copy -->
-    <string name="private_copy_toolbar_label">Brown Keys: Private copy</string>
-    <string name="private_copy_toast">Copied privately to Brown Keys</string>
+    <string name="private_copy_toolbar_label">Mr. Brown\'s Keyboard: Private copy</string>
+    <string name="private_copy_toast">Copied privately to Mr. Brown\'s Keyboard</string>
     <string name="private_copy_expose_dialog_title">Copy to system clipboard?</string>
     <string name="private_copy_expose_dialog_message">This entry was copied privately. Copying it to the system clipboard exposes the text to the foreground app and other clipboard managers. Copy anyway?</string>
     <string name="private_copy_expose_dialog_confirm">Copy anyway</string>
@@ -112,7 +112,7 @@
     <!-- Swipe Engine Settings (Material 3) -->
 
     <!-- Settings Activity (Material 3) -->
-    <string name="settings_title">⚙️ Brown Keys Settings</string>
+    <string name="settings_title">⚙️ Mr. Brown\'s Keyboard Settings</string>
     <string name="settings_description">Configure your keyboard settings for optimal typing experience.</string>
 
     <!-- Swipe Typing Section -->
@@ -398,7 +398,7 @@
     <string name="short_swipe_reset_all">Reset All</string>
     <string name="short_swipe_tap_hint">Tap any key below to customize its short swipe gestures</string>
     <string name="short_swipe_instruction_title">Type any key to customize it</string>
-    <string name="short_swipe_instruction_body">The keyboard below is your actual Brown Keys keyboard.\nTap a key to add short swipe actions to it.</string>
+    <string name="short_swipe_instruction_body">The keyboard below is your actual Mr. Brown\'s Keyboard keyboard.\nTap a key to add short swipe actions to it.</string>
     <string name="short_swipe_custom_mappings">Custom Mappings</string>
 
     <!-- ThemeSettingsActivity -->
@@ -522,7 +522,7 @@
     <!-- AdvancedSection (debug controls — kept translatable to match the
          settings_debug_* siblings already in this file) -->
     <string name="advanced_ime_prompt_title">Default keyboard reminder</string>
-    <string name="advanced_ime_prompt_desc">Remind once per boot to set Brown Keys as the default keyboard. Turn off to never ask again.</string>
+    <string name="advanced_ime_prompt_desc">Remind once per boot to set Mr. Brown\'s Keyboard as the default keyboard. Turn off to never ask again.</string>
     <string name="advanced_swipe_debug_log_title">Swipe Debug Log</string>
     <string name="advanced_swipe_debug_log_desc">Real-time pipeline analysis for swipe gestures (requires logcat)</string>
     <string name="advanced_detailed_logging_title">Detailed Logging</string>
@@ -702,11 +702,11 @@
     <string name="clipboard_swipe_deleted">Deleted</string>
     <string name="clipboard_swipe_undo">Undo</string>
     <string name="clipboard_private_copy_other_apps_title">Private copy in other apps</string>
-    <string name="clipboard_private_copy_other_apps_desc">Add \"Private copy\" to other apps\' text-selection menus. Copies selected text into Brown Keys only — never the system clipboard. Enabling adds an app entry other apps can see.</string>
+    <string name="clipboard_private_copy_other_apps_desc">Add \"Private copy\" to other apps\' text-selection menus. Copies selected text into Mr. Brown\'s Keyboard only — never the system clipboard. Enabling adds an app entry other apps can see.</string>
     <string name="clipboard_sanitize_links_title">Sanitize tracking parameters</string>
     <string name="clipboard_sanitize_links_desc">Strip utm_*, fbclid, etc. from URLs you copy. Powered by ClearURLs.</string>
     <string name="clipboard_sanitize_system_title">Also clean system clipboard</string>
-    <string name="clipboard_sanitize_system_desc">When a copied URL is cleaned, overwrite the system clipboard too, so pastes in any app are sanitized — not just Brown Keys\' panel.</string>
+    <string name="clipboard_sanitize_system_desc">When a copied URL is cleaned, overwrite the system clipboard too, so pastes in any app are sanitized — not just Mr. Brown\'s Keyboard panel.</string>
     <string name="clipboard_embed_enrich_title">Enrich embeds for sharing</string>
     <string name="clipboard_embed_enrich_desc">Rewrite x.com → fxtwitter.com, reddit.com → rxddit.com, etc.</string>
     <string name="clipboard_custom_rules_title">Use custom rules</string>
@@ -1105,7 +1105,7 @@
     <string name="gif_remove_pack_body">This will delete all GIFs from this pack and reclaim storage space.</string>
 
     <!-- PrivacySection.kt — privacy/telemetry-free data controls -->
-    <string name="privacy_section_intro">Brown Keys is fully offline — no data ever leaves your device. These optional settings keep data locally so you can review, export or delete it; exported swipe data can be used to train models elsewhere.</string>
+    <string name="privacy_section_intro">Mr. Brown\'s Keyboard is fully offline — no data ever leaves your device. These optional settings keep data locally so you can review, export or delete it; exported swipe data can be used to train models elsewhere.</string>
     <string name="privacy_on_device_learning_header">On-Device Learning</string>
     <string name="privacy_forget_learned_title">Also forget learned data?</string>
     <string name="privacy_forget_learned_body">Learning is now off — nothing new will be recorded. Do you also want to delete everything already learned (phrase patterns, word usage, suggestion-selection history and swipe corrections)? This cannot be undone.</string>
@@ -1447,7 +1447,7 @@
     <string name="calibration_max_readout">Max: %1$d%%</string>
 
     <!-- LauncherActivity.kt — first-run setup screen -->
-    <string name="launcher_logo_desc">Brown Keys Logo</string>
+    <string name="launcher_logo_desc">Mr. Brown\'s Keyboard Logo</string>
     <string name="launcher_tagline">Privacy, power, and control— with a brain.</string>
     <string name="launcher_step_enable">Enable Keyboard</string>
     <string name="launcher_step_select">Select Keyboard</string>
@@ -1666,11 +1666,11 @@
     <string name="clipboard_entry_duration_desc_default">How long entries persist before auto-deletion (-1 = never)</string>
     <string name="clipboard_entry_duration_never">Never expire</string>
     <string name="clipboard_private_copy_header">🔒 Private copy</string>
-    <string name="clipboard_private_copy_in_app_note">In-app: the \"Private copy\" editing action can be bound to a short swipe or extra key (Short Swipe Customization). It stores the current selection into Brown Keys\' private clipboard without touching the system clipboard. Private entries show a 🔒 badge; exporting one to the system clipboard always asks first, and plaintext backups exclude them (encrypted backups include them).</string>
+    <string name="clipboard_private_copy_in_app_note">In-app: the \"Private copy\" editing action can be bound to a short swipe or extra key (Short Swipe Customization). It stores the current selection into Mr. Brown\'s Keyboard private clipboard without touching the system clipboard. Private entries show a 🔒 badge; exporting one to the system clipboard always asks first, and plaintext backups exclude them (encrypted backups include them).</string>
     <string name="clipboard_url_handling_header">URL handling</string>
     <string name="clipboard_custom_rules_browse">Browse for custom.substitutions.json</string>
     <string name="clipboard_custom_rules_replace">Replace custom rules</string>
-    <string name="clipboard_url_handling_note">Note: cleaning runs when Brown Keys saves a clip to its history, so pastes from Brown Keys\' panel are always sanitized. With \"Also clean system clipboard\" on, the Android system clipboard is overwritten with the cleaned URL too, so pastes in other apps are sanitized as well (best-effort — only while the keyboard has clipboard access). With it off, other apps still see the original URL.</string>
+    <string name="clipboard_url_handling_note">Note: cleaning runs when Mr. Brown\'s Keyboard saves a clip to its history, so pastes from Mr. Brown\'s Keyboard panel are always sanitized. With \"Also clean system clipboard\" on, the Android system clipboard is overwritten with the cleaned URL too, so pastes in other apps are sanitized as well (best-effort — only while the keyboard has clipboard access). With it off, other apps still see the original URL.</string>
     <string name="input_context_source_both">Built-in + Learned</string>
     <string name="input_context_source_learned_only">Learned Only</string>
     <string name="input_context_source_static_only">Built-in Only</string>
@@ -1776,7 +1776,7 @@
     <string name="clipboard_backup_import_completed">Clipboard import completed.</string>
     <string name="clipboard_backup_import_merge_note">Imports merge with existing history without overwriting.</string>
     <string name="clipboard_backup_import_failed_title">Clipboard Import Failed</string>
-    <string name="clipboard_backup_import_failed">Failed to import clipboard history:\n\n%1$s\n\nMake sure the file is a valid Brown Keys clipboard backup.</string>
+    <string name="clipboard_backup_import_failed">Failed to import clipboard history:\n\n%1$s\n\nMake sure the file is a valid Mr. Brown\'s Keyboard clipboard backup.</string>
     <string name="clipboard_backup_zip_export_success_title">Full Clipboard Export Successful</string>
     <string name="clipboard_backup_zip_saved">Clipboard backup with media saved.</string>
     <string name="clipboard_backup_zip_restore_hint">Restore via Import ZIP to recover all entries including images, videos, and other media.</string>
@@ -1786,7 +1786,7 @@
     <string name="clipboard_backup_zip_import_completed">Full clipboard import completed.</string>
     <string name="clipboard_backup_zip_media_restored_note">All media files and thumbnails have been restored.</string>
     <string name="clipboard_backup_zip_import_failed_title">Clipboard ZIP Import Failed</string>
-    <string name="clipboard_backup_zip_import_failed">Failed to import clipboard ZIP:\n\n%1$s\n\nMake sure the file is a valid Brown Keys clipboard ZIP backup.</string>
+    <string name="clipboard_backup_zip_import_failed">Failed to import clipboard ZIP:\n\n%1$s\n\nMake sure the file is a valid Mr. Brown\'s Keyboard clipboard ZIP backup.</string>
     <string name="dictionary_backup_export_success_title">Dictionary Export Successful</string>
     <string name="dictionary_backup_export_disabled_words">Disabled words: %1$d</string>
     <string name="dictionary_backup_export_failed_title">Dictionary Export Failed</string>
@@ -1932,7 +1932,7 @@
     </plurals>
 
     <!-- 2026-09-29 hardcoded-UI sweep (activities): launcher, dictionary, layouts, short swipes, themes, playground, manifest labels (reviewer=model) -->
-    <string name="launcher_step_enable_desc">Turn on Brown Keys in system settings</string>
+    <string name="launcher_step_enable_desc">Turn on Mr. Brown\'s Keyboard in system settings</string>
     <string name="launcher_step_select_desc">Switch your default input method</string>
     <string name="launcher_step_calibrate_desc">Configure up to 8 subkey actions per key</string>
     <string name="dict_tab_active">Active</string>
@@ -2008,9 +2008,9 @@
     <string name="calibration_legend_short_range">Min - Max</string>
     <string name="calibration_legend_long_range">&gt; Max</string>
     <string name="calibration_percent_value">%1$d%%</string>
-    <string name="theme_builtin_cleverkeysdark_name">Brown Keys Dark</string>
+    <string name="theme_builtin_cleverkeysdark_name">Mr. Brown\'s Keyboard Dark</string>
     <string name="theme_builtin_cleverkeysdark_desc">Deep purple with silver accents (default)</string>
-    <string name="theme_builtin_cleverkeyslight_name">Brown Keys Light</string>
+    <string name="theme_builtin_cleverkeyslight_name">Mr. Brown\'s Keyboard Light</string>
     <string name="theme_builtin_cleverkeyslight_desc">Silver keys with purple accents</string>
     <string name="theme_builtin_dark_name">Dark</string>
     <string name="theme_builtin_dark_desc">Classic dark theme with blue accents</string>
@@ -2063,7 +2063,7 @@
     <!-- translatable="false" like app_name: this is the product name, so it must read the same
          in every locale. It is what Android's "On-screen keyboard" list and the input-method
          picker show, which is why it carries the brand rather than a translated phrase. -->
-    <string name="manifest_ime_service_label" translatable="false">Brown Keys</string>
+    <string name="manifest_ime_service_label" translatable="false">Mr. Brown\'s Keyboard</string>
     <string name="manifest_backup_restore_label">Backup &amp; Restore</string>
     <plurals name="swipe_debug_toast_cleared_traces">
         <item quantity="one">Cleared %1$d trace</item>
@@ -2281,11 +2281,11 @@
     </plurals>
     <!-- 2026-09-30 i18n: typed import/export/backup failure reasons and settings-import skip kinds (reviewer=model) -->
     <string name="io_error_file_not_found">The file could not be found or opened.</string>
-    <string name="io_error_permission_denied">Brown Keys is not allowed to access this file.</string>
+    <string name="io_error_permission_denied">Mr. Brown\'s Keyboard is not allowed to access this file.</string>
     <string name="io_error_invalid_format">The file is not in the expected format, or it is damaged.</string>
-    <string name="io_error_newer_version">The file was made by a newer version of Brown Keys. Update the app and try again.</string>
+    <string name="io_error_newer_version">The file was made by a newer version of Mr. Brown\'s Keyboard. Update the app and try again.</string>
     <string name="io_error_out_of_space">Not enough storage space.</string>
-    <string name="io_error_too_large">The file is larger than Brown Keys can safely import.</string>
+    <string name="io_error_too_large">The file is larger than Mr. Brown\'s Keyboard can safely import.</string>
     <string name="io_error_wrong_password_or_corrupt">Wrong backup password, or the file is damaged or was altered.</string>
     <string name="io_error_no_backup_password">This backup is encrypted and no backup password is available.</string>
     <string name="io_error_wrong_backup_kind">This backup does not contain the kind of data this import expects.</string>
@@ -2331,7 +2331,7 @@
     <string name="cmd_copy">Copy</string>
     <string name="cmd_copy_desc">Copy selected text to clipboard</string>
     <string name="cmd_copy_private">Private Copy</string>
-    <string name="cmd_copy_private_desc">Copy selection to Brown Keys only — never the system clipboard</string>
+    <string name="cmd_copy_private_desc">Copy selection to Mr. Brown\'s Keyboard only — never the system clipboard</string>
     <string name="cmd_paste">Paste</string>
     <string name="cmd_paste_desc">Paste from clipboard</string>
     <string name="cmd_cut">Cut</string>

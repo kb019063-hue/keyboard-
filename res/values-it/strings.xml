@@ -40,7 +40,7 @@
     <string name="key_action_send">Invia</string>
     <!-- <string name="launcher_button_imesettings">Enable keyboard</string> -->
     <!-- <string name="launcher_button_imepicker">Select keyboard</string> -->
-    <!-- <string name="launcher_description">This application is a virtual keyboard. Go to the system settings by clicking on the button below and enable Brown Keys.</string> -->
+    <!-- <string name="launcher_description">This application is a virtual keyboard. Go to the system settings by clicking on the button below and enable Mr. Brown's Keyboard.</string> -->
     <!-- <string name="launcher_sourcecode">This is a free and open source application. You can find the source code or report bugs on GitHub.</string> -->
     <!-- <string name="launcher_tryhere">After enabling, you can try the keyboard here:</string> -->
     <!-- <string name="launcher_tryhere_hint">Try here</string> -->
@@ -52,7 +52,7 @@
     <string name="key_descr_change_method">Cambia tastiera</string>
     <string name="key_descr_voice_typing">Digitazione vocale</string>
     <string name="key_descr_copy">Copia</string>
-    <string name="key_descr_copy_private">Copia privata (solo in Brown Keys, non negli appunti di sistema)</string>
+    <string name="key_descr_copy_private">Copia privata (solo in Mr. Brown\'s Keyboard, non negli appunti di sistema)</string>
     <string name="key_descr_paste">Incolla</string>
     <string name="key_descr_cut">Taglia</string>
     <string name="key_descr_selectAll">Seleziona tutto</string>
@@ -123,8 +123,8 @@
     <string name="clipboard_edit_error">Impossibile aggiornare la voce</string>
 
     <!-- #156 Private copy -->
-    <string name="private_copy_toolbar_label">Brown Keys: copia privata</string>
-    <string name="private_copy_toast">Copiato in privato in Brown Keys</string>
+    <string name="private_copy_toolbar_label">Mr. Brown\'s Keyboard: copia privata</string>
+    <string name="private_copy_toast">Copiato in privato in Mr. Brown\'s Keyboard</string>
     <string name="private_copy_expose_dialog_title">Copiare negli appunti di sistema?</string>
     <string name="private_copy_expose_dialog_message">Questa voce è stata copiata in privato. Copiandola negli appunti di sistema il testo viene esposto all\'app in primo piano e ad altri gestori degli appunti. Copiare comunque?</string>
     <string name="private_copy_expose_dialog_confirm">Copia comunque</string>
@@ -135,7 +135,7 @@
     <string name="clipboard_filter_private_only_hint">Mostra solo le voci copiate in privato (🔒)</string>
 
     <!-- Settings Activity (Material 3) -->
-    <string name="settings_title">⚙️ Impostazioni Brown Keys</string>
+    <string name="settings_title">⚙️ Impostazioni Mr. Brown\'s Keyboard</string>
     <string name="settings_description">Configura le impostazioni della tastiera per un\'esperienza di digitazione ottimale.</string>
 
     <!-- Swipe Typing Section -->
@@ -304,7 +304,7 @@
     <string name="short_swipe_reset_all">Reimposta tutto</string>
     <string name="short_swipe_tap_hint">Tocca un tasto qui sotto per personalizzare i suoi scorrimenti brevi</string>
     <string name="short_swipe_instruction_title">Tocca un tasto per personalizzarlo</string>
-    <string name="short_swipe_instruction_body">La tastiera qui sotto è la tua vera tastiera Brown Keys.\nTocca un tasto per aggiungere azioni di scorrimento breve.</string>
+    <string name="short_swipe_instruction_body">La tastiera qui sotto è la tua vera tastiera Mr. Brown\'s Keyboard.\nTocca un tasto per aggiungere azioni di scorrimento breve.</string>
     <string name="short_swipe_custom_mappings">Mappature personalizzate</string>
 
     <!-- Impostazioni tema -->
@@ -391,7 +391,7 @@
     <string name="accessibility_swipe_complete_title">Scorrimento completato</string>
     <string name="accessibility_swipe_complete_desc">Vibra al termine del gesto di scorrimento</string>
     <string name="advanced_ime_prompt_title">Promemoria tastiera predefinita</string>
-    <string name="advanced_ime_prompt_desc">Ricorda una volta per avvio di impostare Brown Keys come tastiera predefinita. Disattiva per non chiedere mai più.</string>
+    <string name="advanced_ime_prompt_desc">Ricorda una volta per avvio di impostare Mr. Brown\'s Keyboard come tastiera predefinita. Disattiva per non chiedere mai più.</string>
     <string name="advanced_swipe_debug_log_title">Registro debug scorrimento</string>
     <string name="advanced_swipe_debug_log_desc">Analisi in tempo reale della pipeline per i gesti di scorrimento (richiede logcat)</string>
     <string name="advanced_detailed_logging_title">Registrazione dettagliata</string>
@@ -495,11 +495,11 @@
     <string name="clipboard_swipe_deleted">Eliminato</string>
     <string name="clipboard_swipe_undo">Annulla</string>
     <string name="clipboard_private_copy_other_apps_title">Copia privata in altre app</string>
-    <string name="clipboard_private_copy_other_apps_desc">Aggiunge "Copia privata" ai menu di selezione testo delle altre app. Copia il testo selezionato solo in Brown Keys, mai negli appunti di sistema. L\'abilitazione aggiunge una voce app visibile alle altre app.</string>
+    <string name="clipboard_private_copy_other_apps_desc">Aggiunge "Copia privata" ai menu di selezione testo delle altre app. Copia il testo selezionato solo in Mr. Brown\'s Keyboard, mai negli appunti di sistema. L\'abilitazione aggiunge una voce app visibile alle altre app.</string>
     <string name="clipboard_sanitize_links_title">Sanifica parametri di tracciamento</string>
     <string name="clipboard_sanitize_links_desc">Rimuovi utm_*, fbclid, ecc. dagli URL copiati. Basato su ClearURLs.</string>
     <string name="clipboard_sanitize_system_title">Pulisci anche gli appunti di sistema</string>
-    <string name="clipboard_sanitize_system_desc">Quando un URL copiato viene pulito, sovrascrive anche gli appunti di sistema, così le incollate in qualsiasi app risultano sanificate, non solo nel pannello Brown Keys.</string>
+    <string name="clipboard_sanitize_system_desc">Quando un URL copiato viene pulito, sovrascrive anche gli appunti di sistema, così le incollate in qualsiasi app risultano sanificate, non solo nel pannello Mr. Brown\'s Keyboard.</string>
     <string name="clipboard_embed_enrich_title">Arricchisci embed per la condivisione</string>
     <string name="clipboard_embed_enrich_desc">Riscrive x.com → fxtwitter.com, reddit.com → rxddit.com, ecc.</string>
     <string name="clipboard_custom_rules_title">Usa regole personalizzate</string>
@@ -833,7 +833,7 @@
     <string name="gif_remove_all_body">Questo eliminerà tutti i pacchetti GIF importati, le miniature e il database. L\'operazione non può essere annullata.</string>
     <string name="gif_remove_all_confirm">Rimuovi tutto</string>
     <string name="gif_remove_pack_body">Questo eliminerà tutte le GIF di questo pacchetto e libererà spazio di archiviazione.</string>
-    <string name="privacy_section_intro">Brown Keys è completamente offline: nessun dato lascia mai il tuo dispositivo. Queste impostazioni facoltative conservano i dati in locale per consentirti di consultarli, esportarli o eliminarli; i dati di scorrimento esportati possono servire ad addestrare modelli altrove.</string>
+    <string name="privacy_section_intro">Mr. Brown\'s Keyboard è completamente offline: nessun dato lascia mai il tuo dispositivo. Queste impostazioni facoltative conservano i dati in locale per consentirti di consultarli, esportarli o eliminarli; i dati di scorrimento esportati possono servire ad addestrare modelli altrove.</string>
     <string name="privacy_on_device_learning_header">Apprendimento sul dispositivo</string>
     <string name="privacy_forget_learned_title">Dimenticare anche i dati appresi?</string>
     <string name="privacy_forget_learned_body">L\'apprendimento è ora disattivato — non verrà registrato nulla di nuovo. Vuoi eliminare anche tutto ciò che è già stato appreso (pattern di frasi, utilizzo delle parole, cronologia di selezione dei suggerimenti e correzioni dello scorrimento)? L\'operazione non può essere annullata.</string>
@@ -1068,7 +1068,7 @@
     <string name="calibration_touch_here">👆 Tocca qui</string>
     <string name="calibration_min_readout">Min: %1$d%%</string>
     <string name="calibration_max_readout">Max: %1$d%%</string>
-    <string name="launcher_logo_desc">Logo Brown Keys</string>
+    <string name="launcher_logo_desc">Logo Mr. Brown\'s Keyboard</string>
     <string name="launcher_tagline">Privacy, potenza e controllo — con un cervello.</string>
     <string name="launcher_step_enable">Abilita tastiera</string>
     <string name="launcher_step_select">Seleziona tastiera</string>
@@ -1288,11 +1288,11 @@
     <string name="clipboard_entry_duration_desc_default">Per quanto tempo le voci restano prima dell\'eliminazione automatica (-1 = mai)</string>
     <string name="clipboard_entry_duration_never">Non scadono mai</string>
     <string name="clipboard_private_copy_header">🔒 Copia privata</string>
-    <string name="clipboard_private_copy_in_app_note">Nell\'app: l\'azione di modifica \"Copia privata\" può essere associata a uno scorrimento breve o a un tasto aggiuntivo (Personalizzazione scorrimenti brevi). Salva la selezione corrente negli appunti privati di Brown Keys senza toccare gli appunti di sistema. Le voci private mostrano un badge 🔒; esportarne una negli appunti di sistema chiede sempre conferma, e i backup non cifrati le escludono (i backup cifrati le includono).</string>
+    <string name="clipboard_private_copy_in_app_note">Nell\'app: l\'azione di modifica \"Copia privata\" può essere associata a uno scorrimento breve o a un tasto aggiuntivo (Personalizzazione scorrimenti brevi). Salva la selezione corrente negli appunti privati di Mr. Brown\'s Keyboard senza toccare gli appunti di sistema. Le voci private mostrano un badge 🔒; esportarne una negli appunti di sistema chiede sempre conferma, e i backup non cifrati le escludono (i backup cifrati le includono).</string>
     <string name="clipboard_url_handling_header">Gestione URL</string>
     <string name="clipboard_custom_rules_browse">Sfoglia per custom.substitutions.json</string>
     <string name="clipboard_custom_rules_replace">Sostituisci regole personalizzate</string>
-    <string name="clipboard_url_handling_note">Nota: la pulizia avviene quando Brown Keys salva un ritaglio nella propria cronologia, quindi i contenuti incollati dal pannello di Brown Keys sono sempre ripuliti. Con \"Pulisci anche gli appunti di sistema\" attivo, anche gli appunti di sistema di Android vengono sovrascritti con l\'URL ripulito, quindi anche i contenuti incollati in altre app sono ripuliti (per quanto possibile — solo finché la tastiera ha accesso agli appunti). Con l\'opzione disattivata, le altre app vedono ancora l\'URL originale.</string>
+    <string name="clipboard_url_handling_note">Nota: la pulizia avviene quando Mr. Brown\'s Keyboard salva un ritaglio nella propria cronologia, quindi i contenuti incollati dal pannello di Mr. Brown\'s Keyboard sono sempre ripuliti. Con \"Pulisci anche gli appunti di sistema\" attivo, anche gli appunti di sistema di Android vengono sovrascritti con l\'URL ripulito, quindi anche i contenuti incollati in altre app sono ripuliti (per quanto possibile — solo finché la tastiera ha accesso agli appunti). Con l\'opzione disattivata, le altre app vedono ancora l\'URL originale.</string>
     <string name="input_context_source_both">Integrate + apprese</string>
     <string name="input_context_source_learned_only">Solo apprese</string>
     <string name="input_context_source_static_only">Solo integrate</string>
@@ -1406,7 +1406,7 @@
     <string name="clipboard_backup_import_completed">Importazione degli appunti completata.</string>
     <string name="clipboard_backup_import_merge_note">Le importazioni si uniscono alla cronologia esistente senza sovrascriverla.</string>
     <string name="clipboard_backup_import_failed_title">Importazione appunti non riuscita</string>
-    <string name="clipboard_backup_import_failed">Importazione della cronologia degli appunti non riuscita:\n\n%1$s\n\nAssicurati che il file sia un backup degli appunti di Brown Keys valido.</string>
+    <string name="clipboard_backup_import_failed">Importazione della cronologia degli appunti non riuscita:\n\n%1$s\n\nAssicurati che il file sia un backup degli appunti di Mr. Brown\'s Keyboard valido.</string>
     <string name="clipboard_backup_zip_export_success_title">Esportazione completa appunti riuscita</string>
     <string name="clipboard_backup_zip_saved">Backup degli appunti con contenuti multimediali salvato.</string>
     <string name="clipboard_backup_zip_restore_hint">Ripristina con \"Importa ZIP\" per recuperare tutte le voci, incluse immagini, video e altri contenuti multimediali.</string>
@@ -1416,7 +1416,7 @@
     <string name="clipboard_backup_zip_import_completed">Importazione completa degli appunti completata.</string>
     <string name="clipboard_backup_zip_media_restored_note">Tutti i file multimediali e le miniature sono stati ripristinati.</string>
     <string name="clipboard_backup_zip_import_failed_title">Importazione ZIP appunti non riuscita</string>
-    <string name="clipboard_backup_zip_import_failed">Importazione dello ZIP degli appunti non riuscita:\n\n%1$s\n\nAssicurati che il file sia un backup ZIP degli appunti di Brown Keys valido.</string>
+    <string name="clipboard_backup_zip_import_failed">Importazione dello ZIP degli appunti non riuscita:\n\n%1$s\n\nAssicurati che il file sia un backup ZIP degli appunti di Mr. Brown\'s Keyboard valido.</string>
     <string name="dictionary_backup_export_success_title">Esportazione dizionario riuscita</string>
     <string name="dictionary_backup_export_disabled_words">Parole disabilitate: %1$d</string>
     <string name="dictionary_backup_export_failed_title">Esportazione dizionario non riuscita</string>
@@ -1585,7 +1585,7 @@
     </plurals>
 
     <!-- 2026-09-29 hardcoded-UI sweep (activities): launcher, dictionary, layouts, short swipes, themes, playground, manifest labels (reviewer=model) -->
-    <string name="launcher_step_enable_desc">Attiva Brown Keys nelle impostazioni di sistema</string>
+    <string name="launcher_step_enable_desc">Attiva Mr. Brown\'s Keyboard nelle impostazioni di sistema</string>
     <string name="launcher_step_select_desc">Cambia il metodo di immissione predefinito</string>
     <string name="launcher_step_calibrate_desc">Configura fino a 8 azioni di sottotasto per tasto</string>
     <string name="dict_tab_active">Attive</string>
@@ -1661,9 +1661,9 @@
     <string name="calibration_legend_short_range">Min - Max</string>
     <string name="calibration_legend_long_range">&gt; Max</string>
     <string name="calibration_percent_value">%1$d%%</string>
-    <string name="theme_builtin_cleverkeysdark_name">Brown Keys Scuro</string>
+    <string name="theme_builtin_cleverkeysdark_name">Mr. Brown\'s Keyboard Scuro</string>
     <string name="theme_builtin_cleverkeysdark_desc">Viola intenso con accenti argento (predefinito)</string>
-    <string name="theme_builtin_cleverkeyslight_name">Brown Keys Chiaro</string>
+    <string name="theme_builtin_cleverkeyslight_name">Mr. Brown\'s Keyboard Chiaro</string>
     <string name="theme_builtin_cleverkeyslight_desc">Tasti argento con accenti viola</string>
     <string name="theme_builtin_dark_name">Scuro</string>
     <string name="theme_builtin_dark_desc">Tema scuro classico con accenti blu</string>
@@ -1939,11 +1939,11 @@
     </plurals>
     <!-- 2026-09-30 i18n: typed import/export/backup failure reasons and settings-import skip kinds (reviewer=model) -->
     <string name="io_error_file_not_found">Impossibile trovare o aprire il file.</string>
-    <string name="io_error_permission_denied">Brown Keys non ha il permesso di accedere a questo file.</string>
+    <string name="io_error_permission_denied">Mr. Brown\'s Keyboard non ha il permesso di accedere a questo file.</string>
     <string name="io_error_invalid_format">Il file non è nel formato previsto oppure è danneggiato.</string>
-    <string name="io_error_newer_version">Il file è stato creato da una versione più recente di Brown Keys. Aggiorna l\'app e riprova.</string>
+    <string name="io_error_newer_version">Il file è stato creato da una versione più recente di Mr. Brown\'s Keyboard. Aggiorna l\'app e riprova.</string>
     <string name="io_error_out_of_space">Spazio di archiviazione insufficiente.</string>
-    <string name="io_error_too_large">Il file è più grande di quanto Brown Keys possa importare in sicurezza.</string>
+    <string name="io_error_too_large">Il file è più grande di quanto Mr. Brown\'s Keyboard possa importare in sicurezza.</string>
     <string name="io_error_wrong_password_or_corrupt">Password di backup errata, oppure il file è danneggiato o è stato modificato.</string>
     <string name="io_error_no_backup_password">Questo backup è crittografato e non è disponibile nessuna password di backup.</string>
     <string name="io_error_wrong_backup_kind">Questo backup non contiene il tipo di dati che questa importazione si aspetta.</string>
@@ -1989,7 +1989,7 @@
     <string name="cmd_copy">Copia</string>
     <string name="cmd_copy_desc">Copia il testo selezionato negli appunti</string>
     <string name="cmd_copy_private">Copia privata</string>
-    <string name="cmd_copy_private_desc">Copia la selezione solo in Brown Keys, mai negli appunti di sistema</string>
+    <string name="cmd_copy_private_desc">Copia la selezione solo in Mr. Brown\'s Keyboard, mai negli appunti di sistema</string>
     <string name="cmd_paste">Incolla</string>
     <string name="cmd_paste_desc">Incolla dagli appunti</string>
     <string name="cmd_cut">Taglia</string>

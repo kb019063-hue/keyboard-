@@ -20,7 +20,7 @@
     <string name="key_descr_change_method">Переключение клавиатуры</string>
     <string name="key_descr_voice_typing">Голосовой ввод</string>
     <string name="key_descr_copy">Копировать</string>
-    <string name="key_descr_copy_private">Приватное копирование (только в Brown Keys, не в системный буфер обмена)</string>
+    <string name="key_descr_copy_private">Приватное копирование (только в Mr. Brown\'s Keyboard, не в системный буфер обмена)</string>
     <string name="key_descr_paste">Вставить</string>
     <string name="key_descr_cut">Вырезать</string>
     <string name="key_descr_selectAll">Выбрать все</string>
@@ -89,8 +89,8 @@
     <string name="clipboard_edit_error">Не удалось обновить запись</string>
 
     <!-- #156 Private copy -->
-    <string name="private_copy_toolbar_label">Brown Keys: Приватное копирование</string>
-    <string name="private_copy_toast">Скопировано приватно в Brown Keys</string>
+    <string name="private_copy_toolbar_label">Mr. Brown\'s Keyboard: Приватное копирование</string>
+    <string name="private_copy_toast">Скопировано приватно в Mr. Brown\'s Keyboard</string>
     <string name="private_copy_expose_dialog_title">Скопировать в системный буфер обмена?</string>
     <string name="private_copy_expose_dialog_message">Эта запись была скопирована приватно. Копирование её в системный буфер обмена откроет текст активному приложению и другим менеджерам буфера обмена. Всё равно скопировать?</string>
     <string name="private_copy_expose_dialog_confirm">Всё равно скопировать</string>
@@ -101,7 +101,7 @@
     <string name="clipboard_filter_private_only_hint">Показывать только приватно скопированные записи (🔒)</string>
 
     <!-- Settings Activity (Material 3) -->
-    <string name="settings_title">⚙️ Настройки Brown Keys</string>
+    <string name="settings_title">⚙️ Настройки Mr. Brown\'s Keyboard</string>
     <string name="settings_description">Настройте параметры клавиатуры для оптимального набора текста.</string>
 
     <!-- Swipe Typing Section -->
@@ -267,7 +267,7 @@
     <string name="short_swipe_reset_all">Сбросить всё</string>
     <string name="short_swipe_tap_hint">Нажмите на любую клавишу ниже, чтобы настроить жесты коротких свайпов</string>
     <string name="short_swipe_instruction_title">Нажмите любую клавишу для настройки</string>
-    <string name="short_swipe_instruction_body">Клавиатура ниже — это ваша настоящая клавиатура Brown Keys.\nНажмите клавишу, чтобы добавить действия коротких свайпов.</string>
+    <string name="short_swipe_instruction_body">Клавиатура ниже — это ваша настоящая клавиатура Mr. Brown\'s Keyboard.\nНажмите клавишу, чтобы добавить действия коротких свайпов.</string>
     <string name="short_swipe_custom_mappings">Пользовательские назначения</string>
 
     <!-- Theme Settings (wp8 batch) -->
@@ -355,7 +355,7 @@
     <string name="accessibility_swipe_complete_title">Завершение свайпа</string>
     <string name="accessibility_swipe_complete_desc">Вибрировать после завершения жеста свайпа</string>
     <string name="advanced_ime_prompt_title">Напоминание о клавиатуре по умолчанию</string>
-    <string name="advanced_ime_prompt_desc">Напоминать раз за загрузку сделать Brown Keys клавиатурой по умолчанию. Выключите, чтобы больше не спрашивать.</string>
+    <string name="advanced_ime_prompt_desc">Напоминать раз за загрузку сделать Mr. Brown\'s Keyboard клавиатурой по умолчанию. Выключите, чтобы больше не спрашивать.</string>
     <string name="advanced_swipe_debug_log_title">Журнал отладки свайпов</string>
     <string name="advanced_swipe_debug_log_desc">Анализ конвейера свайп-жестов в реальном времени (требует logcat)</string>
     <string name="advanced_detailed_logging_title">Подробное журналирование</string>
@@ -459,7 +459,7 @@
     <string name="clipboard_swipe_deleted">Удалено</string>
     <string name="clipboard_swipe_undo">Отменить</string>
     <string name="clipboard_private_copy_other_apps_title">Приватное копирование в других приложениях</string>
-    <string name="clipboard_private_copy_other_apps_desc">Добавить «Приватное копирование» в меню выделения текста других приложений. Копирует выделенный текст только в Brown Keys — не в системный буфер обмена.</string>
+    <string name="clipboard_private_copy_other_apps_desc">Добавить «Приватное копирование» в меню выделения текста других приложений. Копирует выделенный текст только в Mr. Brown\'s Keyboard — не в системный буфер обмена.</string>
     <string name="clipboard_sanitize_links_title">Очистка параметров отслеживания</string>
     <string name="clipboard_sanitize_links_desc">Удалять utm_*, fbclid и т.д. из скопированных URL. Работает на основе ClearURLs.</string>
     <string name="clipboard_sanitize_system_title">Также очищать системный буфер обмена</string>
@@ -795,7 +795,7 @@
     <string name="gif_remove_all_body">Будут удалены все импортированные пакеты GIF, миниатюры и база данных. Это нельзя отменить.</string>
     <string name="gif_remove_all_confirm">Удалить всё</string>
     <string name="gif_remove_pack_body">Все GIF из этого пакета будут удалены, а место в хранилище освобождено.</string>
-    <string name="privacy_section_intro">Brown Keys работает полностью офлайн — никакие данные никогда не покидают ваше устройство. Эти необязательные настройки хранят данные локально, чтобы вы могли их просмотреть, экспортировать или удалить; экспортированные данные свайпов можно использовать для обучения моделей в другом месте.</string>
+    <string name="privacy_section_intro">Mr. Brown\'s Keyboard работает полностью офлайн — никакие данные никогда не покидают ваше устройство. Эти необязательные настройки хранят данные локально, чтобы вы могли их просмотреть, экспортировать или удалить; экспортированные данные свайпов можно использовать для обучения моделей в другом месте.</string>
     <string name="privacy_on_device_learning_header">Обучение на устройстве</string>
     <string name="privacy_forget_learned_title">Также забыть выученные данные?</string>
     <string name="privacy_forget_learned_body">Обучение теперь выключено — ничего нового записываться не будет. Удалить также всё уже выученное (сочетания слов, словоупотребление, историю выбора подсказок и исправления свайпа)? Это нельзя отменить.</string>
@@ -1036,7 +1036,7 @@
     <string name="calibration_touch_here">👆 Коснитесь здесь</string>
     <string name="calibration_min_readout">Мин: %1$d%%</string>
     <string name="calibration_max_readout">Макс: %1$d%%</string>
-    <string name="launcher_logo_desc">Логотип Brown Keys</string>
+    <string name="launcher_logo_desc">Логотип Mr. Brown\'s Keyboard</string>
     <string name="launcher_tagline">Приватность, мощь и контроль — с умом.</string>
     <string name="launcher_step_enable">Включите клавиатуру</string>
     <string name="launcher_step_select">Выберите клавиатуру</string>
@@ -1258,11 +1258,11 @@
     <string name="clipboard_entry_duration_desc_default">Сколько хранятся записи до автоудаления (-1 = бессрочно)</string>
     <string name="clipboard_entry_duration_never">Бессрочно</string>
     <string name="clipboard_private_copy_header">🔒 Приватное копирование</string>
-    <string name="clipboard_private_copy_in_app_note">В приложении: действие редактирования «Приватное копирование» можно назначить на короткий свайп или дополнительную клавишу (Настройка коротких свайпов). Оно сохраняет текущее выделение в приватный буфер обмена Brown Keys, не затрагивая системный буфер обмена. Приватные записи отмечены значком 🔒; перенос такой записи в системный буфер обмена всегда требует подтверждения, а незашифрованные резервные копии их не содержат (зашифрованные — содержат).</string>
+    <string name="clipboard_private_copy_in_app_note">В приложении: действие редактирования «Приватное копирование» можно назначить на короткий свайп или дополнительную клавишу (Настройка коротких свайпов). Оно сохраняет текущее выделение в приватный буфер обмена Mr. Brown\'s Keyboard, не затрагивая системный буфер обмена. Приватные записи отмечены значком 🔒; перенос такой записи в системный буфер обмена всегда требует подтверждения, а незашифрованные резервные копии их не содержат (зашифрованные — содержат).</string>
     <string name="clipboard_url_handling_header">Обработка URL</string>
     <string name="clipboard_custom_rules_browse">Выбрать custom.substitutions.json</string>
     <string name="clipboard_custom_rules_replace">Заменить свои правила</string>
-    <string name="clipboard_url_handling_note">Примечание: очистка выполняется, когда Brown Keys сохраняет запись в историю, поэтому вставки из панели Brown Keys всегда очищены. Если включено «Также очищать системный буфер обмена», системный буфер обмена Android тоже перезаписывается очищенным URL, так что вставки в других приложениях тоже очищаются (по возможности — только пока у клавиатуры есть доступ к буферу обмена). Если выключено, другие приложения по-прежнему видят исходный URL.</string>
+    <string name="clipboard_url_handling_note">Примечание: очистка выполняется, когда Mr. Brown\'s Keyboard сохраняет запись в историю, поэтому вставки из панели Mr. Brown\'s Keyboard всегда очищены. Если включено «Также очищать системный буфер обмена», системный буфер обмена Android тоже перезаписывается очищенным URL, так что вставки в других приложениях тоже очищаются (по возможности — только пока у клавиатуры есть доступ к буферу обмена). Если выключено, другие приложения по-прежнему видят исходный URL.</string>
     <string name="input_context_source_both">Встроенные + выученные</string>
     <string name="input_context_source_learned_only">Только выученные</string>
     <string name="input_context_source_static_only">Только встроенные</string>
@@ -1384,7 +1384,7 @@
     <string name="clipboard_backup_import_completed">Импорт буфера обмена завершён.</string>
     <string name="clipboard_backup_import_merge_note">Импортированные записи добавляются к существующей истории без перезаписи.</string>
     <string name="clipboard_backup_import_failed_title">Импорт буфера обмена не удался</string>
-    <string name="clipboard_backup_import_failed">Не удалось импортировать историю буфера обмена:\n\n%1$s\n\nУбедитесь, что файл является корректной резервной копией буфера обмена Brown Keys.</string>
+    <string name="clipboard_backup_import_failed">Не удалось импортировать историю буфера обмена:\n\n%1$s\n\nУбедитесь, что файл является корректной резервной копией буфера обмена Mr. Brown\'s Keyboard.</string>
     <string name="clipboard_backup_zip_export_success_title">Полный экспорт буфера обмена выполнен</string>
     <string name="clipboard_backup_zip_saved">Резервная копия буфера обмена с медиафайлами сохранена.</string>
     <string name="clipboard_backup_zip_restore_hint">Чтобы восстановить все записи, включая изображения, видео и другие медиафайлы, используйте «Импорт ZIP».</string>
@@ -1394,7 +1394,7 @@
     <string name="clipboard_backup_zip_import_completed">Полный импорт буфера обмена завершён.</string>
     <string name="clipboard_backup_zip_media_restored_note">Все медиафайлы и миниатюры восстановлены.</string>
     <string name="clipboard_backup_zip_import_failed_title">Импорт ZIP буфера обмена не удался</string>
-    <string name="clipboard_backup_zip_import_failed">Не удалось импортировать ZIP буфера обмена:\n\n%1$s\n\nУбедитесь, что файл является корректной ZIP-копией буфера обмена Brown Keys.</string>
+    <string name="clipboard_backup_zip_import_failed">Не удалось импортировать ZIP буфера обмена:\n\n%1$s\n\nУбедитесь, что файл является корректной ZIP-копией буфера обмена Mr. Brown\'s Keyboard.</string>
     <string name="dictionary_backup_export_success_title">Экспорт словаря выполнен</string>
     <string name="dictionary_backup_export_disabled_words">Отключённых слов: %1$d</string>
     <string name="dictionary_backup_export_failed_title">Экспорт словаря не удался</string>
@@ -1586,7 +1586,7 @@
     </plurals>
 
     <!-- 2026-09-29 hardcoded-UI sweep (activities): launcher, dictionary, layouts, short swipes, themes, playground, manifest labels (reviewer=model) -->
-    <string name="launcher_step_enable_desc">Включите Brown Keys в системных настройках</string>
+    <string name="launcher_step_enable_desc">Включите Mr. Brown\'s Keyboard в системных настройках</string>
     <string name="launcher_step_select_desc">Смените способ ввода по умолчанию</string>
     <string name="launcher_step_calibrate_desc">Настройте до 8 действий подклавиш для каждой клавиши</string>
     <string name="dict_tab_active">Активные</string>
@@ -1662,9 +1662,9 @@
     <string name="calibration_legend_short_range">Мин - Макс</string>
     <string name="calibration_legend_long_range">&gt; Макс</string>
     <string name="calibration_percent_value">%1$d%%</string>
-    <string name="theme_builtin_cleverkeysdark_name">Brown Keys Тёмная</string>
+    <string name="theme_builtin_cleverkeysdark_name">Mr. Brown\'s Keyboard Тёмная</string>
     <string name="theme_builtin_cleverkeysdark_desc">Тёмно-фиолетовая с серебристыми акцентами (по умолчанию)</string>
-    <string name="theme_builtin_cleverkeyslight_name">Brown Keys Светлая</string>
+    <string name="theme_builtin_cleverkeyslight_name">Mr. Brown\'s Keyboard Светлая</string>
     <string name="theme_builtin_cleverkeyslight_desc">Серебристые клавиши с фиолетовыми акцентами</string>
     <string name="theme_builtin_dark_name">Тёмная</string>
     <string name="theme_builtin_dark_desc">Классическая тёмная тема с синими акцентами</string>
@@ -1949,11 +1949,11 @@
     </plurals>
     <!-- 2026-09-30 i18n: typed import/export/backup failure reasons and settings-import skip kinds (reviewer=model) -->
     <string name="io_error_file_not_found">Не удалось найти или открыть файл.</string>
-    <string name="io_error_permission_denied">У Brown Keys нет доступа к этому файлу.</string>
+    <string name="io_error_permission_denied">У Mr. Brown\'s Keyboard нет доступа к этому файлу.</string>
     <string name="io_error_invalid_format">Файл имеет неожиданный формат или повреждён.</string>
-    <string name="io_error_newer_version">Файл создан более новой версией Brown Keys. Обновите приложение и повторите попытку.</string>
+    <string name="io_error_newer_version">Файл создан более новой версией Mr. Brown\'s Keyboard. Обновите приложение и повторите попытку.</string>
     <string name="io_error_out_of_space">Недостаточно места в хранилище.</string>
-    <string name="io_error_too_large">Файл слишком велик, чтобы Brown Keys мог безопасно его импортировать.</string>
+    <string name="io_error_too_large">Файл слишком велик, чтобы Mr. Brown\'s Keyboard мог безопасно его импортировать.</string>
     <string name="io_error_wrong_password_or_corrupt">Неверный пароль резервной копии, либо файл повреждён или изменён.</string>
     <string name="io_error_no_backup_password">Эта резервная копия зашифрована, а пароль резервной копии недоступен.</string>
     <string name="io_error_wrong_backup_kind">Эта резервная копия не содержит данных того типа, который ожидает этот импорт.</string>
@@ -1999,7 +1999,7 @@
     <string name="cmd_copy">Копировать</string>
     <string name="cmd_copy_desc">Копировать выделенный текст в буфер обмена</string>
     <string name="cmd_copy_private">Приватное копирование</string>
-    <string name="cmd_copy_private_desc">Копировать выделенное только в Brown Keys — не в системный буфер обмена</string>
+    <string name="cmd_copy_private_desc">Копировать выделенное только в Mr. Brown\'s Keyboard — не в системный буфер обмена</string>
     <string name="cmd_paste">Вставить</string>
     <string name="cmd_paste_desc">Вставить из буфера обмена</string>
     <string name="cmd_cut">Вырезать</string>

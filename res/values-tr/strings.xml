@@ -29,7 +29,7 @@
     <string name="key_descr_change_method">Klavye değiştir</string>
     <string name="key_descr_voice_typing">Sesle yazma</string>
     <string name="key_descr_copy">Kopyala</string>
-    <string name="key_descr_copy_private">Özel kopyala (yalnızca Brown Keys içine, sistem panosuna değil)</string>
+    <string name="key_descr_copy_private">Özel kopyala (yalnızca Mr. Brown\'s Keyboard içine, sistem panosuna değil)</string>
     <string name="key_descr_paste">Yapıştır</string>
     <string name="key_descr_cut">Kes</string>
     <string name="key_descr_selectAll">Tümünü seç</string>
@@ -98,8 +98,8 @@
     <string name="clipboard_edit_error">Kayıt güncellenemedi</string>
 
     <!-- #156 Private copy -->
-    <string name="private_copy_toolbar_label">Brown Keys: Özel kopya</string>
-    <string name="private_copy_toast">Gizli olarak Brown Keys\'e kopyalandı</string>
+    <string name="private_copy_toolbar_label">Mr. Brown\'s Keyboard: Özel kopya</string>
+    <string name="private_copy_toast">Gizli olarak Mr. Brown\'s Keyboard\'e kopyalandı</string>
     <string name="private_copy_expose_dialog_title">Sistem panosuna kopyalansın mı?</string>
     <string name="private_copy_expose_dialog_message">Bu kayıt gizli olarak kopyalanmıştı. Sistem panosuna kopyalamak, metni ön plandaki uygulamaya ve diğer pano yöneticilerine açık hale getirir. Yine de kopyalansın mı?</string>
     <string name="private_copy_expose_dialog_confirm">Yine de kopyala</string>
@@ -110,7 +110,7 @@
     <string name="clipboard_filter_private_only_hint">Yalnızca gizli olarak kopyalanan kayıtları göster (🔒)</string>
 
     <!-- Settings Activity (Material 3) -->
-    <string name="settings_title">⚙️ Brown Keys Ayarları</string>
+    <string name="settings_title">⚙️ Mr. Brown\'s Keyboard Ayarları</string>
     <string name="settings_description">En iyi yazma deneyimi için klavye ayarlarınızı yapılandırın.</string>
 
     <!-- Swipe Typing Section -->
@@ -272,7 +272,7 @@
     <string name="short_swipe_reset_all">Tümünü Sıfırla</string>
     <string name="short_swipe_tap_hint">Kısa kaydırma hareketini özelleştirmek için aşağıdaki herhangi bir tuşa dokunun</string>
     <string name="short_swipe_instruction_title">Özelleştirmek için herhangi bir tuşa yazın</string>
-    <string name="short_swipe_instruction_body">Aşağıdaki klavye gerçek Brown Keys klavyenizdir.\nBir tuşa kısa kaydırma eylemleri eklemek için ona dokunun.</string>
+    <string name="short_swipe_instruction_body">Aşağıdaki klavye gerçek Mr. Brown\'s Keyboard klavyenizdir.\nBir tuşa kısa kaydırma eylemleri eklemek için ona dokunun.</string>
     <string name="short_swipe_custom_mappings">Özel Eşlemeler</string>
 
     <!-- Tema ayarları / Theme Settings -->
@@ -359,7 +359,7 @@
     <string name="accessibility_swipe_complete_title">Kaydırma Tamamlandı</string>
     <string name="accessibility_swipe_complete_desc">Kaydırma hareketi bittiğinde titreşim</string>
     <string name="advanced_ime_prompt_title">Varsayılan klavye hatırlatıcısı</string>
-    <string name="advanced_ime_prompt_desc">Her açılışta bir kez Brown Keys\'i varsayılan klavye yapmayı hatırlat. Bir daha sorulmaması için kapatın.</string>
+    <string name="advanced_ime_prompt_desc">Her açılışta bir kez Mr. Brown\'s Keyboard\'i varsayılan klavye yapmayı hatırlat. Bir daha sorulmaması için kapatın.</string>
     <string name="advanced_swipe_debug_log_title">Kaydırma Hata Ayıklama Günlüğü</string>
     <string name="advanced_swipe_debug_log_desc">Kaydırma hareketleri için gerçek zamanlı ardışık düzen analizi (logcat gerektirir)</string>
     <string name="advanced_detailed_logging_title">Ayrıntılı Günlük Kaydı</string>
@@ -463,11 +463,11 @@
     <string name="clipboard_swipe_deleted">Silindi</string>
     <string name="clipboard_swipe_undo">Geri al</string>
     <string name="clipboard_private_copy_other_apps_title">Diğer uygulamalarda özel kopyalama</string>
-    <string name="clipboard_private_copy_other_apps_desc">Diğer uygulamaların metin seçim menülerine \"Özel kopyala\" ekle. Seçili metni yalnızca Brown Keys\'e kopyalar — sistem panosuna asla. Etkinleştirmek diğer uygulamaların görebileceği bir uygulama girişi ekler.</string>
+    <string name="clipboard_private_copy_other_apps_desc">Diğer uygulamaların metin seçim menülerine \"Özel kopyala\" ekle. Seçili metni yalnızca Mr. Brown\'s Keyboard\'e kopyalar — sistem panosuna asla. Etkinleştirmek diğer uygulamaların görebileceği bir uygulama girişi ekler.</string>
     <string name="clipboard_sanitize_links_title">İzleme parametrelerini temizle</string>
     <string name="clipboard_sanitize_links_desc">Kopyaladığınız URL\'lerden utm_*, fbclid vb.\'yi kaldır. ClearURLs tarafından desteklenir.</string>
     <string name="clipboard_sanitize_system_title">Sistem panosunu da temizle</string>
-    <string name="clipboard_sanitize_system_desc">Kopyalanan bir URL temizlendiğinde sistem panosunun üzerine yaz, böylece herhangi bir uygulamaya yapıştırma işlemi — yalnızca Brown Keys paneli değil — temizlenmiş olur.</string>
+    <string name="clipboard_sanitize_system_desc">Kopyalanan bir URL temizlendiğinde sistem panosunun üzerine yaz, böylece herhangi bir uygulamaya yapıştırma işlemi — yalnızca Mr. Brown\'s Keyboard paneli değil — temizlenmiş olur.</string>
     <string name="clipboard_embed_enrich_title">Paylaşım için yerleştirmeleri zenginleştir</string>
     <string name="clipboard_embed_enrich_desc">x.com → fxtwitter.com, reddit.com → rxddit.com vb. olarak yeniden yaz.</string>
     <string name="clipboard_custom_rules_title">Özel kuralları kullan</string>
@@ -799,7 +799,7 @@
     <string name="gif_remove_all_body">Bu, içe aktarılan tüm GIF paketlerini, küçük resimleri ve veritabanını siler. Bu işlem geri alınamaz.</string>
     <string name="gif_remove_all_confirm">Tümünü Kaldır</string>
     <string name="gif_remove_pack_body">Bu, bu paketteki tüm GIF\'leri siler ve depolama alanını geri kazanır.</string>
-    <string name="privacy_section_intro">Brown Keys tamamen çevrimdışıdır — hiçbir veri cihazınızdan çıkmaz. Bu isteğe bağlı ayarlar verileri yerel olarak saklar; böylece inceleyebilir, dışa aktarabilir veya silebilirsiniz. Dışa aktarılan kaydırma verileri başka bir yerde model eğitmek için kullanılabilir.</string>
+    <string name="privacy_section_intro">Mr. Brown\'s Keyboard tamamen çevrimdışıdır — hiçbir veri cihazınızdan çıkmaz. Bu isteğe bağlı ayarlar verileri yerel olarak saklar; böylece inceleyebilir, dışa aktarabilir veya silebilirsiniz. Dışa aktarılan kaydırma verileri başka bir yerde model eğitmek için kullanılabilir.</string>
     <string name="privacy_on_device_learning_header">Cihaz Üzerinde Öğrenme</string>
     <string name="privacy_forget_learned_title">Öğrenilen veriler de unutulsun mu?</string>
     <string name="privacy_forget_learned_body">Öğrenme artık kapalı — yeni hiçbir şey kaydedilmeyecek. Zaten öğrenilmiş her şeyi de (ifade kalıpları, kelime kullanımı, öneri seçim geçmişi ve kaydırma düzeltmeleri) silmek ister misiniz? Bu işlem geri alınamaz.</string>
@@ -1038,7 +1038,7 @@
     <string name="calibration_touch_here">👆 Buraya dokunun</string>
     <string name="calibration_min_readout">Min: %%%1$d</string>
     <string name="calibration_max_readout">Maks: %%%1$d</string>
-    <string name="launcher_logo_desc">Brown Keys Logosu</string>
+    <string name="launcher_logo_desc">Mr. Brown\'s Keyboard Logosu</string>
     <string name="launcher_tagline">Gizlilik, güç ve kontrol — beyinle birlikte.</string>
     <string name="launcher_step_enable">Klavyeyi Etkinleştir</string>
     <string name="launcher_step_select">Klavyeyi Seç</string>
@@ -1254,11 +1254,11 @@
     <string name="clipboard_entry_duration_desc_default">Kayıtların otomatik silinmeden önce ne kadar süre kalacağı (-1 = asla)</string>
     <string name="clipboard_entry_duration_never">Süresi dolmaz</string>
     <string name="clipboard_private_copy_header">🔒 Özel kopya</string>
-    <string name="clipboard_private_copy_in_app_note">Uygulama içinde: \"Özel kopya\" düzenleme eylemi bir kısa kaydırmaya veya ek tuşa atanabilir (Kısa Kaydırma Özelleştirmesi). Geçerli seçimi, sistem panosuna dokunmadan Brown Keys\'in özel panosuna kaydeder. Özel kayıtlar 🔒 rozetiyle gösterilir; birini sistem panosuna aktarmak her zaman önce onay ister ve düz metin yedekler bunları hariç tutar (şifreli yedekler dahil eder).</string>
+    <string name="clipboard_private_copy_in_app_note">Uygulama içinde: \"Özel kopya\" düzenleme eylemi bir kısa kaydırmaya veya ek tuşa atanabilir (Kısa Kaydırma Özelleştirmesi). Geçerli seçimi, sistem panosuna dokunmadan Mr. Brown\'s Keyboard\'in özel panosuna kaydeder. Özel kayıtlar 🔒 rozetiyle gösterilir; birini sistem panosuna aktarmak her zaman önce onay ister ve düz metin yedekler bunları hariç tutar (şifreli yedekler dahil eder).</string>
     <string name="clipboard_url_handling_header">URL işleme</string>
     <string name="clipboard_custom_rules_browse">custom.substitutions.json dosyasını seç</string>
     <string name="clipboard_custom_rules_replace">Özel kuralları değiştir</string>
-    <string name="clipboard_url_handling_note">Not: temizleme, Brown Keys bir klibi geçmişine kaydettiğinde çalışır; bu nedenle Brown Keys panelinden yapılan yapıştırmalar her zaman temizlenmiş olur. \"Sistem panosunu da temizle\" açıkken Android sistem panosunun üzerine de temizlenmiş URL yazılır, böylece diğer uygulamalardaki yapıştırmalar da temizlenir (en iyi çaba ile — yalnızca klavyenin pano erişimi varken). Kapalıyken diğer uygulamalar orijinal URL\'yi görmeye devam eder.</string>
+    <string name="clipboard_url_handling_note">Not: temizleme, Mr. Brown\'s Keyboard bir klibi geçmişine kaydettiğinde çalışır; bu nedenle Mr. Brown\'s Keyboard panelinden yapılan yapıştırmalar her zaman temizlenmiş olur. \"Sistem panosunu da temizle\" açıkken Android sistem panosunun üzerine de temizlenmiş URL yazılır, böylece diğer uygulamalardaki yapıştırmalar da temizlenir (en iyi çaba ile — yalnızca klavyenin pano erişimi varken). Kapalıyken diğer uygulamalar orijinal URL\'yi görmeye devam eder.</string>
     <string name="input_context_source_both">Yerleşik + Öğrenilen</string>
     <string name="input_context_source_learned_only">Yalnızca Öğrenilen</string>
     <string name="input_context_source_static_only">Yalnızca Yerleşik</string>
@@ -1364,7 +1364,7 @@
     <string name="clipboard_backup_import_completed">Pano içe aktarma tamamlandı.</string>
     <string name="clipboard_backup_import_merge_note">İçe aktarmalar mevcut geçmişin üzerine yazmadan onunla birleştirilir.</string>
     <string name="clipboard_backup_import_failed_title">Pano İçe Aktarma Başarısız</string>
-    <string name="clipboard_backup_import_failed">Pano geçmişi içe aktarılamadı:\n\n%1$s\n\nDosyanın geçerli bir Brown Keys pano yedeği olduğundan emin olun.</string>
+    <string name="clipboard_backup_import_failed">Pano geçmişi içe aktarılamadı:\n\n%1$s\n\nDosyanın geçerli bir Mr. Brown\'s Keyboard pano yedeği olduğundan emin olun.</string>
     <string name="clipboard_backup_zip_export_success_title">Tam Pano Dışa Aktarma Başarılı</string>
     <string name="clipboard_backup_zip_saved">Medya içeren pano yedeği kaydedildi.</string>
     <string name="clipboard_backup_zip_restore_hint">Resimler, videolar ve diğer medya dahil tüm kayıtları kurtarmak için ZIP İçe Aktar ile geri yükleyin.</string>
@@ -1374,7 +1374,7 @@
     <string name="clipboard_backup_zip_import_completed">Tam pano içe aktarma tamamlandı.</string>
     <string name="clipboard_backup_zip_media_restored_note">Tüm medya dosyaları ve küçük resimler geri yüklendi.</string>
     <string name="clipboard_backup_zip_import_failed_title">Pano ZIP İçe Aktarma Başarısız</string>
-    <string name="clipboard_backup_zip_import_failed">Pano ZIP\'i içe aktarılamadı:\n\n%1$s\n\nDosyanın geçerli bir Brown Keys pano ZIP yedeği olduğundan emin olun.</string>
+    <string name="clipboard_backup_zip_import_failed">Pano ZIP\'i içe aktarılamadı:\n\n%1$s\n\nDosyanın geçerli bir Mr. Brown\'s Keyboard pano ZIP yedeği olduğundan emin olun.</string>
     <string name="dictionary_backup_export_success_title">Sözlük Dışa Aktarma Başarılı</string>
     <string name="dictionary_backup_export_disabled_words">Devre dışı kelimeler: %1$d</string>
     <string name="dictionary_backup_export_failed_title">Sözlük Dışa Aktarma Başarısız</string>
@@ -1520,7 +1520,7 @@
     </plurals>
 
     <!-- 2026-09-29 hardcoded-UI sweep (activities): launcher, dictionary, layouts, short swipes, themes, playground, manifest labels (reviewer=model) -->
-    <string name="launcher_step_enable_desc">Sistem ayarlarında Brown Keys\'i açın</string>
+    <string name="launcher_step_enable_desc">Sistem ayarlarında Mr. Brown\'s Keyboard\'i açın</string>
     <string name="launcher_step_select_desc">Varsayılan giriş yönteminizi değiştirin</string>
     <string name="launcher_step_calibrate_desc">Tuş başına en fazla 8 alt tuş eylemi yapılandırın</string>
     <string name="dict_tab_active">Etkin</string>
@@ -1596,9 +1596,9 @@
     <string name="calibration_legend_short_range">Min - Maks</string>
     <string name="calibration_legend_long_range">&gt; Maks</string>
     <string name="calibration_percent_value">%%%1$d</string>
-    <string name="theme_builtin_cleverkeysdark_name">Brown Keys Koyu</string>
+    <string name="theme_builtin_cleverkeysdark_name">Mr. Brown\'s Keyboard Koyu</string>
     <string name="theme_builtin_cleverkeysdark_desc">Gümüş vurgulu koyu mor (varsayılan)</string>
-    <string name="theme_builtin_cleverkeyslight_name">Brown Keys Açık</string>
+    <string name="theme_builtin_cleverkeyslight_name">Mr. Brown\'s Keyboard Açık</string>
     <string name="theme_builtin_cleverkeyslight_desc">Mor vurgulu gümüş tuşlar</string>
     <string name="theme_builtin_dark_name">Koyu</string>
     <string name="theme_builtin_dark_desc">Mavi vurgulu klasik koyu tema</string>
@@ -1865,11 +1865,11 @@
     </plurals>
     <!-- 2026-09-30 i18n: typed import/export/backup failure reasons and settings-import skip kinds (reviewer=model) -->
     <string name="io_error_file_not_found">Dosya bulunamadı veya açılamadı.</string>
-    <string name="io_error_permission_denied">Brown Keys\'in bu dosyaya erişim izni yok.</string>
+    <string name="io_error_permission_denied">Mr. Brown\'s Keyboard\'in bu dosyaya erişim izni yok.</string>
     <string name="io_error_invalid_format">Dosya beklenen biçimde değil veya hasarlı.</string>
-    <string name="io_error_newer_version">Dosya, Brown Keys\'in daha yeni bir sürümüyle oluşturulmuş. Uygulamayı güncelleyip tekrar deneyin.</string>
+    <string name="io_error_newer_version">Dosya, Mr. Brown\'s Keyboard\'in daha yeni bir sürümüyle oluşturulmuş. Uygulamayı güncelleyip tekrar deneyin.</string>
     <string name="io_error_out_of_space">Yeterli depolama alanı yok.</string>
-    <string name="io_error_too_large">Dosya, Brown Keys\'in güvenle içe aktarabileceğinden daha büyük.</string>
+    <string name="io_error_too_large">Dosya, Mr. Brown\'s Keyboard\'in güvenle içe aktarabileceğinden daha büyük.</string>
     <string name="io_error_wrong_password_or_corrupt">Yedek parolası yanlış veya dosya hasarlı ya da değiştirilmiş.</string>
     <string name="io_error_no_backup_password">Bu yedek şifreli ve kullanılabilir bir yedek parolası yok.</string>
     <string name="io_error_wrong_backup_kind">Bu yedek, bu içe aktarmanın beklediği türde veri içermiyor.</string>
@@ -1915,7 +1915,7 @@
     <string name="cmd_copy">Kopyala</string>
     <string name="cmd_copy_desc">Seçili metni panoya kopyala</string>
     <string name="cmd_copy_private">Özel Kopyala</string>
-    <string name="cmd_copy_private_desc">Yalnızca Brown Keys\'e kopyala, asla sistem panosuna değil</string>
+    <string name="cmd_copy_private_desc">Yalnızca Mr. Brown\'s Keyboard\'e kopyala, asla sistem panosuna değil</string>
     <string name="cmd_paste">Yapıştır</string>
     <string name="cmd_paste_desc">Panodan yapıştır</string>
     <string name="cmd_cut">Kes</string>

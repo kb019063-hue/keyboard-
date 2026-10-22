@@ -175,7 +175,7 @@ object EncryptedBackupFormat {
         val version = bytes[OFF_VERSION]
         if (version > FORMAT_VERSION) {
             throw BackupFormatException(
-                "This backup is from a newer CleverKeys version (format v$version); update the app to restore it",
+                "This backup is from a newer Mr. Brown's Keyboard version (format v$version); update the app to restore it",
                 IoFailureReason.NEWER_VERSION,
             )
         }

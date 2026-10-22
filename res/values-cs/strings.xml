@@ -29,7 +29,7 @@
     <string name="key_descr_change_method">Přepnout klávesnici</string>
     <string name="key_descr_voice_typing">Hlasové zadávání</string>
     <string name="key_descr_copy">Kopírovat</string>
-    <string name="key_descr_copy_private">Soukromá kopie (pouze do Brown Keys, ne do systémové schránky)</string>
+    <string name="key_descr_copy_private">Soukromá kopie (pouze do Mr. Brown\'s Keyboard, ne do systémové schránky)</string>
     <string name="key_descr_paste">Vložit</string>
     <string name="key_descr_cut">Vyjmout</string>
     <string name="key_descr_selectAll">Označit vše</string>
@@ -99,8 +99,8 @@
     <string name="clipboard_edit_error">Aktualizace položky se nezdařila</string>
 
     <!-- #156 Private copy -->
-    <string name="private_copy_toolbar_label">Brown Keys: Soukromá kopie</string>
-    <string name="private_copy_toast">Soukromě zkopírováno do Brown Keys</string>
+    <string name="private_copy_toolbar_label">Mr. Brown\'s Keyboard: Soukromá kopie</string>
+    <string name="private_copy_toast">Soukromě zkopírováno do Mr. Brown\'s Keyboard</string>
     <string name="private_copy_expose_dialog_title">Zkopírovat do systémové schránky?</string>
     <string name="private_copy_expose_dialog_message">Tato položka byla zkopírována soukromě. Jejím zkopírováním do systémové schránky se text zpřístupní aplikaci v popředí a dalším správcům schránky. Přesto zkopírovat?</string>
     <string name="private_copy_expose_dialog_confirm">Přesto zkopírovat</string>
@@ -112,7 +112,7 @@
     <string name="clipboard_filter_private_only_hint">Zobrazit pouze soukromě zkopírované položky (🔒)</string>
 
     <!-- Settings Activity (Material 3) -->
-    <string name="settings_title">⚙️ Nastavení Brown Keys</string>
+    <string name="settings_title">⚙️ Nastavení Mr. Brown\'s Keyboard</string>
     <string name="settings_description">Nakonfigurujte nastavení klávesnice pro optimální zážitek z psaní.</string>
 
     <!-- Swipe Typing Section -->
@@ -276,7 +276,7 @@
     <string name="short_swipe_reset_all">Obnovit vše</string>
     <string name="short_swipe_tap_hint">Klepnutím na libovolnou klávesu níže přizpůsobíte její gesta krátkého tahu</string>
     <string name="short_swipe_instruction_title">Klepnutím na libovolnou klávesu ji přizpůsobíte</string>
-    <string name="short_swipe_instruction_body">Klávesnice níže je vaše skutečná klávesnice Brown Keys.\nKlepnutím na klávesu přidáte akce krátkého tahu.</string>
+    <string name="short_swipe_instruction_body">Klávesnice níže je vaše skutečná klávesnice Mr. Brown\'s Keyboard.\nKlepnutím na klávesu přidáte akce krátkého tahu.</string>
     <string name="short_swipe_custom_mappings">Vlastní mapování</string>
     <string name="theme_settings_title">Motivy klávesnice</string>
     <string name="theme_restart_keyboard">Restartovat klávesnici</string>
@@ -355,7 +355,7 @@
     <string name="accessibility_swipe_complete_title">Tah dokončen</string>
     <string name="accessibility_swipe_complete_desc">Vibrovat po dokončení tahového gesta</string>
     <string name="advanced_ime_prompt_title">Připomenutí výchozí klávesnice</string>
-    <string name="advanced_ime_prompt_desc">Jednou za spuštění zařízení připomenout nastavení Brown Keys jako výchozí klávesnice. Vypnutím se už nikdy neptat.</string>
+    <string name="advanced_ime_prompt_desc">Jednou za spuštění zařízení připomenout nastavení Mr. Brown\'s Keyboard jako výchozí klávesnice. Vypnutím se už nikdy neptat.</string>
     <string name="advanced_swipe_debug_log_title">Protokol ladění tahů</string>
     <string name="advanced_swipe_debug_log_desc">Analýza pipeline v reálném čase pro tahová gesta (vyžaduje logcat)</string>
     <string name="advanced_detailed_logging_title">Podrobné protokolování</string>
@@ -459,11 +459,11 @@
     <string name="clipboard_swipe_deleted">Smazáno</string>
     <string name="clipboard_swipe_undo">Zpět</string>
     <string name="clipboard_private_copy_other_apps_title">Soukromé kopírování v jiných aplikacích</string>
-    <string name="clipboard_private_copy_other_apps_desc">Přidat "Soukromá kopie" do nabídek výběru textu jiných aplikací. Zkopíruje vybraný text pouze do Brown Keys — nikdy do systémové schránky. Povolením přidáte položku aplikace, kterou mohou vidět jiné aplikace.</string>
+    <string name="clipboard_private_copy_other_apps_desc">Přidat "Soukromá kopie" do nabídek výběru textu jiných aplikací. Zkopíruje vybraný text pouze do Mr. Brown\'s Keyboard — nikdy do systémové schránky. Povolením přidáte položku aplikace, kterou mohou vidět jiné aplikace.</string>
     <string name="clipboard_sanitize_links_title">Odstranit parametry sledování</string>
     <string name="clipboard_sanitize_links_desc">Odstraňovat utm_*, fbclid atd. z kopírovaných URL. Využívá ClearURLs.</string>
     <string name="clipboard_sanitize_system_title">Čistit také systémovou schránku</string>
-    <string name="clipboard_sanitize_system_desc">Pokud je zkopírovaná URL vyčištěna, přepsat i systémovou schránku, aby byly přílohy v jakékoli aplikaci očištěné — nejen v panelu Brown Keys.</string>
+    <string name="clipboard_sanitize_system_desc">Pokud je zkopírovaná URL vyčištěna, přepsat i systémovou schránku, aby byly přílohy v jakékoli aplikaci očištěné — nejen v panelu Mr. Brown\'s Keyboard.</string>
     <string name="clipboard_embed_enrich_title">Obohatit vložení pro sdílení</string>
     <string name="clipboard_embed_enrich_desc">Přepisovat x.com → fxtwitter.com, reddit.com → rxddit.com atd.</string>
     <string name="clipboard_custom_rules_title">Použít vlastní pravidla</string>
@@ -795,7 +795,7 @@
     <string name="gif_remove_all_body">Smaže všechny importované balíčky GIF, miniatury i databázi. Nelze vrátit zpět.</string>
     <string name="gif_remove_all_confirm">Odstranit vše</string>
     <string name="gif_remove_pack_body">Smaže všechny GIFy z tohoto balíčku a uvolní úložiště.</string>
-    <string name="privacy_section_intro">Brown Keys funguje plně offline — žádná data nikdy neopustí vaše zařízení. Tato volitelná nastavení ukládají data místně, abyste si je mohli prohlédnout, exportovat nebo smazat; exportovaná data o tazích lze použít k trénování modelů jinde.</string>
+    <string name="privacy_section_intro">Mr. Brown\'s Keyboard funguje plně offline — žádná data nikdy neopustí vaše zařízení. Tato volitelná nastavení ukládají data místně, abyste si je mohli prohlédnout, exportovat nebo smazat; exportovaná data o tazích lze použít k trénování modelů jinde.</string>
     <string name="privacy_on_device_learning_header">Učení v zařízení</string>
     <string name="privacy_forget_learned_title">Zapomenout i naučená data?</string>
     <string name="privacy_forget_learned_body">Učení je nyní vypnuté — nic nového se nezaznamenává. Chcete smazat i vše, co už je naučené (vzory frází, používání slov, historii výběru návrhů a opravy tahů)? Nelze vrátit zpět.</string>
@@ -1030,7 +1030,7 @@
     <string name="calibration_touch_here">👆 Dotkněte se zde</string>
     <string name="calibration_min_readout">Min: %1$d%%</string>
     <string name="calibration_max_readout">Max: %1$d%%</string>
-    <string name="launcher_logo_desc">Logo Brown Keys</string>
+    <string name="launcher_logo_desc">Logo Mr. Brown\'s Keyboard</string>
     <string name="launcher_tagline">Soukromí, síla a kontrola — s mozkem.</string>
     <string name="launcher_step_enable">Povolit klávesnici</string>
     <string name="launcher_step_select">Vybrat klávesnici</string>
@@ -1253,11 +1253,11 @@
     <string name="clipboard_entry_duration_desc_default">Jak dlouho položky zůstanou před automatickým smazáním (-1 = nikdy)</string>
     <string name="clipboard_entry_duration_never">Nikdy nevyprší</string>
     <string name="clipboard_private_copy_header">🔒 Soukromá kopie</string>
-    <string name="clipboard_private_copy_in_app_note">V aplikaci: akci úprav „Soukromá kopie“ lze přiřadit krátkému tahu nebo extra klávese (Přizpůsobení krátkého tahu). Uloží aktuální výběr do soukromé schránky Brown Keys, aniž by se dotkla systémové schránky. Soukromé položky mají odznak 🔒; export takové položky do systémové schránky se vždy nejprve zeptá a nešifrované zálohy je vynechávají (šifrované zálohy je obsahují).</string>
+    <string name="clipboard_private_copy_in_app_note">V aplikaci: akci úprav „Soukromá kopie“ lze přiřadit krátkému tahu nebo extra klávese (Přizpůsobení krátkého tahu). Uloží aktuální výběr do soukromé schránky Mr. Brown\'s Keyboard, aniž by se dotkla systémové schránky. Soukromé položky mají odznak 🔒; export takové položky do systémové schránky se vždy nejprve zeptá a nešifrované zálohy je vynechávají (šifrované zálohy je obsahují).</string>
     <string name="clipboard_url_handling_header">Zpracování URL</string>
     <string name="clipboard_custom_rules_browse">Vybrat soubor custom.substitutions.json</string>
     <string name="clipboard_custom_rules_replace">Nahradit vlastní pravidla</string>
-    <string name="clipboard_url_handling_note">Poznámka: čištění proběhne, když Brown Keys ukládá klip do své historie, takže vložení z panelu Brown Keys jsou vždy vyčištěná. Se zapnutou volbou „Čistit také systémovou schránku“ se vyčištěnou URL přepíše i systémová schránka Androidu, takže vyčištěná jsou i vložení v jiných aplikacích (podle možností — jen dokud má klávesnice přístup ke schránce). Při vypnuté volbě vidí jiné aplikace stále původní URL.</string>
+    <string name="clipboard_url_handling_note">Poznámka: čištění proběhne, když Mr. Brown\'s Keyboard ukládá klip do své historie, takže vložení z panelu Mr. Brown\'s Keyboard jsou vždy vyčištěná. Se zapnutou volbou „Čistit také systémovou schránku“ se vyčištěnou URL přepíše i systémová schránka Androidu, takže vyčištěná jsou i vložení v jiných aplikacích (podle možností — jen dokud má klávesnice přístup ke schránce). Při vypnuté volbě vidí jiné aplikace stále původní URL.</string>
     <string name="input_context_source_both">Vestavěné + naučené</string>
     <string name="input_context_source_learned_only">Pouze naučené</string>
     <string name="input_context_source_static_only">Pouze vestavěné</string>
@@ -1379,7 +1379,7 @@
     <string name="clipboard_backup_import_completed">Import schránky dokončen.</string>
     <string name="clipboard_backup_import_merge_note">Importované položky se sloučí se stávající historií bez přepsání.</string>
     <string name="clipboard_backup_import_failed_title">Import schránky se nezdařil</string>
-    <string name="clipboard_backup_import_failed">Historii schránky se nepodařilo importovat:\n\n%1$s\n\nUjistěte se, že soubor je platnou zálohou schránky Brown Keys.</string>
+    <string name="clipboard_backup_import_failed">Historii schránky se nepodařilo importovat:\n\n%1$s\n\nUjistěte se, že soubor je platnou zálohou schránky Mr. Brown\'s Keyboard.</string>
     <string name="clipboard_backup_zip_export_success_title">Úplný export schránky proběhl úspěšně</string>
     <string name="clipboard_backup_zip_saved">Záloha schránky včetně médií uložena.</string>
     <string name="clipboard_backup_zip_restore_hint">Pomocí Importovat ZIP obnovíte všechny položky včetně obrázků, videí a dalších médií.</string>
@@ -1389,7 +1389,7 @@
     <string name="clipboard_backup_zip_import_completed">Úplný import schránky dokončen.</string>
     <string name="clipboard_backup_zip_media_restored_note">Všechny mediální soubory a miniatury byly obnoveny.</string>
     <string name="clipboard_backup_zip_import_failed_title">Import schránky ze ZIP se nezdařil</string>
-    <string name="clipboard_backup_zip_import_failed">ZIP schránky se nepodařilo importovat:\n\n%1$s\n\nUjistěte se, že soubor je platnou zálohou schránky Brown Keys ve formátu ZIP.</string>
+    <string name="clipboard_backup_zip_import_failed">ZIP schránky se nepodařilo importovat:\n\n%1$s\n\nUjistěte se, že soubor je platnou zálohou schránky Mr. Brown\'s Keyboard ve formátu ZIP.</string>
     <string name="dictionary_backup_export_success_title">Export slovníku proběhl úspěšně</string>
     <string name="dictionary_backup_export_disabled_words">Zakázaná slova: %1$d</string>
     <string name="dictionary_backup_export_failed_title">Export slovníku se nezdařil</string>
@@ -1581,7 +1581,7 @@
     </plurals>
 
     <!-- 2026-09-29 hardcoded-UI sweep (activities): launcher, dictionary, layouts, short swipes, themes, playground, manifest labels (reviewer=model) -->
-    <string name="launcher_step_enable_desc">Zapněte Brown Keys v nastavení systému</string>
+    <string name="launcher_step_enable_desc">Zapněte Mr. Brown\'s Keyboard v nastavení systému</string>
     <string name="launcher_step_select_desc">Přepněte výchozí metodu zadávání</string>
     <string name="launcher_step_calibrate_desc">Nastavte až 8 akcí podkláves pro každou klávesu</string>
     <string name="dict_tab_active">Aktivní</string>
@@ -1657,9 +1657,9 @@
     <string name="calibration_legend_short_range">Min – Max</string>
     <string name="calibration_legend_long_range">&gt; Max</string>
     <string name="calibration_percent_value">%1$d %%</string>
-    <string name="theme_builtin_cleverkeysdark_name">Brown Keys Tmavý</string>
+    <string name="theme_builtin_cleverkeysdark_name">Mr. Brown\'s Keyboard Tmavý</string>
     <string name="theme_builtin_cleverkeysdark_desc">Sytě fialová se stříbrnými akcenty (výchozí)</string>
-    <string name="theme_builtin_cleverkeyslight_name">Brown Keys Světlý</string>
+    <string name="theme_builtin_cleverkeyslight_name">Mr. Brown\'s Keyboard Světlý</string>
     <string name="theme_builtin_cleverkeyslight_desc">Stříbrné klávesy s fialovými akcenty</string>
     <string name="theme_builtin_dark_name">Tmavý</string>
     <string name="theme_builtin_dark_desc">Klasický tmavý motiv s modrými akcenty</string>
@@ -1944,11 +1944,11 @@
     </plurals>
     <!-- 2026-09-30 i18n: typed import/export/backup failure reasons and settings-import skip kinds (reviewer=model) -->
     <string name="io_error_file_not_found">Soubor se nepodařilo najít ani otevřít.</string>
-    <string name="io_error_permission_denied">Brown Keys nemá oprávnění k přístupu k tomuto souboru.</string>
+    <string name="io_error_permission_denied">Mr. Brown\'s Keyboard nemá oprávnění k přístupu k tomuto souboru.</string>
     <string name="io_error_invalid_format">Soubor nemá očekávaný formát, nebo je poškozený.</string>
-    <string name="io_error_newer_version">Soubor vytvořila novější verze Brown Keys. Aktualizujte aplikaci a zkuste to znovu.</string>
+    <string name="io_error_newer_version">Soubor vytvořila novější verze Mr. Brown\'s Keyboard. Aktualizujte aplikaci a zkuste to znovu.</string>
     <string name="io_error_out_of_space">Nedostatek místa v úložišti.</string>
-    <string name="io_error_too_large">Soubor je větší, než může Brown Keys bezpečně importovat.</string>
+    <string name="io_error_too_large">Soubor je větší, než může Mr. Brown\'s Keyboard bezpečně importovat.</string>
     <string name="io_error_wrong_password_or_corrupt">Nesprávné heslo zálohy, nebo je soubor poškozený či pozměněný.</string>
     <string name="io_error_no_backup_password">Tato záloha je šifrovaná a není k dispozici žádné heslo zálohy.</string>
     <string name="io_error_wrong_backup_kind">Tato záloha neobsahuje data, která tento import očekává.</string>
@@ -1994,7 +1994,7 @@
     <string name="cmd_copy">Kopírovat</string>
     <string name="cmd_copy_desc">Kopírovat vybraný text do schránky</string>
     <string name="cmd_copy_private">Soukromá kopie</string>
-    <string name="cmd_copy_private_desc">Kopírovat výběr jen do Brown Keys — nikdy do systémové schránky</string>
+    <string name="cmd_copy_private_desc">Kopírovat výběr jen do Mr. Brown\'s Keyboard — nikdy do systémové schránky</string>
     <string name="cmd_paste">Vložit</string>
     <string name="cmd_paste_desc">Vložit ze schránky</string>
     <string name="cmd_cut">Vyjmout</string>

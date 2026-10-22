@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Solid espresso backdrop sampled from the launcher artwork so the adaptive icon's masked
+     shape and its foreground motif read as one composition. Mr. Brown's Keyboard branding. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
-  <solid android:color="#050510"/>
+  <solid android:color="#28160d"/>
 </shape>

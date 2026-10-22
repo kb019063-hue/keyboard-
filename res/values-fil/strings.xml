@@ -29,7 +29,7 @@
     <string name="key_descr_change_method">Magpalit ng keyboard</string>
     <string name="key_descr_voice_typing">Voice typing</string>
     <string name="key_descr_copy">I-copy</string>
-    <string name="key_descr_copy_private">Private na copy (sa Brown Keys lang, hindi sa system clipboard)</string>
+    <string name="key_descr_copy_private">Private na copy (sa Mr. Brown\'s Keyboard lang, hindi sa system clipboard)</string>
     <string name="key_descr_paste">I-paste</string>
     <string name="key_descr_cut">I-cut</string>
     <string name="key_descr_selectAll">Piliin lahat</string>
@@ -98,8 +98,8 @@
     <string name="clipboard_edit_error">Hindi na-update ang entry</string>
 
     <!-- #156 Private copy -->
-    <string name="private_copy_toolbar_label">Brown Keys: Private na copy</string>
-    <string name="private_copy_toast">Na-copy nang pribado sa Brown Keys</string>
+    <string name="private_copy_toolbar_label">Mr. Brown\'s Keyboard: Private na copy</string>
+    <string name="private_copy_toast">Na-copy nang pribado sa Mr. Brown\'s Keyboard</string>
     <string name="private_copy_expose_dialog_title">I-copy sa system clipboard?</string>
     <string name="private_copy_expose_dialog_message">Ang entry na ito ay na-copy nang pribado. Kapag na-copy ito sa system clipboard, malalantad ang teksto sa foreground app at iba pang clipboard manager. I-copy pa rin?</string>
     <string name="private_copy_expose_dialog_confirm">I-copy pa rin</string>
@@ -110,7 +110,7 @@
     <string name="clipboard_filter_private_only_hint">Ipakita lang ang mga entry na na-copy nang pribado (🔒)</string>
 
     <!-- Settings Activity (Material 3) -->
-    <string name="settings_title">⚙️ Mga Setting ng Brown Keys</string>
+    <string name="settings_title">⚙️ Mga Setting ng Mr. Brown\'s Keyboard</string>
     <string name="settings_description">I-configure ang mga setting ng iyong keyboard para sa pinakamahusay na karanasan sa pagtatype.</string>
 
     <!-- Swipe Typing Section -->
@@ -272,7 +272,7 @@
     <string name="short_swipe_reset_all">I-reset Lahat</string>
     <string name="short_swipe_tap_hint">I-tap ang anumang key sa ibaba para i-customize ang mga maikling swipe gesture nito</string>
     <string name="short_swipe_instruction_title">I-type ang anumang key para i-customize ito</string>
-    <string name="short_swipe_instruction_body">Ang keyboard sa ibaba ay ang iyong tunay na Brown Keys keyboard.\nI-tap ang isang key para magdagdag ng mga maikling swipe action dito.</string>
+    <string name="short_swipe_instruction_body">Ang keyboard sa ibaba ay ang iyong tunay na Mr. Brown\'s Keyboard keyboard.\nI-tap ang isang key para magdagdag ng mga maikling swipe action dito.</string>
     <string name="short_swipe_custom_mappings">Mga Custom na Mapping</string>
 
     <!-- Mga setting ng tema / Theme Settings -->
@@ -360,7 +360,7 @@
     <string name="accessibility_swipe_complete_title">Natapos ang Swipe</string>
     <string name="accessibility_swipe_complete_desc">Mag-vibrate kapag natapos ang swipe gesture</string>
     <string name="advanced_ime_prompt_title">Paalala sa default na keyboard</string>
-    <string name="advanced_ime_prompt_desc">Magpaalala isang beses kada boot na gawing default na keyboard ang Brown Keys. I-off para hindi na muling magtanong.</string>
+    <string name="advanced_ime_prompt_desc">Magpaalala isang beses kada boot na gawing default na keyboard ang Mr. Brown\'s Keyboard. I-off para hindi na muling magtanong.</string>
     <string name="advanced_swipe_debug_log_title">Swipe Debug Log</string>
     <string name="advanced_swipe_debug_log_desc">Real-time na pagsusuri ng pipeline para sa mga swipe gesture (kailangan ang logcat)</string>
     <string name="advanced_detailed_logging_title">Detalyadong Logging</string>
@@ -464,11 +464,11 @@
     <string name="clipboard_swipe_deleted">Na-delete</string>
     <string name="clipboard_swipe_undo">I-undo</string>
     <string name="clipboard_private_copy_other_apps_title">Private na copy sa ibang app</string>
-    <string name="clipboard_private_copy_other_apps_desc">Magdagdag ng "Private na copy" sa mga text-selection menu ng ibang app. Kino-copy ang napiling teksto sa Brown Keys lamang — hindi sa system clipboard. Ang pag-enable ay nagdadagdag ng app entry na maaaring makita ng ibang app.</string>
+    <string name="clipboard_private_copy_other_apps_desc">Magdagdag ng "Private na copy" sa mga text-selection menu ng ibang app. Kino-copy ang napiling teksto sa Mr. Brown\'s Keyboard lamang — hindi sa system clipboard. Ang pag-enable ay nagdadagdag ng app entry na maaaring makita ng ibang app.</string>
     <string name="clipboard_sanitize_links_title">Linisin ang mga tracking parameter</string>
     <string name="clipboard_sanitize_links_desc">Alisin ang utm_*, fbclid, atbp. mula sa mga URL na iyong kino-copy. Pinapagana ng ClearURLs.</string>
     <string name="clipboard_sanitize_system_title">Linisin din ang system clipboard</string>
-    <string name="clipboard_sanitize_system_desc">Kapag nalinis ang na-copy na URL, i-overwrite din ang system clipboard para malinis ang mga paste sa anumang app — hindi lang sa panel ng Brown Keys.</string>
+    <string name="clipboard_sanitize_system_desc">Kapag nalinis ang na-copy na URL, i-overwrite din ang system clipboard para malinis ang mga paste sa anumang app — hindi lang sa panel ng Mr. Brown\'s Keyboard.</string>
     <string name="clipboard_embed_enrich_title">Pagyamanin ang mga embed para sa pagbabahagi</string>
     <string name="clipboard_embed_enrich_desc">I-rewrite ang x.com → fxtwitter.com, reddit.com → rxddit.com, atbp.</string>
     <string name="clipboard_custom_rules_title">Gumamit ng mga custom na panuntunan</string>
@@ -800,7 +800,7 @@
     <string name="gif_remove_all_body">Tatanggalin nito ang lahat ng na-import na GIF pack, thumbnail, at database. Hindi ito maibabalik.</string>
     <string name="gif_remove_all_confirm">Tanggalin Lahat</string>
     <string name="gif_remove_pack_body">Tatanggalin nito ang lahat ng GIF mula sa pack na ito at mababawi ang storage space.</string>
-    <string name="privacy_section_intro">Ganap na offline ang Brown Keys — walang datos na umaalis sa iyong device. Ang mga opsyonal na setting na ito ay nag-iimbak ng datos nang lokal upang matingnan, ma-export, o mabura mo ito; magagamit ang na-export na datos ng swipe sa pagsasanay ng mga modelo sa ibang lugar.</string>
+    <string name="privacy_section_intro">Ganap na offline ang Mr. Brown\'s Keyboard — walang datos na umaalis sa iyong device. Ang mga opsyonal na setting na ito ay nag-iimbak ng datos nang lokal upang matingnan, ma-export, o mabura mo ito; magagamit ang na-export na datos ng swipe sa pagsasanay ng mga modelo sa ibang lugar.</string>
     <string name="privacy_on_device_learning_header">On-Device na Pagkatuto</string>
     <string name="privacy_forget_learned_title">Kalimutan din ang natutunang data?</string>
     <string name="privacy_forget_learned_body">Naka-off na ngayon ang pagkatuto — walang bagong itatala. Gusto mo rin bang tanggalin ang lahat ng natutunan na (mga pattern ng parirala, paggamit ng salita, kasaysayan ng pagpili ng mungkahi, at mga pagwawasto sa swipe)? Hindi ito maibabalik.</string>
@@ -1039,7 +1039,7 @@
     <string name="calibration_touch_here">👆 Pindutin dito</string>
     <string name="calibration_min_readout">Min: %1$d%%</string>
     <string name="calibration_max_readout">Max: %1$d%%</string>
-    <string name="launcher_logo_desc">Logo ng Brown Keys</string>
+    <string name="launcher_logo_desc">Logo ng Mr. Brown\'s Keyboard</string>
     <string name="launcher_tagline">Privacy, lakas, at kontrol — na may utak.</string>
     <string name="launcher_step_enable">I-enable ang Keyboard</string>
     <string name="launcher_step_select">Piliin ang Keyboard</string>
@@ -1255,11 +1255,11 @@
     <string name="clipboard_entry_duration_desc_default">Gaano katagal mananatili ang mga entry bago awtomatikong ma-delete (-1 = hindi kailanman)</string>
     <string name="clipboard_entry_duration_never">Hindi mag-e-expire</string>
     <string name="clipboard_private_copy_header">🔒 Private na copy</string>
-    <string name="clipboard_private_copy_in_app_note">Sa loob ng app: ang editing action na \"Private na copy\" ay maaaring i-bind sa isang maikling swipe o karagdagang key (Pag-customize ng Maikling Swipe). Iniimbak nito ang kasalukuyang napili sa private na clipboard ng Brown Keys nang hindi ginagalaw ang system clipboard. May 🔒 badge ang mga private na entry; laging nagtatanong muna bago i-export ang isa sa system clipboard, at hindi kasama ang mga ito sa mga hindi naka-encrypt na backup (kasama ang mga ito sa mga naka-encrypt na backup).</string>
+    <string name="clipboard_private_copy_in_app_note">Sa loob ng app: ang editing action na \"Private na copy\" ay maaaring i-bind sa isang maikling swipe o karagdagang key (Pag-customize ng Maikling Swipe). Iniimbak nito ang kasalukuyang napili sa private na clipboard ng Mr. Brown\'s Keyboard nang hindi ginagalaw ang system clipboard. May 🔒 badge ang mga private na entry; laging nagtatanong muna bago i-export ang isa sa system clipboard, at hindi kasama ang mga ito sa mga hindi naka-encrypt na backup (kasama ang mga ito sa mga naka-encrypt na backup).</string>
     <string name="clipboard_url_handling_header">Paghawak ng URL</string>
     <string name="clipboard_custom_rules_browse">Hanapin ang custom.substitutions.json</string>
     <string name="clipboard_custom_rules_replace">Palitan ang mga custom na panuntunan</string>
-    <string name="clipboard_url_handling_note">Tandaan: tumatakbo ang paglilinis kapag nagse-save ang Brown Keys ng clip sa history nito, kaya laging malinis ang mga paste mula sa panel ng Brown Keys. Kapag naka-on ang \"Linisin din ang system clipboard\", ino-overwrite din ang Android system clipboard ng nalinis na URL, kaya malinis din ang mga paste sa ibang app (best-effort — habang may access lang sa clipboard ang keyboard). Kapag naka-off ito, nakikita pa rin ng ibang app ang orihinal na URL.</string>
+    <string name="clipboard_url_handling_note">Tandaan: tumatakbo ang paglilinis kapag nagse-save ang Mr. Brown\'s Keyboard ng clip sa history nito, kaya laging malinis ang mga paste mula sa panel ng Mr. Brown\'s Keyboard. Kapag naka-on ang \"Linisin din ang system clipboard\", ino-overwrite din ang Android system clipboard ng nalinis na URL, kaya malinis din ang mga paste sa ibang app (best-effort — habang may access lang sa clipboard ang keyboard). Kapag naka-off ito, nakikita pa rin ng ibang app ang orihinal na URL.</string>
     <string name="input_context_source_both">Built-in + Natutunan</string>
     <string name="input_context_source_learned_only">Natutunan Lang</string>
     <string name="input_context_source_static_only">Built-in Lang</string>
@@ -1365,7 +1365,7 @@
     <string name="clipboard_backup_import_completed">Tapos na ang import ng clipboard.</string>
     <string name="clipboard_backup_import_merge_note">Isinasama ang mga import sa kasalukuyang history nang walang ino-overwrite.</string>
     <string name="clipboard_backup_import_failed_title">Nabigo ang Import ng Clipboard</string>
-    <string name="clipboard_backup_import_failed">Nabigong i-import ang history ng clipboard:\n\n%1$s\n\nTiyaking valid na Brown Keys clipboard backup ang file.</string>
+    <string name="clipboard_backup_import_failed">Nabigong i-import ang history ng clipboard:\n\n%1$s\n\nTiyaking valid na Mr. Brown\'s Keyboard clipboard backup ang file.</string>
     <string name="clipboard_backup_zip_export_success_title">Matagumpay ang Buong Export ng Clipboard</string>
     <string name="clipboard_backup_zip_saved">Na-save ang clipboard backup kasama ang media.</string>
     <string name="clipboard_backup_zip_restore_hint">I-restore gamit ang I-import ang ZIP para mabawi ang lahat ng entry kasama ang mga larawan, video, at iba pang media.</string>
@@ -1375,7 +1375,7 @@
     <string name="clipboard_backup_zip_import_completed">Tapos na ang buong import ng clipboard.</string>
     <string name="clipboard_backup_zip_media_restored_note">Na-restore na ang lahat ng media file at thumbnail.</string>
     <string name="clipboard_backup_zip_import_failed_title">Nabigo ang ZIP Import ng Clipboard</string>
-    <string name="clipboard_backup_zip_import_failed">Nabigong i-import ang clipboard ZIP:\n\n%1$s\n\nTiyaking valid na Brown Keys clipboard ZIP backup ang file.</string>
+    <string name="clipboard_backup_zip_import_failed">Nabigong i-import ang clipboard ZIP:\n\n%1$s\n\nTiyaking valid na Mr. Brown\'s Keyboard clipboard ZIP backup ang file.</string>
     <string name="dictionary_backup_export_success_title">Matagumpay ang Export ng Diksyunaryo</string>
     <string name="dictionary_backup_export_disabled_words">Mga disabled na salita: %1$d</string>
     <string name="dictionary_backup_export_failed_title">Nabigo ang Export ng Diksyunaryo</string>
@@ -1521,7 +1521,7 @@
     </plurals>
 
     <!-- 2026-09-29 hardcoded-UI sweep (activities): launcher, dictionary, layouts, short swipes, themes, playground, manifest labels (reviewer=model) -->
-    <string name="launcher_step_enable_desc">I-on ang Brown Keys sa mga setting ng system</string>
+    <string name="launcher_step_enable_desc">I-on ang Mr. Brown\'s Keyboard sa mga setting ng system</string>
     <string name="launcher_step_select_desc">Palitan ang iyong default na input method</string>
     <string name="launcher_step_calibrate_desc">I-configure ang hanggang 8 subkey action bawat key</string>
     <string name="dict_tab_active">Aktibo</string>
@@ -1597,9 +1597,9 @@
     <string name="calibration_legend_short_range">Min - Max</string>
     <string name="calibration_legend_long_range">&gt; Max</string>
     <string name="calibration_percent_value">%1$d%%</string>
-    <string name="theme_builtin_cleverkeysdark_name">Brown Keys Madilim</string>
+    <string name="theme_builtin_cleverkeysdark_name">Mr. Brown\'s Keyboard Madilim</string>
     <string name="theme_builtin_cleverkeysdark_desc">Malalim na lila na may pilak na accent (default)</string>
-    <string name="theme_builtin_cleverkeyslight_name">Brown Keys Maliwanag</string>
+    <string name="theme_builtin_cleverkeyslight_name">Mr. Brown\'s Keyboard Maliwanag</string>
     <string name="theme_builtin_cleverkeyslight_desc">Pilak na mga key na may lilang accent</string>
     <string name="theme_builtin_dark_name">Madilim</string>
     <string name="theme_builtin_dark_desc">Klasikong madilim na tema na may asul na accent</string>
@@ -1866,11 +1866,11 @@
     </plurals>
     <!-- 2026-09-30 i18n: typed import/export/backup failure reasons and settings-import skip kinds (reviewer=model) -->
     <string name="io_error_file_not_found">Hindi mahanap o mabuksan ang file.</string>
-    <string name="io_error_permission_denied">Walang pahintulot ang Brown Keys na i-access ang file na ito.</string>
+    <string name="io_error_permission_denied">Walang pahintulot ang Mr. Brown\'s Keyboard na i-access ang file na ito.</string>
     <string name="io_error_invalid_format">Wala sa inaasahang format ang file, o sira ito.</string>
-    <string name="io_error_newer_version">Ginawa ang file ng mas bagong bersyon ng Brown Keys. I-update ang app at subukan ulit.</string>
+    <string name="io_error_newer_version">Ginawa ang file ng mas bagong bersyon ng Mr. Brown\'s Keyboard. I-update ang app at subukan ulit.</string>
     <string name="io_error_out_of_space">Kulang ang storage space.</string>
-    <string name="io_error_too_large">Mas malaki ang file kaysa sa kayang ligtas na i-import ng Brown Keys.</string>
+    <string name="io_error_too_large">Mas malaki ang file kaysa sa kayang ligtas na i-import ng Mr. Brown\'s Keyboard.</string>
     <string name="io_error_wrong_password_or_corrupt">Maling password ng backup, o sira o binago ang file.</string>
     <string name="io_error_no_backup_password">Naka-encrypt ang backup na ito at walang available na password ng backup.</string>
     <string name="io_error_wrong_backup_kind">Hindi naglalaman ang backup na ito ng uri ng data na inaasahan ng import na ito.</string>
@@ -1916,7 +1916,7 @@
     <string name="cmd_copy">I-copy</string>
     <string name="cmd_copy_desc">I-copy ang napiling text sa clipboard</string>
     <string name="cmd_copy_private">Private na Copy</string>
-    <string name="cmd_copy_private_desc">I-copy sa Brown Keys lang, hindi kailanman sa system clipboard</string>
+    <string name="cmd_copy_private_desc">I-copy sa Mr. Brown\'s Keyboard lang, hindi kailanman sa system clipboard</string>
     <string name="cmd_paste">I-paste</string>
     <string name="cmd_paste_desc">I-paste mula sa clipboard</string>
     <string name="cmd_cut">I-cut</string>

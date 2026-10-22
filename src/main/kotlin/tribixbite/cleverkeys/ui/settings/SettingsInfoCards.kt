@@ -73,7 +73,7 @@ internal fun SettingsActivity.VersionInfoCard() {
                     // no-history path — version info is not sensitive, and entering the
                     // clipboard history is desirable for the bug-reporting flow it serves.
                     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    cm.setPrimaryClip(ClipData.newPlainText("CleverKeys version", payload))
+                    cm.setPrimaryClip(ClipData.newPlainText("Mr. Brown's Keyboard version", payload))
                     Toast.makeText(context, toastCopied, Toast.LENGTH_SHORT).show()
                 }
             ),

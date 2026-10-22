@@ -219,7 +219,7 @@ data class LauncherColors(
     /** Circular chip behind the GitHub / Settings top-bar icons. */
     val topIconChipBackground: Color,
     val topIconTint: Color,
-    /** "Brown Keys" display title. */
+    /** "Mr. Brown's Keyboard" display title. */
     val title: Color,
     /** Tagline under the title; the footer uses this at 50% alpha. */
     val subtitle: Color,
@@ -445,7 +445,7 @@ fun LauncherScreen(
             if (!isKeyboardVisible) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = "Brown Keys",
+                        text = "Mr. Brown's Keyboard",
                         style = MaterialTheme.typography.displayMedium.copy(
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 1.sp

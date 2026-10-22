@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- <string name="app_name_debug">Brown Keys (Debug)</string> -->
+    <!-- <string name="app_name_debug">Mr. Brown's Keyboard (Debug)</string> -->
     <!-- <string name="pref_portrait_unfolded">In portrait mode unfolded</string> -->
     <!-- <string name="pref_landscape_unfolded">In landscape mode unfolded</string> -->
     <string name="pref_layout_e_system">시스템 설정</string>
@@ -31,7 +31,7 @@
     <string name="key_descr_change_method">키보드 전환</string>
     <string name="key_descr_voice_typing">음성 입력</string>
     <string name="key_descr_copy">복사</string>
-    <string name="key_descr_copy_private">비공개 복사(시스템 클립보드가 아닌 Brown Keys 전용)</string>
+    <string name="key_descr_copy_private">비공개 복사(시스템 클립보드가 아닌 Mr. Brown\'s Keyboard 전용)</string>
     <string name="key_descr_paste">붙여넣기</string>
     <string name="key_descr_cut">자르기</string>
     <string name="key_descr_selectAll">전부 선택</string>
@@ -100,8 +100,8 @@
     <string name="clipboard_edit_error">항목을 업데이트하지 못했습니다</string>
 
     <!-- #156 Private copy -->
-    <string name="private_copy_toolbar_label">Brown Keys: 비공개 복사</string>
-    <string name="private_copy_toast">Brown Keys에 비공개로 복사했습니다</string>
+    <string name="private_copy_toolbar_label">Mr. Brown\'s Keyboard: 비공개 복사</string>
+    <string name="private_copy_toast">Mr. Brown\'s Keyboard에 비공개로 복사했습니다</string>
     <string name="private_copy_expose_dialog_title">시스템 클립보드에 복사하시겠습니까?</string>
     <string name="private_copy_expose_dialog_message">이 항목은 비공개로 복사되었습니다. 시스템 클립보드에 복사하면 포그라운드 앱과 다른 클립보드 관리자에 텍스트가 노출됩니다. 그래도 복사하시겠습니까?</string>
     <string name="private_copy_expose_dialog_confirm">복사</string>
@@ -112,7 +112,7 @@
     <string name="clipboard_filter_private_only_hint">비공개로 복사한 항목(🔒)만 표시</string>
 
     <!-- Settings Activity (Material 3) -->
-    <string name="settings_title">⚙️ Brown Keys 설정</string>
+    <string name="settings_title">⚙️ Mr. Brown\'s Keyboard 설정</string>
     <string name="settings_description">최적의 입력 환경을 위해 키보드 설정을 구성합니다.</string>
 
     <!-- Swipe Typing Section -->
@@ -270,7 +270,7 @@
     <string name="short_swipe_reset_all">모두 초기화</string>
     <string name="short_swipe_tap_hint">아래 키를 탭하여 짧은 스와이프 제스처를 사용자 지정하세요</string>
     <string name="short_swipe_instruction_title">사용자 지정할 키를 탭하세요</string>
-    <string name="short_swipe_instruction_body">아래 키보드는 실제 Brown Keys 키보드입니다.\n키를 탭하여 짧은 스와이프 동작을 추가하세요.</string>
+    <string name="short_swipe_instruction_body">아래 키보드는 실제 Mr. Brown\'s Keyboard 키보드입니다.\n키를 탭하여 짧은 스와이프 동작을 추가하세요.</string>
     <string name="short_swipe_custom_mappings">사용자 지정 매핑</string>
     <string name="theme_settings_title">키보드 테마</string>
     <string name="theme_restart_keyboard">키보드 재시작</string>
@@ -349,7 +349,7 @@
     <string name="accessibility_swipe_complete_title">스와이프 완료</string>
     <string name="accessibility_swipe_complete_desc">스와이프 제스처 완료 시 진동합니다</string>
     <string name="advanced_ime_prompt_title">기본 키보드 알림</string>
-    <string name="advanced_ime_prompt_desc">부팅마다 한 번 Brown Keys를 기본 키보드로 설정하도록 알립니다. 끄면 다시 묻지 않습니다.</string>
+    <string name="advanced_ime_prompt_desc">부팅마다 한 번 Mr. Brown\'s Keyboard를 기본 키보드로 설정하도록 알립니다. 끄면 다시 묻지 않습니다.</string>
     <string name="advanced_swipe_debug_log_title">스와이프 디버그 로그</string>
     <string name="advanced_swipe_debug_log_desc">스와이프 제스처의 실시간 파이프라인 분석（logcat 필요）</string>
     <string name="advanced_detailed_logging_title">상세 로깅</string>
@@ -453,11 +453,11 @@
     <string name="clipboard_swipe_deleted">삭제됨</string>
     <string name="clipboard_swipe_undo">실행 취소</string>
     <string name="clipboard_private_copy_other_apps_title">다른 앱에서 개인 복사</string>
-    <string name="clipboard_private_copy_other_apps_desc">다른 앱의 텍스트 선택 메뉴에 \"개인 복사\"를 추가합니다. 선택한 텍스트를 Brown Keys에만 복사하고 시스템 클립보드에는 저장하지 않습니다. 활성화하면 다른 앱에서 볼 수 있는 앱 항목이 추가됩니다.</string>
+    <string name="clipboard_private_copy_other_apps_desc">다른 앱의 텍스트 선택 메뉴에 \"개인 복사\"를 추가합니다. 선택한 텍스트를 Mr. Brown\'s Keyboard에만 복사하고 시스템 클립보드에는 저장하지 않습니다. 활성화하면 다른 앱에서 볼 수 있는 앱 항목이 추가됩니다.</string>
     <string name="clipboard_sanitize_links_title">추적 매개변수 제거</string>
     <string name="clipboard_sanitize_links_desc">복사한 URL에서 utm_*, fbclid 등을 제거합니다. ClearURLs를 기반으로 합니다.</string>
     <string name="clipboard_sanitize_system_title">시스템 클립보드도 정리</string>
-    <string name="clipboard_sanitize_system_desc">복사한 URL이 정리되면 시스템 클립보드도 덮어씁니다. Brown Keys 패널뿐만 아니라 모든 앱에서 붙여넣기가 정리됩니다.</string>
+    <string name="clipboard_sanitize_system_desc">복사한 URL이 정리되면 시스템 클립보드도 덮어씁니다. Mr. Brown\'s Keyboard 패널뿐만 아니라 모든 앱에서 붙여넣기가 정리됩니다.</string>
     <string name="clipboard_embed_enrich_title">공유용 임베드 개선</string>
     <string name="clipboard_embed_enrich_desc">x.com→fxtwitter.com, reddit.com→rxddit.com 등으로 재작성합니다</string>
     <string name="clipboard_custom_rules_title">사용자 정의 규칙 사용</string>
@@ -789,7 +789,7 @@
     <string name="gif_remove_all_body">가져온 모든 GIF 팩, 썸네일, 데이터베이스가 삭제됩니다. 이 작업은 되돌릴 수 없습니다.</string>
     <string name="gif_remove_all_confirm">모두 제거</string>
     <string name="gif_remove_pack_body">이 팩의 모든 GIF를 삭제하고 저장 공간을 회수합니다.</string>
-    <string name="privacy_section_intro">Brown Keys는 완전히 오프라인으로 작동하며 데이터가 기기를 벗어나지 않습니다. 이 선택 설정은 데이터를 기기에 저장해 확인·내보내기·삭제할 수 있게 합니다. 내보낸 스와이프 데이터는 다른 곳에서 모델 학습에 사용할 수 있습니다.</string>
+    <string name="privacy_section_intro">Mr. Brown\'s Keyboard는 완전히 오프라인으로 작동하며 데이터가 기기를 벗어나지 않습니다. 이 선택 설정은 데이터를 기기에 저장해 확인·내보내기·삭제할 수 있게 합니다. 내보낸 스와이프 데이터는 다른 곳에서 모델 학습에 사용할 수 있습니다.</string>
     <string name="privacy_on_device_learning_header">기기 내 학습</string>
     <string name="privacy_forget_learned_title">학습된 데이터도 삭제할까요?</string>
     <string name="privacy_forget_learned_body">학습이 꺼졌습니다 — 새로 기록되는 내용은 없습니다. 이미 학습된 모든 것(표현 패턴, 단어 사용, 추천 선택 기록, 스와이프 수정)도 삭제할까요? 이 작업은 되돌릴 수 없습니다.</string>
@@ -1024,7 +1024,7 @@
     <string name="calibration_touch_here">👆 여기를 터치하세요</string>
     <string name="calibration_min_readout">최소: %1$d%%</string>
     <string name="calibration_max_readout">최대: %1$d%%</string>
-    <string name="launcher_logo_desc">Brown Keys 로고</string>
+    <string name="launcher_logo_desc">Mr. Brown\'s Keyboard 로고</string>
     <string name="launcher_tagline">프라이버시, 성능, 제어 — 두뇌까지.</string>
     <string name="launcher_step_enable">키보드 활성화</string>
     <string name="launcher_step_select">키보드 선택</string>
@@ -1238,11 +1238,11 @@
     <string name="clipboard_entry_duration_desc_default">항목이 자동 삭제되기 전까지 보존되는 기간(-1 = 만료 안 함)</string>
     <string name="clipboard_entry_duration_never">만료 안 함</string>
     <string name="clipboard_private_copy_header">🔒 비공개 복사</string>
-    <string name="clipboard_private_copy_in_app_note">앱 내: \"비공개 복사\" 편집 동작을 짧은 스와이프나 추가 키에 할당할 수 있습니다(짧은 스와이프 사용자 지정). 현재 선택 항목을 시스템 클립보드를 건드리지 않고 Brown Keys의 비공개 클립보드에 저장합니다. 비공개 항목에는 🔒 배지가 표시됩니다. 시스템 클립보드로 내보낼 때는 항상 먼저 확인하며, 평문 백업에서는 제외됩니다(암호화된 백업에는 포함됨).</string>
+    <string name="clipboard_private_copy_in_app_note">앱 내: \"비공개 복사\" 편집 동작을 짧은 스와이프나 추가 키에 할당할 수 있습니다(짧은 스와이프 사용자 지정). 현재 선택 항목을 시스템 클립보드를 건드리지 않고 Mr. Brown\'s Keyboard의 비공개 클립보드에 저장합니다. 비공개 항목에는 🔒 배지가 표시됩니다. 시스템 클립보드로 내보낼 때는 항상 먼저 확인하며, 평문 백업에서는 제외됩니다(암호화된 백업에는 포함됨).</string>
     <string name="clipboard_url_handling_header">URL 처리</string>
     <string name="clipboard_custom_rules_browse">custom.substitutions.json 찾아보기</string>
     <string name="clipboard_custom_rules_replace">사용자 정의 규칙 교체</string>
-    <string name="clipboard_url_handling_note">참고: 정리는 Brown Keys가 클립을 기록에 저장할 때 실행되므로, Brown Keys 패널에서 붙여넣는 내용은 항상 정리되어 있습니다. \"시스템 클립보드도 정리\"가 켜져 있으면 Android 시스템 클립보드도 정리된 URL로 덮어쓰므로 다른 앱에서 붙여넣을 때도 정리됩니다(최선 노력 — 키보드에 클립보드 접근 권한이 있는 동안에만). 꺼져 있으면 다른 앱에는 원래 URL이 그대로 보입니다.</string>
+    <string name="clipboard_url_handling_note">참고: 정리는 Mr. Brown\'s Keyboard가 클립을 기록에 저장할 때 실행되므로, Mr. Brown\'s Keyboard 패널에서 붙여넣는 내용은 항상 정리되어 있습니다. \"시스템 클립보드도 정리\"가 켜져 있으면 Android 시스템 클립보드도 정리된 URL로 덮어쓰므로 다른 앱에서 붙여넣을 때도 정리됩니다(최선 노력 — 키보드에 클립보드 접근 권한이 있는 동안에만). 꺼져 있으면 다른 앱에는 원래 URL이 그대로 보입니다.</string>
     <string name="input_context_source_both">기본 제공 + 학습됨</string>
     <string name="input_context_source_learned_only">학습된 데이터만</string>
     <string name="input_context_source_static_only">기본 제공만</string>
@@ -1340,7 +1340,7 @@
     <string name="clipboard_backup_import_completed">클립보드 가져오기가 완료되었습니다.</string>
     <string name="clipboard_backup_import_merge_note">가져온 항목은 기존 기록을 덮어쓰지 않고 병합됩니다.</string>
     <string name="clipboard_backup_import_failed_title">클립보드 가져오기 실패</string>
-    <string name="clipboard_backup_import_failed">클립보드 기록을 가져오지 못했습니다:\n\n%1$s\n\n파일이 올바른 Brown Keys 클립보드 백업인지 확인하세요.</string>
+    <string name="clipboard_backup_import_failed">클립보드 기록을 가져오지 못했습니다:\n\n%1$s\n\n파일이 올바른 Mr. Brown\'s Keyboard 클립보드 백업인지 확인하세요.</string>
     <string name="clipboard_backup_zip_export_success_title">클립보드 전체 내보내기 성공</string>
     <string name="clipboard_backup_zip_saved">미디어를 포함한 클립보드 백업을 저장했습니다.</string>
     <string name="clipboard_backup_zip_restore_hint">이미지, 동영상 및 기타 미디어를 포함한 모든 항목을 복구하려면 \'ZIP 가져오기\'로 복원하세요.</string>
@@ -1350,7 +1350,7 @@
     <string name="clipboard_backup_zip_import_completed">클립보드 전체 가져오기가 완료되었습니다.</string>
     <string name="clipboard_backup_zip_media_restored_note">모든 미디어 파일과 썸네일이 복원되었습니다.</string>
     <string name="clipboard_backup_zip_import_failed_title">클립보드 ZIP 가져오기 실패</string>
-    <string name="clipboard_backup_zip_import_failed">클립보드 ZIP을 가져오지 못했습니다:\n\n%1$s\n\n파일이 올바른 Brown Keys 클립보드 ZIP 백업인지 확인하세요.</string>
+    <string name="clipboard_backup_zip_import_failed">클립보드 ZIP을 가져오지 못했습니다:\n\n%1$s\n\n파일이 올바른 Mr. Brown\'s Keyboard 클립보드 ZIP 백업인지 확인하세요.</string>
     <string name="dictionary_backup_export_success_title">사전 내보내기 성공</string>
     <string name="dictionary_backup_export_disabled_words">비활성화된 단어: %1$d</string>
     <string name="dictionary_backup_export_failed_title">사전 내보내기 실패</string>
@@ -1473,7 +1473,7 @@
     </plurals>
 
     <!-- 2026-09-29 hardcoded-UI sweep (activities): launcher, dictionary, layouts, short swipes, themes, playground, manifest labels (reviewer=model) -->
-    <string name="launcher_step_enable_desc">시스템 설정에서 Brown Keys를 켜세요</string>
+    <string name="launcher_step_enable_desc">시스템 설정에서 Mr. Brown\'s Keyboard를 켜세요</string>
     <string name="launcher_step_select_desc">기본 입력 방법을 전환하세요</string>
     <string name="launcher_step_calibrate_desc">키당 최대 8개의 하위 키 동작을 구성하세요</string>
     <string name="dict_tab_active">활성</string>
@@ -1549,9 +1549,9 @@
     <string name="calibration_legend_short_range">최소 - 최대</string>
     <string name="calibration_legend_long_range">&gt; 최대</string>
     <string name="calibration_percent_value">%1$d%%</string>
-    <string name="theme_builtin_cleverkeysdark_name">Brown Keys 다크</string>
+    <string name="theme_builtin_cleverkeysdark_name">Mr. Brown\'s Keyboard 다크</string>
     <string name="theme_builtin_cleverkeysdark_desc">실버 포인트의 딥 퍼플(기본값)</string>
-    <string name="theme_builtin_cleverkeyslight_name">Brown Keys 라이트</string>
+    <string name="theme_builtin_cleverkeyslight_name">Mr. Brown\'s Keyboard 라이트</string>
     <string name="theme_builtin_cleverkeyslight_desc">보라색 포인트의 실버 키</string>
     <string name="theme_builtin_dark_name">다크</string>
     <string name="theme_builtin_dark_desc">파란색 포인트의 클래식 다크 테마</string>
@@ -1809,11 +1809,11 @@
     </plurals>
     <!-- 2026-09-30 i18n: typed import/export/backup failure reasons and settings-import skip kinds (reviewer=model) -->
     <string name="io_error_file_not_found">파일을 찾거나 열 수 없습니다.</string>
-    <string name="io_error_permission_denied">Brown Keys에 이 파일에 대한 액세스 권한이 없습니다.</string>
+    <string name="io_error_permission_denied">Mr. Brown\'s Keyboard에 이 파일에 대한 액세스 권한이 없습니다.</string>
     <string name="io_error_invalid_format">파일 형식이 예상과 다르거나 파일이 손상되었습니다.</string>
-    <string name="io_error_newer_version">이 파일은 최신 버전의 Brown Keys에서 만들어졌습니다. 앱을 업데이트한 후 다시 시도하세요.</string>
+    <string name="io_error_newer_version">이 파일은 최신 버전의 Mr. Brown\'s Keyboard에서 만들어졌습니다. 앱을 업데이트한 후 다시 시도하세요.</string>
     <string name="io_error_out_of_space">저장 공간이 부족합니다.</string>
-    <string name="io_error_too_large">파일이 너무 커서 Brown Keys에서 안전하게 가져올 수 없습니다.</string>
+    <string name="io_error_too_large">파일이 너무 커서 Mr. Brown\'s Keyboard에서 안전하게 가져올 수 없습니다.</string>
     <string name="io_error_wrong_password_or_corrupt">백업 비밀번호가 틀렸거나 파일이 손상 또는 변조되었습니다.</string>
     <string name="io_error_no_backup_password">이 백업은 암호화되어 있으며 사용할 수 있는 백업 비밀번호가 없습니다.</string>
     <string name="io_error_wrong_backup_kind">이 백업에는 이 가져오기에 필요한 종류의 데이터가 없습니다.</string>
@@ -1859,7 +1859,7 @@
     <string name="cmd_copy">복사</string>
     <string name="cmd_copy_desc">선택한 텍스트를 클립보드에 복사</string>
     <string name="cmd_copy_private">비공개 복사</string>
-    <string name="cmd_copy_private_desc">선택 영역을 Brown Keys에만 복사(시스템 클립보드에는 복사 안 함)</string>
+    <string name="cmd_copy_private_desc">선택 영역을 Mr. Brown\'s Keyboard에만 복사(시스템 클립보드에는 복사 안 함)</string>
     <string name="cmd_paste">붙여넣기</string>
     <string name="cmd_paste_desc">클립보드에서 붙여넣기</string>
     <string name="cmd_cut">자르기</string>
