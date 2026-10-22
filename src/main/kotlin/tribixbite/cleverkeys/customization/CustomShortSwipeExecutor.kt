@@ -362,6 +362,12 @@ class CustomShortSwipeExecutor(private val context: Context) {
 
                 // Language toggle commands (v1.2.0) - handled via KeyValue
                 "primaryLangToggle", "secondaryLangToggle",
+                // One-handed mode (HeliBoard gap analysis phase 2): these change the keyboard's
+                // SHAPE, so they are service-level like the minimize commands below. Being listed
+                // here is what keeps them out of this `when`'s `else` branch — KeyValue.getKeyByName
+                // is total, so an unlisted name becomes a String key and the executor would commit
+                // the literal text "one_handed_toggle" into the user's editor.
+                "one_handed_toggle", "one_handed_side",
                 // Keyboard event commands - handled via KeyValue
                 "config", "switch_text", "switch_numeric", "switch_emoji",
                 "switch_back_emoji", "switch_clipboard", "switch_back_clipboard",

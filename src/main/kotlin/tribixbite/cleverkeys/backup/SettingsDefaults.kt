@@ -2,6 +2,7 @@ package tribixbite.cleverkeys.backup
 
 import tribixbite.cleverkeys.Defaults
 import tribixbite.cleverkeys.KeyboardHeightPrefs
+import tribixbite.cleverkeys.OneHandedConfig
 import tribixbite.cleverkeys.ToolbarConfig
 import tribixbite.cleverkeys.autocorrect.AutocorrectTuning
 
@@ -151,6 +152,10 @@ internal val SETTINGS_DEFAULTS: Map<String, PrefValue> = mapOf(
     // a key present in Config but absent from this map is silently dropped from backups.
     ToolbarConfig.PREF_ENABLED to PrefValue.Bool(Defaults.TOOLBAR_ENABLED),
     ToolbarConfig.PREF_KEYS to PrefValue.Str(Defaults.TOOLBAR_KEYS),
+    // One-handed mode (HeliBoard gap analysis phase 2), for the same reason as the toolbar above.
+    OneHandedConfig.PREF_ENABLED to PrefValue.Bool(Defaults.ONE_HANDED_ENABLED),
+    OneHandedConfig.PREF_SIDE to PrefValue.Str(Defaults.ONE_HANDED_SIDE),
+    OneHandedConfig.PREF_SCALE to PrefValue.IntV(Defaults.ONE_HANDED_SCALE),
     "show_exact_typed_word" to PrefValue.Bool(Defaults.SHOW_EXACT_TYPED_WORD),
     "context_aware_predictions_enabled" to PrefValue.Bool(Defaults.CONTEXT_AWARE_PREDICTIONS_ENABLED),
     "personalized_learning_enabled" to PrefValue.Bool(Defaults.PERSONALIZED_LEARNING_ENABLED),

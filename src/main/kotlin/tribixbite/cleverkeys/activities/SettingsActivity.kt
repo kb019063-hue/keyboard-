@@ -437,6 +437,14 @@ class SettingsActivity : ComponentActivity(), SharedPreferences.OnSharedPreferen
     internal var toolbarEnabled by mutableStateOf(Defaults.TOOLBAR_ENABLED)
     internal var toolbarKeys by mutableStateOf(ToolbarConfig.DEFAULT_KEYS)
 
+    // One-handed mode (HeliBoard gap analysis phase 2). oneHandedSide holds the persisted spelling
+    // ("left"/"right"), not the Side enum: OneHandedConfig.parseSide is the single place that turns
+    // one into the other, so a value this screen did not write — a restored backup, a hand-edited
+    // preference — lands on the default rather than throwing here.
+    internal var oneHandedEnabled by mutableStateOf(Defaults.ONE_HANDED_ENABLED)
+    internal var oneHandedSide by mutableStateOf(Defaults.ONE_HANDED_SIDE)
+    internal var oneHandedScale by mutableStateOf(Defaults.ONE_HANDED_SCALE)
+
     // Swipe trail appearance settings
     internal var swipeTrailEnabled by mutableStateOf(Defaults.SWIPE_TRAIL_ENABLED)
     internal var swipeTrailEffect by mutableStateOf(Defaults.SWIPE_TRAIL_EFFECT)
@@ -550,6 +558,9 @@ class SettingsActivity : ComponentActivity(), SharedPreferences.OnSharedPreferen
     internal var toolbarSectionExpanded: Boolean
         get() = settingsViewModel.toolbarSectionExpanded
         set(value) { settingsViewModel.toolbarSectionExpanded = value }
+    internal var oneHandedSectionExpanded: Boolean
+        get() = settingsViewModel.oneHandedSectionExpanded
+        set(value) { settingsViewModel.oneHandedSectionExpanded = value }
     internal var inputSectionExpanded: Boolean
         get() = settingsViewModel.inputSectionExpanded
         set(value) { settingsViewModel.inputSectionExpanded = value }

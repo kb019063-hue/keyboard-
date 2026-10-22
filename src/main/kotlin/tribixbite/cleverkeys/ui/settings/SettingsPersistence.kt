@@ -1,6 +1,7 @@
 package tribixbite.cleverkeys.ui.settings
 
 import tribixbite.cleverkeys.KeyboardHeightPrefs
+import tribixbite.cleverkeys.OneHandedConfig
 import tribixbite.cleverkeys.ToolbarConfig
 import android.content.Intent
 import android.content.SharedPreferences
@@ -406,6 +407,14 @@ internal fun SettingsActivity.loadCurrentSettings() {
         // longer knows, so a command removed by a future upstream merge cannot leave a dead button.
         toolbarEnabled = prefs.getSafeBoolean(ToolbarConfig.PREF_ENABLED, Defaults.TOOLBAR_ENABLED)
         toolbarKeys = ToolbarConfig.parse(prefs.getSafeString(ToolbarConfig.PREF_KEYS, Defaults.TOOLBAR_KEYS))
+
+        // One-handed mode (HeliBoard gap analysis phase 2). The scale is clamped here as well as in
+        // Config.refresh, so the slider can never be handed a value outside its own range.
+        oneHandedEnabled = prefs.getSafeBoolean(OneHandedConfig.PREF_ENABLED, Defaults.ONE_HANDED_ENABLED)
+        oneHandedSide = prefs.getSafeString(OneHandedConfig.PREF_SIDE, Defaults.ONE_HANDED_SIDE)
+        oneHandedScale = OneHandedConfig.clampScale(
+            prefs.getSafeInt(OneHandedConfig.PREF_SCALE, Defaults.ONE_HANDED_SCALE)
+        )
 
         // Swipe trail appearance settings
         swipeTrailEnabled = prefs.getSafeBoolean("swipe_trail_enabled", Defaults.SWIPE_TRAIL_ENABLED)

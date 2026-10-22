@@ -32,7 +32,8 @@ class PreferenceUIUpdateHandler(
     private val layoutBridge: LayoutBridge?,
     private val keyboardView: () -> Keyboard2View?,
     private val suggestionBar: () -> SuggestionBar?,
-    private val toolbar: () -> KeyboardToolbar?
+    private val toolbar: () -> KeyboardToolbar?,
+    private val oneHanded: () -> OneHandedRoot?
 ) {
     /**
      * Handle UI updates for preference changes.
@@ -48,6 +49,9 @@ class PreferenceUIUpdateHandler(
 
         // Update the toolbar (visibility and button set)
         updateToolbar()
+
+        // Update one-handed mode (enable, side, scale)
+        updateOneHanded()
 
         // Re-warm the swipe engine after a dictionary mutation
         rewarmAfterDictionaryEditIfNeeded(key)
@@ -80,6 +84,16 @@ class PreferenceUIUpdateHandler(
      */
     private fun updateToolbar() {
         config?.let { cfg -> toolbar()?.applyFromConfig(cfg) }
+    }
+
+    /**
+     * Re-apply one-handed mode from the current config, so toggling it or changing its side or
+     * scale in settings takes effect on the open keyboard without restarting the IME. Read through
+     * a provider for the same reason as [updateToolbar] — and here the reason is stronger, because
+     * this root is also what `setInputView` hands the platform on every theme change and pane swap.
+     */
+    private fun updateOneHanded() {
+        config?.let { cfg -> oneHanded()?.applyFromConfig(cfg) }
     }
 
     /**
@@ -131,6 +145,7 @@ class PreferenceUIUpdateHandler(
          * @param keyboardView Supplies the CURRENT keyboard view (nullable result)
          * @param suggestionBar Supplies the CURRENT suggestion bar (nullable result)
      * @param toolbar Supplies the CURRENT toolbar row (nullable result)
+     * @param oneHanded Supplies the CURRENT one-handed root wrapper (nullable result)
          * @return A new PreferenceUIUpdateHandler instance
          */
         @JvmStatic
@@ -139,9 +154,12 @@ class PreferenceUIUpdateHandler(
             layoutBridge: LayoutBridge?,
             keyboardView: () -> Keyboard2View?,
             suggestionBar: () -> SuggestionBar?,
-            toolbar: () -> KeyboardToolbar?
+            toolbar: () -> KeyboardToolbar?,
+            oneHanded: () -> OneHandedRoot?
         ): PreferenceUIUpdateHandler {
-            return PreferenceUIUpdateHandler(config, layoutBridge, keyboardView, suggestionBar, toolbar)
+            return PreferenceUIUpdateHandler(
+                config, layoutBridge, keyboardView, suggestionBar, toolbar, oneHanded
+            )
         }
     }
 }

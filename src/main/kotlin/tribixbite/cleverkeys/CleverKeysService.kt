@@ -111,6 +111,17 @@ class CleverKeysService : InputMethodService(),
     private var _suggestionBar: SuggestionBar? = null
     // Toolbar row above the suggestion strip (HeliBoard gap analysis phase 1).
     private var _keyboardToolbar: KeyboardToolbar? = null
+
+    /**
+     * The IME window root while one-handed mode may be active (HeliBoard gap analysis phase 2).
+     *
+     * Unlike the views inside it, this is created once and kept for the service's lifetime: it is
+     * the wrapper every `setInputView` passes through, so it is never rebuilt by a theme change or
+     * a pane swap — those replace its CHILD. That is why a direct reference is safe here even
+     * though `PreferenceUIUpdateHandler` deliberately refuses to hold references to the views
+     * within, and why the handler still reads it through a provider for consistency.
+     */
+    private var _oneHandedRoot: OneHandedRoot? = null
     private var _inputViewContainer: LinearLayout? = null
 
     // Prediction context tracking (v1.32.342: extracted to PredictionContextTracker)
@@ -875,9 +886,62 @@ class CleverKeysService : InputMethodService(),
         if (parent != null && parent is ViewGroup) {
             parent.removeView(shown)
         }
-        super.setInputView(shown)
+        // One-handed mode (HeliBoard gap analysis phase 2): the platform gets the wrapper, and the
+        // requested view becomes its scaled child. host() is idempotent, so the repeated calls this
+        // sees — theme change, pane swap, minimize/expand — never nest a root inside a root.
+        //
+        // WindowLayoutUtils is unaffected: it configures android.R.id.inputArea, the platform
+        // container this root sits inside, and sets that container's background transparent, which
+        // is what lets the gap beside a shrunken keyboard show the app behind it.
+        val root = oneHandedRoot().host(shown)
+        root.scaleSuppressed = _minimizer.style != null
+        super.setInputView(root)
         updateSoftInputWindowLayoutParams()
-        shown.requestApplyInsets()
+        root.requestApplyInsets()
+    }
+
+    /** The one-handed wrapper root, created on first use and kept for the service's lifetime. */
+    private fun oneHandedRoot(): OneHandedRoot =
+        _oneHandedRoot ?: OneHandedRoot(this) {
+            // lateinit guard: the root is created on the first setInputView, which can precede the
+            // first keyboard view.
+            if (::_keyboardView.isInitialized) _keyboardView.getTheme() else null
+        }.also { root ->
+            root.onStopOneHanded = { setOneHandedEnabled(false) }
+            _config?.let { root.applyFromConfig(it) }
+            _oneHandedRoot = root
+        }
+
+    /**
+     * Toggle one-handed mode. Reached through the `one_handed_toggle` command, so it works from a
+     * phase-1 toolbar button, a short swipe or an extra key with no second dispatch path.
+     */
+    fun toggleOneHandedMode() {
+        setOneHandedEnabled(!(_config?.one_handed_enabled ?: false))
+    }
+
+    /** Move the shrunken keyboard to the other edge (`one_handed_side` command). */
+    fun switchOneHandedSide() {
+        val next = OneHandedConfig.otherSide(OneHandedConfig.parseSide(_config?.one_handed_side))
+        // Naming the key constant at the write site is not just tidiness: SettingsSurfaceDriftTest's
+        // F-8 scan resolves `const val` names to find a key's writers, and a generic
+        // `writePref(key, value)` helper reads as having none, so the key would be reported as a
+        // live preference nothing can change.
+        DirectBootAwarePreferences.get_shared_preferences(this).edit()
+            .putString(OneHandedConfig.PREF_SIDE, OneHandedConfig.serializeSide(next))
+            .apply()
+    }
+
+    /**
+     * Both writers above rely on the existing chain to apply the change: ConfigurationManager
+     * refreshes [Config], then [onSharedPreferenceChanged] reaches
+     * `PreferenceUIUpdateHandler.updateOneHanded`, so the open keyboard changes with no IME restart
+     * and no second code path that could disagree with what Settings writes.
+     */
+    private fun setOneHandedEnabled(enabled: Boolean) {
+        DirectBootAwarePreferences.get_shared_preferences(this).edit()
+            .putBoolean(OneHandedConfig.PREF_ENABLED, enabled)
+            .apply()
     }
 
     /** gh #175: collapse the keyboard to [style] until it is tapped or hidden. */
@@ -1271,7 +1335,8 @@ class CleverKeysService : InputMethodService(),
                 _layoutBridge,
                 { _keyboardView },
                 { _suggestionBar },
-                { _keyboardToolbar }
+                { _keyboardToolbar },
+                { _oneHandedRoot }
             )
         }
 

@@ -52,6 +52,7 @@ class SettingsViewModel : ViewModel() {
     var appearanceSectionExpanded by mutableStateOf(false)
     var swipeTrailSectionExpanded by mutableStateOf(false)
     var toolbarSectionExpanded by mutableStateOf(false)
+    var oneHandedSectionExpanded by mutableStateOf(false)
     var inputSectionExpanded by mutableStateOf(false)
     var swipeCorrectionsSectionExpanded by mutableStateOf(false)
     var gestureTuningSectionExpanded by mutableStateOf(false)

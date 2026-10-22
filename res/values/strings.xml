@@ -2438,6 +2438,36 @@
     <string name="cmd_minimize_bar_desc">Collapse the keyboard to a thin bar; tap it to bring the keyboard back</string>
     <string name="cmd_minimize_fab">Minimize to Floating Button</string>
     <string name="cmd_minimize_fab_desc">Collapse the keyboard to a floating button so the app gets the whole screen; tap it to bring the keyboard back</string>
+
+    <!-- One-handed mode (HeliBoard gap analysis phase 2). Grouped with the minimize commands
+         above because all three change the SHAPE of the keyboard rather than what it types.
+         Names follow the cmd_<name> convention CommandRegistry expects, so they are localized
+         wherever the command catalogue is. English only, like the phase-1 toolbar strings. -->
+    <string name="cmd_one_handed_toggle">One-Handed Mode</string>
+    <string name="cmd_one_handed_toggle_desc">Shrink the keyboard and hug it to one side so one thumb can reach it</string>
+    <string name="cmd_one_handed_side">Switch One-Handed Side</string>
+    <string name="cmd_one_handed_side_desc">Move the shrunken keyboard to the other side of the screen</string>
+    <!-- The exit control drawn in the gap beside a shrunken keyboard. translatable="false" like
+         app_name: a symbol shown identically in every locale. It is a resource rather than a
+         literal in OneHandedRoot because HardcodedUiStringTest treats a string assigned to `text`
+         as UI prose that must live in resources. -->
+    <string name="one_handed_stop_symbol" translatable="false">↔</string>
+    <string name="one_handed_stop_desc">Exit one-handed mode</string>
+
+    <!-- Settings surface for one-handed mode. The section title carries a leading emoji like every
+         other CollapsibleSettingsSection: SettingsSearch.bareTitle strips it and shows the rest as
+         "in <section>". No bare percent signs in these values — aapt2 rejects a lone "%" in a
+         string that declares no format arguments. -->
+    <string name="settings_section_one_handed">✋ One-Handed Mode</string>
+    <string name="one_handed_enable_title">One-handed mode</string>
+    <string name="one_handed_enable_desc">Shrink the keyboard and push it against one edge of the screen so a single thumb can reach every key. The width it gives up stays free for the app behind it.</string>
+    <string name="one_handed_side_title">Side</string>
+    <string name="one_handed_side_desc">Which edge the keyboard hugs. Pick the side of your writing thumb.</string>
+    <string name="one_handed_side_left">Left</string>
+    <string name="one_handed_side_right">Right</string>
+    <string name="one_handed_scale_title">Keyboard width</string>
+    <string name="one_handed_scale_desc">How much of the screen width the keyboard takes up. Narrower than 70 makes the suggestions hard to read, so that is the floor.</string>
+    <string name="one_handed_scale_value">%1$d%%</string>
     <string name="cmd_hide_keyboard">Hide Keyboard</string>
     <string name="cmd_hide_keyboard_desc">Close the keyboard; tap a text field to bring it back</string>
     <string name="cmd_shift">Shift</string>

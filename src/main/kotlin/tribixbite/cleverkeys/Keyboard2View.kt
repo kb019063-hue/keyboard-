@@ -1153,6 +1153,11 @@ class Keyboard2View @JvmOverloads constructor(
                 "primaryLangToggle" -> { togglePrimaryLanguage(); true }
                 "secondaryLangToggle" -> { toggleSecondaryLanguage(); true }
                 "showTextMenu" -> { showTextContextMenu(inputConnection); true }
+                // One-handed mode (HeliBoard gap analysis phase 2). Service-level like the language
+                // toggles above: both change the shape of the keyboard rather than the text in it,
+                // and the executor has no service reference to do it with.
+                "one_handed_toggle" -> { service.toggleOneHandedMode(); true }
+                "one_handed_side" -> { service.switchOneHandedSide(); true }
                 else -> false
             }
 

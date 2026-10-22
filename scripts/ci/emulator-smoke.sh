@@ -52,11 +52,13 @@ fails=0
 # early bail still leaves a summary behind; verified that the trap does not alter the exit status.
 TB_VERDICT=notrun
 TBUI_VERDICT=notrun
+OH_VERDICT=notrun
 KB_VERDICT=notrun
 ANR_SEEN=0
 write_summary() {
-  printf 'fails=%s-toolbar=%s-tbui=%s-keyboard=%s-anr=%s\n' \
-    "${fails:-?}" "${TB_VERDICT:-?}" "${TBUI_VERDICT:-?}" "${KB_VERDICT:-?}" "${ANR_SEEN:-?}" \
+  printf 'fails=%s-toolbar=%s-tbui=%s-oh=%s-keyboard=%s-anr=%s\n' \
+    "${fails:-?}" "${TB_VERDICT:-?}" "${TBUI_VERDICT:-?}" "${OH_VERDICT:-?}" \
+    "${KB_VERDICT:-?}" "${ANR_SEEN:-?}" \
     > "$OUT/summary.txt" 2>/dev/null || true
 }
 trap write_summary EXIT
@@ -446,6 +448,143 @@ else
   else
     TBUI_VERDICT=no-switch
     fail "header found but 3 expand attempts never composed the switch: last tapped '${LASTC:-NOT-FOUND}' band=$SAFE_LO-$SAFE_HI screen=${SW}x${SH}: texts=[$(texts "$LASTE")]"
+  fi
+fi
+
+# 7c. One-handed mode settings (gap analysis phase 2). Assertable for the same reason 7b is:
+# SettingsActivity is an ordinary app window, so uiautomator captures it. The shrunken keyboard
+# itself is NOT assertable from a dump -- a scaleX transform exposes no text and no resource-id to
+# match, and IME windows are not captured at all -- so the pixel question goes to the screenshots
+# and this walks the settings surface end to end instead: the header renders, expanding it composes
+# the switch, the side/width controls stay hidden until it is on, turning it on reveals them, and
+# the value reaches device-protected storage.
+echo "== 7c. one-handed mode settings (phase 2 UI) =="
+# The header reads "One-Handed Mode" (capital H) and the switch inside it "One-handed mode"
+# (lowercase h), so CASE-SENSITIVE greps tell them apart -- none of these use -i. nodecenter does
+# match case-insensitively, which is harmless: while the section is collapsed the switch is not
+# composed, so the header is the only node carrying either spelling.
+adb shell am start -W -n "$PKG/$NS.SettingsActivity" > "$OUT/am-settings-oh.log" 2>&1
+sleep 5
+
+# Own safe band rather than reusing 7b's: those variables are set inside a branch that a header
+# miss would skip, and a tap near the screen edge hits the gesture nav bar (run 39681883670).
+OH_LO=$((SH * 20 / 100)); OH_HI=$((SH * 75 / 100))
+OH_HDR=""
+for attempt in 1 2 3 4 5 6 7 8; do
+  F="$OUT/ui-oh-hdr-$attempt.xml"; dumpui "$F"
+  if grep -qiE "responding" "$F" 2>/dev/null; then
+    info "attempt $attempt: ANR dialog over the settings screen -- dismissing"
+    dismiss_anr || true
+    continue
+  fi
+  if grep -qE 'text="[^"]*One-Handed Mode' "$F" 2>/dev/null; then OH_HDR="$F"; break; fi
+  info "attempt $attempt: no one-handed header on screen, scrolling"
+  scrollup
+done
+
+if [ -z "$OH_HDR" ]; then
+  OH_VERDICT=no-header
+  fail "one-handed section header never appeared after 8 dump/scroll attempts: texts=[$(texts "$OUT"/ui-oh-hdr-*.xml)]"
+else
+  pass "one-handed section header present in the settings list"
+  SRC="$OH_HDR"; OH_EXP=""; OH_LASTC=""
+  for try in 1 2 3; do
+    for nudge in 1 2 3; do
+      C=$(nodecenter "$SRC" 'One-Handed Mode'); [ -z "$C" ] && break
+      CY=${C#* }
+      [ "$CY" -ge "$OH_LO" ] && [ "$CY" -le "$OH_HI" ] && break
+      if [ "$CY" -gt "$OH_HI" ]; then
+        adb shell input swipe $((SW / 2)) $((SH * 60 / 100)) $((SW / 2)) $((SH * 40 / 100)) 300
+      else
+        adb shell input swipe $((SW / 2)) $((SH * 40 / 100)) $((SW / 2)) $((SH * 60 / 100)) 300
+      fi
+      sleep 2
+      N="$OUT/ui-oh-nudge-$try-$nudge.xml"; dumpui "$N"
+      # Only adopt the new dump if the header survived the scroll, so an overshoot cannot lose it.
+      grep -qE 'text="[^"]*One-Handed Mode' "$N" 2>/dev/null && SRC="$N"
+    done
+    C=$(nodecenter "$SRC" 'One-Handed Mode'); OH_LASTC="$C"
+    [ -n "$C" ] && { adb shell input tap $C; sleep 3; }
+    E="$OUT/ui-oh-expanded-$try.xml"; dumpui "$E"
+    if grep -qE 'text="One-handed mode"' "$E" 2>/dev/null; then OH_EXP="$E"; break; fi
+    info "attempt $try: tapped '${C:-none}' (band $OH_LO-$OH_HI), section still collapsed"
+  done
+
+  if [ -z "$OH_EXP" ]; then
+    OH_VERDICT=no-switch
+    fail "one-handed header found but 3 expand attempts never composed the switch: last tapped '${OH_LASTC:-NOT-FOUND}' band=$OH_LO-$OH_HI screen=${SW}x${SH}: texts=[$(texts "$OUT"/ui-oh-expanded-*.xml)]"
+  else
+    OH_VERDICT=switch
+    pass "expanding the section composed the 'One-handed mode' switch"
+    shot 07-one-handed-collapsed
+    E="$OH_EXP"
+
+    # Side and width are gated behind the switch, so on a fresh install (default off) they must be
+    # ABSENT. Checked BEFORE the toggle: that is what proves the gate is real rather than a control
+    # that was always composed and merely greyed out.
+    if grep -qE 'text="Keyboard width"' "$E" 2>/dev/null; then
+      info "'Keyboard width' visible before any toggle -- a previous run left the pref enabled"
+      OH_VERDICT=pre-on
+    else
+      pass "side/width controls correctly absent while one-handed mode is off"
+    fi
+
+    # SettingsSwitch makes the whole Row clickable, so the title's centre is a valid tap target.
+    #
+    # ANCHORED on purpose. nodecenter matches case-INSENSITively and returns the FIRST hit in
+    # document order, and the section header ("One-Handed Mode", emoji escaped to a numeric
+    # entity) sits above the switch row ("One-handed mode") -- so an unanchored pattern resolves
+    # to the header, and tapping it COLLAPSES the section instead of flipping the switch. The
+    # offline harness caught exactly that: both taps landed on the header and the width control
+    # never appeared. ^...$ can only match the switch title, whose label has no emoji prefix.
+    C=$(nodecenter "$E" '^One-handed mode$')
+    if [ -z "$C" ]; then
+      OH_VERDICT=no-toggle
+      fail "could not locate the 'One-handed mode' row to tap: texts=[$(texts "$E")]"
+    else
+      CY=${C#* }
+      if [ "$CY" -lt "$OH_LO" ] || [ "$CY" -gt "$OH_HI" ]; then
+        if [ "$CY" -gt "$OH_HI" ]; then
+          adb shell input swipe $((SW / 2)) $((SH * 60 / 100)) $((SW / 2)) $((SH * 40 / 100)) 300
+        else
+          adb shell input swipe $((SW / 2)) $((SH * 40 / 100)) $((SW / 2)) $((SH * 60 / 100)) 300
+        fi
+        sleep 2
+        N="$OUT/ui-oh-switch-nudge.xml"; dumpui "$N"
+        C2=$(nodecenter "$N" '^One-handed mode$'); [ -n "$C2" ] && C="$C2"
+      fi
+      adb shell input tap $C; sleep 3
+      T="$OUT/ui-oh-toggled.xml"; dumpui "$T"; shot 08-one-handed-toggled
+      if grep -qE 'text="Keyboard width"' "$T" 2>/dev/null; then
+        OH_VERDICT=toggled
+        pass "toggling the switch revealed the width control (state var + recomposition wired)"
+        # 'Side' is a short common word, so a miss is reported rather than failed.
+        if grep -qE 'text="Side"' "$T" 2>/dev/null; then
+          pass "the side dropdown composed alongside it"
+        else
+          info "the side dropdown title was not on screen (may sit below the fold)"
+        fi
+      else
+        OH_VERDICT=no-width
+        fail "tapping the switch at '$C' did not reveal 'Keyboard width': texts=[$(texts "$T")]"
+      fi
+
+      # Best-effort persistence check. DirectBootAwarePreferences writes
+      # "${packageName}_preferences" into DEVICE-PROTECTED storage (/data/user_de/0/...), which
+      # run-as does not always reach. Reported, never asserted: a harness limitation must not sink
+      # a run whose UI assertions all passed.
+      PX="$OUT/oh-prefs.xml"
+      adb shell "run-as $PKG cat /data/user_de/0/$PKG/shared_prefs/${PKG}_preferences.xml" > "$PX" 2>&1
+      grep -q "one_handed" "$PX" 2>/dev/null || \
+        adb shell "run-as $PKG cat shared_prefs/${PKG}_preferences.xml" > "$PX" 2>&1
+      if grep -q "one_handed_enabled" "$PX" 2>/dev/null; then
+        V=$(grep -oE 'name="one_handed_enabled" value="[a-z]+"' "$PX" | head -1)
+        S2=$(grep -oE 'name="one_handed_side" value="[a-z]+"' "$PX" | head -1)
+        pass "preference reached device-protected storage: ${V:-present} ${S2}"
+      else
+        info "protected prefs unreadable via run-as (harness limitation): $(peek "$PX" 140)"
+      fi
+    fi
   fi
 fi
 

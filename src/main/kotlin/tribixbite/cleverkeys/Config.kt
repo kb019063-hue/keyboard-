@@ -199,6 +199,12 @@ object Defaults {
     // pre-bound short swipe, so there is no migration to wait for.
     const val TOOLBAR_ENABLED = true
     const val TOOLBAR_KEYS = ToolbarConfig.DEFAULT_KEYS_STRING
+    // One-handed mode (HeliBoard gap analysis phase 2). Default OFF: unlike the toolbar, which
+    // only exposed commands that already existed, this changes the shape of the keyboard, so it
+    // must never surprise an install that has been using the defaults.
+    const val ONE_HANDED_ENABLED = OneHandedConfig.DEFAULT_ENABLED
+    const val ONE_HANDED_SIDE = OneHandedConfig.DEFAULT_SIDE
+    const val ONE_HANDED_SCALE = OneHandedConfig.DEFAULT_SCALE
     const val SHOW_EXACT_TYPED_WORD = true  // #42: Show exact typed string as tap-to-add-to-dictionary option
     const val CONTEXT_AWARE_PREDICTIONS_ENABLED = true
     const val PERSONALIZED_LEARNING_ENABLED = true
@@ -920,6 +926,12 @@ class Config private constructor(
     @JvmField var toolbar_enabled = Defaults.TOOLBAR_ENABLED
     /** Ordered, comma-separated CommandRegistry names the toolbar shows. */
     @JvmField var toolbar_keys = Defaults.TOOLBAR_KEYS
+    /** Whether the keyboard is shrunk and hugged to one edge. */
+    @JvmField var one_handed_enabled = Defaults.ONE_HANDED_ENABLED
+    /** Which edge the shrunken keyboard hugs: OneHandedConfig.SIDE_LEFT or SIDE_RIGHT. */
+    @JvmField var one_handed_side = Defaults.ONE_HANDED_SIDE
+    /** Shrunken width as a percentage of the screen; clamped to 70..100 on read. */
+    @JvmField var one_handed_scale = Defaults.ONE_HANDED_SCALE
 
     // Word prediction scoring weights
     @JvmField var prediction_context_boost = Defaults.PREDICTION_CONTEXT_BOOST
@@ -1279,6 +1291,13 @@ class Config private constructor(
         suggestion_bar_opacity = safeGetInt(_prefs, "suggestion_bar_opacity", Defaults.SUGGESTION_BAR_OPACITY)
         toolbar_enabled = safeGetBoolean(_prefs, ToolbarConfig.PREF_ENABLED, Defaults.TOOLBAR_ENABLED)
         toolbar_keys = safeGetString(_prefs, ToolbarConfig.PREF_KEYS, Defaults.TOOLBAR_KEYS)
+        one_handed_enabled = safeGetBoolean(_prefs, OneHandedConfig.PREF_ENABLED, Defaults.ONE_HANDED_ENABLED)
+        one_handed_side = safeGetString(_prefs, OneHandedConfig.PREF_SIDE, Defaults.ONE_HANDED_SIDE)
+        // Clamped here rather than at the call site so a hand-edited or corrupt preference cannot
+        // reach OneHandedRoot as a scale outside the range the layout maths assumes.
+        one_handed_scale = OneHandedConfig.clampScale(
+            safeGetInt(_prefs, OneHandedConfig.PREF_SCALE, Defaults.ONE_HANDED_SCALE)
+        )
 
         prediction_context_boost = safeGetFloat(_prefs, "prediction_context_boost", Defaults.PREDICTION_CONTEXT_BOOST)
         prediction_frequency_scale = safeGetFloat(_prefs, "prediction_frequency_scale", Defaults.PREDICTION_FREQUENCY_SCALE)

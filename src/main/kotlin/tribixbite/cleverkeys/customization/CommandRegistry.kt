@@ -237,6 +237,19 @@ object CommandRegistry {
         // gh #175: dismiss the keyboard outright.
         Command("hide_keyboard", R.string.cmd_hide_keyboard, R.string.cmd_hide_keyboard_desc, Category.EVENTS,
             keywords = listOf("hide", "dismiss", "close", "keyboard", "down")),
+        // HeliBoard gap analysis phase 2: shrink the keyboard to one edge. Grouped with the
+        // minimize commands because all three change the keyboard's SHAPE, not what it types.
+        //
+        // Both declare a symbol of <=4 characters on purpose. getDisplayInfo falls back to
+        // `command?.symbol ?: commandName.take(4)`, so without one a toolbar button for
+        // `one_handed_toggle` would render as "one_". ShortSwipeMapping also rejects a displayText
+        // longer than 4, which would kill the IME rather than merely look wrong.
+        Command("one_handed_toggle", R.string.cmd_one_handed_toggle, R.string.cmd_one_handed_toggle_desc,
+            Category.EVENTS, symbol = "1H",
+            keywords = listOf("one", "handed", "hand", "thumb", "shrink", "small", "narrow", "side", "reach")),
+        Command("one_handed_side", R.string.cmd_one_handed_side, R.string.cmd_one_handed_side_desc,
+            Category.EVENTS, symbol = "1H\u21C4",
+            keywords = listOf("one", "handed", "side", "switch", "flip", "left", "right", "mirror")),
 
         // ========== MODIFIERS ==========
         Command("shift", R.string.cmd_shift, R.string.cmd_shift_desc, Category.MODIFIERS,

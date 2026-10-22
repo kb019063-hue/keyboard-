@@ -63,6 +63,7 @@ import tribixbite.cleverkeys.ui.settings.sections.MultiLanguageSection
 import tribixbite.cleverkeys.ui.settings.sections.SwipeTypingSection
 import tribixbite.cleverkeys.ui.settings.sections.PrivacySection
 import tribixbite.cleverkeys.ui.settings.sections.SwipeTrailSection
+import tribixbite.cleverkeys.ui.settings.sections.OneHandedSection
 import tribixbite.cleverkeys.ui.settings.sections.ToolbarSection
 import tribixbite.cleverkeys.ui.settings.sections.TestKeyboardSection
 import tribixbite.cleverkeys.ui.settings.sections.VersionActionsSection
@@ -243,6 +244,9 @@ internal fun SettingsActivity.SettingsScreen() {
 
             // Toolbar Section (Collapsible) — one-tap command row above the suggestions
             ToolbarSection()
+
+            // One-Handed Mode Section (Collapsible) — shrink the keyboard against one edge
+            OneHandedSection()
 
             // Input Behavior Section (Collapsible)
             InputBehaviorSection()
