@@ -1624,6 +1624,10 @@ class Keyboard2View @JvmOverloads constructor(
 
     private fun vibrate(event: HapticEvent = HapticEvent.KEY_PRESS) {
         VibratorCompat.vibrate(this, _config, event)
+        // The audio half of the same feedback. Keyed to KEY_PRESS so every key that can vibrate
+        // can click, and governed by its own toggle and volume in Config -- sound_enabled false
+        // makes play() a no-op, so the default keyboard is exactly as quiet as before.
+        if (event == HapticEvent.KEY_PRESS) KeyClickSound.play(getContext(), _config)
     }
 
     /**
@@ -1955,6 +1959,9 @@ class Keyboard2View @JvmOverloads constructor(
     override fun onDetachedFromWindow() {
         cancelContinuousSwipe()
         super.onDetachedFromWindow()
+        // The click lives in a native SoundPool; letting it outlive the view would leak it on
+        // every IME switch or rotation. Release is safe when sound was never enabled.
+        KeyClickSound.release()
         if (_shortSwipeListenerRegistered) {
             _shortSwipeManager.removeChangeListener(_shortSwipeMappingsChanged)
             _shortSwipeListenerRegistered = false

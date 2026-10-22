@@ -87,6 +87,11 @@ object Defaults {
     // word recognition, which teaches new users the gesture worked. The
     // "distracting" concern is best handled per-user via the toggle.
     const val HAPTIC_SWIPE_COMPLETE = true
+    // Key-press sound: the audio half of feedback, haptics above being the tactile half.
+    // Off by default -- a keyboard that clicks on every tap is intrusive until asked for, and
+    // Gboard/HeliBoard ship it off too. The volume is a 0-100 percentage of the bundled sample.
+    const val SOUND_ENABLED = false
+    const val SOUND_VOLUME = 70
     const val LONGPRESS_TIMEOUT = 600
     const val LONGPRESS_INTERVAL = 25
     const val KEYREPEAT_ENABLED = true
@@ -826,6 +831,9 @@ class Config private constructor(
     @JvmField var vibrate_duration = Defaults.VIBRATE_DURATION.toLong()
     // Master haptic toggle - disables ALL vibration when false
     @JvmField var haptic_enabled = Defaults.HAPTIC_ENABLED
+    // Key-press sound (see Defaults.SOUND_ENABLED); volume is 0-100
+    @JvmField var sound_enabled = Defaults.SOUND_ENABLED
+    @JvmField var sound_volume = Defaults.SOUND_VOLUME
     // Per-event haptic feedback toggles (only checked if haptic_enabled is true)
     @JvmField var haptic_key_press = Defaults.HAPTIC_KEY_PRESS
     @JvmField var haptic_prediction_tap = Defaults.HAPTIC_PREDICTION_TAP
@@ -1173,6 +1181,10 @@ class Config private constructor(
         vibrate_duration = safeGetInt(_prefs, "vibrate_duration", Defaults.VIBRATE_DURATION).toLong()
         // Master haptic toggle - "vibration_enabled" key from Settings UI
         haptic_enabled = _prefs.getBoolean("vibration_enabled", Defaults.HAPTIC_ENABLED)
+        // Key-press sound, read here so a Settings change reaches the next keystroke via the
+        // same Config.refresh() that carries the haptic flags.
+        sound_enabled = _prefs.getBoolean("sound_enabled", Defaults.SOUND_ENABLED)
+        sound_volume = safeGetInt(_prefs, "sound_volume", Defaults.SOUND_VOLUME)
         // Per-event haptic feedback toggles (only matter if haptic_enabled is true)
         haptic_key_press = _prefs.getBoolean("haptic_key_press", Defaults.HAPTIC_KEY_PRESS)
         haptic_prediction_tap = _prefs.getBoolean("haptic_prediction_tap", Defaults.HAPTIC_PREDICTION_TAP)

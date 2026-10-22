@@ -104,6 +104,8 @@ object SettingsResetPolicy {
         // Input behavior
         put("vibrate_custom", Defaults.VIBRATE_CUSTOM)
         put("vibrate_duration", Defaults.VIBRATE_DURATION)
+        put("sound_enabled", Defaults.SOUND_ENABLED)
+        put("sound_volume", Defaults.SOUND_VOLUME)
         put("longpress_timeout", Defaults.LONGPRESS_TIMEOUT)
         put("keyrepeat_enabled", Defaults.KEYREPEAT_ENABLED)
         put("autocapitalisation", Defaults.AUTOCAPITALISATION)

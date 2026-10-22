@@ -164,6 +164,11 @@
     <string name="settings_auto_capitalization_desc">Automatically capitalize words at sentence start</string>
     <string name="settings_vibration_title">Vibration Feedback</string>
     <string name="settings_vibration_desc">Vibrate when keys are pressed</string>
+    <string name="accessibility_key_sound_header">Key Sound</string>
+    <string name="settings_key_sound_title">Sound on Key Press</string>
+    <string name="settings_key_sound_desc">Play a click when keys are pressed</string>
+    <string name="settings_key_sound_volume_title">Key Sound Volume</string>
+    <string name="settings_key_sound_volume_desc">How loud the key click is</string>
 
     <!-- Accessibility Section -->
     <string name="settings_section_accessibility">♿ Accessibility</string>

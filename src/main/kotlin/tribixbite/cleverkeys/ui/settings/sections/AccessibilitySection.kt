@@ -65,6 +65,42 @@ internal fun SettingsActivity.AccessibilitySection() {
                     }
                 )
 
+                // Key-press sound: the audio half of key feedback, parked next to its haptic
+                // twin so the pair is discoverable in one place. Deliberately independent of
+                // the vibration toggle above -- a user may want the click without the buzz.
+                Text(
+                    text = stringResource(R.string.accessibility_key_sound_header),
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                )
+                SettingsSwitch(
+                    title = stringResource(R.string.settings_key_sound_title),
+                    description = stringResource(R.string.settings_key_sound_desc),
+                    checked = soundEnabled,
+                    onCheckedChange = {
+                        soundEnabled = it
+                        saveSetting("sound_enabled", it)
+                        // Same immediate write the vibration switch makes, so the next
+                        // keystroke hears the change without waiting for a Config reload.
+                        Config.globalConfig().sound_enabled = it
+                    }
+                )
+                if (soundEnabled) {
+                    SettingsSlider(
+                        title = stringResource(R.string.settings_key_sound_volume_title),
+                        description = stringResource(R.string.settings_key_sound_volume_desc),
+                        value = soundVolume,
+                        valueRange = 0f..100f,
+                        increment = 5f,
+                        onValueChange = {
+                            soundVolume = it
+                            saveSetting("sound_volume", it.toInt())
+                            Config.globalConfig().sound_volume = it.toInt()
+                        },
+                        displayValue = "${soundVolume.toInt()}%"
+                    )
+                }
+
                 if (vibrationEnabled) {
                     // #154: the explicit way back to the system haptic. ON = vibrate_custom
                     // false = VibratorCompat's low-latency performHapticFeedback path (the

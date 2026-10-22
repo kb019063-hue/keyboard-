@@ -277,6 +277,9 @@ class SettingsActivity : ComponentActivity(), SharedPreferences.OnSharedPreferen
     internal var keyboardHeightLandscapeUnfolded by mutableIntStateOf(Defaults.KEYBOARD_HEIGHT_LANDSCAPE)
     internal var scaleNumpadHeight by mutableStateOf(Defaults.SCALE_NUMPAD_HEIGHT)  // F-8 / #58: numpad row scaling
     internal var vibrationEnabled by mutableStateOf(Defaults.HAPTIC_ENABLED)
+    // Key-press sound (the audio half of feedback; vibrationEnabled is the tactile half)
+    internal var soundEnabled by mutableStateOf(Defaults.SOUND_ENABLED)
+    internal var soundVolume by mutableStateOf(Defaults.SOUND_VOLUME.toFloat())
     internal var debugEnabled by mutableStateOf(Defaults.DEBUG_ENABLED)
     internal var clipboardHistoryEnabled by mutableStateOf(Defaults.CLIPBOARD_HISTORY_ENABLED)
     internal var clipboardHistoryLimit by mutableIntStateOf(Defaults.CLIPBOARD_HISTORY_LIMIT_FALLBACK)
