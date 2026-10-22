@@ -78,8 +78,10 @@ class HardcodedUiStringTest {
      * reason. A whole file is excluded with the literal `*`. Keep every reason specific.
      */
     private val allowed: Map<String, String> = mapOf(
-        // Brand name: CleverKeys is never translated (app_name is translatable="false").
-        "activities/LauncherActivity.kt|CleverKeys" to "brand wordmark; app_name is translatable=false",
+        // Brand name: Brown Keys is never translated (app_name is translatable="false"). The key
+        // is the literal itself, so it has to move whenever the wordmark does -- rebranding the
+        // text without this line fails the test as an unlisted hardcoded UI string.
+        "activities/LauncherActivity.kt|Brown Keys" to "brand wordmark; app_name is translatable=false",
         // File-format names are proper nouns rendered identically in every locale.
         "clipboard/ClipboardMediaManager.kt|WebP" to "image format name",
         "clipboard/ClipboardMediaManager.kt|WebM" to "video format name",

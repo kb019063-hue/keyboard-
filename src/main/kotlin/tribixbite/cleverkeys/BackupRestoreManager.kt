@@ -472,17 +472,19 @@ open class BackupRestoreManager(
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, fileName)
                 put(MediaStore.Downloads.MIME_TYPE, "application/json")
-                // Place in CleverKeys subfolder within Downloads
+                // Place in BrownKeys subfolder within Downloads. Renamed from "CleverKeys" by the
+                // rebrand; every read path below still looks in the old folder too, so an export
+                // written by an earlier build stays importable rather than silently vanishing.
                 put(MediaStore.Downloads.RELATIVE_PATH,
-                    "${Environment.DIRECTORY_DOWNLOADS}/CleverKeys")
+                    "${Environment.DIRECTORY_DOWNLOADS}/BrownKeys")
             }
             val contentUri = context.contentResolver.insert(
                 MediaStore.Downloads.EXTERNAL_CONTENT_URI, values
             ) ?: return null
             val stream = context.contentResolver.openOutputStream(contentUri)
             if (stream != null) {
-                lastOutputPath = "${Environment.DIRECTORY_DOWNLOADS}/CleverKeys/$fileName"
-                Log.i(TAG, "Writing to Downloads/CleverKeys/$fileName via MediaStore")
+                lastOutputPath = "${Environment.DIRECTORY_DOWNLOADS}/BrownKeys/$fileName"
+                Log.i(TAG, "Writing to Downloads/BrownKeys/$fileName via MediaStore")
             }
             stream
         } catch (e: Exception) {
@@ -509,8 +511,8 @@ open class BackupRestoreManager(
      *
      * Search order for file:// URIs:
      * 1. Exact path via direct FileInputStream (try without canRead — FUSE may lie)
-     * 2. Downloads/CleverKeys/ via direct FileInputStream
-     * 3. Downloads/CleverKeys/ via MediaStore query (app's own exports)
+     * 2. Downloads/BrownKeys/ via direct FileInputStream
+     * 3. Downloads/BrownKeys/ via MediaStore query (app's own exports)
      * 4. Force MediaStore scan + retry (handles cp/vim/external edits)
      * 5. Broader MediaStore query by filename only (any Downloads subfolder)
      * 6. App-private external dir (where exports land as last resort)
@@ -532,7 +534,7 @@ open class BackupRestoreManager(
                 Log.d(TAG, "Direct read failed for $path: ${e.message}")
             }
 
-            // Try 2: Downloads/CleverKeys/ direct
+            // Try 2: Downloads/BrownKeys/ direct
             val downloadsDir = Environment.getExternalStoragePublicDirectory(
                 Environment.DIRECTORY_DOWNLOADS
             )
@@ -545,13 +547,15 @@ open class BackupRestoreManager(
                 }
             }
 
-            // Try 3: MediaStore query by filename in Downloads/CleverKeys/ (app's own files)
+            // Try 3: MediaStore query by filename in Downloads/BrownKeys/ (app's own files)
+            readFromDownloadsMediaStore(fileName, "%BrownKeys%")?.let { return it }
             readFromDownloadsMediaStore(fileName, "%CleverKeys%")?.let { return it }
 
             // Try 4: Force MediaStore scan of the exact path, then retry query
             // This indexes files created/modified by external tools (cp, vim, etc.)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 scanFileIntoMediaStore(path)
+                readFromDownloadsMediaStore(fileName, "%BrownKeys%")?.let { return it }
                 readFromDownloadsMediaStore(fileName, "%CleverKeys%")?.let { return it }
             }
 
@@ -600,7 +604,7 @@ open class BackupRestoreManager(
      * files owned by this app. Files created/copied by other processes (Termux, etc.)
      * may not be visible even after scanning.
      *
-     * @param pathPattern LIKE pattern for RELATIVE_PATH (e.g., "%CleverKeys%" or "%")
+     * @param pathPattern LIKE pattern for RELATIVE_PATH (e.g., "%BrownKeys%" or "%")
      */
     private fun readFromDownloadsMediaStore(fileName: String, pathPattern: String): InputStream? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null

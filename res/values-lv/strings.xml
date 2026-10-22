@@ -29,7 +29,7 @@
     <string name="key_descr_change_method">Pārslēgt tastatūru</string>
     <string name="key_descr_voice_typing">Rakstīšana ar balsi</string>
     <string name="key_descr_copy">Kopēt</string>
-    <string name="key_descr_copy_private">Privāta kopēšana (tikai CleverKeys, nevis sistēmas starpliktuvē)</string>
+    <string name="key_descr_copy_private">Privāta kopēšana (tikai Brown Keys, nevis sistēmas starpliktuvē)</string>
     <string name="key_descr_paste">Ielīmēt</string>
     <string name="key_descr_cut">Izgriezt</string>
     <string name="key_descr_selectAll">Atlasīt visu</string>
@@ -98,8 +98,8 @@
     <string name="clipboard_edit_error">Neizdevās atjaunināt ierakstu</string>
 
     <!-- #156 Private copy -->
-    <string name="private_copy_toolbar_label">CleverKeys: Privāta kopēšana</string>
-    <string name="private_copy_toast">Privāti nokopēts uz CleverKeys</string>
+    <string name="private_copy_toolbar_label">Brown Keys: Privāta kopēšana</string>
+    <string name="private_copy_toast">Privāti nokopēts uz Brown Keys</string>
     <string name="private_copy_expose_dialog_title">Kopēt uz sistēmas starpliktuvi?</string>
     <string name="private_copy_expose_dialog_message">Šis ieraksts tika nokopēts privāti. Tā kopēšana uz sistēmas starpliktuvi atklās tekstu priekšplāna lietotnei un citiem starpliktuves pārvaldniekiem. Vai tomēr kopēt?</string>
     <string name="private_copy_expose_dialog_confirm">Tomēr kopēt</string>
@@ -110,7 +110,7 @@
     <string name="clipboard_filter_private_only_hint">Rādīt tikai privāti nokopētos ierakstus (🔒)</string>
 
     <!-- Settings Activity (Material 3) -->
-    <string name="settings_title">⚙️ CleverKeys iestatījumi</string>
+    <string name="settings_title">⚙️ Brown Keys iestatījumi</string>
     <string name="settings_description">Konfigurējiet tastatūras iestatījumus optimālai rakstīšanai.</string>
 
     <!-- Swipe Typing Section -->
@@ -276,7 +276,7 @@
     <string name="short_swipe_reset_all">Atiestatīt visu</string>
     <string name="short_swipe_tap_hint">Pieskarieties jebkuram taustiņam zemāk, lai pielāgotu īso vilkumu žestus</string>
     <string name="short_swipe_instruction_title">Pieskarieties jebkuram taustiņam, lai to pielāgotu</string>
-    <string name="short_swipe_instruction_body">Zemāk redzamā tastatūra ir jūsu īstā CleverKeys tastatūra.\nPieskarieties taustiņam, lai pievienotu īso vilkumu darbības.</string>
+    <string name="short_swipe_instruction_body">Zemāk redzamā tastatūra ir jūsu īstā Brown Keys tastatūra.\nPieskarieties taustiņam, lai pievienotu īso vilkumu darbības.</string>
     <string name="short_swipe_custom_mappings">Pielāgotie piešķīrumi</string>
 
     <!-- Theme Settings (wp8 batch) -->
@@ -364,7 +364,7 @@
     <string name="accessibility_swipe_complete_title">Vilkums pabeigts</string>
     <string name="accessibility_swipe_complete_desc">Vibrēt, kad vilkuma žests beidzies</string>
     <string name="advanced_ime_prompt_title">Noklusējuma tastatūras atgādinājums</string>
-    <string name="advanced_ime_prompt_desc">Vienreiz katrā palaišanas reizē atgādināt iestatīt CleverKeys kā noklusējuma tastatūru. Izslēdziet, lai vairs nejautātu.</string>
+    <string name="advanced_ime_prompt_desc">Vienreiz katrā palaišanas reizē atgādināt iestatīt Brown Keys kā noklusējuma tastatūru. Izslēdziet, lai vairs nejautātu.</string>
     <string name="advanced_swipe_debug_log_title">Vilkumu atkļūdošanas žurnāls</string>
     <string name="advanced_swipe_debug_log_desc">Reāllaikā analizē vilkuma žestu konveijeru (nepieciešams logcat)</string>
     <string name="advanced_detailed_logging_title">Detalizēta žurnālošana</string>
@@ -468,7 +468,7 @@
     <string name="clipboard_swipe_deleted">Dzēsts</string>
     <string name="clipboard_swipe_undo">Atsaukt</string>
     <string name="clipboard_private_copy_other_apps_title">Privāta kopēšana citās lietotnēs</string>
-    <string name="clipboard_private_copy_other_apps_desc">Pievienot "Privātā kopēšana" citu lietotņu teksta atlases izvēlnēm. Kopē atlasīto tekstu tikai CleverKeys — nekad sistēmas starpliktuvē.</string>
+    <string name="clipboard_private_copy_other_apps_desc">Pievienot "Privātā kopēšana" citu lietotņu teksta atlases izvēlnēm. Kopē atlasīto tekstu tikai Brown Keys — nekad sistēmas starpliktuvē.</string>
     <string name="clipboard_sanitize_links_title">Attīrīt izsekošanas parametrus</string>
     <string name="clipboard_sanitize_links_desc">Noņemt utm_*, fbclid u.c. no kopētajiem URL. Izmanto ClearURLs.</string>
     <string name="clipboard_sanitize_system_title">Attīrīt arī sistēmas starpliktuvi</string>
@@ -804,7 +804,7 @@
     <string name="gif_remove_all_body">Tiks dzēstas visas importētās GIF pakotnes, sīktēli un datubāze. To nevar atsaukt.</string>
     <string name="gif_remove_all_confirm">Noņemt visu</string>
     <string name="gif_remove_pack_body">Tiks dzēsti visi šīs pakotnes GIF un atbrīvota krātuves vieta.</string>
-    <string name="privacy_section_intro">CleverKeys darbojas pilnībā bezsaistē — nekādi dati nekad neatstāj jūsu ierīci. Šie neobligātie iestatījumi glabā datus lokāli, lai jūs varētu tos apskatīt, eksportēt vai dzēst; eksportētos vilkšanas datus var izmantot modeļu apmācībai citur.</string>
+    <string name="privacy_section_intro">Brown Keys darbojas pilnībā bezsaistē — nekādi dati nekad neatstāj jūsu ierīci. Šie neobligātie iestatījumi glabā datus lokāli, lai jūs varētu tos apskatīt, eksportēt vai dzēst; eksportētos vilkšanas datus var izmantot modeļu apmācībai citur.</string>
     <string name="privacy_on_device_learning_header">Mācīšanās ierīcē</string>
     <string name="privacy_forget_learned_title">Aizmirst arī apgūtos datus?</string>
     <string name="privacy_forget_learned_body">Mācīšanās tagad ir izslēgta — nekas jauns netiks ierakstīts. Vai vēlaties dzēst arī visu jau apgūto (frāžu modeļus, vārdu lietojumu, ieteikumu izvēles vēsturi un vilkšanas labojumus)? To nevar atsaukt.</string>
@@ -1039,7 +1039,7 @@
     <string name="calibration_touch_here">👆 Pieskarieties šeit</string>
     <string name="calibration_min_readout">Min.: %1$d%%</string>
     <string name="calibration_max_readout">Maks.: %1$d%%</string>
-    <string name="launcher_logo_desc">CleverKeys logotips</string>
+    <string name="launcher_logo_desc">Brown Keys logotips</string>
     <string name="launcher_tagline">Privātums, jauda un kontrole — ar smadzenēm.</string>
     <string name="launcher_step_enable">Iespējot tastatūru</string>
     <string name="launcher_step_select">Atlasīt tastatūru</string>
@@ -1259,11 +1259,11 @@
     <string name="clipboard_entry_duration_desc_default">Cik ilgi ieraksti tiek glabāti pirms automātiskas dzēšanas (-1 = nekad)</string>
     <string name="clipboard_entry_duration_never">Nekad nebeidzas</string>
     <string name="clipboard_private_copy_header">🔒 Privāta kopēšana</string>
-    <string name="clipboard_private_copy_in_app_note">Lietotnē: rediģēšanas darbību “Privāta kopēšana” var piesaistīt īsam vilkumam vai papildu taustiņam (Īso vilkumu pielāgošana). Tā saglabā pašreizējo atlasi CleverKeys privātajā starpliktuvē, neskarot sistēmas starpliktuvi. Privātajiem ierakstiem ir 🔒 emblēma; pirms šāda ieraksta eksportēšanas uz sistēmas starpliktuvi vienmēr tiek prasīts apstiprinājums, un nešifrētos dublējumos tie netiek iekļauti (šifrētos dublējumos tie tiek iekļauti).</string>
+    <string name="clipboard_private_copy_in_app_note">Lietotnē: rediģēšanas darbību “Privāta kopēšana” var piesaistīt īsam vilkumam vai papildu taustiņam (Īso vilkumu pielāgošana). Tā saglabā pašreizējo atlasi Brown Keys privātajā starpliktuvē, neskarot sistēmas starpliktuvi. Privātajiem ierakstiem ir 🔒 emblēma; pirms šāda ieraksta eksportēšanas uz sistēmas starpliktuvi vienmēr tiek prasīts apstiprinājums, un nešifrētos dublējumos tie netiek iekļauti (šifrētos dublējumos tie tiek iekļauti).</string>
     <string name="clipboard_url_handling_header">URL apstrāde</string>
     <string name="clipboard_custom_rules_browse">Pārlūkot custom.substitutions.json</string>
     <string name="clipboard_custom_rules_replace">Aizstāt pielāgotās kārtulas</string>
-    <string name="clipboard_url_handling_note">Piezīme: attīrīšana notiek, kad CleverKeys saglabā fragmentu savā vēsturē, tāpēc ielīmēšana no CleverKeys paneļa vienmēr ir attīrīta. Ja ir ieslēgts “Attīrīt arī sistēmas starpliktuvi”, arī Android sistēmas starpliktuve tiek pārrakstīta ar attīrīto URL, tāpēc attīrīta ir arī ielīmēšana citās lietotnēs (bez garantijas — tikai tad, kad tastatūrai ir piekļuve starpliktuvei). Ja tas ir izslēgts, citas lietotnes joprojām redz sākotnējo URL.</string>
+    <string name="clipboard_url_handling_note">Piezīme: attīrīšana notiek, kad Brown Keys saglabā fragmentu savā vēsturē, tāpēc ielīmēšana no Brown Keys paneļa vienmēr ir attīrīta. Ja ir ieslēgts “Attīrīt arī sistēmas starpliktuvi”, arī Android sistēmas starpliktuve tiek pārrakstīta ar attīrīto URL, tāpēc attīrīta ir arī ielīmēšana citās lietotnēs (bez garantijas — tikai tad, kad tastatūrai ir piekļuve starpliktuvei). Ja tas ir izslēgts, citas lietotnes joprojām redz sākotnējo URL.</string>
     <string name="input_context_source_both">Iebūvētās + apgūtās</string>
     <string name="input_context_source_learned_only">Tikai apgūtās</string>
     <string name="input_context_source_static_only">Tikai iebūvētās</string>
@@ -1377,7 +1377,7 @@
     <string name="clipboard_backup_import_completed">Starpliktuves importēšana pabeigta.</string>
     <string name="clipboard_backup_import_merge_note">Importētie ieraksti tiek apvienoti ar esošo vēsturi, neko nepārrakstot.</string>
     <string name="clipboard_backup_import_failed_title">Starpliktuves importēšana neizdevās</string>
-    <string name="clipboard_backup_import_failed">Neizdevās importēt starpliktuves vēsturi:\n\n%1$s\n\nPārliecinieties, ka fails ir derīgs CleverKeys starpliktuves dublējums.</string>
+    <string name="clipboard_backup_import_failed">Neizdevās importēt starpliktuves vēsturi:\n\n%1$s\n\nPārliecinieties, ka fails ir derīgs Brown Keys starpliktuves dublējums.</string>
     <string name="clipboard_backup_zip_export_success_title">Pilna starpliktuves eksportēšana veiksmīga</string>
     <string name="clipboard_backup_zip_saved">Starpliktuves dublējums ar multividi saglabāts.</string>
     <string name="clipboard_backup_zip_restore_hint">Lai atgūtu visus ierakstus, tostarp attēlus, video un citu multividi, atjaunojiet ar pogu Importēt ZIP.</string>
@@ -1387,7 +1387,7 @@
     <string name="clipboard_backup_zip_import_completed">Pilnā starpliktuves importēšana pabeigta.</string>
     <string name="clipboard_backup_zip_media_restored_note">Visi multivides faili un sīktēli ir atjaunoti.</string>
     <string name="clipboard_backup_zip_import_failed_title">Starpliktuves ZIP importēšana neizdevās</string>
-    <string name="clipboard_backup_zip_import_failed">Neizdevās importēt starpliktuves ZIP:\n\n%1$s\n\nPārliecinieties, ka fails ir derīgs CleverKeys starpliktuves ZIP dublējums.</string>
+    <string name="clipboard_backup_zip_import_failed">Neizdevās importēt starpliktuves ZIP:\n\n%1$s\n\nPārliecinieties, ka fails ir derīgs Brown Keys starpliktuves ZIP dublējums.</string>
     <string name="dictionary_backup_export_success_title">Vārdnīcas eksportēšana veiksmīga</string>
     <string name="dictionary_backup_export_disabled_words">Atspējotie vārdi: %1$d</string>
     <string name="dictionary_backup_export_failed_title">Vārdnīcas eksportēšana neizdevās</string>
@@ -1556,7 +1556,7 @@
     </plurals>
 
     <!-- 2026-09-29 hardcoded-UI sweep (activities): launcher, dictionary, layouts, short swipes, themes, playground, manifest labels (reviewer=model) -->
-    <string name="launcher_step_enable_desc">Ieslēdziet CleverKeys sistēmas iestatījumos</string>
+    <string name="launcher_step_enable_desc">Ieslēdziet Brown Keys sistēmas iestatījumos</string>
     <string name="launcher_step_select_desc">Mainiet noklusējuma ievades metodi</string>
     <string name="launcher_step_calibrate_desc">Konfigurējiet līdz 8 apakštaustiņu darbībām katram taustiņam</string>
     <string name="dict_tab_active">Aktīvie</string>
@@ -1632,9 +1632,9 @@
     <string name="calibration_legend_short_range">Min. - Maks.</string>
     <string name="calibration_legend_long_range">&gt; Maks.</string>
     <string name="calibration_percent_value">%1$d%%</string>
-    <string name="theme_builtin_cleverkeysdark_name">CleverKeys tumšā</string>
+    <string name="theme_builtin_cleverkeysdark_name">Brown Keys tumšā</string>
     <string name="theme_builtin_cleverkeysdark_desc">Tumši violeta ar sudraba akcentiem (noklusējums)</string>
-    <string name="theme_builtin_cleverkeyslight_name">CleverKeys gaišā</string>
+    <string name="theme_builtin_cleverkeyslight_name">Brown Keys gaišā</string>
     <string name="theme_builtin_cleverkeyslight_desc">Sudraba taustiņi ar violetiem akcentiem</string>
     <string name="theme_builtin_dark_name">Tumšā</string>
     <string name="theme_builtin_dark_desc">Klasiska tumšā tēma ar ziliem akcentiem</string>
@@ -1684,7 +1684,6 @@
     <string name="swipe_debug_clear_traces_playground">Tikai Playground</string>
     <string name="swipe_debug_clear_traces_all">Visi vilkumu dati</string>
     <string name="swipe_debug_clear_traces_message">Vai dzēst ierakstītās vilkumu trajektorijas no šīs ierīces?\n\n“%1$s” noņem šajā ekrānā ierakstītās trajektorijas; “%2$s” noņem arī trajektorijas no globālās ML kolekcijas.</string>
-    <string name="manifest_ime_service_label">CleverKeys tastatūra</string>
     <string name="manifest_backup_restore_label">Dublēšana un atjaunošana</string>
     <plurals name="swipe_debug_toast_cleared_traces">
         <item quantity="zero">Notīrīts %1$d trajektoriju</item>
@@ -1911,11 +1910,11 @@
     </plurals>
     <!-- 2026-09-30 i18n: typed import/export/backup failure reasons and settings-import skip kinds (reviewer=model) -->
     <string name="io_error_file_not_found">Failu neizdevās atrast vai atvērt.</string>
-    <string name="io_error_permission_denied">CleverKeys nav atļauts piekļūt šim failam.</string>
+    <string name="io_error_permission_denied">Brown Keys nav atļauts piekļūt šim failam.</string>
     <string name="io_error_invalid_format">Faila formāts nav tāds, kāds gaidīts, vai fails ir bojāts.</string>
-    <string name="io_error_newer_version">Fails ir izveidots ar jaunāku CleverKeys versiju. Atjauniniet lietotni un mēģiniet vēlreiz.</string>
+    <string name="io_error_newer_version">Fails ir izveidots ar jaunāku Brown Keys versiju. Atjauniniet lietotni un mēģiniet vēlreiz.</string>
     <string name="io_error_out_of_space">Nepietiek krātuves vietas.</string>
-    <string name="io_error_too_large">Fails ir lielāks, nekā CleverKeys var droši importēt.</string>
+    <string name="io_error_too_large">Fails ir lielāks, nekā Brown Keys var droši importēt.</string>
     <string name="io_error_wrong_password_or_corrupt">Nepareiza dublējuma parole, vai fails ir bojāts vai mainīts.</string>
     <string name="io_error_no_backup_password">Šis dublējums ir šifrēts, un dublējuma parole nav pieejama.</string>
     <string name="io_error_wrong_backup_kind">Šajā dublējumā nav tāda veida datu, kādus gaida šī importēšana.</string>
@@ -1961,7 +1960,7 @@
     <string name="cmd_copy">Kopēt</string>
     <string name="cmd_copy_desc">Kopēt atlasīto tekstu starpliktuvē</string>
     <string name="cmd_copy_private">Privāta kopēšana</string>
-    <string name="cmd_copy_private_desc">Kopēt tikai CleverKeys, nekad sistēmas starpliktuvē</string>
+    <string name="cmd_copy_private_desc">Kopēt tikai Brown Keys, nekad sistēmas starpliktuvē</string>
     <string name="cmd_paste">Ielīmēt</string>
     <string name="cmd_paste_desc">Ielīmēt no starpliktuves</string>
     <string name="cmd_cut">Izgriezt</string>

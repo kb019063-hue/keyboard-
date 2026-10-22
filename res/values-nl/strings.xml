@@ -29,7 +29,7 @@
     <string name="key_descr_change_method">Wissel toetsenbord</string>
     <string name="key_descr_voice_typing">Spraakgestuurd typen</string>
     <string name="key_descr_copy">Kopieer</string>
-    <string name="key_descr_copy_private">Privé kopiëren (alleen naar CleverKeys, niet naar het systeemklembord)</string>
+    <string name="key_descr_copy_private">Privé kopiëren (alleen naar Brown Keys, niet naar het systeemklembord)</string>
     <string name="key_descr_paste">Plak</string>
     <string name="key_descr_cut">Knip</string>
     <string name="key_descr_selectAll">Selecteer alles</string>
@@ -99,8 +99,8 @@
     <string name="clipboard_edit_error">Bijwerken van item mislukt</string>
 
     <!-- #156 Private copy -->
-    <string name="private_copy_toolbar_label">CleverKeys: Privé kopiëren</string>
-    <string name="private_copy_toast">Privé gekopieerd naar CleverKeys</string>
+    <string name="private_copy_toolbar_label">Brown Keys: Privé kopiëren</string>
+    <string name="private_copy_toast">Privé gekopieerd naar Brown Keys</string>
     <string name="private_copy_expose_dialog_title">Naar systeemklembord kopiëren?</string>
     <string name="private_copy_expose_dialog_message">Dit item is privé gekopieerd. Het naar het systeemklembord kopiëren stelt de tekst bloot aan de app op de voorgrond en andere klembordbeheerders. Toch kopiëren?</string>
     <string name="private_copy_expose_dialog_confirm">Toch kopiëren</string>
@@ -112,7 +112,7 @@
     <string name="clipboard_filter_private_only_hint">Alleen privé gekopieerde items tonen (🔒)</string>
 
     <!-- Settings Activity (Material 3) -->
-    <string name="settings_title">⚙️ CleverKeys-instellingen</string>
+    <string name="settings_title">⚙️ Brown Keys-instellingen</string>
     <string name="settings_description">Configureer je toetsenbordinstellingen voor de beste typervaring.</string>
 
     <!-- Swipe Typing Section -->
@@ -272,7 +272,7 @@
     <string name="short_swipe_reset_all">Alles resetten</string>
     <string name="short_swipe_tap_hint">Tik op een toets hieronder om de korte veeggebaren aan te passen</string>
     <string name="short_swipe_instruction_title">Tik op een toets om deze aan te passen</string>
-    <string name="short_swipe_instruction_body">Het toetsenbord hieronder is je echte CleverKeys-toetsenbord.\nTik op een toets om korte veegacties toe te voegen.</string>
+    <string name="short_swipe_instruction_body">Het toetsenbord hieronder is je echte Brown Keys-toetsenbord.\nTik op een toets om korte veegacties toe te voegen.</string>
     <string name="short_swipe_custom_mappings">Aangepaste toewijzingen</string>
     <string name="theme_settings_title">Toetsenbordthema\'s</string>
     <string name="theme_restart_keyboard">Toetsenbord herstarten</string>
@@ -351,7 +351,7 @@
     <string name="accessibility_swipe_complete_title">Veeggebaar voltooid</string>
     <string name="accessibility_swipe_complete_desc">Trillen als het veeggebaar klaar is</string>
     <string name="advanced_ime_prompt_title">Herinnering standaardtoetsenbord</string>
-    <string name="advanced_ime_prompt_desc">Eén keer per opstart herinneren om CleverKeys als standaardtoetsenbord in te stellen. Zet uit om nooit meer te vragen.</string>
+    <string name="advanced_ime_prompt_desc">Eén keer per opstart herinneren om Brown Keys als standaardtoetsenbord in te stellen. Zet uit om nooit meer te vragen.</string>
     <string name="advanced_swipe_debug_log_title">Veeg-debuglogboek</string>
     <string name="advanced_swipe_debug_log_desc">Realtime pijplijnanalyse voor veeggebaren (vereist logcat)</string>
     <string name="advanced_detailed_logging_title">Gedetailleerde logging</string>
@@ -455,11 +455,11 @@
     <string name="clipboard_swipe_deleted">Verwijderd</string>
     <string name="clipboard_swipe_undo">Ongedaan maken</string>
     <string name="clipboard_private_copy_other_apps_title">Privé kopiëren in andere apps</string>
-    <string name="clipboard_private_copy_other_apps_desc">Voeg "Privé kopie" toe aan tekstselectiemenu\'s van andere apps. Kopieert geselecteerde tekst alleen naar CleverKeys — nooit naar het systeemklembord. Inschakelen voegt een app-vermelding toe die andere apps kunnen zien.</string>
+    <string name="clipboard_private_copy_other_apps_desc">Voeg "Privé kopie" toe aan tekstselectiemenu\'s van andere apps. Kopieert geselecteerde tekst alleen naar Brown Keys — nooit naar het systeemklembord. Inschakelen voegt een app-vermelding toe die andere apps kunnen zien.</string>
     <string name="clipboard_sanitize_links_title">Trackingparameters verwijderen</string>
     <string name="clipboard_sanitize_links_desc">utm_*, fbclid enz. verwijderen uit gekopieerde URL\'s. Mogelijk gemaakt door ClearURLs.</string>
     <string name="clipboard_sanitize_system_title">Ook systeemklembord opschonen</string>
-    <string name="clipboard_sanitize_system_desc">Wanneer een gekopieerde URL wordt opgeschoond, het systeemklembord ook overschrijven zodat plakken in elke app gesaneerd is — niet alleen in het CleverKeys-paneel.</string>
+    <string name="clipboard_sanitize_system_desc">Wanneer een gekopieerde URL wordt opgeschoond, het systeemklembord ook overschrijven zodat plakken in elke app gesaneerd is — niet alleen in het Brown Keys-paneel.</string>
     <string name="clipboard_embed_enrich_title">Insluitingen verrijken voor delen</string>
     <string name="clipboard_embed_enrich_desc">x.com → fxtwitter.com, reddit.com → rxddit.com enz. herschrijven</string>
     <string name="clipboard_custom_rules_title">Aangepaste regels gebruiken</string>
@@ -791,7 +791,7 @@
     <string name="gif_remove_all_body">Hiermee worden alle geïmporteerde GIF-pakketten, miniaturen en de database verwijderd. Dit kan niet ongedaan worden gemaakt.</string>
     <string name="gif_remove_all_confirm">Alles verwijderen</string>
     <string name="gif_remove_pack_body">Hiermee worden alle GIF\'s uit dit pakket verwijderd en komt opslagruimte vrij.</string>
-    <string name="privacy_section_intro">CleverKeys werkt volledig offline — er verlaten nooit gegevens je apparaat. Deze optionele instellingen bewaren gegevens lokaal zodat je ze kunt bekijken, exporteren of verwijderen; geëxporteerde veeggegevens kun je elders gebruiken om modellen te trainen.</string>
+    <string name="privacy_section_intro">Brown Keys werkt volledig offline — er verlaten nooit gegevens je apparaat. Deze optionele instellingen bewaren gegevens lokaal zodat je ze kunt bekijken, exporteren of verwijderen; geëxporteerde veeggegevens kun je elders gebruiken om modellen te trainen.</string>
     <string name="privacy_on_device_learning_header">Leren op het apparaat</string>
     <string name="privacy_forget_learned_title">Ook geleerde gegevens vergeten?</string>
     <string name="privacy_forget_learned_body">Leren staat nu uit — er wordt niets nieuws opgenomen. Wil je ook alles verwijderen wat al is geleerd (uitdrukkingspatronen, woordgebruik, geschiedenis van gekozen suggesties en veegcorrecties)? Dit kan niet ongedaan worden gemaakt.</string>
@@ -1026,7 +1026,7 @@
     <string name="calibration_touch_here">👆 Raak hier aan</string>
     <string name="calibration_min_readout">Min: %1$d%%</string>
     <string name="calibration_max_readout">Max: %1$d%%</string>
-    <string name="launcher_logo_desc">CleverKeys-logo</string>
+    <string name="launcher_logo_desc">Brown Keys-logo</string>
     <string name="launcher_tagline">Privacy, kracht en controle — met een brein.</string>
     <string name="launcher_step_enable">Toetsenbord inschakelen</string>
     <string name="launcher_step_select">Toetsenbord selecteren</string>
@@ -1243,11 +1243,11 @@
     <string name="clipboard_entry_duration_desc_default">Hoe lang items blijven bestaan voordat ze automatisch worden verwijderd (-1 = nooit)</string>
     <string name="clipboard_entry_duration_never">Verloopt nooit</string>
     <string name="clipboard_private_copy_header">🔒 Privé kopiëren</string>
-    <string name="clipboard_private_copy_in_app_note">In de app: de bewerkingsactie \'Privé kopiëren\' kan aan een korte veeg of een extra toets worden gekoppeld (Korte veegaanpassing). Ze slaat de huidige selectie op in het privéklembord van CleverKeys, zonder het systeemklembord aan te raken. Privé-items tonen een 🔒-badge; een privé-item naar het systeemklembord exporteren vraagt altijd eerst om bevestiging, en onversleutelde back-ups sluiten ze uit (versleutelde back-ups bevatten ze wel).</string>
+    <string name="clipboard_private_copy_in_app_note">In de app: de bewerkingsactie \'Privé kopiëren\' kan aan een korte veeg of een extra toets worden gekoppeld (Korte veegaanpassing). Ze slaat de huidige selectie op in het privéklembord van Brown Keys, zonder het systeemklembord aan te raken. Privé-items tonen een 🔒-badge; een privé-item naar het systeemklembord exporteren vraagt altijd eerst om bevestiging, en onversleutelde back-ups sluiten ze uit (versleutelde back-ups bevatten ze wel).</string>
     <string name="clipboard_url_handling_header">URL-verwerking</string>
     <string name="clipboard_custom_rules_browse">Bladeren naar custom.substitutions.json</string>
     <string name="clipboard_custom_rules_replace">Aangepaste regels vervangen</string>
-    <string name="clipboard_url_handling_note">Let op: opschonen gebeurt wanneer CleverKeys een knipsel in zijn geschiedenis opslaat, dus plakken vanuit het CleverKeys-paneel is altijd opgeschoond. Met \'Ook systeemklembord opschonen\' aan wordt ook het Android-systeemklembord overschreven met de opgeschoonde URL, zodat plakken in andere apps ook opgeschoond is (naar beste vermogen – alleen zolang het toetsenbord toegang tot het klembord heeft). Staat het uit, dan zien andere apps nog steeds de oorspronkelijke URL.</string>
+    <string name="clipboard_url_handling_note">Let op: opschonen gebeurt wanneer Brown Keys een knipsel in zijn geschiedenis opslaat, dus plakken vanuit het Brown Keys-paneel is altijd opgeschoond. Met \'Ook systeemklembord opschonen\' aan wordt ook het Android-systeemklembord overschreven met de opgeschoonde URL, zodat plakken in andere apps ook opgeschoond is (naar beste vermogen – alleen zolang het toetsenbord toegang tot het klembord heeft). Staat het uit, dan zien andere apps nog steeds de oorspronkelijke URL.</string>
     <string name="input_context_source_both">Ingebouwd + geleerd</string>
     <string name="input_context_source_learned_only">Alleen geleerd</string>
     <string name="input_context_source_static_only">Alleen ingebouwd</string>
@@ -1353,7 +1353,7 @@
     <string name="clipboard_backup_import_completed">Klembordimport voltooid.</string>
     <string name="clipboard_backup_import_merge_note">Imports worden samengevoegd met de bestaande geschiedenis zonder iets te overschrijven.</string>
     <string name="clipboard_backup_import_failed_title">Klembordimport mislukt</string>
-    <string name="clipboard_backup_import_failed">Kon klembordgeschiedenis niet importeren:\n\n%1$s\n\nControleer of het bestand een geldige CleverKeys-klembordback-up is.</string>
+    <string name="clipboard_backup_import_failed">Kon klembordgeschiedenis niet importeren:\n\n%1$s\n\nControleer of het bestand een geldige Brown Keys-klembordback-up is.</string>
     <string name="clipboard_backup_zip_export_success_title">Volledige klembordexport geslaagd</string>
     <string name="clipboard_backup_zip_saved">Klembordback-up met media opgeslagen.</string>
     <string name="clipboard_backup_zip_restore_hint">Herstel via \'ZIP importeren\' om alle items terug te zetten, inclusief afbeeldingen, video\'s en andere media.</string>
@@ -1363,7 +1363,7 @@
     <string name="clipboard_backup_zip_import_completed">Volledige klembordimport voltooid.</string>
     <string name="clipboard_backup_zip_media_restored_note">Alle mediabestanden en miniaturen zijn hersteld.</string>
     <string name="clipboard_backup_zip_import_failed_title">ZIP-import van klembord mislukt</string>
-    <string name="clipboard_backup_zip_import_failed">Kon klembord-ZIP niet importeren:\n\n%1$s\n\nControleer of het bestand een geldige CleverKeys-klembord-ZIP-back-up is.</string>
+    <string name="clipboard_backup_zip_import_failed">Kon klembord-ZIP niet importeren:\n\n%1$s\n\nControleer of het bestand een geldige Brown Keys-klembord-ZIP-back-up is.</string>
     <string name="dictionary_backup_export_success_title">Woordenboekexport geslaagd</string>
     <string name="dictionary_backup_export_disabled_words">Uitgeschakelde woorden: %1$d</string>
     <string name="dictionary_backup_export_failed_title">Woordenboekexport mislukt</string>
@@ -1509,7 +1509,7 @@
     </plurals>
 
     <!-- 2026-09-29 hardcoded-UI sweep (activities): launcher, dictionary, layouts, short swipes, themes, playground, manifest labels (reviewer=model) -->
-    <string name="launcher_step_enable_desc">CleverKeys inschakelen in de systeeminstellingen</string>
+    <string name="launcher_step_enable_desc">Brown Keys inschakelen in de systeeminstellingen</string>
     <string name="launcher_step_select_desc">Je standaardinvoermethode wijzigen</string>
     <string name="launcher_step_calibrate_desc">Tot 8 subtoetsacties per toets configureren</string>
     <string name="dict_tab_active">Actief</string>
@@ -1585,9 +1585,9 @@
     <string name="calibration_legend_short_range">Min - Max</string>
     <string name="calibration_legend_long_range">&gt; Max</string>
     <string name="calibration_percent_value">%1$d%%</string>
-    <string name="theme_builtin_cleverkeysdark_name">CleverKeys Donker</string>
+    <string name="theme_builtin_cleverkeysdark_name">Brown Keys Donker</string>
     <string name="theme_builtin_cleverkeysdark_desc">Dieppaars met zilveren accenten (standaard)</string>
-    <string name="theme_builtin_cleverkeyslight_name">CleverKeys Licht</string>
+    <string name="theme_builtin_cleverkeyslight_name">Brown Keys Licht</string>
     <string name="theme_builtin_cleverkeyslight_desc">Zilveren toetsen met paarse accenten</string>
     <string name="theme_builtin_dark_name">Donker</string>
     <string name="theme_builtin_dark_desc">Klassiek donker thema met blauwe accenten</string>
@@ -1637,7 +1637,6 @@
     <string name="swipe_debug_clear_traces_playground">Alleen testomgeving</string>
     <string name="swipe_debug_clear_traces_all">Alle veeggegevens</string>
     <string name="swipe_debug_clear_traces_message">Vastgelegde veegsporen van dit apparaat verwijderen?\n\n\'%1$s\' verwijdert sporen die op dit scherm zijn vastgelegd; \'%2$s\' verwijdert ook sporen uit de globale ML-verzameling.</string>
-    <string name="manifest_ime_service_label">CleverKeys-toetsenbord</string>
     <string name="manifest_backup_restore_label">Back-up &amp; herstel</string>
     <plurals name="swipe_debug_toast_cleared_traces">
         <item quantity="one">%1$d veegspoor gewist</item>
@@ -1855,11 +1854,11 @@
     </plurals>
     <!-- 2026-09-30 i18n: typed import/export/backup failure reasons and settings-import skip kinds (reviewer=model) -->
     <string name="io_error_file_not_found">Het bestand kan niet worden gevonden of geopend.</string>
-    <string name="io_error_permission_denied">CleverKeys heeft geen toegang tot dit bestand.</string>
+    <string name="io_error_permission_denied">Brown Keys heeft geen toegang tot dit bestand.</string>
     <string name="io_error_invalid_format">Het bestand heeft niet de verwachte indeling of is beschadigd.</string>
-    <string name="io_error_newer_version">Het bestand is gemaakt met een nieuwere versie van CleverKeys. Werk de app bij en probeer het opnieuw.</string>
+    <string name="io_error_newer_version">Het bestand is gemaakt met een nieuwere versie van Brown Keys. Werk de app bij en probeer het opnieuw.</string>
     <string name="io_error_out_of_space">Onvoldoende opslagruimte.</string>
-    <string name="io_error_too_large">Het bestand is groter dan CleverKeys veilig kan importeren.</string>
+    <string name="io_error_too_large">Het bestand is groter dan Brown Keys veilig kan importeren.</string>
     <string name="io_error_wrong_password_or_corrupt">Onjuist back-upwachtwoord, of het bestand is beschadigd of gewijzigd.</string>
     <string name="io_error_no_backup_password">Deze back-up is versleuteld en er is geen back-upwachtwoord beschikbaar.</string>
     <string name="io_error_wrong_backup_kind">Deze back-up bevat niet het soort gegevens dat deze import verwacht.</string>
@@ -1905,7 +1904,7 @@
     <string name="cmd_copy">Kopiëren</string>
     <string name="cmd_copy_desc">Geselecteerde tekst naar klembord kopiëren</string>
     <string name="cmd_copy_private">Privé kopiëren</string>
-    <string name="cmd_copy_private_desc">Selectie alleen naar CleverKeys kopiëren, nooit naar het systeemklembord</string>
+    <string name="cmd_copy_private_desc">Selectie alleen naar Brown Keys kopiëren, nooit naar het systeemklembord</string>
     <string name="cmd_paste">Plakken</string>
     <string name="cmd_paste_desc">Plakken vanaf klembord</string>
     <string name="cmd_cut">Knippen</string>

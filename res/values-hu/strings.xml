@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- <string name="app_name_release">CleverKeys</string> -->
-    <!-- <string name="app_name_debug">CleverKeys (Debug)</string> -->
+    <!-- <string name="app_name_release">Brown Keys</string> -->
+    <!-- <string name="app_name_debug">Brown Keys (Debug)</string> -->
     <!-- <string name="short_description">Lightweight and privacy-conscious virtual keyboard for Android.</string> -->
     <!-- <string name="store_description">The main feature is that you can type more characters by swiping the keys towards the corners.\n\nThis application was originally designed for programmers using Termux.\nNow perfect for everyday use.\n\nThis application contains no ads, doesn\'t make any network requests and is Open Source.</string> -->
     <string name="pref_layout_e_system">Rendszerbeállítások</string>
@@ -24,7 +24,7 @@
     <string name="key_descr_change_method">Billentyűzet váltása</string>
     <string name="key_descr_voice_typing">Hangalapú gépelés</string>
     <string name="key_descr_copy">Másolás</string>
-    <string name="key_descr_copy_private">Privát másolás (csak a CleverKeysbe, nem a rendszer vágólapjára)</string>
+    <string name="key_descr_copy_private">Privát másolás (csak a Brown Keysbe, nem a rendszer vágólapjára)</string>
     <string name="key_descr_paste">Beillesztés</string>
     <string name="key_descr_cut">Kivágás</string>
     <string name="key_descr_selectAll">Az összes kijelölése</string>
@@ -93,8 +93,8 @@
     <string name="clipboard_edit_error">A bejegyzés frissítése sikertelen</string>
 
     <!-- #156 Private copy -->
-    <string name="private_copy_toolbar_label">CleverKeys: Privát másolás</string>
-    <string name="private_copy_toast">Privát módon másolva a CleverKeysbe</string>
+    <string name="private_copy_toolbar_label">Brown Keys: Privát másolás</string>
+    <string name="private_copy_toast">Privát módon másolva a Brown Keysbe</string>
     <string name="private_copy_expose_dialog_title">Másolás a rendszer vágólapjára?</string>
     <string name="private_copy_expose_dialog_message">Ezt a bejegyzést privát módon másolta. Ha a rendszer vágólapjára másolja, a szöveg elérhetővé válik az előtérben lévő alkalmazás és más vágólapkezelők számára. Ennek ellenére másolja?</string>
     <string name="private_copy_expose_dialog_confirm">Másolás ennek ellenére</string>
@@ -105,7 +105,7 @@
     <string name="clipboard_filter_private_only_hint">Csak a privát módon másolt bejegyzések megjelenítése (🔒)</string>
 
     <!-- Settings Activity (Material 3) -->
-    <string name="settings_title">⚙️ CleverKeys beállítások</string>
+    <string name="settings_title">⚙️ Brown Keys beállítások</string>
     <string name="settings_description">Állítsa be a billentyűzetet az optimális gépelési élményhez.</string>
 
     <!-- Swipe Typing Section -->
@@ -269,7 +269,7 @@
     <string name="short_swipe_reset_all">Összes visszaállítása</string>
     <string name="short_swipe_tap_hint">Koppintson az alábbi billentyűk bármelyikére a rövid csúsztatási geszt testreszabásához</string>
     <string name="short_swipe_instruction_title">Koppintson bármelyik billentyűre a testreszabáshoz</string>
-    <string name="short_swipe_instruction_body">Az alábbi billentyűzet a valódi CleverKeys billentyűzete.\nKoppintson egy billentyűre rövid csúsztatási műveletek hozzáadásához.</string>
+    <string name="short_swipe_instruction_body">Az alábbi billentyűzet a valódi Brown Keys billentyűzete.\nKoppintson egy billentyűre rövid csúsztatási műveletek hozzáadásához.</string>
     <string name="short_swipe_custom_mappings">Egyéni leképezések</string>
 
     <!-- Témabeállítások / Theme Settings -->
@@ -356,7 +356,7 @@
     <string name="accessibility_swipe_complete_title">Csúsztatás befejezve</string>
     <string name="accessibility_swipe_complete_desc">Rezgés a csúsztatási gesztus befejezésekor</string>
     <string name="advanced_ime_prompt_title">Alapértelmezett billentyűzet emlékeztető</string>
-    <string name="advanced_ime_prompt_desc">Rendszerindításonként egyszer emlékeztet, hogy a CleverKeys legyen az alapértelmezett billentyűzet. Kikapcsolva soha többé nem kérdez.</string>
+    <string name="advanced_ime_prompt_desc">Rendszerindításonként egyszer emlékeztet, hogy a Brown Keys legyen az alapértelmezett billentyűzet. Kikapcsolva soha többé nem kérdez.</string>
     <string name="advanced_swipe_debug_log_title">Csúsztatás hibakeresési napló</string>
     <string name="advanced_swipe_debug_log_desc">Valós idejű folyamat elemzés csúsztatási gesztusokhoz (logcat szükséges)</string>
     <string name="advanced_detailed_logging_title">Részletes naplózás</string>
@@ -460,11 +460,11 @@
     <string name="clipboard_swipe_deleted">Törölve</string>
     <string name="clipboard_swipe_undo">Visszavonás</string>
     <string name="clipboard_private_copy_other_apps_title">Privát másolás más alkalmazásokban</string>
-    <string name="clipboard_private_copy_other_apps_desc">\"Privát másolás\" hozzáadása más alkalmazások szövegkijelölési menüjéhez. A kijelölt szöveget csak a CleverKeys-be másolja — soha nem a rendszer vágólapjára. Az engedélyezés egy alkalmazásbejegyzést ad hozzá, amelyet más alkalmazások is láthatnak.</string>
+    <string name="clipboard_private_copy_other_apps_desc">\"Privát másolás\" hozzáadása más alkalmazások szövegkijelölési menüjéhez. A kijelölt szöveget csak a Brown Keys-be másolja — soha nem a rendszer vágólapjára. Az engedélyezés egy alkalmazásbejegyzést ad hozzá, amelyet más alkalmazások is láthatnak.</string>
     <string name="clipboard_sanitize_links_title">Nyomkövetési paraméterek eltávolítása</string>
     <string name="clipboard_sanitize_links_desc">Az utm_*, fbclid stb. eltávolítása a másolt URL-ekből. ClearURLs által működtetve.</string>
     <string name="clipboard_sanitize_system_title">Rendszer vágólap megtisztítása is</string>
-    <string name="clipboard_sanitize_system_desc">Ha egy másolt URL megtisztul, a rendszer vágólapját is felülírja, így bármely alkalmazásban végzett beillesztés megtisztított — nem csak a CleverKeys panelen.</string>
+    <string name="clipboard_sanitize_system_desc">Ha egy másolt URL megtisztul, a rendszer vágólapját is felülírja, így bármely alkalmazásban végzett beillesztés megtisztított — nem csak a Brown Keys panelen.</string>
     <string name="clipboard_embed_enrich_title">Beágyazások gazdagítása megosztáshoz</string>
     <string name="clipboard_embed_enrich_desc">x.com → fxtwitter.com, reddit.com → rxddit.com stb. átírása.</string>
     <string name="clipboard_custom_rules_title">Egyéni szabályok használata</string>
@@ -797,7 +797,7 @@
     <string name="gif_remove_all_body">Ez törli az összes importált GIF-csomagot, bélyegképet és az adatbázist. Ez nem vonható vissza.</string>
     <string name="gif_remove_all_confirm">Összes eltávolítása</string>
     <string name="gif_remove_pack_body">Ez törli a csomag összes GIF-jét, és felszabadítja a tárhelyet.</string>
-    <string name="privacy_section_intro">A CleverKeys teljesen offline működik — soha semmilyen adat nem hagyja el az eszközét. Ezek a választható beállítások helyben tárolnak adatokat, hogy megnézhesse, exportálhassa vagy törölhesse őket; az exportált csúsztatási adatok máshol modellek betanítására használhatók.</string>
+    <string name="privacy_section_intro">A Brown Keys teljesen offline működik — soha semmilyen adat nem hagyja el az eszközét. Ezek a választható beállítások helyben tárolnak adatokat, hogy megnézhesse, exportálhassa vagy törölhesse őket; az exportált csúsztatási adatok máshol modellek betanítására használhatók.</string>
     <string name="privacy_on_device_learning_header">Tanulás az eszközön</string>
     <string name="privacy_forget_learned_title">A tanult adatokat is elfelejti?</string>
     <string name="privacy_forget_learned_body">A tanulás mostantól ki van kapcsolva — semmi új nem kerül rögzítésre. Törli a már megtanultakat is (kifejezésminták, szóhasználat, javaslatválasztási előzmények és csúsztatási javítások)? Ez nem vonható vissza.</string>
@@ -1032,7 +1032,7 @@
     <string name="calibration_touch_here">👆 Érintse meg itt</string>
     <string name="calibration_min_readout">Min: %1$d%%</string>
     <string name="calibration_max_readout">Max: %1$d%%</string>
-    <string name="launcher_logo_desc">CleverKeys logó</string>
+    <string name="launcher_logo_desc">Brown Keys logó</string>
     <string name="launcher_tagline">Adatvédelem, erő és irányítás — ésszel.</string>
     <string name="launcher_step_enable">Billentyűzet engedélyezése</string>
     <string name="launcher_step_select">Billentyűzet kiválasztása</string>
@@ -1249,11 +1249,11 @@
     <string name="clipboard_entry_duration_desc_default">Mennyi ideig maradnak meg a bejegyzések az automatikus törlés előtt (-1 = soha)</string>
     <string name="clipboard_entry_duration_never">Soha nem jár le</string>
     <string name="clipboard_private_copy_header">🔒 Privát másolás</string>
-    <string name="clipboard_private_copy_in_app_note">Alkalmazáson belül: a „Privát másolás” szerkesztési művelet rövid csúsztatáshoz vagy extra billentyűhöz rendelhető (Rövid csúsztatás testreszabása). Az aktuális kijelölést a CleverKeys privát vágólapjára menti, a rendszer vágólapjának érintése nélkül. A privát bejegyzéseken 🔒 jelvény látható; a rendszer vágólapjára való exportálásuk előtt az alkalmazás mindig rákérdez, a titkosítatlan mentések pedig kihagyják őket (a titkosított mentések tartalmazzák őket).</string>
+    <string name="clipboard_private_copy_in_app_note">Alkalmazáson belül: a „Privát másolás” szerkesztési művelet rövid csúsztatáshoz vagy extra billentyűhöz rendelhető (Rövid csúsztatás testreszabása). Az aktuális kijelölést a Brown Keys privát vágólapjára menti, a rendszer vágólapjának érintése nélkül. A privát bejegyzéseken 🔒 jelvény látható; a rendszer vágólapjára való exportálásuk előtt az alkalmazás mindig rákérdez, a titkosítatlan mentések pedig kihagyják őket (a titkosított mentések tartalmazzák őket).</string>
     <string name="clipboard_url_handling_header">URL-kezelés</string>
     <string name="clipboard_custom_rules_browse">custom.substitutions.json tallózása</string>
     <string name="clipboard_custom_rules_replace">Egyéni szabályok cseréje</string>
-    <string name="clipboard_url_handling_note">Megjegyzés: a tisztítás akkor fut le, amikor a CleverKeys egy kivágást az előzményeibe ment, így a CleverKeys panelről történő beillesztések mindig megtisztítottak. Ha a „Rendszer vágólap megtisztítása is” be van kapcsolva, az Android rendszer vágólapja is felülíródik a megtisztított URL-lel, így a más alkalmazásokban történő beillesztések is megtisztítottak (nem garantáltan — csak amíg a billentyűzet hozzáfér a vágólaphoz). Kikapcsolt állapotban a többi alkalmazás továbbra is az eredeti URL-t látja.</string>
+    <string name="clipboard_url_handling_note">Megjegyzés: a tisztítás akkor fut le, amikor a Brown Keys egy kivágást az előzményeibe ment, így a Brown Keys panelről történő beillesztések mindig megtisztítottak. Ha a „Rendszer vágólap megtisztítása is” be van kapcsolva, az Android rendszer vágólapja is felülíródik a megtisztított URL-lel, így a más alkalmazásokban történő beillesztések is megtisztítottak (nem garantáltan — csak amíg a billentyűzet hozzáfér a vágólaphoz). Kikapcsolt állapotban a többi alkalmazás továbbra is az eredeti URL-t látja.</string>
     <string name="input_context_source_both">Beépített + tanult</string>
     <string name="input_context_source_learned_only">Csak tanult</string>
     <string name="input_context_source_static_only">Csak beépített</string>
@@ -1359,7 +1359,7 @@
     <string name="clipboard_backup_import_completed">A vágólap importálása befejeződött.</string>
     <string name="clipboard_backup_import_merge_note">Az importált elemek felülírás nélkül egyesülnek a meglévő előzményekkel.</string>
     <string name="clipboard_backup_import_failed_title">Sikertelen vágólap-importálás</string>
-    <string name="clipboard_backup_import_failed">Nem sikerült importálni a vágólap-előzményeket:\n\n%1$s\n\nEllenőrizze, hogy a fájl érvényes CleverKeys vágólapmentés-e.</string>
+    <string name="clipboard_backup_import_failed">Nem sikerült importálni a vágólap-előzményeket:\n\n%1$s\n\nEllenőrizze, hogy a fájl érvényes Brown Keys vágólapmentés-e.</string>
     <string name="clipboard_backup_zip_export_success_title">Sikeres teljes vágólap-exportálás</string>
     <string name="clipboard_backup_zip_saved">A vágólapmentés médiával együtt elmentve.</string>
     <string name="clipboard_backup_zip_restore_hint">Az összes bejegyzést – a képekkel, videókkal és egyéb médiával együtt – a ZIP importálása gombbal állíthatja vissza.</string>
@@ -1369,7 +1369,7 @@
     <string name="clipboard_backup_zip_import_completed">A teljes vágólap importálása befejeződött.</string>
     <string name="clipboard_backup_zip_media_restored_note">Minden médiafájl és bélyegkép visszaállítva.</string>
     <string name="clipboard_backup_zip_import_failed_title">Sikertelen vágólap-ZIP-importálás</string>
-    <string name="clipboard_backup_zip_import_failed">Nem sikerült importálni a vágólap-ZIP-et:\n\n%1$s\n\nEllenőrizze, hogy a fájl érvényes CleverKeys vágólap-ZIP-mentés-e.</string>
+    <string name="clipboard_backup_zip_import_failed">Nem sikerült importálni a vágólap-ZIP-et:\n\n%1$s\n\nEllenőrizze, hogy a fájl érvényes Brown Keys vágólap-ZIP-mentés-e.</string>
     <string name="dictionary_backup_export_success_title">Sikeres szótárexportálás</string>
     <string name="dictionary_backup_export_disabled_words">Letiltott szavak: %1$d</string>
     <string name="dictionary_backup_export_failed_title">Sikertelen szótárexportálás</string>
@@ -1515,7 +1515,7 @@
     </plurals>
 
     <!-- 2026-09-29 hardcoded-UI sweep (activities): launcher, dictionary, layouts, short swipes, themes, playground, manifest labels (reviewer=model) -->
-    <string name="launcher_step_enable_desc">Kapcsolja be a CleverKeyst a rendszerbeállításokban</string>
+    <string name="launcher_step_enable_desc">Kapcsolja be a Brown Keyst a rendszerbeállításokban</string>
     <string name="launcher_step_select_desc">Váltsa át az alapértelmezett beviteli módot</string>
     <string name="launcher_step_calibrate_desc">Billentyűnként legfeljebb 8 albillentyű-művelet beállítása</string>
     <string name="dict_tab_active">Aktív</string>
@@ -1591,9 +1591,9 @@
     <string name="calibration_legend_short_range">Min - Max</string>
     <string name="calibration_legend_long_range">&gt; Max</string>
     <string name="calibration_percent_value">%1$d%%</string>
-    <string name="theme_builtin_cleverkeysdark_name">CleverKeys Sötét</string>
+    <string name="theme_builtin_cleverkeysdark_name">Brown Keys Sötét</string>
     <string name="theme_builtin_cleverkeysdark_desc">Mélylila ezüst kiemelésekkel (alapértelmezett)</string>
-    <string name="theme_builtin_cleverkeyslight_name">CleverKeys Világos</string>
+    <string name="theme_builtin_cleverkeyslight_name">Brown Keys Világos</string>
     <string name="theme_builtin_cleverkeyslight_desc">Ezüst billentyűk lila kiemelésekkel</string>
     <string name="theme_builtin_dark_name">Sötét</string>
     <string name="theme_builtin_dark_desc">Klasszikus sötét téma kék kiemelésekkel</string>
@@ -1643,7 +1643,6 @@
     <string name="swipe_debug_clear_traces_playground">Csak a Playground</string>
     <string name="swipe_debug_clear_traces_all">Minden csúsztatási adat</string>
     <string name="swipe_debug_clear_traces_message">Törli a rögzített csúsztatási nyomvonalakat erről az eszközről?\n\nA(z) „%1$s” az ezen a képernyőn rögzített nyomvonalakat törli; a(z) „%2$s” a globális ML-gyűjtemény nyomvonalait is törli.</string>
-    <string name="manifest_ime_service_label">CleverKeys billentyűzet</string>
     <string name="manifest_backup_restore_label">Biztonsági mentés &amp; Visszaállítás</string>
     <plurals name="swipe_debug_toast_cleared_traces">
         <item quantity="one">%1$d nyomvonal törölve</item>
@@ -1861,11 +1860,11 @@
     </plurals>
     <!-- 2026-09-30 i18n: typed import/export/backup failure reasons and settings-import skip kinds (reviewer=model) -->
     <string name="io_error_file_not_found">A fájl nem található, vagy nem nyitható meg.</string>
-    <string name="io_error_permission_denied">A CleverKeys nem férhet hozzá ehhez a fájlhoz.</string>
+    <string name="io_error_permission_denied">A Brown Keys nem férhet hozzá ehhez a fájlhoz.</string>
     <string name="io_error_invalid_format">A fájl nem a várt formátumú, vagy sérült.</string>
-    <string name="io_error_newer_version">A fájlt a CleverKeys egy újabb verziója készítette. Frissítse az alkalmazást, és próbálja újra.</string>
+    <string name="io_error_newer_version">A fájlt a Brown Keys egy újabb verziója készítette. Frissítse az alkalmazást, és próbálja újra.</string>
     <string name="io_error_out_of_space">Nincs elég tárhely.</string>
-    <string name="io_error_too_large">A fájl nagyobb annál, amit a CleverKeys biztonságosan importálni tud.</string>
+    <string name="io_error_too_large">A fájl nagyobb annál, amit a Brown Keys biztonságosan importálni tud.</string>
     <string name="io_error_wrong_password_or_corrupt">Hibás biztonsági mentési jelszó, vagy a fájl sérült, illetve módosították.</string>
     <string name="io_error_no_backup_password">Ez a biztonsági mentés titkosított, és nincs elérhető biztonsági mentési jelszó.</string>
     <string name="io_error_wrong_backup_kind">Ez a biztonsági mentés nem az ehhez az importáláshoz szükséges adatokat tartalmazza.</string>
@@ -1911,7 +1910,7 @@
     <string name="cmd_copy">Másolás</string>
     <string name="cmd_copy_desc">Kijelölt szöveg másolása a vágólapra</string>
     <string name="cmd_copy_private">Privát másolás</string>
-    <string name="cmd_copy_private_desc">Másolás csak a CleverKeysbe, a rendszer vágólapjára soha</string>
+    <string name="cmd_copy_private_desc">Másolás csak a Brown Keysbe, a rendszer vágólapjára soha</string>
     <string name="cmd_paste">Beillesztés</string>
     <string name="cmd_paste_desc">Beillesztés a vágólapról</string>
     <string name="cmd_cut">Kivágás</string>

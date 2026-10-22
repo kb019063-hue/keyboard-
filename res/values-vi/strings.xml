@@ -47,7 +47,7 @@
     <string name="key_action_send">Gửi</string>
     <!-- <string name="launcher_button_imesettings">Enable keyboard</string> -->
     <!-- <string name="launcher_button_imepicker">Select keyboard</string> -->
-    <!-- <string name="launcher_description">This application is a virtual keyboard. Go to the system settings by clicking on the button below and enable CleverKeys.</string> -->
+    <!-- <string name="launcher_description">This application is a virtual keyboard. Go to the system settings by clicking on the button below and enable Brown Keys.</string> -->
     <!-- <string name="launcher_sourcecode">This is a free and open source application. You can find the source code or report bugs on GitHub.</string> -->
     <!-- <string name="launcher_tryhere">After enabling, you can try the keyboard here:</string> -->
     <!-- <string name="launcher_tryhere_hint">Try here</string> -->
@@ -59,7 +59,7 @@
     <string name="key_descr_change_method">Chuyển bàn phím</string>
     <string name="key_descr_voice_typing">Nhập bằng giọng nói</string>
     <string name="key_descr_copy">Sao chép</string>
-    <string name="key_descr_copy_private">Sao chép riêng tư (chỉ vào CleverKeys, không vào bộ nhớ tạm hệ thống)</string>
+    <string name="key_descr_copy_private">Sao chép riêng tư (chỉ vào Brown Keys, không vào bộ nhớ tạm hệ thống)</string>
     <string name="key_descr_paste">Dán</string>
     <string name="key_descr_cut">Cắt</string>
     <string name="key_descr_selectAll">Chọn tất cả</string>
@@ -128,8 +128,8 @@
     <string name="clipboard_edit_error">Không cập nhật được mục</string>
 
     <!-- #156 Private copy -->
-    <string name="private_copy_toolbar_label">CleverKeys: Sao chép riêng tư</string>
-    <string name="private_copy_toast">Đã sao chép riêng tư vào CleverKeys</string>
+    <string name="private_copy_toolbar_label">Brown Keys: Sao chép riêng tư</string>
+    <string name="private_copy_toast">Đã sao chép riêng tư vào Brown Keys</string>
     <string name="private_copy_expose_dialog_title">Sao chép vào bộ nhớ tạm hệ thống?</string>
     <string name="private_copy_expose_dialog_message">Mục này đã được sao chép riêng tư. Sao chép nó vào bộ nhớ tạm hệ thống sẽ để lộ văn bản cho ứng dụng nền trước và các trình quản lý bộ nhớ tạm khác. Vẫn sao chép?</string>
     <string name="private_copy_expose_dialog_confirm">Vẫn sao chép</string>
@@ -140,7 +140,7 @@
     <string name="clipboard_filter_private_only_hint">Chỉ hiển thị các mục đã sao chép riêng tư (🔒)</string>
 
     <!-- Settings Activity (Material 3) -->
-    <string name="settings_title">⚙️ Cài đặt CleverKeys</string>
+    <string name="settings_title">⚙️ Cài đặt Brown Keys</string>
     <string name="settings_description">Cấu hình bàn phím để có trải nghiệm gõ tối ưu.</string>
 
     <!-- Swipe Typing Section -->
@@ -298,7 +298,7 @@
     <string name="short_swipe_reset_all">Đặt lại tất cả</string>
     <string name="short_swipe_tap_hint">Nhấn vào bất kỳ phím nào bên dưới để tùy chỉnh cử chỉ vuốt ngắn</string>
     <string name="short_swipe_instruction_title">Nhấn vào bất kỳ phím nào để tùy chỉnh</string>
-    <string name="short_swipe_instruction_body">Bàn phím bên dưới là bàn phím CleverKeys thực tế của bạn.\nChạm vào một phím để thêm thao tác vuốt ngắn cho phím đó.</string>
+    <string name="short_swipe_instruction_body">Bàn phím bên dưới là bàn phím Brown Keys thực tế của bạn.\nChạm vào một phím để thêm thao tác vuốt ngắn cho phím đó.</string>
     <string name="short_swipe_custom_mappings">Ánh xạ tùy chỉnh</string>
     <string name="theme_settings_title">Chủ đề bàn phím</string>
     <string name="theme_restart_keyboard">Khởi động lại bàn phím</string>
@@ -377,7 +377,7 @@
     <string name="accessibility_swipe_complete_title">Hoàn tất vuốt</string>
     <string name="accessibility_swipe_complete_desc">Rung khi cử chỉ vuốt kết thúc</string>
     <string name="advanced_ime_prompt_title">Nhắc bàn phím mặc định</string>
-    <string name="advanced_ime_prompt_desc">Nhắc một lần mỗi lần khởi động để đặt CleverKeys làm bàn phím mặc định. Tắt để không bao giờ hỏi lại.</string>
+    <string name="advanced_ime_prompt_desc">Nhắc một lần mỗi lần khởi động để đặt Brown Keys làm bàn phím mặc định. Tắt để không bao giờ hỏi lại.</string>
     <string name="advanced_swipe_debug_log_title">Nhật ký gỡ lỗi vuốt</string>
     <string name="advanced_swipe_debug_log_desc">Phân tích quy trình xử lý vuốt theo thời gian thực (yêu cầu logcat)</string>
     <string name="advanced_detailed_logging_title">Ghi nhật ký chi tiết</string>
@@ -481,11 +481,11 @@
     <string name="clipboard_swipe_deleted">Đã xóa</string>
     <string name="clipboard_swipe_undo">Hoàn tác</string>
     <string name="clipboard_private_copy_other_apps_title">Sao chép riêng tư trong ứng dụng khác</string>
-    <string name="clipboard_private_copy_other_apps_desc">Thêm \"Sao chép riêng tư\" vào menu chọn văn bản của các ứng dụng khác. Sao chép văn bản được chọn chỉ vào CleverKeys — không bao giờ vào bảng tạm hệ thống. Khi bật sẽ thêm mục ứng dụng mà các ứng dụng khác có thể thấy.</string>
+    <string name="clipboard_private_copy_other_apps_desc">Thêm \"Sao chép riêng tư\" vào menu chọn văn bản của các ứng dụng khác. Sao chép văn bản được chọn chỉ vào Brown Keys — không bao giờ vào bảng tạm hệ thống. Khi bật sẽ thêm mục ứng dụng mà các ứng dụng khác có thể thấy.</string>
     <string name="clipboard_sanitize_links_title">Làm sạch tham số theo dõi</string>
     <string name="clipboard_sanitize_links_desc">Xóa utm_*, fbclid, v.v. khỏi URL bạn sao chép. Hỗ trợ bởi ClearURLs.</string>
     <string name="clipboard_sanitize_system_title">Cũng làm sạch bảng tạm hệ thống</string>
-    <string name="clipboard_sanitize_system_desc">Khi URL đã được làm sạch, ghi đè bảng tạm hệ thống để các lần dán trong mọi ứng dụng đều được làm sạch — không chỉ bảng điều khiển CleverKeys.</string>
+    <string name="clipboard_sanitize_system_desc">Khi URL đã được làm sạch, ghi đè bảng tạm hệ thống để các lần dán trong mọi ứng dụng đều được làm sạch — không chỉ bảng điều khiển Brown Keys.</string>
     <string name="clipboard_embed_enrich_title">Cải thiện nội dung nhúng khi chia sẻ</string>
     <string name="clipboard_embed_enrich_desc">Viết lại x.com → fxtwitter.com, reddit.com → rxddit.com, v.v.</string>
     <string name="clipboard_custom_rules_title">Dùng quy tắc tùy chỉnh</string>
@@ -934,7 +934,7 @@
     <string name="intent_editor_title_create">Tạo hành động intent</string>
     <string name="intent_editor_title_edit">Sửa hành động intent</string>
     <string name="launcher_footer">Bàn phím mã nguồn mở không khoan nhượng.</string>
-    <string name="launcher_logo_desc">Logo CleverKeys</string>
+    <string name="launcher_logo_desc">Logo Brown Keys</string>
     <string name="launcher_step_calibrate">Hiệu chỉnh cử chỉ từng phím</string>
     <string name="launcher_step_completed_desc">Đã hoàn thành</string>
     <string name="launcher_step_enable">Bật bàn phím</string>
@@ -1016,7 +1016,7 @@
     <string name="privacy_on_device_learning_header">Học trên thiết bị</string>
     <string name="privacy_perf_stats">Dự đoán: %1$d • TB: %2$dms • Top-1: %3$d%%</string>
     <string name="privacy_performance_header">Chỉ số hiệu năng</string>
-    <string name="privacy_section_intro">CleverKeys hoạt động hoàn toàn ngoại tuyến — không dữ liệu nào rời khỏi thiết bị của bạn. Các cài đặt tuỳ chọn này lưu dữ liệu cục bộ để bạn xem lại, xuất ra hoặc xoá; dữ liệu vuốt đã xuất có thể dùng để huấn luyện mô hình ở nơi khác.</string>
+    <string name="privacy_section_intro">Brown Keys hoạt động hoàn toàn ngoại tuyến — không dữ liệu nào rời khỏi thiết bị của bạn. Các cài đặt tuỳ chọn này lưu dữ liệu cục bộ để bạn xem lại, xuất ra hoặc xoá; dữ liệu vuốt đã xuất có thể dùng để huấn luyện mô hình ở nơi khác.</string>
     <string name="privacy_swipe_stats">Tổng lượt vuốt: %1$d • Từ khác nhau: %2$d</string>
     <string name="provenance_adaptation">• Thích ứng: %1$.2f×</string>
     <string name="provenance_aggression">Mức mạnh tay: %1$s (%2$.2f×)</string>
@@ -1266,11 +1266,11 @@
     <string name="clipboard_entry_duration_desc_default">Thời gian lưu các mục trước khi tự động xóa (-1 = không bao giờ)</string>
     <string name="clipboard_entry_duration_never">Không bao giờ hết hạn</string>
     <string name="clipboard_private_copy_header">🔒 Sao chép riêng tư</string>
-    <string name="clipboard_private_copy_in_app_note">Trong ứng dụng: thao tác chỉnh sửa \"Sao chép riêng tư\" có thể gán cho một cú vuốt ngắn hoặc phím bổ sung (Tùy chỉnh vuốt ngắn). Thao tác này lưu vùng chọn hiện tại vào bảng tạm riêng tư của CleverKeys mà không đụng đến bảng tạm hệ thống. Các mục riêng tư có huy hiệu 🔒; việc xuất một mục như vậy ra bảng tạm hệ thống luôn hỏi trước, và bản sao lưu văn bản thuần không bao gồm chúng (bản sao lưu mã hóa có bao gồm).</string>
+    <string name="clipboard_private_copy_in_app_note">Trong ứng dụng: thao tác chỉnh sửa \"Sao chép riêng tư\" có thể gán cho một cú vuốt ngắn hoặc phím bổ sung (Tùy chỉnh vuốt ngắn). Thao tác này lưu vùng chọn hiện tại vào bảng tạm riêng tư của Brown Keys mà không đụng đến bảng tạm hệ thống. Các mục riêng tư có huy hiệu 🔒; việc xuất một mục như vậy ra bảng tạm hệ thống luôn hỏi trước, và bản sao lưu văn bản thuần không bao gồm chúng (bản sao lưu mã hóa có bao gồm).</string>
     <string name="clipboard_url_handling_header">Xử lý URL</string>
     <string name="clipboard_custom_rules_browse">Chọn tệp custom.substitutions.json</string>
     <string name="clipboard_custom_rules_replace">Thay thế quy tắc tùy chỉnh</string>
-    <string name="clipboard_url_handling_note">Lưu ý: việc làm sạch diễn ra khi CleverKeys lưu một mục vào lịch sử của nó, nên nội dung dán từ bảng của CleverKeys luôn đã được làm sạch. Khi bật \"Cũng làm sạch bảng tạm hệ thống\", bảng tạm hệ thống Android cũng bị ghi đè bằng URL đã làm sạch, nên nội dung dán trong ứng dụng khác cũng được làm sạch (cố gắng tối đa — chỉ khi bàn phím có quyền truy cập bảng tạm). Khi tắt, các ứng dụng khác vẫn thấy URL gốc.</string>
+    <string name="clipboard_url_handling_note">Lưu ý: việc làm sạch diễn ra khi Brown Keys lưu một mục vào lịch sử của nó, nên nội dung dán từ bảng của Brown Keys luôn đã được làm sạch. Khi bật \"Cũng làm sạch bảng tạm hệ thống\", bảng tạm hệ thống Android cũng bị ghi đè bằng URL đã làm sạch, nên nội dung dán trong ứng dụng khác cũng được làm sạch (cố gắng tối đa — chỉ khi bàn phím có quyền truy cập bảng tạm). Khi tắt, các ứng dụng khác vẫn thấy URL gốc.</string>
     <string name="input_context_source_both">Tích hợp + Đã học</string>
     <string name="input_context_source_learned_only">Chỉ đã học</string>
     <string name="input_context_source_static_only">Chỉ tích hợp</string>
@@ -1368,7 +1368,7 @@
     <string name="clipboard_backup_import_completed">Đã nhập bộ nhớ tạm xong.</string>
     <string name="clipboard_backup_import_merge_note">Dữ liệu nhập được gộp vào lịch sử hiện có mà không ghi đè.</string>
     <string name="clipboard_backup_import_failed_title">Nhập bộ nhớ tạm thất bại</string>
-    <string name="clipboard_backup_import_failed">Không nhập được lịch sử bộ nhớ tạm:\n\n%1$s\n\nHãy đảm bảo tệp là bản sao lưu bộ nhớ tạm CleverKeys hợp lệ.</string>
+    <string name="clipboard_backup_import_failed">Không nhập được lịch sử bộ nhớ tạm:\n\n%1$s\n\nHãy đảm bảo tệp là bản sao lưu bộ nhớ tạm Brown Keys hợp lệ.</string>
     <string name="clipboard_backup_zip_export_success_title">Xuất đầy đủ bộ nhớ tạm thành công</string>
     <string name="clipboard_backup_zip_saved">Đã lưu bản sao lưu bộ nhớ tạm kèm tệp phương tiện.</string>
     <string name="clipboard_backup_zip_restore_hint">Khôi phục qua \"Nhập ZIP\" để lấy lại mọi mục, kể cả hình ảnh, video và tệp phương tiện khác.</string>
@@ -1378,7 +1378,7 @@
     <string name="clipboard_backup_zip_import_completed">Đã nhập đầy đủ bộ nhớ tạm xong.</string>
     <string name="clipboard_backup_zip_media_restored_note">Mọi tệp phương tiện và ảnh thu nhỏ đã được khôi phục.</string>
     <string name="clipboard_backup_zip_import_failed_title">Nhập ZIP bộ nhớ tạm thất bại</string>
-    <string name="clipboard_backup_zip_import_failed">Không nhập được ZIP bộ nhớ tạm:\n\n%1$s\n\nHãy đảm bảo tệp là bản sao lưu ZIP bộ nhớ tạm CleverKeys hợp lệ.</string>
+    <string name="clipboard_backup_zip_import_failed">Không nhập được ZIP bộ nhớ tạm:\n\n%1$s\n\nHãy đảm bảo tệp là bản sao lưu ZIP bộ nhớ tạm Brown Keys hợp lệ.</string>
     <string name="dictionary_backup_export_success_title">Xuất từ điển thành công</string>
     <string name="dictionary_backup_export_disabled_words">Từ bị tắt: %1$d</string>
     <string name="dictionary_backup_export_failed_title">Xuất từ điển thất bại</string>
@@ -1501,7 +1501,7 @@
     </plurals>
 
     <!-- 2026-09-29 hardcoded-UI sweep (activities): launcher, dictionary, layouts, short swipes, themes, playground, manifest labels (reviewer=model) -->
-    <string name="launcher_step_enable_desc">Bật CleverKeys trong cài đặt hệ thống</string>
+    <string name="launcher_step_enable_desc">Bật Brown Keys trong cài đặt hệ thống</string>
     <string name="launcher_step_select_desc">Chuyển phương thức nhập mặc định của bạn</string>
     <string name="launcher_step_calibrate_desc">Cấu hình tối đa 8 thao tác phím phụ cho mỗi phím</string>
     <string name="dict_tab_active">Đang dùng</string>
@@ -1577,9 +1577,9 @@
     <string name="calibration_legend_short_range">Min - Max</string>
     <string name="calibration_legend_long_range">&gt; Max</string>
     <string name="calibration_percent_value">%1$d%%</string>
-    <string name="theme_builtin_cleverkeysdark_name">CleverKeys Tối</string>
+    <string name="theme_builtin_cleverkeysdark_name">Brown Keys Tối</string>
     <string name="theme_builtin_cleverkeysdark_desc">Tím đậm điểm xuyết bạc (mặc định)</string>
-    <string name="theme_builtin_cleverkeyslight_name">CleverKeys Sáng</string>
+    <string name="theme_builtin_cleverkeyslight_name">Brown Keys Sáng</string>
     <string name="theme_builtin_cleverkeyslight_desc">Phím bạc điểm xuyết tím</string>
     <string name="theme_builtin_dark_name">Tối</string>
     <string name="theme_builtin_dark_desc">Chủ đề tối cổ điển điểm xuyết xanh dương</string>
@@ -1629,7 +1629,6 @@
     <string name="swipe_debug_clear_traces_playground">Chỉ Sân thử</string>
     <string name="swipe_debug_clear_traces_all">Mọi dữ liệu vuốt</string>
     <string name="swipe_debug_clear_traces_message">Xóa các vệt vuốt đã ghi khỏi thiết bị này?\n\n“%1$s” xóa các vệt được ghi trên màn hình này; “%2$s” còn xóa cả các vệt trong bộ sưu tập ML chung.</string>
-    <string name="manifest_ime_service_label">Bàn phím CleverKeys</string>
     <string name="manifest_backup_restore_label">Sao lưu &amp; Khôi phục</string>
     <plurals name="swipe_debug_toast_cleared_traces">
         <item quantity="other">Đã xóa %1$d vệt vuốt</item>
@@ -1838,11 +1837,11 @@
     </plurals>
     <!-- 2026-09-30 i18n: typed import/export/backup failure reasons and settings-import skip kinds (reviewer=model) -->
     <string name="io_error_file_not_found">Không thể tìm thấy hoặc mở tệp.</string>
-    <string name="io_error_permission_denied">CleverKeys không được phép truy cập tệp này.</string>
+    <string name="io_error_permission_denied">Brown Keys không được phép truy cập tệp này.</string>
     <string name="io_error_invalid_format">Tệp không đúng định dạng mong đợi hoặc đã bị hỏng.</string>
-    <string name="io_error_newer_version">Tệp được tạo bằng phiên bản CleverKeys mới hơn. Hãy cập nhật ứng dụng rồi thử lại.</string>
+    <string name="io_error_newer_version">Tệp được tạo bằng phiên bản Brown Keys mới hơn. Hãy cập nhật ứng dụng rồi thử lại.</string>
     <string name="io_error_out_of_space">Không đủ dung lượng lưu trữ.</string>
-    <string name="io_error_too_large">Tệp lớn hơn mức CleverKeys có thể nhập một cách an toàn.</string>
+    <string name="io_error_too_large">Tệp lớn hơn mức Brown Keys có thể nhập một cách an toàn.</string>
     <string name="io_error_wrong_password_or_corrupt">Sai mật khẩu sao lưu, hoặc tệp bị hỏng hay đã bị thay đổi.</string>
     <string name="io_error_no_backup_password">Bản sao lưu này được mã hóa và không có mật khẩu sao lưu nào.</string>
     <string name="io_error_wrong_backup_kind">Bản sao lưu này không chứa loại dữ liệu mà lần nhập này cần.</string>
@@ -1888,7 +1887,7 @@
     <string name="cmd_copy">Sao chép</string>
     <string name="cmd_copy_desc">Sao chép văn bản đã chọn vào bộ nhớ tạm</string>
     <string name="cmd_copy_private">Sao chép riêng tư</string>
-    <string name="cmd_copy_private_desc">Chỉ sao chép vào CleverKeys, không bao giờ vào bộ nhớ tạm hệ thống</string>
+    <string name="cmd_copy_private_desc">Chỉ sao chép vào Brown Keys, không bao giờ vào bộ nhớ tạm hệ thống</string>
     <string name="cmd_paste">Dán</string>
     <string name="cmd_paste_desc">Dán từ bộ nhớ tạm</string>
     <string name="cmd_cut">Cắt</string>

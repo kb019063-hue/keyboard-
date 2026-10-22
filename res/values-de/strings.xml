@@ -30,7 +30,7 @@
     <string name="key_descr_change_method">Tastatur wechseln</string>
     <string name="key_descr_voice_typing">Spracheingabe</string>
     <string name="key_descr_copy">Kopieren</string>
-    <string name="key_descr_copy_private">Privates Kopieren (nur in CleverKeys, nicht in die Systemzwischenablage)</string>
+    <string name="key_descr_copy_private">Privates Kopieren (nur in Brown Keys, nicht in die Systemzwischenablage)</string>
     <string name="key_descr_paste">Einfügen</string>
     <string name="key_descr_cut">Ausschneiden</string>
     <string name="key_descr_selectAll">Alles auswählen</string>
@@ -103,8 +103,8 @@
     <string name="clipboard_edit_error">Eintrag konnte nicht aktualisiert werden</string>
 
     <!-- #156 Private copy -->
-    <string name="private_copy_toolbar_label">CleverKeys: Privates Kopieren</string>
-    <string name="private_copy_toast">Privat nach CleverKeys kopiert</string>
+    <string name="private_copy_toolbar_label">Brown Keys: Privates Kopieren</string>
+    <string name="private_copy_toast">Privat nach Brown Keys kopiert</string>
     <string name="private_copy_expose_dialog_title">In die Systemzwischenablage kopieren?</string>
     <string name="private_copy_expose_dialog_message">Dieser Eintrag wurde privat kopiert. Wenn Sie ihn in die Systemzwischenablage kopieren, wird der Text für die Vordergrund-App und andere Zwischenablage-Manager sichtbar. Trotzdem kopieren?</string>
     <string name="private_copy_expose_dialog_confirm">Trotzdem kopieren</string>
@@ -115,7 +115,7 @@
     <string name="clipboard_filter_private_only_hint">Nur privat kopierte Einträge anzeigen (🔒)</string>
 
     <!-- Settings Activity (Material 3) -->
-    <string name="settings_title">⚙️ CleverKeys-Einstellungen</string>
+    <string name="settings_title">⚙️ Brown Keys-Einstellungen</string>
     <string name="settings_description">Konfigurieren Sie Ihre Tastatureinstellungen für ein optimales Tipperlebnis.</string>
 
     <!-- Swipe Typing Section -->
@@ -282,7 +282,7 @@
     <string name="short_swipe_reset_all">Alles zurücksetzen</string>
     <string name="short_swipe_tap_hint">Tippen Sie unten auf eine Taste, um ihre kurzen Wischgesten anzupassen</string>
     <string name="short_swipe_instruction_title">Tippen Sie auf eine Taste, um sie anzupassen</string>
-    <string name="short_swipe_instruction_body">Die folgende Tastatur ist Ihre eigentliche CleverKeys-Tastatur.\nTippen Sie auf eine Taste, um ihr kurze Wischaktionen hinzuzufügen.</string>
+    <string name="short_swipe_instruction_body">Die folgende Tastatur ist Ihre eigentliche Brown Keys-Tastatur.\nTippen Sie auf eine Taste, um ihr kurze Wischaktionen hinzuzufügen.</string>
     <string name="short_swipe_custom_mappings">Benutzerdefinierte Zuordnungen</string>
 
     <!-- Theme-Einstellungen -->
@@ -370,7 +370,7 @@
     <string name="accessibility_swipe_complete_title">Wischgeste abgeschlossen</string>
     <string name="accessibility_swipe_complete_desc">Vibrieren, wenn eine Wischgeste beendet wird</string>
     <string name="advanced_ime_prompt_title">Erinnerung an Standardtastatur</string>
-    <string name="advanced_ime_prompt_desc">Einmal pro Gerätestart erinnern, CleverKeys als Standardtastatur festzulegen. Ausschalten, um nie wieder gefragt zu werden.</string>
+    <string name="advanced_ime_prompt_desc">Einmal pro Gerätestart erinnern, Brown Keys als Standardtastatur festzulegen. Ausschalten, um nie wieder gefragt zu werden.</string>
     <string name="advanced_swipe_debug_log_title">Wisch-Debug-Protokoll</string>
     <string name="advanced_swipe_debug_log_desc">Echtzeit-Pipeline-Analyse für Wischgesten (erfordert logcat)</string>
     <string name="advanced_detailed_logging_title">Detaillierte Protokollierung</string>
@@ -474,11 +474,11 @@
     <string name="clipboard_swipe_deleted">Gelöscht</string>
     <string name="clipboard_swipe_undo">Rückgängig</string>
     <string name="clipboard_private_copy_other_apps_title">Private Kopie in anderen Apps</string>
-    <string name="clipboard_private_copy_other_apps_desc">\"Private Kopie\" zu Textauswahlmenüs anderer Apps hinzufügen. Kopiert ausgewählten Text nur in CleverKeys – niemals in die Systemzwischenablage. Durch Aktivieren wird ein App-Eintrag hinzugefügt, den andere Apps sehen können.</string>
+    <string name="clipboard_private_copy_other_apps_desc">\"Private Kopie\" zu Textauswahlmenüs anderer Apps hinzufügen. Kopiert ausgewählten Text nur in Brown Keys – niemals in die Systemzwischenablage. Durch Aktivieren wird ein App-Eintrag hinzugefügt, den andere Apps sehen können.</string>
     <string name="clipboard_sanitize_links_title">Tracking-Parameter bereinigen</string>
     <string name="clipboard_sanitize_links_desc">utm_*, fbclid usw. aus kopierten URLs entfernen. Unterstützt von ClearURLs.</string>
     <string name="clipboard_sanitize_system_title">Auch Systemzwischenablage bereinigen</string>
-    <string name="clipboard_sanitize_system_desc">Wenn eine kopierte URL bereinigt wird, wird auch die Systemzwischenablage überschrieben, sodass Einfügungen in jeder App bereinigt sind – nicht nur im CleverKeys-Panel.</string>
+    <string name="clipboard_sanitize_system_desc">Wenn eine kopierte URL bereinigt wird, wird auch die Systemzwischenablage überschrieben, sodass Einfügungen in jeder App bereinigt sind – nicht nur im Brown Keys-Panel.</string>
     <string name="clipboard_embed_enrich_title">Einbettungen für das Teilen anreichern</string>
     <string name="clipboard_embed_enrich_desc">x.com → fxtwitter.com, reddit.com → rxddit.com usw. umschreiben.</string>
     <string name="clipboard_custom_rules_title">Benutzerdefinierte Regeln verwenden</string>
@@ -811,7 +811,7 @@
     <string name="gif_remove_all_body">Dies löscht alle importierten GIF-Pakete, Miniaturansichten und die Datenbank. Dies kann nicht rückgängig gemacht werden.</string>
     <string name="gif_remove_all_confirm">Alle entfernen</string>
     <string name="gif_remove_pack_body">Dies löscht alle GIFs dieses Pakets und gibt Speicherplatz frei.</string>
-    <string name="privacy_section_intro">CleverKeys arbeitet vollständig offline — es verlassen niemals Daten Ihr Gerät. Diese optionalen Einstellungen speichern Daten lokal, damit Sie sie ansehen, exportieren oder löschen können; exportierte Wischdaten lassen sich anderswo zum Trainieren von Modellen nutzen.</string>
+    <string name="privacy_section_intro">Brown Keys arbeitet vollständig offline — es verlassen niemals Daten Ihr Gerät. Diese optionalen Einstellungen speichern Daten lokal, damit Sie sie ansehen, exportieren oder löschen können; exportierte Wischdaten lassen sich anderswo zum Trainieren von Modellen nutzen.</string>
     <string name="privacy_on_device_learning_header">Lernen auf dem Gerät</string>
     <string name="privacy_forget_learned_title">Auch gelernte Daten vergessen?</string>
     <string name="privacy_forget_learned_body">Das Lernen ist jetzt aus — es wird nichts Neues aufgezeichnet. Möchten Sie auch alles bereits Gelernte löschen (Wendungsmuster, Wortnutzung, Verlauf der Vorschlagsauswahl und Wisch-Korrekturen)? Dies kann nicht rückgängig gemacht werden.</string>
@@ -1046,7 +1046,7 @@
     <string name="calibration_touch_here">👆 Hier berühren</string>
     <string name="calibration_min_readout">Min: %1$d%%</string>
     <string name="calibration_max_readout">Max: %1$d%%</string>
-    <string name="launcher_logo_desc">CleverKeys-Logo</string>
+    <string name="launcher_logo_desc">Brown Keys-Logo</string>
     <string name="launcher_tagline">Privatsphäre, Leistung und Kontrolle — mit Köpfchen.</string>
     <string name="launcher_step_enable">Tastatur aktivieren</string>
     <string name="launcher_step_select">Tastatur auswählen</string>
@@ -1263,11 +1263,11 @@
     <string name="clipboard_entry_duration_desc_default">Wie lange Einträge vor dem automatischen Löschen erhalten bleiben (-1 = nie)</string>
     <string name="clipboard_entry_duration_never">Läuft nie ab</string>
     <string name="clipboard_private_copy_header">🔒 Private Kopie</string>
-    <string name="clipboard_private_copy_in_app_note">In der App: Die Bearbeitungsaktion „Private Kopie“ kann einer kurzen Wischgeste oder einer Zusatztaste zugewiesen werden (Kurze Wischgesten anpassen). Sie speichert die aktuelle Auswahl in der privaten Zwischenablage von CleverKeys, ohne die Systemzwischenablage zu berühren. Private Einträge tragen ein 🔒-Abzeichen; das Übertragen eines solchen Eintrags in die Systemzwischenablage erfordert immer eine Rückfrage, und unverschlüsselte Sicherungen schließen sie aus (verschlüsselte Sicherungen enthalten sie).</string>
+    <string name="clipboard_private_copy_in_app_note">In der App: Die Bearbeitungsaktion „Private Kopie“ kann einer kurzen Wischgeste oder einer Zusatztaste zugewiesen werden (Kurze Wischgesten anpassen). Sie speichert die aktuelle Auswahl in der privaten Zwischenablage von Brown Keys, ohne die Systemzwischenablage zu berühren. Private Einträge tragen ein 🔒-Abzeichen; das Übertragen eines solchen Eintrags in die Systemzwischenablage erfordert immer eine Rückfrage, und unverschlüsselte Sicherungen schließen sie aus (verschlüsselte Sicherungen enthalten sie).</string>
     <string name="clipboard_url_handling_header">URL-Verarbeitung</string>
     <string name="clipboard_custom_rules_browse">custom.substitutions.json auswählen</string>
     <string name="clipboard_custom_rules_replace">Eigene Regeln ersetzen</string>
-    <string name="clipboard_url_handling_note">Hinweis: Die Bereinigung erfolgt, wenn CleverKeys einen Clip im Verlauf speichert, daher sind Einfügungen aus dem CleverKeys-Panel immer bereinigt. Mit „Auch Systemzwischenablage bereinigen“ wird auch die Android-Systemzwischenablage mit der bereinigten URL überschrieben, sodass Einfügungen in anderen Apps ebenfalls bereinigt sind (nach bestem Bemühen – nur solange die Tastatur Zugriff auf die Zwischenablage hat). Ist die Option aus, sehen andere Apps weiterhin die ursprüngliche URL.</string>
+    <string name="clipboard_url_handling_note">Hinweis: Die Bereinigung erfolgt, wenn Brown Keys einen Clip im Verlauf speichert, daher sind Einfügungen aus dem Brown Keys-Panel immer bereinigt. Mit „Auch Systemzwischenablage bereinigen“ wird auch die Android-Systemzwischenablage mit der bereinigten URL überschrieben, sodass Einfügungen in anderen Apps ebenfalls bereinigt sind (nach bestem Bemühen – nur solange die Tastatur Zugriff auf die Zwischenablage hat). Ist die Option aus, sehen andere Apps weiterhin die ursprüngliche URL.</string>
     <string name="input_context_source_both">Integriert + Gelernt</string>
     <string name="input_context_source_learned_only">Nur gelernt</string>
     <string name="input_context_source_static_only">Nur integriert</string>
@@ -1373,7 +1373,7 @@
     <string name="clipboard_backup_import_completed">Zwischenablage-Import abgeschlossen.</string>
     <string name="clipboard_backup_import_merge_note">Importe werden mit dem vorhandenen Verlauf zusammengeführt, ohne etwas zu überschreiben.</string>
     <string name="clipboard_backup_import_failed_title">Zwischenablage-Import fehlgeschlagen</string>
-    <string name="clipboard_backup_import_failed">Zwischenablageverlauf konnte nicht importiert werden:\n\n%1$s\n\nStellen Sie sicher, dass die Datei eine gültige CleverKeys-Zwischenablagesicherung ist.</string>
+    <string name="clipboard_backup_import_failed">Zwischenablageverlauf konnte nicht importiert werden:\n\n%1$s\n\nStellen Sie sicher, dass die Datei eine gültige Brown Keys-Zwischenablagesicherung ist.</string>
     <string name="clipboard_backup_zip_export_success_title">Vollständiger Zwischenablage-Export erfolgreich</string>
     <string name="clipboard_backup_zip_saved">Zwischenablagesicherung mit Medien gespeichert.</string>
     <string name="clipboard_backup_zip_restore_hint">Über „ZIP importieren“ lassen sich alle Einträge einschließlich Bildern, Videos und anderer Medien wiederherstellen.</string>
@@ -1383,7 +1383,7 @@
     <string name="clipboard_backup_zip_import_completed">Vollständiger Zwischenablage-Import abgeschlossen.</string>
     <string name="clipboard_backup_zip_media_restored_note">Alle Mediendateien und Vorschaubilder wurden wiederhergestellt.</string>
     <string name="clipboard_backup_zip_import_failed_title">ZIP-Import der Zwischenablage fehlgeschlagen</string>
-    <string name="clipboard_backup_zip_import_failed">Zwischenablage-ZIP konnte nicht importiert werden:\n\n%1$s\n\nStellen Sie sicher, dass die Datei eine gültige CleverKeys-Zwischenablage-ZIP-Sicherung ist.</string>
+    <string name="clipboard_backup_zip_import_failed">Zwischenablage-ZIP konnte nicht importiert werden:\n\n%1$s\n\nStellen Sie sicher, dass die Datei eine gültige Brown Keys-Zwischenablage-ZIP-Sicherung ist.</string>
     <string name="dictionary_backup_export_success_title">Wörterbuch-Export erfolgreich</string>
     <string name="dictionary_backup_export_disabled_words">Deaktivierte Wörter: %1$d</string>
     <string name="dictionary_backup_export_failed_title">Wörterbuch-Export fehlgeschlagen</string>
@@ -1529,7 +1529,7 @@
     </plurals>
 
     <!-- 2026-09-29 hardcoded-UI sweep (activities): launcher, dictionary, layouts, short swipes, themes, playground, manifest labels (reviewer=model) -->
-    <string name="launcher_step_enable_desc">CleverKeys in den Systemeinstellungen aktivieren</string>
+    <string name="launcher_step_enable_desc">Brown Keys in den Systemeinstellungen aktivieren</string>
     <string name="launcher_step_select_desc">Standard-Eingabemethode wechseln</string>
     <string name="launcher_step_calibrate_desc">Bis zu 8 Untertasten-Aktionen pro Taste konfigurieren</string>
     <string name="dict_tab_active">Aktiv</string>
@@ -1605,9 +1605,9 @@
     <string name="calibration_legend_short_range">Min - Max</string>
     <string name="calibration_legend_long_range">&gt; Max</string>
     <string name="calibration_percent_value">%1$d %%</string>
-    <string name="theme_builtin_cleverkeysdark_name">CleverKeys Dunkel</string>
+    <string name="theme_builtin_cleverkeysdark_name">Brown Keys Dunkel</string>
     <string name="theme_builtin_cleverkeysdark_desc">Tiefes Violett mit silbernen Akzenten (Standard)</string>
-    <string name="theme_builtin_cleverkeyslight_name">CleverKeys Hell</string>
+    <string name="theme_builtin_cleverkeyslight_name">Brown Keys Hell</string>
     <string name="theme_builtin_cleverkeyslight_desc">Silberne Tasten mit violetten Akzenten</string>
     <string name="theme_builtin_dark_name">Dunkel</string>
     <string name="theme_builtin_dark_desc">Klassisches dunkles Theme mit blauen Akzenten</string>
@@ -1657,7 +1657,6 @@
     <string name="swipe_debug_clear_traces_playground">Nur Testumgebung</string>
     <string name="swipe_debug_clear_traces_all">Alle Wischdaten</string>
     <string name="swipe_debug_clear_traces_message">Aufgezeichnete Wischspuren von diesem Gerät löschen?\n\n„%1$s“ entfernt die auf diesem Bildschirm aufgezeichneten Wischspuren; „%2$s“ entfernt zusätzlich die Wischspuren aus der globalen ML-Sammlung.</string>
-    <string name="manifest_ime_service_label">CleverKeys-Tastatur</string>
     <string name="manifest_backup_restore_label">Sichern &amp; Wiederherstellen</string>
     <plurals name="swipe_debug_toast_cleared_traces">
         <item quantity="one">%1$d Wischspur gelöscht</item>
@@ -1875,11 +1874,11 @@
     </plurals>
     <!-- 2026-09-30 i18n: typed import/export/backup failure reasons and settings-import skip kinds (reviewer=model) -->
     <string name="io_error_file_not_found">Die Datei wurde nicht gefunden oder konnte nicht geöffnet werden.</string>
-    <string name="io_error_permission_denied">CleverKeys darf nicht auf diese Datei zugreifen.</string>
+    <string name="io_error_permission_denied">Brown Keys darf nicht auf diese Datei zugreifen.</string>
     <string name="io_error_invalid_format">Die Datei hat nicht das erwartete Format oder ist beschädigt.</string>
-    <string name="io_error_newer_version">Die Datei wurde mit einer neueren CleverKeys-Version erstellt. Aktualisieren Sie die App und versuchen Sie es erneut.</string>
+    <string name="io_error_newer_version">Die Datei wurde mit einer neueren Brown Keys-Version erstellt. Aktualisieren Sie die App und versuchen Sie es erneut.</string>
     <string name="io_error_out_of_space">Nicht genügend Speicherplatz.</string>
-    <string name="io_error_too_large">Die Datei ist größer, als CleverKeys sicher importieren kann.</string>
+    <string name="io_error_too_large">Die Datei ist größer, als Brown Keys sicher importieren kann.</string>
     <string name="io_error_wrong_password_or_corrupt">Falsches Sicherungspasswort, oder die Datei ist beschädigt oder wurde verändert.</string>
     <string name="io_error_no_backup_password">Diese Sicherung ist verschlüsselt, und es ist kein Sicherungspasswort verfügbar.</string>
     <string name="io_error_wrong_backup_kind">Diese Sicherung enthält nicht die Art von Daten, die dieser Import erwartet.</string>
@@ -1925,7 +1924,7 @@
     <string name="cmd_copy">Kopieren</string>
     <string name="cmd_copy_desc">Ausgewählten Text in die Zwischenablage kopieren</string>
     <string name="cmd_copy_private">Privates Kopieren</string>
-    <string name="cmd_copy_private_desc">Auswahl nur in CleverKeys kopieren – nie in die Systemzwischenablage</string>
+    <string name="cmd_copy_private_desc">Auswahl nur in Brown Keys kopieren – nie in die Systemzwischenablage</string>
     <string name="cmd_paste">Einfügen</string>
     <string name="cmd_paste_desc">Aus der Zwischenablage einfügen</string>
     <string name="cmd_cut">Ausschneiden</string>

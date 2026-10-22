@@ -29,7 +29,7 @@
     <string name="key_descr_change_method">切换键盘</string>
     <string name="key_descr_voice_typing">语音输入</string>
     <string name="key_descr_copy">复制</string>
-    <string name="key_descr_copy_private">私密复制（仅存入 CleverKeys，不进入系统剪贴板）</string>
+    <string name="key_descr_copy_private">私密复制（仅存入 Brown Keys，不进入系统剪贴板）</string>
     <string name="key_descr_paste">粘贴</string>
     <string name="key_descr_cut">剪切</string>
     <string name="key_descr_selectAll">全选</string>
@@ -98,8 +98,8 @@
     <string name="clipboard_edit_error">更新条目失败</string>
 
     <!-- #156 Private copy -->
-    <string name="private_copy_toolbar_label">CleverKeys：私密复制</string>
-    <string name="private_copy_toast">已私密复制到 CleverKeys</string>
+    <string name="private_copy_toolbar_label">Brown Keys：私密复制</string>
+    <string name="private_copy_toast">已私密复制到 Brown Keys</string>
     <string name="private_copy_expose_dialog_title">复制到系统剪贴板？</string>
     <string name="private_copy_expose_dialog_message">此条目是私密复制的。复制到系统剪贴板会将文本暴露给前台应用及其他剪贴板管理器。仍要复制吗？</string>
     <string name="private_copy_expose_dialog_confirm">仍要复制</string>
@@ -110,7 +110,7 @@
     <string name="clipboard_filter_private_only_hint">仅显示私密复制的条目（🔒）</string>
 
     <!-- Settings Activity (Material 3) -->
-    <string name="settings_title">⚙️ CleverKeys 设置</string>
+    <string name="settings_title">⚙️ Brown Keys 设置</string>
     <string name="settings_description">配置键盘设置以获得最佳输入体验。</string>
 
     <!-- Swipe Typing Section -->
@@ -268,7 +268,7 @@
     <string name="short_swipe_reset_all">全部重置</string>
     <string name="short_swipe_tap_hint">点击下方任意按键以自定义其短滑动手势</string>
     <string name="short_swipe_instruction_title">点击任意按键进行自定义</string>
-    <string name="short_swipe_instruction_body">下方键盘是你实际使用的 CleverKeys 键盘。\n点击某个按键以为其添加短滑动操作。</string>
+    <string name="short_swipe_instruction_body">下方键盘是你实际使用的 Brown Keys 键盘。\n点击某个按键以为其添加短滑动操作。</string>
     <string name="short_swipe_custom_mappings">自定义映射</string>
     <string name="theme_settings_title">键盘主题</string>
     <string name="theme_restart_keyboard">重启键盘</string>
@@ -347,7 +347,7 @@
     <string name="accessibility_swipe_complete_title">滑动完成触感</string>
     <string name="accessibility_swipe_complete_desc">滑动手势完成时振动</string>
     <string name="advanced_ime_prompt_title">默认键盘提醒</string>
-    <string name="advanced_ime_prompt_desc">每次开机提醒一次将 CleverKeys 设为默认键盘。关闭后不再询问。</string>
+    <string name="advanced_ime_prompt_desc">每次开机提醒一次将 Brown Keys 设为默认键盘。关闭后不再询问。</string>
     <string name="advanced_swipe_debug_log_title">滑动调试日志</string>
     <string name="advanced_swipe_debug_log_desc">滑动手势的实时管道分析（需要 logcat）。</string>
     <string name="advanced_detailed_logging_title">详细日志</string>
@@ -451,11 +451,11 @@
     <string name="clipboard_swipe_deleted">已删除</string>
     <string name="clipboard_swipe_undo">撤销</string>
     <string name="clipboard_private_copy_other_apps_title">在其他应用中私密复制</string>
-    <string name="clipboard_private_copy_other_apps_desc">在其他应用的文本选择菜单中添加「私密复制」。将所选文本仅复制到 CleverKeys，而不存入系统剪贴板。启用后，其他应用可看到一个应用条目。</string>
+    <string name="clipboard_private_copy_other_apps_desc">在其他应用的文本选择菜单中添加「私密复制」。将所选文本仅复制到 Brown Keys，而不存入系统剪贴板。启用后，其他应用可看到一个应用条目。</string>
     <string name="clipboard_sanitize_links_title">清除追踪参数</string>
     <string name="clipboard_sanitize_links_desc">从复制的链接中删除 utm_*、fbclid 等参数。由 ClearURLs 提供支持。</string>
     <string name="clipboard_sanitize_system_title">同时清理系统剪贴板</string>
-    <string name="clipboard_sanitize_system_desc">复制的链接被清理后，同时覆盖系统剪贴板，使所有应用中的粘贴内容都经过净化，而不仅限于 CleverKeys 面板。</string>
+    <string name="clipboard_sanitize_system_desc">复制的链接被清理后，同时覆盖系统剪贴板，使所有应用中的粘贴内容都经过净化，而不仅限于 Brown Keys 面板。</string>
     <string name="clipboard_embed_enrich_title">分享时优化嵌入内容</string>
     <string name="clipboard_embed_enrich_desc">将 x.com 改写为 fxtwitter.com，将 reddit.com 改写为 rxddit.com 等。</string>
     <string name="clipboard_custom_rules_title">使用自定义规则</string>
@@ -904,7 +904,7 @@
     <string name="intent_editor_title_create">创建 Intent 操作</string>
     <string name="intent_editor_title_edit">编辑 Intent 操作</string>
     <string name="launcher_footer">一款毫不妥协的开源键盘。</string>
-    <string name="launcher_logo_desc">CleverKeys 徽标</string>
+    <string name="launcher_logo_desc">Brown Keys 徽标</string>
     <string name="launcher_step_calibrate">校准按键手势</string>
     <string name="launcher_step_completed_desc">已完成</string>
     <string name="launcher_step_enable">启用键盘</string>
@@ -986,7 +986,7 @@
     <string name="privacy_on_device_learning_header">设备端学习</string>
     <string name="privacy_perf_stats">预测：%1$d • 平均：%2$d 毫秒 • Top-1：%3$d%%</string>
     <string name="privacy_performance_header">性能指标</string>
-    <string name="privacy_section_intro">CleverKeys 完全离线运行——数据绝不会离开你的设备。这些可选设置将数据保存在本机，方便你查看、导出或删除；导出的滑动数据可用于在别处训练模型。</string>
+    <string name="privacy_section_intro">Brown Keys 完全离线运行——数据绝不会离开你的设备。这些可选设置将数据保存在本机，方便你查看、导出或删除；导出的滑动数据可用于在别处训练模型。</string>
     <string name="privacy_swipe_stats">滑动总数：%1$d • 不同单词数：%2$d</string>
     <string name="provenance_adaptation">• 适应：%1$.2f×</string>
     <string name="provenance_aggression">力度：%1$s（%2$.2f×）</string>
@@ -1236,11 +1236,11 @@
     <string name="clipboard_entry_duration_desc_default">条目在自动删除前保留的时长（-1 = 永不）</string>
     <string name="clipboard_entry_duration_never">永不过期</string>
     <string name="clipboard_private_copy_header">🔒 私密复制</string>
-    <string name="clipboard_private_copy_in_app_note">应用内：“私密复制”编辑操作可以绑定到短滑动或额外按键（短滑动自定义）。它会将当前选中内容存入 CleverKeys 的私密剪贴板，而不会触及系统剪贴板。私密条目带有 🔒 标记；将其导出到系统剪贴板前总会先询问，明文备份不包含这些条目（加密备份会包含）。</string>
+    <string name="clipboard_private_copy_in_app_note">应用内：“私密复制”编辑操作可以绑定到短滑动或额外按键（短滑动自定义）。它会将当前选中内容存入 Brown Keys 的私密剪贴板，而不会触及系统剪贴板。私密条目带有 🔒 标记；将其导出到系统剪贴板前总会先询问，明文备份不包含这些条目（加密备份会包含）。</string>
     <string name="clipboard_url_handling_header">URL 处理</string>
     <string name="clipboard_custom_rules_browse">浏览选择 custom.substitutions.json</string>
     <string name="clipboard_custom_rules_replace">替换自定义规则</string>
-    <string name="clipboard_url_handling_note">注意：清理在 CleverKeys 将剪贴内容保存到其历史时进行，因此从 CleverKeys 面板粘贴的内容总是已清理的。开启“同时清理系统剪贴板”后，Android 系统剪贴板也会被清理后的 URL 覆盖，因此在其他应用中粘贴的内容同样会被清理（尽力而为——仅在键盘拥有剪贴板访问权限时）。关闭后，其他应用仍会看到原始 URL。</string>
+    <string name="clipboard_url_handling_note">注意：清理在 Brown Keys 将剪贴内容保存到其历史时进行，因此从 Brown Keys 面板粘贴的内容总是已清理的。开启“同时清理系统剪贴板”后，Android 系统剪贴板也会被清理后的 URL 覆盖，因此在其他应用中粘贴的内容同样会被清理（尽力而为——仅在键盘拥有剪贴板访问权限时）。关闭后，其他应用仍会看到原始 URL。</string>
     <string name="input_context_source_both">内置 + 已学</string>
     <string name="input_context_source_learned_only">仅已学</string>
     <string name="input_context_source_static_only">仅内置</string>
@@ -1338,7 +1338,7 @@
     <string name="clipboard_backup_import_completed">剪贴板导入完成。</string>
     <string name="clipboard_backup_import_merge_note">导入的内容会与现有历史合并，不会覆盖。</string>
     <string name="clipboard_backup_import_failed_title">剪贴板导入失败</string>
-    <string name="clipboard_backup_import_failed">导入剪贴板历史失败：\n\n%1$s\n\n请确认该文件是有效的 CleverKeys 剪贴板备份。</string>
+    <string name="clipboard_backup_import_failed">导入剪贴板历史失败：\n\n%1$s\n\n请确认该文件是有效的 Brown Keys 剪贴板备份。</string>
     <string name="clipboard_backup_zip_export_success_title">剪贴板完整导出成功</string>
     <string name="clipboard_backup_zip_saved">已保存含媒体的剪贴板备份。</string>
     <string name="clipboard_backup_zip_restore_hint">通过“导入 ZIP”即可恢复所有条目，包括图片、视频和其他媒体。</string>
@@ -1348,7 +1348,7 @@
     <string name="clipboard_backup_zip_import_completed">剪贴板完整导入完成。</string>
     <string name="clipboard_backup_zip_media_restored_note">所有媒体文件和缩略图均已恢复。</string>
     <string name="clipboard_backup_zip_import_failed_title">剪贴板 ZIP 导入失败</string>
-    <string name="clipboard_backup_zip_import_failed">导入剪贴板 ZIP 失败：\n\n%1$s\n\n请确认该文件是有效的 CleverKeys 剪贴板 ZIP 备份。</string>
+    <string name="clipboard_backup_zip_import_failed">导入剪贴板 ZIP 失败：\n\n%1$s\n\n请确认该文件是有效的 Brown Keys 剪贴板 ZIP 备份。</string>
     <string name="dictionary_backup_export_success_title">词典导出成功</string>
     <string name="dictionary_backup_export_disabled_words">禁用词：%1$d</string>
     <string name="dictionary_backup_export_failed_title">词典导出失败</string>
@@ -1471,7 +1471,7 @@
     </plurals>
 
     <!-- 2026-09-29 hardcoded-UI sweep (activities): launcher, dictionary, layouts, short swipes, themes, playground, manifest labels (reviewer=model) -->
-    <string name="launcher_step_enable_desc">在系统设置中开启 CleverKeys</string>
+    <string name="launcher_step_enable_desc">在系统设置中开启 Brown Keys</string>
     <string name="launcher_step_select_desc">切换你的默认输入法</string>
     <string name="launcher_step_calibrate_desc">为每个按键配置最多 8 个子键操作</string>
     <string name="dict_tab_active">启用</string>
@@ -1547,9 +1547,9 @@
     <string name="calibration_legend_short_range">最小 - 最大</string>
     <string name="calibration_legend_long_range">&gt; 最大</string>
     <string name="calibration_percent_value">%1$d%%</string>
-    <string name="theme_builtin_cleverkeysdark_name">CleverKeys 深色</string>
+    <string name="theme_builtin_cleverkeysdark_name">Brown Keys 深色</string>
     <string name="theme_builtin_cleverkeysdark_desc">深紫色配银色点缀（默认）</string>
-    <string name="theme_builtin_cleverkeyslight_name">CleverKeys 浅色</string>
+    <string name="theme_builtin_cleverkeyslight_name">Brown Keys 浅色</string>
     <string name="theme_builtin_cleverkeyslight_desc">银色按键配紫色点缀</string>
     <string name="theme_builtin_dark_name">深色</string>
     <string name="theme_builtin_dark_desc">经典深色主题，蓝色点缀</string>
@@ -1599,7 +1599,6 @@
     <string name="swipe_debug_clear_traces_playground">仅练习场</string>
     <string name="swipe_debug_clear_traces_all">所有滑动数据</string>
     <string name="swipe_debug_clear_traces_message">要从本设备删除已记录的滑动轨迹吗？\n\n“%1$s”会删除在此界面记录的轨迹；“%2$s”还会删除全局 ML 收集中的轨迹。</string>
-    <string name="manifest_ime_service_label">CleverKeys 键盘</string>
     <string name="manifest_backup_restore_label">备份与恢复</string>
     <plurals name="swipe_debug_toast_cleared_traces">
         <item quantity="other">已清除 %1$d 条轨迹</item>
@@ -1808,11 +1807,11 @@
     </plurals>
     <!-- 2026-09-30 i18n: typed import/export/backup failure reasons and settings-import skip kinds (reviewer=model) -->
     <string name="io_error_file_not_found">找不到或无法打开该文件。</string>
-    <string name="io_error_permission_denied">CleverKeys 无权访问该文件。</string>
+    <string name="io_error_permission_denied">Brown Keys 无权访问该文件。</string>
     <string name="io_error_invalid_format">文件格式与预期不符，或文件已损坏。</string>
-    <string name="io_error_newer_version">该文件由更新版本的 CleverKeys 创建。请更新应用后重试。</string>
+    <string name="io_error_newer_version">该文件由更新版本的 Brown Keys 创建。请更新应用后重试。</string>
     <string name="io_error_out_of_space">存储空间不足。</string>
-    <string name="io_error_too_large">文件过大，CleverKeys 无法安全导入。</string>
+    <string name="io_error_too_large">文件过大，Brown Keys 无法安全导入。</string>
     <string name="io_error_wrong_password_or_corrupt">备份密码错误，或文件已损坏或被篡改。</string>
     <string name="io_error_no_backup_password">此备份已加密，但没有可用的备份密码。</string>
     <string name="io_error_wrong_backup_kind">此备份不包含本次导入所需的数据类型。</string>
@@ -1858,7 +1857,7 @@
     <string name="cmd_copy">复制</string>
     <string name="cmd_copy_desc">将所选文本复制到剪贴板</string>
     <string name="cmd_copy_private">私密复制</string>
-    <string name="cmd_copy_private_desc">仅将所选内容复制到 CleverKeys，不进入系统剪贴板</string>
+    <string name="cmd_copy_private_desc">仅将所选内容复制到 Brown Keys，不进入系统剪贴板</string>
     <string name="cmd_paste">粘贴</string>
     <string name="cmd_paste_desc">从剪贴板粘贴</string>
     <string name="cmd_cut">剪切</string>

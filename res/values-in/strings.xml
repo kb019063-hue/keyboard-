@@ -29,7 +29,7 @@
     <string name="key_descr_change_method">Beralih keyboard</string>
     <string name="key_descr_voice_typing">Pengetikan suara</string>
     <string name="key_descr_copy">Salin</string>
-    <string name="key_descr_copy_private">Salinan pribadi (hanya ke dalam CleverKeys, bukan clipboard sistem)</string>
+    <string name="key_descr_copy_private">Salinan pribadi (hanya ke dalam Brown Keys, bukan clipboard sistem)</string>
     <string name="key_descr_paste">Tempel</string>
     <string name="key_descr_cut">Potong</string>
     <string name="key_descr_selectAll">Pilih semua</string>
@@ -98,8 +98,8 @@
     <string name="clipboard_edit_error">Gagal memperbarui entri</string>
 
     <!-- #156 Private copy -->
-    <string name="private_copy_toolbar_label">CleverKeys: Salinan pribadi</string>
-    <string name="private_copy_toast">Disalin secara pribadi ke CleverKeys</string>
+    <string name="private_copy_toolbar_label">Brown Keys: Salinan pribadi</string>
+    <string name="private_copy_toast">Disalin secara pribadi ke Brown Keys</string>
     <string name="private_copy_expose_dialog_title">Salin ke clipboard sistem?</string>
     <string name="private_copy_expose_dialog_message">Entri ini disalin secara pribadi. Menyalinnya ke clipboard sistem akan memaparkan teks ke aplikasi latar depan dan pengelola clipboard lainnya. Tetap salin?</string>
     <string name="private_copy_expose_dialog_confirm">Tetap salin</string>
@@ -110,7 +110,7 @@
     <string name="clipboard_filter_private_only_hint">Hanya tampilkan entri yang disalin secara pribadi (🔒)</string>
 
     <!-- Settings Activity (Material 3) -->
-    <string name="settings_title">⚙️ Pengaturan CleverKeys</string>
+    <string name="settings_title">⚙️ Pengaturan Brown Keys</string>
     <string name="settings_description">Konfigurasikan pengaturan keyboard Anda untuk pengalaman mengetik yang optimal.</string>
 
     <!-- Swipe Typing Section -->
@@ -272,7 +272,7 @@
     <string name="short_swipe_reset_all">Setel Ulang Semua</string>
     <string name="short_swipe_tap_hint">Ketuk tombol mana saja di bawah untuk menyesuaikan gestur geser pendeknya</string>
     <string name="short_swipe_instruction_title">Ketuk tombol apa saja untuk menyesuaikannya</string>
-    <string name="short_swipe_instruction_body">Keyboard di bawah ini adalah keyboard CleverKeys Anda yang sebenarnya.\nKetuk tombol untuk menambahkan aksi geser pendek padanya.</string>
+    <string name="short_swipe_instruction_body">Keyboard di bawah ini adalah keyboard Brown Keys Anda yang sebenarnya.\nKetuk tombol untuk menambahkan aksi geser pendek padanya.</string>
     <string name="short_swipe_custom_mappings">Pemetaan Kustom</string>
 
     <!-- Pengaturan tema / Theme Settings -->
@@ -360,7 +360,7 @@
     <string name="accessibility_swipe_complete_title">Geser Selesai</string>
     <string name="accessibility_swipe_complete_desc">Bergetar saat gesture geser selesai</string>
     <string name="advanced_ime_prompt_title">Pengingat keyboard default</string>
-    <string name="advanced_ime_prompt_desc">Ingatkan sekali per boot untuk menjadikan CleverKeys keyboard default. Matikan agar tidak pernah bertanya lagi.</string>
+    <string name="advanced_ime_prompt_desc">Ingatkan sekali per boot untuk menjadikan Brown Keys keyboard default. Matikan agar tidak pernah bertanya lagi.</string>
     <string name="advanced_swipe_debug_log_title">Log Debug Geser</string>
     <string name="advanced_swipe_debug_log_desc">Analisis jalur real-time untuk gestur geser (membutuhkan logcat)</string>
     <string name="advanced_detailed_logging_title">Pencatatan Terperinci</string>
@@ -464,11 +464,11 @@
     <string name="clipboard_swipe_deleted">Dihapus</string>
     <string name="clipboard_swipe_undo">Urungkan</string>
     <string name="clipboard_private_copy_other_apps_title">Salinan pribadi di aplikasi lain</string>
-    <string name="clipboard_private_copy_other_apps_desc">Tambahkan "Salinan pribadi" ke menu pemilihan teks aplikasi lain. Menyalin teks yang dipilih hanya ke CleverKeys — bukan clipboard sistem. Mengaktifkan menambahkan entri aplikasi yang dapat dilihat aplikasi lain.</string>
+    <string name="clipboard_private_copy_other_apps_desc">Tambahkan "Salinan pribadi" ke menu pemilihan teks aplikasi lain. Menyalin teks yang dipilih hanya ke Brown Keys — bukan clipboard sistem. Mengaktifkan menambahkan entri aplikasi yang dapat dilihat aplikasi lain.</string>
     <string name="clipboard_sanitize_links_title">Bersihkan parameter pelacakan</string>
     <string name="clipboard_sanitize_links_desc">Hapus utm_*, fbclid, dll. dari URL yang Anda salin. Didukung oleh ClearURLs.</string>
     <string name="clipboard_sanitize_system_title">Bersihkan juga clipboard sistem</string>
-    <string name="clipboard_sanitize_system_desc">Saat URL yang disalin dibersihkan, timpa juga clipboard sistem agar tempel di aplikasi mana pun sudah bersih — bukan hanya panel CleverKeys.</string>
+    <string name="clipboard_sanitize_system_desc">Saat URL yang disalin dibersihkan, timpa juga clipboard sistem agar tempel di aplikasi mana pun sudah bersih — bukan hanya panel Brown Keys.</string>
     <string name="clipboard_embed_enrich_title">Perkaya embed untuk berbagi</string>
     <string name="clipboard_embed_enrich_desc">Tulis ulang x.com → fxtwitter.com, reddit.com → rxddit.com, dll.</string>
     <string name="clipboard_custom_rules_title">Gunakan aturan kustom</string>
@@ -801,7 +801,7 @@
     <string name="gif_remove_all_body">Ini akan menghapus semua paket GIF yang diimpor, gambar mini, dan basis data. Tindakan ini tidak dapat dibatalkan.</string>
     <string name="gif_remove_all_confirm">Hapus Semua</string>
     <string name="gif_remove_pack_body">Ini akan menghapus semua GIF dari paket ini dan mengosongkan ruang penyimpanan.</string>
-    <string name="privacy_section_intro">CleverKeys sepenuhnya luring — tidak ada data yang pernah meninggalkan perangkat Anda. Pengaturan opsional ini menyimpan data secara lokal agar Anda dapat meninjau, mengekspor, atau menghapusnya; data gesekan yang diekspor dapat dipakai untuk melatih model di tempat lain.</string>
+    <string name="privacy_section_intro">Brown Keys sepenuhnya luring — tidak ada data yang pernah meninggalkan perangkat Anda. Pengaturan opsional ini menyimpan data secara lokal agar Anda dapat meninjau, mengekspor, atau menghapusnya; data gesekan yang diekspor dapat dipakai untuk melatih model di tempat lain.</string>
     <string name="privacy_on_device_learning_header">Pembelajaran di Perangkat</string>
     <string name="privacy_forget_learned_title">Lupakan juga data yang dipelajari?</string>
     <string name="privacy_forget_learned_body">Pembelajaran kini nonaktif — tidak ada hal baru yang akan dicatat. Apakah Anda juga ingin menghapus semua yang sudah dipelajari (pola frasa, penggunaan kata, riwayat pemilihan saran, dan koreksi geser)? Tindakan ini tidak dapat dibatalkan.</string>
@@ -1036,7 +1036,7 @@
     <string name="calibration_touch_here">👆 Sentuh di sini</string>
     <string name="calibration_min_readout">Min: %1$d%%</string>
     <string name="calibration_max_readout">Maks: %1$d%%</string>
-    <string name="launcher_logo_desc">Logo CleverKeys</string>
+    <string name="launcher_logo_desc">Logo Brown Keys</string>
     <string name="launcher_tagline">Privasi, kekuatan, dan kendali — dengan otak.</string>
     <string name="launcher_step_enable">Aktifkan Keyboard</string>
     <string name="launcher_step_select">Pilih Keyboard</string>
@@ -1250,11 +1250,11 @@
     <string name="clipboard_entry_duration_desc_default">Berapa lama entri disimpan sebelum dihapus otomatis (-1 = tidak pernah)</string>
     <string name="clipboard_entry_duration_never">Tidak kedaluwarsa</string>
     <string name="clipboard_private_copy_header">🔒 Salinan pribadi</string>
-    <string name="clipboard_private_copy_in_app_note">Di dalam aplikasi: aksi pengeditan \"Salinan pribadi\" dapat ditetapkan ke geser pendek atau tombol tambahan (Kustomisasi Geser Pendek). Aksi ini menyimpan seleksi saat ini ke clipboard pribadi CleverKeys tanpa menyentuh clipboard sistem. Entri pribadi menampilkan lencana 🔒; mengekspor entri tersebut ke clipboard sistem selalu meminta konfirmasi terlebih dahulu, dan cadangan tanpa enkripsi tidak menyertakannya (cadangan terenkripsi menyertakannya).</string>
+    <string name="clipboard_private_copy_in_app_note">Di dalam aplikasi: aksi pengeditan \"Salinan pribadi\" dapat ditetapkan ke geser pendek atau tombol tambahan (Kustomisasi Geser Pendek). Aksi ini menyimpan seleksi saat ini ke clipboard pribadi Brown Keys tanpa menyentuh clipboard sistem. Entri pribadi menampilkan lencana 🔒; mengekspor entri tersebut ke clipboard sistem selalu meminta konfirmasi terlebih dahulu, dan cadangan tanpa enkripsi tidak menyertakannya (cadangan terenkripsi menyertakannya).</string>
     <string name="clipboard_url_handling_header">Penanganan URL</string>
     <string name="clipboard_custom_rules_browse">Cari custom.substitutions.json</string>
     <string name="clipboard_custom_rules_replace">Ganti aturan kustom</string>
-    <string name="clipboard_url_handling_note">Catatan: pembersihan berjalan saat CleverKeys menyimpan klip ke riwayatnya, sehingga tempel dari panel CleverKeys selalu bersih. Dengan \"Bersihkan juga clipboard sistem\" aktif, clipboard sistem Android juga ditimpa dengan URL yang sudah dibersihkan, sehingga tempel di aplikasi lain juga bersih (upaya terbaik — hanya selama keyboard memiliki akses clipboard). Jika nonaktif, aplikasi lain tetap melihat URL asli.</string>
+    <string name="clipboard_url_handling_note">Catatan: pembersihan berjalan saat Brown Keys menyimpan klip ke riwayatnya, sehingga tempel dari panel Brown Keys selalu bersih. Dengan \"Bersihkan juga clipboard sistem\" aktif, clipboard sistem Android juga ditimpa dengan URL yang sudah dibersihkan, sehingga tempel di aplikasi lain juga bersih (upaya terbaik — hanya selama keyboard memiliki akses clipboard). Jika nonaktif, aplikasi lain tetap melihat URL asli.</string>
     <string name="input_context_source_both">Bawaan + Dipelajari</string>
     <string name="input_context_source_learned_only">Hanya yang Dipelajari</string>
     <string name="input_context_source_static_only">Hanya Bawaan</string>
@@ -1352,7 +1352,7 @@
     <string name="clipboard_backup_import_completed">Impor clipboard selesai.</string>
     <string name="clipboard_backup_import_merge_note">Impor digabungkan dengan riwayat yang ada tanpa menimpa.</string>
     <string name="clipboard_backup_import_failed_title">Impor Clipboard Gagal</string>
-    <string name="clipboard_backup_import_failed">Gagal mengimpor riwayat clipboard:\n\n%1$s\n\nPastikan file adalah cadangan clipboard CleverKeys yang valid.</string>
+    <string name="clipboard_backup_import_failed">Gagal mengimpor riwayat clipboard:\n\n%1$s\n\nPastikan file adalah cadangan clipboard Brown Keys yang valid.</string>
     <string name="clipboard_backup_zip_export_success_title">Ekspor Clipboard Lengkap Berhasil</string>
     <string name="clipboard_backup_zip_saved">Cadangan clipboard beserta media disimpan.</string>
     <string name="clipboard_backup_zip_restore_hint">Pulihkan melalui Impor ZIP untuk mengembalikan semua entri termasuk gambar, video, dan media lainnya.</string>
@@ -1362,7 +1362,7 @@
     <string name="clipboard_backup_zip_import_completed">Impor clipboard lengkap selesai.</string>
     <string name="clipboard_backup_zip_media_restored_note">Semua file media dan gambar mini telah dipulihkan.</string>
     <string name="clipboard_backup_zip_import_failed_title">Impor ZIP Clipboard Gagal</string>
-    <string name="clipboard_backup_zip_import_failed">Gagal mengimpor ZIP clipboard:\n\n%1$s\n\nPastikan file adalah cadangan ZIP clipboard CleverKeys yang valid.</string>
+    <string name="clipboard_backup_zip_import_failed">Gagal mengimpor ZIP clipboard:\n\n%1$s\n\nPastikan file adalah cadangan ZIP clipboard Brown Keys yang valid.</string>
     <string name="dictionary_backup_export_success_title">Ekspor Kamus Berhasil</string>
     <string name="dictionary_backup_export_disabled_words">Kata dinonaktifkan: %1$d</string>
     <string name="dictionary_backup_export_failed_title">Ekspor Kamus Gagal</string>
@@ -1485,7 +1485,7 @@
     </plurals>
 
     <!-- 2026-09-29 hardcoded-UI sweep (activities): launcher, dictionary, layouts, short swipes, themes, playground, manifest labels (reviewer=model) -->
-    <string name="launcher_step_enable_desc">Aktifkan CleverKeys di pengaturan sistem</string>
+    <string name="launcher_step_enable_desc">Aktifkan Brown Keys di pengaturan sistem</string>
     <string name="launcher_step_select_desc">Ganti metode input default Anda</string>
     <string name="launcher_step_calibrate_desc">Konfigurasikan hingga 8 aksi subtombol per tombol</string>
     <string name="dict_tab_active">Aktif</string>
@@ -1561,9 +1561,9 @@
     <string name="calibration_legend_short_range">Min - Maks</string>
     <string name="calibration_legend_long_range">&gt; Maks</string>
     <string name="calibration_percent_value">%1$d%%</string>
-    <string name="theme_builtin_cleverkeysdark_name">CleverKeys Gelap</string>
+    <string name="theme_builtin_cleverkeysdark_name">Brown Keys Gelap</string>
     <string name="theme_builtin_cleverkeysdark_desc">Ungu tua dengan aksen perak (default)</string>
-    <string name="theme_builtin_cleverkeyslight_name">CleverKeys Terang</string>
+    <string name="theme_builtin_cleverkeyslight_name">Brown Keys Terang</string>
     <string name="theme_builtin_cleverkeyslight_desc">Tombol perak dengan aksen ungu</string>
     <string name="theme_builtin_dark_name">Gelap</string>
     <string name="theme_builtin_dark_desc">Tema gelap klasik dengan aksen biru</string>
@@ -1613,7 +1613,6 @@
     <string name="swipe_debug_clear_traces_playground">Hanya Playground</string>
     <string name="swipe_debug_clear_traces_all">Semua data geser</string>
     <string name="swipe_debug_clear_traces_message">Hapus jejak geser yang terekam dari perangkat ini?\n\n“%1$s” menghapus jejak yang direkam di layar ini; “%2$s” juga menghapus jejak dari koleksi ML global.</string>
-    <string name="manifest_ime_service_label">Keyboard CleverKeys</string>
     <string name="manifest_backup_restore_label">Cadangkan &amp; Pulihkan</string>
     <plurals name="swipe_debug_toast_cleared_traces">
         <item quantity="other">%1$d jejak dihapus</item>
@@ -1822,11 +1821,11 @@
     </plurals>
     <!-- 2026-09-30 i18n: typed import/export/backup failure reasons and settings-import skip kinds (reviewer=model) -->
     <string name="io_error_file_not_found">File tidak dapat ditemukan atau dibuka.</string>
-    <string name="io_error_permission_denied">CleverKeys tidak diizinkan mengakses file ini.</string>
+    <string name="io_error_permission_denied">Brown Keys tidak diizinkan mengakses file ini.</string>
     <string name="io_error_invalid_format">Format file tidak sesuai yang diharapkan, atau file rusak.</string>
-    <string name="io_error_newer_version">File dibuat oleh versi CleverKeys yang lebih baru. Perbarui aplikasi dan coba lagi.</string>
+    <string name="io_error_newer_version">File dibuat oleh versi Brown Keys yang lebih baru. Perbarui aplikasi dan coba lagi.</string>
     <string name="io_error_out_of_space">Ruang penyimpanan tidak cukup.</string>
-    <string name="io_error_too_large">File lebih besar daripada yang dapat diimpor CleverKeys dengan aman.</string>
+    <string name="io_error_too_large">File lebih besar daripada yang dapat diimpor Brown Keys dengan aman.</string>
     <string name="io_error_wrong_password_or_corrupt">Kata sandi cadangan salah, atau file rusak atau telah diubah.</string>
     <string name="io_error_no_backup_password">Cadangan ini terenkripsi dan tidak ada kata sandi cadangan yang tersedia.</string>
     <string name="io_error_wrong_backup_kind">Cadangan ini tidak berisi jenis data yang diharapkan oleh impor ini.</string>
@@ -1872,7 +1871,7 @@
     <string name="cmd_copy">Salin</string>
     <string name="cmd_copy_desc">Salin teks yang dipilih ke clipboard</string>
     <string name="cmd_copy_private">Salinan pribadi</string>
-    <string name="cmd_copy_private_desc">Salin pilihan hanya ke CleverKeys, tidak pernah ke clipboard sistem</string>
+    <string name="cmd_copy_private_desc">Salin pilihan hanya ke Brown Keys, tidak pernah ke clipboard sistem</string>
     <string name="cmd_paste">Tempel</string>
     <string name="cmd_paste_desc">Tempel dari clipboard</string>
     <string name="cmd_cut">Potong</string>

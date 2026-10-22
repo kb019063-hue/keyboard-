@@ -1,4 +1,4 @@
-# keyboard-
+# Brown Keys
 
 A personal, **GPL-3.0** Android keyboard (IME). 100% offline — the manifest declares no
 `INTERNET` permission, so nothing can phone home by construction.
@@ -6,6 +6,15 @@ A personal, **GPL-3.0** Android keyboard (IME). 100% offline — the manifest de
 Built on top of [CleverKeys](https://github.com/tribixbite/CleverKeys), with a planned set of
 feature ports from [HeliBoard](https://github.com/HeliBorg/HeliBoard). See
 [`docs/PROVENANCE.md`](docs/PROVENANCE.md) for the full attribution and license position.
+
+**On the name.** "Brown Keys" is this fork's product name only: it is what the launcher icon and
+Android's *On-screen keyboard* list show (`app_name` and `manifest_ime_service_label`, both
+`translatable="false"` so the brand reads identically in every locale). It is not a rename of the
+code — package names, class names (`CleverKeysService`), theme resources (`CleverKeysIMETheme`) and
+the backup format marker (`cleverkeys_full_backup`) are all unchanged, because renaming those would
+break the upstream merge path, the drift tests that read source text, and the ability to import a
+backup written before the rebrand. Upstream attribution in `LICENSE` and `NOTICE` is likewise
+untouched, as GPL-3.0 requires.
 
 ## Why this exists
 

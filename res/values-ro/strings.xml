@@ -51,7 +51,7 @@
     <string name="key_descr_change_method">Schimbă tastatura</string>
     <string name="key_descr_voice_typing">Dictare vocală</string>
     <string name="key_descr_copy">Copiază</string>
-    <string name="key_descr_copy_private">Copie privată (doar în CleverKeys, nu în clipboardul sistemului)</string>
+    <string name="key_descr_copy_private">Copie privată (doar în Brown Keys, nu în clipboardul sistemului)</string>
     <string name="key_descr_paste">Lipește</string>
     <string name="key_descr_cut">Decupează</string>
     <string name="key_descr_selectAll">Selectează tot</string>
@@ -123,8 +123,8 @@
     <string name="clipboard_edit_error">Actualizarea intrării a eșuat</string>
 
     <!-- #156 Private copy -->
-    <string name="private_copy_toolbar_label">CleverKeys: Copie privată</string>
-    <string name="private_copy_toast">Copiat privat în CleverKeys</string>
+    <string name="private_copy_toolbar_label">Brown Keys: Copie privată</string>
+    <string name="private_copy_toast">Copiat privat în Brown Keys</string>
     <string name="private_copy_expose_dialog_title">Copiați în clipboard-ul sistemului?</string>
     <string name="private_copy_expose_dialog_message">Această intrare a fost copiată privat. Copierea ei în clipboard-ul sistemului expune textul aplicației din prim-plan și altor manageri de clipboard. Copiați oricum?</string>
     <string name="private_copy_expose_dialog_confirm">Copiază oricum</string>
@@ -136,7 +136,7 @@
     <string name="clipboard_filter_private_only_hint">Arată doar intrările copiate privat (🔒)</string>
 
     <!-- Settings Activity (Material 3) -->
-    <string name="settings_title">⚙️ Setări CleverKeys</string>
+    <string name="settings_title">⚙️ Setări Brown Keys</string>
     <string name="settings_description">Configurează setările tastaturii pentru o experiență de scriere optimă.</string>
 
     <!-- Swipe Typing Section -->
@@ -296,7 +296,7 @@
     <string name="short_swipe_reset_all">Resetează tot</string>
     <string name="short_swipe_tap_hint">Atingeți orice tastă de mai jos pentru a-i personaliza gesturile de glisare scurtă</string>
     <string name="short_swipe_instruction_title">Atingeți orice tastă pentru a o personaliza</string>
-    <string name="short_swipe_instruction_body">Tastatura de mai jos este tastatura dvs. CleverKeys.\nAtingeți o tastă pentru a adăuga acțiuni de glisare scurtă.</string>
+    <string name="short_swipe_instruction_body">Tastatura de mai jos este tastatura dvs. Brown Keys.\nAtingeți o tastă pentru a adăuga acțiuni de glisare scurtă.</string>
     <string name="short_swipe_custom_mappings">Mapări personalizate</string>
     <string name="theme_settings_title">Teme pentru tastatură</string>
     <string name="theme_restart_keyboard">Repornește tastatura</string>
@@ -375,7 +375,7 @@
     <string name="accessibility_swipe_complete_title">Glisare finalizată</string>
     <string name="accessibility_swipe_complete_desc">Vibrează când gestul de glisare se termină</string>
     <string name="advanced_ime_prompt_title">Memento tastatură implicită</string>
-    <string name="advanced_ime_prompt_desc">Amintește o dată la fiecare pornire să setați CleverKeys ca tastatură implicită. Dezactivați pentru a nu mai întreba niciodată.</string>
+    <string name="advanced_ime_prompt_desc">Amintește o dată la fiecare pornire să setați Brown Keys ca tastatură implicită. Dezactivați pentru a nu mai întreba niciodată.</string>
     <string name="advanced_swipe_debug_log_title">Jurnal depanare glisare</string>
     <string name="advanced_swipe_debug_log_desc">Analiză în timp real a pipeline-ului pentru gesturile de glisare (necesită logcat)</string>
     <string name="advanced_detailed_logging_title">Jurnalizare detaliată</string>
@@ -479,11 +479,11 @@
     <string name="clipboard_swipe_deleted">Șters</string>
     <string name="clipboard_swipe_undo">Anulează</string>
     <string name="clipboard_private_copy_other_apps_title">Copiere privată în alte aplicații</string>
-    <string name="clipboard_private_copy_other_apps_desc">Adaugă "Copiere privată" la meniurile de selecție a textului ale altor aplicații. Copiază textul selectat doar în CleverKeys — niciodată în clipboard-ul sistemului. Activarea adaugă o intrare de aplicație pe care alte aplicații o pot vedea.</string>
+    <string name="clipboard_private_copy_other_apps_desc">Adaugă "Copiere privată" la meniurile de selecție a textului ale altor aplicații. Copiază textul selectat doar în Brown Keys — niciodată în clipboard-ul sistemului. Activarea adaugă o intrare de aplicație pe care alte aplicații o pot vedea.</string>
     <string name="clipboard_sanitize_links_title">Sanitizează parametrii de urmărire</string>
     <string name="clipboard_sanitize_links_desc">Elimină utm_*, fbclid, etc. din URL-urile copiate. Alimentat de ClearURLs.</string>
     <string name="clipboard_sanitize_system_title">Curăță și clipboard-ul sistemului</string>
-    <string name="clipboard_sanitize_system_desc">Când un URL copiat este curățat, suprascrie și clipboard-ul sistemului, astfel încât lipirile în orice aplicație să fie sanitizate — nu doar în panoul CleverKeys.</string>
+    <string name="clipboard_sanitize_system_desc">Când un URL copiat este curățat, suprascrie și clipboard-ul sistemului, astfel încât lipirile în orice aplicație să fie sanitizate — nu doar în panoul Brown Keys.</string>
     <string name="clipboard_embed_enrich_title">Îmbogățește embed-urile pentru partajare</string>
     <string name="clipboard_embed_enrich_desc">Rescrie x.com → fxtwitter.com, reddit.com → rxddit.com, etc.</string>
     <string name="clipboard_custom_rules_title">Folosește reguli personalizate</string>
@@ -816,7 +816,7 @@
     <string name="gif_remove_all_body">Aceasta va șterge toate pachetele GIF importate, miniaturile și baza de date. Nu se poate anula.</string>
     <string name="gif_remove_all_confirm">Elimină tot</string>
     <string name="gif_remove_pack_body">Aceasta va șterge toate GIF-urile din acest pachet și va elibera spațiul de stocare.</string>
-    <string name="privacy_section_intro">CleverKeys funcționează complet offline — niciun fel de date nu părăsesc dispozitivul dvs. Aceste setări opționale păstrează datele local, ca să le puteți consulta, exporta sau șterge; datele de glisare exportate pot fi folosite pentru antrenarea modelelor în altă parte.</string>
+    <string name="privacy_section_intro">Brown Keys funcționează complet offline — niciun fel de date nu părăsesc dispozitivul dvs. Aceste setări opționale păstrează datele local, ca să le puteți consulta, exporta sau șterge; datele de glisare exportate pot fi folosite pentru antrenarea modelelor în altă parte.</string>
     <string name="privacy_on_device_learning_header">Învățare pe dispozitiv</string>
     <string name="privacy_forget_learned_title">Uitați și datele învățate?</string>
     <string name="privacy_forget_learned_body">Învățarea este acum dezactivată — nu se va mai înregistra nimic nou. Doriți să ștergeți și tot ce a fost deja învățat (tipare de expresii, utilizarea cuvintelor, istoricul selectării sugestiilor și corecturile de glisare)? Nu se poate anula.</string>
@@ -1056,7 +1056,7 @@
     <string name="calibration_touch_here">👆 Atingeți aici</string>
     <string name="calibration_min_readout">Min: %1$d%%</string>
     <string name="calibration_max_readout">Max: %1$d%%</string>
-    <string name="launcher_logo_desc">Sigla CleverKeys</string>
+    <string name="launcher_logo_desc">Sigla Brown Keys</string>
     <string name="launcher_tagline">Confidențialitate, putere și control — cu creier.</string>
     <string name="launcher_step_enable">Activează tastatura</string>
     <string name="launcher_step_select">Selectează tastatura</string>
@@ -1275,11 +1275,11 @@
     <string name="clipboard_entry_duration_desc_default">Cât timp rămân intrările înainte de ștergerea automată (-1 = niciodată)</string>
     <string name="clipboard_entry_duration_never">Nu expiră niciodată</string>
     <string name="clipboard_private_copy_header">🔒 Copie privată</string>
-    <string name="clipboard_private_copy_in_app_note">În aplicație: acțiunea de editare „Copie privată” poate fi asociată unei glisări scurte sau unei taste suplimentare (Personalizare glisare scurtă). Aceasta stochează selecția curentă în clipboardul privat al CleverKeys, fără a atinge clipboardul sistemului. Intrările private au o insignă 🔒; exportarea uneia în clipboardul sistemului cere întotdeauna confirmare mai întâi, iar backupurile în text simplu le exclud (backupurile criptate le includ).</string>
+    <string name="clipboard_private_copy_in_app_note">În aplicație: acțiunea de editare „Copie privată” poate fi asociată unei glisări scurte sau unei taste suplimentare (Personalizare glisare scurtă). Aceasta stochează selecția curentă în clipboardul privat al Brown Keys, fără a atinge clipboardul sistemului. Intrările private au o insignă 🔒; exportarea uneia în clipboardul sistemului cere întotdeauna confirmare mai întâi, iar backupurile în text simplu le exclud (backupurile criptate le includ).</string>
     <string name="clipboard_url_handling_header">Gestionarea URL-urilor</string>
     <string name="clipboard_custom_rules_browse">Alegeți custom.substitutions.json</string>
     <string name="clipboard_custom_rules_replace">Înlocuiește regulile personalizate</string>
-    <string name="clipboard_url_handling_note">Notă: curățarea are loc când CleverKeys salvează un clip în istoric, deci lipirile din panoul CleverKeys sunt întotdeauna curățate. Cu „Curăță și clipboard-ul sistemului” activat, clipboardul de sistem Android este suprascris și el cu URL-ul curățat, astfel că și lipirile din alte aplicații sunt curățate (în măsura posibilului – doar cât timp tastatura are acces la clipboard). Cu opțiunea dezactivată, celelalte aplicații văd în continuare URL-ul original.</string>
+    <string name="clipboard_url_handling_note">Notă: curățarea are loc când Brown Keys salvează un clip în istoric, deci lipirile din panoul Brown Keys sunt întotdeauna curățate. Cu „Curăță și clipboard-ul sistemului” activat, clipboardul de sistem Android este suprascris și el cu URL-ul curățat, astfel că și lipirile din alte aplicații sunt curățate (în măsura posibilului – doar cât timp tastatura are acces la clipboard). Cu opțiunea dezactivată, celelalte aplicații văd în continuare URL-ul original.</string>
     <string name="input_context_source_both">Integrate + învățate</string>
     <string name="input_context_source_learned_only">Doar învățate</string>
     <string name="input_context_source_static_only">Doar integrate</string>
@@ -1393,7 +1393,7 @@
     <string name="clipboard_backup_import_completed">Importul clipboardului a fost finalizat.</string>
     <string name="clipboard_backup_import_merge_note">Importurile se îmbină cu istoricul existent fără a suprascrie nimic.</string>
     <string name="clipboard_backup_import_failed_title">Import clipboard eșuat</string>
-    <string name="clipboard_backup_import_failed">Importul istoricului clipboardului a eșuat:\n\n%1$s\n\nAsigurați-vă că fișierul este un backup de clipboard CleverKeys valid.</string>
+    <string name="clipboard_backup_import_failed">Importul istoricului clipboardului a eșuat:\n\n%1$s\n\nAsigurați-vă că fișierul este un backup de clipboard Brown Keys valid.</string>
     <string name="clipboard_backup_zip_export_success_title">Export complet clipboard reușit</string>
     <string name="clipboard_backup_zip_saved">Backupul clipboardului cu media a fost salvat.</string>
     <string name="clipboard_backup_zip_restore_hint">Restaurați prin Importă ZIP pentru a recupera toate intrările, inclusiv imagini, videoclipuri și alte fișiere media.</string>
@@ -1403,7 +1403,7 @@
     <string name="clipboard_backup_zip_import_completed">Importul complet al clipboardului a fost finalizat.</string>
     <string name="clipboard_backup_zip_media_restored_note">Toate fișierele media și miniaturile au fost restaurate.</string>
     <string name="clipboard_backup_zip_import_failed_title">Import ZIP clipboard eșuat</string>
-    <string name="clipboard_backup_zip_import_failed">Importul ZIP-ului de clipboard a eșuat:\n\n%1$s\n\nAsigurați-vă că fișierul este un backup ZIP de clipboard CleverKeys valid.</string>
+    <string name="clipboard_backup_zip_import_failed">Importul ZIP-ului de clipboard a eșuat:\n\n%1$s\n\nAsigurați-vă că fișierul este un backup ZIP de clipboard Brown Keys valid.</string>
     <string name="dictionary_backup_export_success_title">Export dicționar reușit</string>
     <string name="dictionary_backup_export_disabled_words">Cuvinte dezactivate: %1$d</string>
     <string name="dictionary_backup_export_failed_title">Export dicționar eșuat</string>
@@ -1572,7 +1572,7 @@
     </plurals>
 
     <!-- 2026-09-29 hardcoded-UI sweep (activities): launcher, dictionary, layouts, short swipes, themes, playground, manifest labels (reviewer=model) -->
-    <string name="launcher_step_enable_desc">Activați CleverKeys în setările sistemului</string>
+    <string name="launcher_step_enable_desc">Activați Brown Keys în setările sistemului</string>
     <string name="launcher_step_select_desc">Schimbați metoda de introducere implicită</string>
     <string name="launcher_step_calibrate_desc">Configurați până la 8 acțiuni de subtastă per tastă</string>
     <string name="dict_tab_active">Active</string>
@@ -1648,9 +1648,9 @@
     <string name="calibration_legend_short_range">Min - Max</string>
     <string name="calibration_legend_long_range">&gt; Max</string>
     <string name="calibration_percent_value">%1$d%%</string>
-    <string name="theme_builtin_cleverkeysdark_name">CleverKeys Întunecat</string>
+    <string name="theme_builtin_cleverkeysdark_name">Brown Keys Întunecat</string>
     <string name="theme_builtin_cleverkeysdark_desc">Violet închis cu accente argintii (implicit)</string>
-    <string name="theme_builtin_cleverkeyslight_name">CleverKeys Luminos</string>
+    <string name="theme_builtin_cleverkeyslight_name">Brown Keys Luminos</string>
     <string name="theme_builtin_cleverkeyslight_desc">Taste argintii cu accente violet</string>
     <string name="theme_builtin_dark_name">Întunecat</string>
     <string name="theme_builtin_dark_desc">Temă întunecată clasică cu accente albastre</string>
@@ -1700,7 +1700,6 @@
     <string name="swipe_debug_clear_traces_playground">Doar zona de test</string>
     <string name="swipe_debug_clear_traces_all">Toate datele de glisare</string>
     <string name="swipe_debug_clear_traces_message">Ștergeți traseele de glisare înregistrate de pe acest dispozitiv?\n\n„%1$s” elimină traseele înregistrate pe acest ecran; „%2$s” elimină și traseele din colecția ML globală.</string>
-    <string name="manifest_ime_service_label">Tastatura CleverKeys</string>
     <string name="manifest_backup_restore_label">Backup și restaurare</string>
     <plurals name="swipe_debug_toast_cleared_traces">
         <item quantity="one">S-a șters %1$d traseu</item>
@@ -1927,11 +1926,11 @@
     </plurals>
     <!-- 2026-09-30 i18n: typed import/export/backup failure reasons and settings-import skip kinds (reviewer=model) -->
     <string name="io_error_file_not_found">Fișierul nu a putut fi găsit sau deschis.</string>
-    <string name="io_error_permission_denied">CleverKeys nu are permisiunea de a accesa acest fișier.</string>
+    <string name="io_error_permission_denied">Brown Keys nu are permisiunea de a accesa acest fișier.</string>
     <string name="io_error_invalid_format">Fișierul nu are formatul așteptat sau este deteriorat.</string>
-    <string name="io_error_newer_version">Fișierul a fost creat de o versiune mai nouă a CleverKeys. Actualizați aplicația și încercați din nou.</string>
+    <string name="io_error_newer_version">Fișierul a fost creat de o versiune mai nouă a Brown Keys. Actualizați aplicația și încercați din nou.</string>
     <string name="io_error_out_of_space">Spațiu de stocare insuficient.</string>
-    <string name="io_error_too_large">Fișierul este mai mare decât poate importa CleverKeys în siguranță.</string>
+    <string name="io_error_too_large">Fișierul este mai mare decât poate importa Brown Keys în siguranță.</string>
     <string name="io_error_wrong_password_or_corrupt">Parolă de backup greșită sau fișierul este deteriorat ori a fost modificat.</string>
     <string name="io_error_no_backup_password">Acest backup este criptat și nu este disponibilă nicio parolă de backup.</string>
     <string name="io_error_wrong_backup_kind">Acest backup nu conține tipul de date pe care îl așteaptă acest import.</string>
@@ -1977,7 +1976,7 @@
     <string name="cmd_copy">Copiază</string>
     <string name="cmd_copy_desc">Copiază textul selectat în clipboard</string>
     <string name="cmd_copy_private">Copie privată</string>
-    <string name="cmd_copy_private_desc">Copiază selecția doar în CleverKeys, niciodată în clipboardul sistemului</string>
+    <string name="cmd_copy_private_desc">Copiază selecția doar în Brown Keys, niciodată în clipboardul sistemului</string>
     <string name="cmd_paste">Lipește</string>
     <string name="cmd_paste_desc">Lipește din clipboard</string>
     <string name="cmd_cut">Decupează</string>
