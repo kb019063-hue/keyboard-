@@ -47,6 +47,9 @@ internal fun testConfigSnapshot(
     labelTextSize: Float = 0.33f,
     sublabelTextSize: Float = 0.22f,
     secondary_label_size_scale: Float = 1f,
+    // Legacy (print everything), not the shipped calm default: no test renders the keyboard, and
+    // any test that ever inspects labels should see them unless it opts into calm on purpose.
+    print_all_key_symbols: Boolean = true,
     characterSize: Float = 1f,
     keyboardOpacity: Int = 100,
     themeName: String = "cleverkeysdark",
@@ -92,6 +95,7 @@ internal fun testConfigSnapshot(
     labelTextSize = labelTextSize,
     sublabelTextSize = sublabelTextSize,
     secondary_label_size_scale = secondary_label_size_scale,
+    print_all_key_symbols = print_all_key_symbols,
     characterSize = characterSize,
     keyboardOpacity = keyboardOpacity,
     themeName = themeName,

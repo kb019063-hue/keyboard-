@@ -148,6 +148,7 @@ object SettingsResetPolicy {
         // Voice typing (phase 4 part 1) - keys kept in sync with voice/VoiceTypingConfig.kt
         put(VoiceTypingConfig.PREF_MODE, Defaults.VOICE_TYPING_MODE)
         put(VoiceTypingConfig.PREF_SELF_TEST, Defaults.VOICE_TYPING_SELF_TEST)
+        put("print_all_key_symbols", Defaults.PRINT_ALL_KEY_SYMBOLS)
         put("split_enabled", Defaults.SPLIT_ENABLED)
         put("split_gap_percent", Defaults.SPLIT_GAP_PERCENT)
         put("clipboard_pane_height_percent", Defaults.CLIPBOARD_PANE_HEIGHT_PERCENT)

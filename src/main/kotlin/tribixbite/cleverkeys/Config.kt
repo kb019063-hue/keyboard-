@@ -502,6 +502,9 @@ object Defaults {
     // these mirror its defaults the way every other Defaults entry mirrors its owner.
     const val VOICE_TYPING_MODE = VoiceTypingConfig.DEFAULT_MODE
     const val VOICE_TYPING_SELF_TEST = VoiceTypingConfig.DEFAULT_SELF_TEST
+    // Calm key labels (phase 4 part 2): off means one corner hint per character key and none on
+    // functional keys; on is the dense Unexpected-Keyboard rendering this tree shipped with.
+    const val PRINT_ALL_KEY_SYMBOLS = false
 
     // Accessibility
     const val STICKY_KEYS_ENABLED = false
@@ -830,6 +833,7 @@ class Config private constructor(
     @JvmField val sublabelTextSize: Float = Defaults.SUBLABEL_TEXT_SIZE_FACTOR
     // #133: user multiplier applied to the secondary (flick) label size only.
     @JvmField var secondary_label_size_scale = Defaults.SECONDARY_LABEL_SIZE_SCALE
+    @JvmField var print_all_key_symbols = Defaults.PRINT_ALL_KEY_SYMBOLS
 
     // From preferences.
     // A field that refresh() reads straight from ONE preference is initialised to that
@@ -1276,6 +1280,7 @@ class Config private constructor(
         characterSize = safeGetFloat(_prefs, "character_size", Defaults.CHARACTER_SIZE)
             .coerceIn(SettingsRanges.CHARACTER_SIZE.start, SettingsRanges.CHARACTER_SIZE.endInclusive) * characterSizeScale
         secondary_label_size_scale = safeGetFloat(_prefs, "secondary_label_size_scale", Defaults.SECONDARY_LABEL_SIZE_SCALE)
+        print_all_key_symbols = _prefs.getBoolean("print_all_key_symbols", Defaults.PRINT_ALL_KEY_SYMBOLS)
         // The global theme preference. The EFFECTIVE theme (themeName/theme) is resolved at the
         // end of refresh, once the layouts, the selection and wide_screen are known.
         user_theme_name = safeGetString(_prefs, "theme", Defaults.THEME)
@@ -1584,6 +1589,7 @@ class Config private constructor(
         labelTextSize = labelTextSize,
         sublabelTextSize = sublabelTextSize,
         secondary_label_size_scale = secondary_label_size_scale,
+        print_all_key_symbols = print_all_key_symbols,
         characterSize = characterSize,
         keyboardOpacity = keyboardOpacity,
         themeName = themeName,

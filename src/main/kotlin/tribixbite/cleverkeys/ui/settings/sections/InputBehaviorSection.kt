@@ -528,6 +528,22 @@ internal fun SettingsActivity.InputBehaviorSection() {
                     }
                 )
 
+                // Phase 4 part 2: the calm default keeps one corner hint per key. This is the way
+                // back to the dense rendering for anyone who has learned it, sitting next to the
+                // number-row control because both decide what a key shows.
+                SettingsSwitch(
+                    title = stringResource(R.string.input_key_symbols_title),
+                    description = stringResource(R.string.input_key_symbols_desc),
+                    checked = printAllKeySymbols,
+                    onCheckedChange = { enabled ->
+                        printAllKeySymbols = enabled
+                        saveSetting("print_all_key_symbols", enabled)
+                        // Immediate, like the other live switches: the open keyboard redraws with
+                        // the corner labels back (or gone) without a restart.
+                        Config.globalConfig()?.print_all_key_symbols = enabled
+                    }
+                )
+
                 SettingsDropdown(
                     title = stringResource(R.string.input_show_numpad_title),
                     description = stringResource(R.string.input_show_numpad_desc),

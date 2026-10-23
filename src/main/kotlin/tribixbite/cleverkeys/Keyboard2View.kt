@@ -1854,9 +1854,23 @@ class Keyboard2View @JvmOverloads constructor(
                         _shortSwipeManager.getMappingsForKey(_keyCodeLowerCache[k] ?: "").keys
                     )
                 else 0
+                // Phase 4 part 2: the calm default draws one corner hint per character key and
+                // none on keys that do something; print_all_key_symbols restores every label the
+                // key carries. Rendering only -- the KeySpec keeps all nine slots, so long-press,
+                // swipes, hit-testing and the a11y tree still reach what is not drawn.
+                var presentCorners = 0
+                for (i in 1..8) if (k.keys[i] != null) presentCorners = presentCorners or (1 shl i)
+                val calmCorners = CornerLabelPolicy.drawn(
+                    snap.print_all_key_symbols,
+                    CornerLabelPolicy.isCharacterKind(kv0?.getKind()),
+                    presentCorners
+                )
                 for (i in 1..8) {
-                    if (k.keys[i] != null && (coveredSubLabels and (1 shl i)) == 0)
+                    if (k.keys[i] != null && (coveredSubLabels and (1 shl i)) == 0 &&
+                        (calmCorners and (1 shl i)) != 0
+                    ) {
                         drawSubLabel(canvas, k.keys[i]!!, x, y, keyW, keyH, i, isKeyDown, tc_key, snap, mainLabelW)
+                    }
                 }
                 // Draw custom short swipe mappings (they own their slots — see above).
                 // Skip the whole overlay when no custom mappings are configured (R2 early-out).

@@ -294,6 +294,7 @@ internal fun SettingsActivity.loadCurrentSettings() {
             VoiceTypingConfig.modeOf(prefs.getSafeString(VoiceTypingConfig.PREF_MODE, Defaults.VOICE_TYPING_MODE))
         )
         voiceTypingSelfTest = prefs.getSafeBoolean(VoiceTypingConfig.PREF_SELF_TEST, Defaults.VOICE_TYPING_SELF_TEST)
+        printAllKeySymbols = prefs.getSafeBoolean("print_all_key_symbols", Defaults.PRINT_ALL_KEY_SYMBOLS)
         clipboardHistoryLimit = prefs.getSafeString("clipboard_history_limit", Defaults.CLIPBOARD_HISTORY_LIMIT).toIntOrNull() ?: Defaults.CLIPBOARD_HISTORY_LIMIT_FALLBACK
         clipboardHistoryDuration = prefs.getSafeString("clipboard_history_duration", Defaults.CLIPBOARD_HISTORY_DURATION).toIntOrNull() ?: Defaults.CLIPBOARD_HISTORY_DURATION_FALLBACK
         clipboardPaneHeightPercent = Config.safeGetInt(prefs, "clipboard_pane_height_percent", Defaults.CLIPBOARD_PANE_HEIGHT_PERCENT)
@@ -405,6 +406,7 @@ internal fun SettingsActivity.loadCurrentSettings() {
             VoiceTypingConfig.modeOf(prefs.getSafeString(VoiceTypingConfig.PREF_MODE, Defaults.VOICE_TYPING_MODE))
         )
         voiceTypingSelfTest = prefs.getSafeBoolean(VoiceTypingConfig.PREF_SELF_TEST, Defaults.VOICE_TYPING_SELF_TEST)
+        printAllKeySymbols = prefs.getSafeBoolean("print_all_key_symbols", Defaults.PRINT_ALL_KEY_SYMBOLS)
         customTerminalPackages = prefs.getSafeString("custom_terminal_packages", Defaults.CUSTOM_TERMINAL_PACKAGES)
         imeDefaultPromptEnabled = prefs.getSafeBoolean("ime_default_prompt_enabled", Defaults.IME_DEFAULT_PROMPT_ENABLED)
         vibrationDuration = prefs.getSafeInt("vibrate_duration", Defaults.VIBRATE_DURATION)

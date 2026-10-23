@@ -105,6 +105,8 @@ data class ConfigSnapshot(
     val labelTextSize: Float,
     val sublabelTextSize: Float,
     val secondary_label_size_scale: Float,
+    /** Phase 4 part 2: true draws every corner label a key carries; false is the calm default. */
+    val print_all_key_symbols: Boolean,
     val characterSize: Float,
     val keyboardOpacity: Int,
     val themeName: String,
