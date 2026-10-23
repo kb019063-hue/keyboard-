@@ -42,6 +42,9 @@ SDCARD = os.path.join(NFOFF, "sdcard-ui.xml")
 VIEW_TOP = 100      # screen y where the scrollable content starts
 VIEW_H = 2300       # content px visible at once
 SCREEN_W, SCREEN_H = 1080, 2400
+# While the IME is up its toolbar occupies this band at the bottom of the screen. Settings rows
+# that would render inside it are not on screen, and must not win a hit test against a key.
+IME_BAND_TOP = SCREEN_H - 130
 PKG_DEFAULT = "tribixbite.cleverkeys.debug"
 
 
@@ -76,7 +79,10 @@ SECTIONS = [
      [("switch", "Show Toolbar"), ("button", "Add"), ("button", "Reset"),
       ("dropdown", "Toolbar Position"), ("slider", "Toolbar Height"), ("text", "10 / 12")]),
     ("oneHanded", "\u270b One-Handed", [("switch", "One-Handed Mode"), ("dropdown", "Side")]),
-    ("input", "\u2328 Input Behavior", [("switch", "Auto-Capitalisation"), ("switch", "Autocorrect")]),
+    ("input", "\u2328 Input Behavior",
+     [("button", "Manage Keyboard Layouts"), ("button", "Extra Keys Configuration"),
+      ("dropdown", "Voice Typing"), ("switch", "Dictation Self-Test"),
+      ("switch", "Auto-Capitalisation"), ("switch", "Autocorrect")]),
     ("swipeCorrections", "\U0001f4dd Corrections", [("switch", "Swipe Final Autocorrect")]),
     ("gestureTuning", "\U0001f3af Gesture Tuning", [("slider", "Long Press Delay"), ("text", "Calibrate")]),
     ("accessibility", "\u267f Accessibility", [("switch", "Key Sound"), ("slider", "Key Sound Volume")]),
@@ -106,6 +112,7 @@ INDEX = [
     ("Incognito Mode", "privacy"),
     ("One-Handed Mode", "oneHanded"),
     ("Key Sound", "accessibility"),
+    ("Dictation Self-Test", "input"),
 ]
 
 SWITCHES = ["Incognito Mode", "Floating Keyboard", "Split Keyboard", "One-Handed Mode", "Key Sound",
@@ -136,7 +143,9 @@ def rows(s):
     """Layout rows in content space: (kind, text, height, section|None)."""
     out = [("title", "Settings", 90, None), ("desc", "Everything about your keyboard", 60, None)]
     if not s.get("no_search_bar"):
-        out.append(("searchbar", "Search settings\u2026", 144, None))
+        # The bar renders whatever the field holds: the placeholder while empty, the typed query
+        # while searching, and -- the thing 7e asserts on -- the transcript dictation committed.
+        out.append(("searchbar", s.get("field_text") or "Search settings\u2026", 144, None))
     q = s.get("query", "")
     if q and not s.get("search_broken"):
         for title, sec in INDEX:
@@ -161,6 +170,8 @@ def settings_nodes(s):
         top = VIEW_TOP + y - s["scroll"]
         y += h + 16
         if not (-h < top < SCREEN_H):
+            continue
+        if s.get("ime_shown") and top + h > IME_BAND_TOP:
             continue
         y1, y2 = max(0, top), min(SCREEN_H, top + h)
         state = s["checked"].get(text)
@@ -216,13 +227,60 @@ def launcher_nodes(s):
     return n
 
 
+def ime_nodes(s):
+    """The keyboard's toolbar band. Only composed while the IME is up, as on a device."""
+    if not s.get("ime_shown"):
+        return []
+    descs = ["Voice Typing", "Clipboard", "Undo", "Redo", "Select Word", "Copy", "Paste"]
+    if s.get("no_toolbar_mic"):
+        descs = descs[1:]
+    n = []
+    x = 16
+    for desc in descs:
+        n.append((IME_BAND_TOP,
+                  '<node index="%d" text="" resource-id="" class="android.widget.ImageButton" '
+                  'package="%s" content-desc="%s" checkable="false" checked="false" '
+                  'clickable="true" enabled="true" focusable="true" focused="false" '
+                  'scrollable="false" bounds="[%d,%d][%d,%d]" />'
+                  % (len(n), s["pkg"], esc(desc), x, IME_BAND_TOP + 20, x + 110, IME_BAND_TOP + 110)))
+        x += 130
+    return n
+
+
+def voice_mic(s):
+    """What the mic key does, per DictationPolicy: self-test commits, everything else falls back.
+
+    The emulator image has no speech service, so the recogniser is never available here; that is
+    why the decision line is recorded at all -- it is the evidence 7e ships as VOICE-DIAG.
+    """
+    selftest = bool(s["checked"].get("Dictation Self-Test"))
+    if selftest and not s.get("voice_deaf"):
+        decision = "COMMIT_SELF_TEST"
+    elif s.get("voice_ime_available"):
+        decision = "SWITCH_TO_VOICE_IME"
+    else:
+        decision = "REPORT_NO_VOICE_INPUT"
+    s.setdefault("loglines", []).append(
+        "I DictationController: press mode=DICTATION selfTest=%s listening=false recognizer=%s "
+        "permission=%s voiceIme=%s decision=%s"
+        % ("true" if selftest else "false",
+           "true" if s.get("voice_recognizer") else "false",
+           "true" if s.get("permission_granted") else "false",
+           "true" if s.get("voice_ime_available") else "false",
+           decision))
+    if decision == "COMMIT_SELF_TEST":
+        # DictationPolicy.commitPrefix: a joining space only after real text.
+        prefix = " " if s.get("field_text") else ""
+        s["field_text"] = (s.get("field_text") or "") + prefix + "voice dictation self test"
+
+
 def nodes(s):
     if s["screen"] == "launcher":
         return launcher_nodes(s)
     if s["screen"] != "settings":
         return [(0, '<node index="0" text="Theme preview" class="android.view.View" package="%s" '
                     'bounds="[0,0][1080,2400]" />' % s["pkg"])]
-    return settings_nodes(s)
+    return settings_nodes(s) + ime_nodes(s)
 
 
 def dump(s):
@@ -317,6 +375,7 @@ def main(argv):
 
     if cmd[:2] == ["input", "text"]:
         s["query"] = cmd[2].replace("%s", " ")
+        s["field_text"] = s["query"]
         save(s)
         return 0
 
@@ -341,6 +400,12 @@ def main(argv):
         s["taps"] = s.get("taps", []) + ["%d,%d %s" % (x, y, text or "MISS")]
         if tag:
             cls = re.search(r'class="([^"]*)"', tag).group(1)
+            desc = re.search(r'content-desc="([^"]*)"', tag)
+            if desc and unesc(desc.group(1)) == "Voice Typing":
+                # 7e: the toolbar's mic key, not the settings row that shares its label.
+                voice_mic(s)
+                save(s)
+                return 0
             if s["screen"] == "launcher":
                 if "EditText" in cls:
                     s["focused_field"] = "launcher"
@@ -356,6 +421,7 @@ def main(argv):
                 # section, then scroll the control to the top of the viewport.
                 sec = next(sec for t, sec in INDEX if t == text)
                 s["query"] = ""
+                s["field_text"] = ""
                 for k in s["expanded"]:
                     s["expanded"][k] = False
                 s["expanded"][sec] = True
@@ -437,8 +503,14 @@ def main(argv):
         save(s)
         print("%s/tribixbite.cleverkeys.CleverKeysService" % s["pkg"])
         return 0
+    if cmd[:2] == ["pm", "grant"]:
+        s["permission_granted"] = True
+        save(s)
+        return 0
     if cmd[:1] == ["logcat"]:
         save(s)
+        for line in s.get("loglines", []):
+            print(line)
         return 0
     save(s)
     return 0

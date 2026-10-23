@@ -8,15 +8,15 @@ annotations (capped, and notices beyond roughly the twelfth are dropped) and the
 
 So a failed run yields one or two sentences of evidence, and guessing from those has already cost
 three runs. This harness removes the guessing for the parts of the script that are pure hunt logic:
-it runs the real section 7d, unmodified, against a fake `adb` that models an emulator's settings
-screen, and checks that nine scenarios each produce exactly the verdict they must.
+it runs the real sections 7d and 7e, unmodified, against a fake `adb` that models an emulator's
+settings screen, and checks that twelve scenarios each produce exactly the verdicts they must.
 
 ```
 scripts/ci/offline/run.sh          # every scenario, about twenty seconds
 scripts/ci/offline/run.sh run30    # one scenario, with its full output on mismatch
 ```
 
-Run it after any edit to section 7b or 7d. It needs `python3` and `bash`, and no Android SDK,
+Run it after any edit to section 7b, 7d or 7e. It needs `python3` and `bash`, and no Android SDK,
 Gradle, emulator or network.
 
 ## What the fake adb models
@@ -34,15 +34,26 @@ Every detail here corresponds to something that broke a real run.
 | `dumpsys window windows` whose input-method frame narrows only when floating is on | the mechanism part 3 exists to implement |
 | BACK with an IME shown hides the keyboard and keeps the activity; only then does it pop | run 39783242401 pressed BACK to "dismiss a keyboard" that was never up, and left the next hunt dumping the launcher |
 | Swipes apply no fling momentum | a device flings further than it is dragged, so what passes here passes there |
+| While the IME is up, its toolbar band covers the bottom of the screen and the settings rows there are absent | 7e taps the mic key by its `content-desc`, and a settings row rendering in the same band would win the hit test and be tapped instead |
+| The search bar renders whatever the field holds, including text committed through the `InputConnection` | what 7e asserts on: the dictation transcript appearing in the field is the only device-visible evidence that the commit path works |
+| `logcat` replays the lines the model recorded, and `pm grant` records the permission | 7e ships the mic key's decision line as `VOICE-DIAG`, because on an image with no speech service that line is the only record of which branch ran |
 
 ## Scenarios
 
-`scenarios.py` holds both the state each scenario starts from and the verdict it must produce. Four
-of them exist to prove the suite cannot lie: `nochecked` and `tapdeaf` must stand down and report
-instead of asserting a window measurement whose precondition was never confirmed, and `framepkg`
-and `noime` must report instead of asserting a window they cannot identify or reach. `framefull` is
-the mirror image — floating confirmed on, window still full width — and is the one scenario that
-must fail, because that is the defect the probe exists to catch.
+`scenarios.py` holds both the state each scenario starts from and the verdicts it must produce: the
+7d frame verdict and, since phase 4 part 1, the 7e voice verdict. Four of them exist to prove the
+suite cannot lie: `nochecked` and `tapdeaf` must stand down and report instead of asserting a window
+measurement whose precondition was never confirmed, and `framepkg` and `noime` must report instead of
+asserting a window they cannot identify or reach. `framefull` is the mirror image — floating
+confirmed on, window still full width — and is the one scenario that must fail, because that is the
+defect the probe exists to catch.
+
+`voicedeaf` is 7e's mirror image and exists for the same reason: the mic key tapped with the
+self-test switch confirmed on, and no transcript reaching the field. That is the defect 7e exists to
+catch — a key that logs a decision and commits nothing — so it must fail, and a harness that cannot
+produce that failure proves nothing about dictation. `voicenokey` is the stand-down: no toolbar node
+carries the mic key's `content-desc`, so 7e reports and does not accuse. Both ride on scenarios where
+7d still passes, which is what keeps a voice regression from being blamed on the window probe.
 
 `framemodern` earns its place by having already caught a bug: it models the Android 12+ `dumpsys`
 dialect, where a window's rectangle is a lowercase `frame=` under a `Frames:` block and the window is

@@ -49,7 +49,7 @@ nf_end = find(lambda l: l.startswith("# ThemeSettingsActivity hosts KeyboardPrev
 glue = ["", 'PKG=tribixbite.cleverkeys.debug', 'SW=1080', 'SH=2400',
         'OUT="%s/out"' % __import__("os").environ["NFOFF_DIR"], 'mkdir -p "$OUT"', ""]
 tail = ["", 'write_summary', 'echo "SUMMARY $(cat "$OUT/summary.txt")"',
-        'echo "HARNESS fails=$fails NF_VERDICT=$NF_VERDICT"']
+        'echo "HARNESS fails=$fails NF_VERDICT=$NF_VERDICT VOICE_VERDICT=$VOICE_VERDICT"']
 out = src[:pre_end] + src[h_start:h_end + 1] + glue + src[nf_start:nf_end - 1] + tail
 open(sys.argv[2], "w").write("\n".join(out) + "\n")
 PY
@@ -58,14 +58,17 @@ bash -n "$WORK/harness.sh" || { echo "harness does not parse" >&2; exit 2; }
 
 # --- one scenario --------------------------------------------------------------------------------
 verdict_of() {  # $1 = captured output
-  local out="$1" fails nf frame warn
+  local out="$1" fails nf frame voice warn
   fails=$(printf '%s' "$out" | sed -n 's/^SUMMARY fails=\([0-9]*\).*/\1/p' | head -1)
   nf=$(printf '%s' "$out" | sed -n 's/.*-nf=\([a-z]*\)-.*/\1/p' | head -1)
+  voice=$(printf '%s' "$out" | sed -n 's/.*VOICE_VERDICT=\([a-z]*\).*/\1/p' | head -1)
   frame=none
   printf '%s' "$out" | grep -q "PASS  floating narrowed the input-method WINDOW" && frame=pass
   printf '%s' "$out" | grep -q "FAIL  floating left the input-method window" && frame=fail
-  warn=$(printf '%s' "$out" | grep '^::warning::' | head -2 | tr '\n' ' ')
-  printf '%s|%s|%s|%s' "${fails:-?}" "${nf:-?}" "$frame" "$warn"
+  # Four warnings, not two: 7e added VOICE-DIAG plus its own skip warnings, and a scenario's
+  # required substring can be the third one emitted.
+  warn=$(printf '%s' "$out" | grep '^::warning::' | head -4 | tr '\n' ' ')
+  printf '%s|%s|%s|%s|%s' "${fails:-?}" "${nf:-?}" "$frame" "${voice:-?}" "$warn"
 }
 
 run_one() {  # $1 = scenario
@@ -75,19 +78,20 @@ run_one() {  # $1 = scenario
   want=$(python3 "$HERE/scenarios.py" expect "$sc")
   out=$(PATH="$WORK/bin:$PATH" bash "$WORK/harness.sh" 2>&1)
   got=$(verdict_of "$out")
-  local wf wn wframe wwarn gf gn gframe gwarn
-  IFS=' ' read -r wf wn wframe wwarn <<< "$want"
-  IFS='|' read -r gf gn gframe gwarn <<< "$got"
+  local wf wn wframe wvoice wwarn gf gn gframe gvoice gwarn
+  IFS=' ' read -r wf wn wframe wvoice wwarn <<< "$want"
+  IFS='|' read -r gf gn gframe gvoice gwarn <<< "$got"
   [ "$gf" = "$wf" ] || { echo "    fails: want $wf got $gf"; rc=1; }
   [ "$gn" = "$wn" ] || { echo "    nf verdict: want $wn got $gn"; rc=1; }
   [ "$gframe" = "$wframe" ] || { echo "    frame assertion: want $wframe got $gframe"; rc=1; }
+  [ "$gvoice" = "$wvoice" ] || { echo "    voice verdict: want $wvoice got $gvoice"; rc=1; }
   if [ -n "$wwarn" ]; then
     printf '%s' "$gwarn" | grep -q "$wwarn" || { echo "    warning: wanted substring '$wwarn', got '$gwarn'"; rc=1; }
   fi
   if [ "$rc" -eq 0 ]; then
-    printf '  ok    %-12s fails=%s nf=%s frame=%s\n' "$sc" "$gf" "$gn" "$gframe"
+    printf '  ok    %-12s fails=%s nf=%s frame=%s voice=%s\n' "$sc" "$gf" "$gn" "$gframe" "$gvoice"
   else
-    printf '  FAIL  %-12s fails=%s nf=%s frame=%s\n' "$sc" "$gf" "$gn" "$gframe"
+    printf '  FAIL  %-12s fails=%s nf=%s frame=%s voice=%s\n' "$sc" "$gf" "$gn" "$gframe" "$gvoice"
     printf '%s\n' "$out" | grep -E '^  (PASS|FAIL)|^::(warning|error)|^SUMMARY' | sed 's/^/      /' | cut -c1-200
   fi
   return $rc

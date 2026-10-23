@@ -56,10 +56,14 @@ OH_VERDICT=notrun
 NF_VERDICT=notrun
 KB_VERDICT=notrun
 ANR_SEEN=0
+VOICE_VERDICT=notrun
+# The voice field is spelled `-v=` and appended LAST on purpose: the workflow truncates the summary
+# to 90 characters before it becomes the artifact name, and the run-36 summary is already 80. A
+# longer spelling would push `anr=` past the cut and silently lose the ANR witness.
 write_summary() {
-  printf 'fails=%s-toolbar=%s-tbui=%s-oh=%s-nf=%s-keyboard=%s-anr=%s\n' \
+  printf 'fails=%s-toolbar=%s-tbui=%s-oh=%s-nf=%s-keyboard=%s-anr=%s-v=%s\n' \
     "${fails:-?}" "${TB_VERDICT:-?}" "${TBUI_VERDICT:-?}" "${OH_VERDICT:-?}" \
-    "${NF_VERDICT:-?}" "${KB_VERDICT:-?}" "${ANR_SEEN:-?}" \
+    "${NF_VERDICT:-?}" "${KB_VERDICT:-?}" "${ANR_SEEN:-?}" "${VOICE_VERDICT:-?}" \
     > "$OUT/summary.txt" 2>/dev/null || true
 }
 trap write_summary EXIT
@@ -116,6 +120,34 @@ for m in re.finditer(r'<node[^>]*>', xml):
     # trailing space that would defeat an anchored pattern like ^wait$.
     label = " ".join(re.findall(r'(?:text|content-desc)="([^"]*)"', tag)).strip()
     if not label or not pat.search(label):
+        continue
+    b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', tag)
+    if b:
+        x1, y1, x2, y2 = map(int, b.groups())
+        if (x2 - x1) > 10 and (y2 - y1) > 10:
+            print(f"{(x1 + x2) // 2} {(y1 + y2) // 2}")
+            sys.exit(0)
+PY
+}
+
+# Center of the first node whose CONTENT-DESC alone matches $2. 7e needs this because two different
+# things on screen call themselves "Voice Typing": the settings dropdown row added in phase 4 (a
+# TextView whose label is its text) and the toolbar's mic key (an ImageButton whose label is its
+# content-desc). nodecenter() joins text and content-desc into one label and returns the first hit
+# in document order, so with the settings list composed above the keyboard it would tap the row and
+# never the key. Matching content-desc alone tells them apart, because only the key carries one.
+nodecenter_desc() {
+  python3 - "$1" "$2" <<'PY' 2>/dev/null
+import re, sys
+try:
+    xml = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+except Exception:
+    sys.exit(0)
+pat = re.compile(sys.argv[2], re.I)
+for m in re.finditer(r'<node[^>]*>', xml):
+    tag = m.group(0)
+    d = re.search(r'content-desc="([^"]*)"', tag)
+    if not d or not pat.search(d.group(1).strip()):
         continue
     b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', tag)
     if b:
@@ -1089,6 +1121,74 @@ else
   NF_VERDICT=$([ "$NF_VERDICT" = "ok" ] && echo spl || echo "$NF_VERDICT")
   fail "split keyboard switch never composed (route=$NF_ROUTE search-result=$NF_SEARCH): $(nf_evidence nfspl)"
 fi
+
+# --- 7e: dictation, phase 4 part 1 ---------------------------------------------------------------
+# The mic key's old behaviour was to hand the field to a voice IME, which on the owner's Huawei
+# produced a system toast and typed nothing. A real recognition session cannot run here: the AOSP
+# image has no speech service and no microphone, so `isRecognitionAvailable` is false and the policy
+# falls back. What CAN be proven is the whole delivery path -- preference read, DictationPolicy
+# decision, DictationController commit, InputConnection into a live editor -- by riding the
+# self-test switch, which substitutes a fixed transcript for audio. If that transcript lands in the
+# field the keyboard is bound to, everything except the recogniser itself is proven on a real device.
+#
+# The assertion is gated on the switch being CONFIRMED on, exactly like the frame probe in 7d: if
+# the tap missed, the key legitimately does the legacy thing and a failure would blame the product
+# for the harness's miss. VOICE-DIAG is emitted whether or not anything was asserted, because
+# warnings survive annotation storage where notices are dropped at about twelve.
+MIC=""; GRANT="none"
+if nf_reach nfvoi dictation 'Dictation Self-Test' 'Input'; then
+  pass "dictation self-test switch composed under Input Behavior (route=$NF_ROUTE search-result=$NF_SEARCH)"
+  PRE=$(nf_checkedcount "$NF_SRC")
+  C=$(nf_tapcenter "$NF_SRC" 'Dictation Self-Test')
+  if [ -n "$C" ]; then adb shell input tap $C; sleep 3; fi
+  D="$OUT/ui-nfvoi-on.xml"; dumpui "$D"
+  POST=$(nf_checkedcount "$D")
+  SWST=$(nf_switchstate "$D" 'Dictation Self-Test')
+  info "self-test switch: tap=${C:-none} state='$SWST' checked-nodes ${PRE:-0}->${POST:-0}"
+  shot 11-voice-switch
+  if [ "${SWST%% *}" = "true" ] || [ "${POST:-0}" -gt "${PRE:-0}" ]; then
+    # Granted up front so the decision line the key logs reports permissions the way a real phone
+    # does after the user allows it. The self-test branch does not consult the permission, but the
+    # log line reports it, and that line is the only plumbing evidence CI can read.
+    GRANT=$(adb shell pm grant "$PKG" android.permission.RECORD_AUDIO 2>&1 | tr -d '\r' | head -1)
+    [ -z "$GRANT" ] && GRANT=granted
+    # nf_reach left focus on the switch row, so the keyboard is down. Bring the settings screen
+    # forward, climb to the top, and focus the search bar -- the same editor 7d measures with.
+    adb shell am start -W -n "$PKG/$NS.SettingsActivity" > "$OUT/am-settings-nfvoi.log" 2>&1
+    sleep 4
+    nf_totop
+    F="$OUT/ui-nfvoi-field.xml"; dumpui "$F"
+    FC=$(nf_topfield "$F")
+    if [ -n "$FC" ]; then adb shell input tap $FC; sleep 3; fi
+    F="$OUT/ui-nfvoi-kb.xml"; dumpui "$F"
+    MIC=$(nodecenter_desc "$F" '^Voice Typing$')
+    info "self-test: field-tap='${FC:-none}' mic-node='${MIC:-none}' shown=$(shown)"
+    if [ -n "$MIC" ]; then
+      adb shell input tap $MIC; sleep 3
+      F="$OUT/ui-nfvoi-after.xml"; dumpui "$F"
+      shot 11-voice-selftest
+      if grep -q 'voice dictation self test' "$F" 2>/dev/null; then
+        VOICE_VERDICT=ok
+        pass "the mic key committed dictation's transcript into the focused field"
+      else
+        VOICE_VERDICT=commit
+        fail "mic key tapped at $MIC with self-test confirmed on, but no transcript reached the field: $(nf_evidence nfvoi)"
+      fi
+    else
+      VOICE_VERDICT=key
+      ann warning "VOICE skipped, no toolbar node carries content-desc 'Voice Typing' (shown=$(shown) focus='$(focus)')"
+    fi
+  else
+    VOICE_VERDICT=sw
+    ann warning "VOICE skipped, self-test never confirmed on: state='$SWST' checked-nodes=${PRE:-0}->${POST:-0} tap='${C:-none}'"
+  fi
+else
+  VOICE_VERDICT=flt
+  fail "dictation self-test switch never composed (route=$NF_ROUTE search-result=$NF_SEARCH): $(nf_evidence nfvoi)"
+fi
+VOICEDIAG=$(adb logcat -d -v brief 2>/dev/null | grep -E 'DictationController|VoicePermissionActivity' \
+            | tail -3 | tr '\n' '|' | tr -d '\r' | cut -c1-300)
+ann warning "VOICE-DIAG verdict=$VOICE_VERDICT mic='${MIC:-none}' grant='$GRANT' shown=$(shown) log='${VOICEDIAG:-none}'"
 
 # ThemeSettingsActivity hosts KeyboardPreviewHost -> a real Keyboard2View rendered with the active
 # theme and layout: a direct visual check of the keyboard needing no IME connection at all.
