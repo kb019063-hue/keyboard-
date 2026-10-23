@@ -20,8 +20,11 @@ nochecked    dumps expose no checked/checkable attributes at all -> the frame pr
 tapdeaf      the tap lands but the switch does not flip -> same: stand down, do not blame the product
 framefull    floating IS confirmed on and the input-method window is still full width -> the one
              genuine defect this probe exists to catch, so it must FAIL
-framepkg     the input-method window is titled with the package rather than InputMethodService, so it
-             cannot be identified with confidence -> report, do not assert
+framepkg     the input-method window is titled with the package rather than InputMethodService and
+             carries nothing else to identify it -> report, do not assert
+framemodern  the Android 12+ dialect: no mFrame=, a lowercase frame= under a Frames: block, and the
+             window identified only by ty=INPUT_METHOD inside it. This is the shape run 39877368710
+             most likely met, since it reported conf=0 with an empty frame
 noime        no text field anywhere to focus, so no window to measure -> report, do not assert
              (also loses the search route, so the scroll fallback has to carry all three checks)
 """
@@ -47,6 +50,7 @@ def base():
         "focused_field": None,
         "ime_shown": False,
         "window_mode": "narrow",
+        "frame_format": "mframe",
         "search_broken": False,
         "no_scroll_to": False,
         "hide_checked": False,
@@ -69,7 +73,8 @@ SCENARIOS = {
     "nochecked":   ({"hide_checked": True},                                    0, "ok",  "none", "NFFRAME skipped"),
     "tapdeaf":     ({"tap_deaf": True},                                        0, "ok",  "none", "NFFRAME skipped"),
     "framefull":   ({"window_mode": "full"},                                   1, "frm", "fail", ""),
-    "framepkg":    ({"window_mode": "pkg"},                                    0, "ok",  "none", "not assertable"),
+    "framepkg":    ({"window_mode": "pkg"},                                    0, "ok",  "none", "conf=1"),
+    "framemodern": ({"window_mode": "pkg", "frame_format": "modern"},          0, "ok",  "pass", "conf=2"),
     "noime":       ({"no_search_bar": True, "search_broken": True},             0, "ok",  "none", "no text field"),
 }
 

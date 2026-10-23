@@ -399,22 +399,32 @@ def main(argv):
 
     if cmd[:3] == ["dumpsys", "window", "windows"]:
         save(s)
-        print("WINDOW MANAGER WINDOWS")
-        print("  Window #3 Window{aaa u0 StatusBar}")
-        print("    mFrame=[0,0][1080,73]")
-        if s.get("ime_shown"):
-            mode = s.get("window_mode", "narrow")
-            if s["checked"].get("Floating Keyboard") and mode == "pkg":
-                print("  Window #2 Window{bbb u0 %s/tribixbite.cleverkeys.CleverKeysService}" % s["pkg"])
-                print("    mFrame=[108,1488][972,2340]")
-            elif s["checked"].get("Floating Keyboard") and mode != "full":
-                print("  Window #2 Window{bbb u0 InputMethodService}")
-                print("    mFrame=[108,1488][972,2340]")
+        modern = s.get("frame_format") == "modern"
+        floating = bool(s["checked"].get("Floating Keyboard"))
+        mode = s.get("window_mode", "narrow")
+        frame = [108, 1488, 972, 2340] if (floating and mode != "full") else [0, 1488, 1080, 2400]
+
+        def win(num, title, rect, ime=False):
+            print("  Window #%d Window{%s u0 %s}" % (num, hex(0xaaa + num)[2:], title))
+            if ime:
+                print("    mAttrs={(%d,%d)(wrap x wrap) sim={adjust=resize} ty=INPUT_METHOD fl=81820100}"
+                      % (rect[0], rect[1]))
+            if modern:
+                print("    Frames: containing=[0,0][1080,2400] parent=[0,0][1080,2400]")
+                print("    frame=[%d,%d][%d,%d]" % tuple(rect))
             else:
-                print("  Window #2 Window{bbb u0 InputMethodService}")
-                print("    mFrame=[0,1488][1080,2400]")
-        print("  Window #1 Window{ccc u0 com.android.launcher3/QuickstepLauncher}")
-        print("    mFrame=[0,0][1080,2400]")
+                print("    mFrame=[%d,%d][%d,%d]" % tuple(rect))
+
+        print("WINDOW MANAGER WINDOWS")
+        win(3, "StatusBar", [0, 0, 1080, 73])
+        if s.get("ime_shown"):
+            # how the IME window is titled, and in which dialect, is what run 39877368710 could not
+            # tell us: conf=0 with an empty frame means neither the header nor the key was as guessed
+            if mode == "pkg":
+                win(2, "%s/tribixbite.cleverkeys.CleverKeysService" % s["pkg"], frame, ime=modern)
+            else:
+                win(2, "InputMethodService", frame, ime=modern)
+        win(1, "com.android.launcher3/QuickstepLauncher", [0, 0, 1080, 2400])
         return 0
 
     if cmd[:2] == ["dumpsys", "window"]:

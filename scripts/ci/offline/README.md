@@ -44,6 +44,14 @@ and `noime` must report instead of asserting a window they cannot identify or re
 the mirror image — floating confirmed on, window still full width — and is the one scenario that
 must fail, because that is the defect the probe exists to catch.
 
+`framemodern` earns its place by having already caught a bug: it models the Android 12+ `dumpsys`
+dialect, where a window's rectangle is a lowercase `frame=` under a `Frames:` block and the window is
+identifiable only by `ty=INPUT_METHOD` inside it. The first version of the parser looked for
+`inputmethod` as one word, so the underscored type token missed and the measurement was quietly
+downgraded to "cannot identify this window" — a green run that proved nothing. Matching the type
+token exactly (rather than any mention of the input method, which a window can carry as a *target*)
+is what makes it assert again.
+
 The runner also re-runs the **pre-fix** shape of section 7b's "Add" hunt (`addloop-old.txt`) and
 requires it to fail. A shape test that passes both the fixed and the broken loop proves nothing;
 run 39789396340 lost a check to that loop scrolling a fourth time and then falling out without

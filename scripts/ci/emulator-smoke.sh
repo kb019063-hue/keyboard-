@@ -941,57 +941,88 @@ nf_frame_probe() {
   shot 09-floating-keyboard
   adb shell dumpsys input_method > "$OUT/dumpsys-input_method-floating.txt" 2>&1
   shown=$(grep -oE 'mInputShown=[a-z]*' "$OUT/dumpsys-input_method-floating.txt" 2>/dev/null | head -1 | tr -d '\r')
-  adb shell dumpsys window windows > "$OUT/window-frames.txt" 2>&1
-  # One line: "<x1> <x2> <confidence> <header>", confidence 2 = the window's own header line names
-  # the input method, 1 = it names our package. Extra candidates follow as "ALT <header>" lines.
-  python3 - "$OUT/window-frames.txt" "$PKG" > "$OUT/nfframe.txt" 2>/dev/null <<'PY'
+  FR="$OUT/window-frames.txt"
+  adb shell dumpsys window windows > "$FR" 2>&1
+  # Fall back to the undifferentiated dump if that spelling produced no window list at all: which
+  # sub-commands a given Android build accepts is not something this sandbox can check, and run
+  # 39877368710 came back with conf=0 and an empty frame, so the shape of this output is a guess
+  # until the diagnostics below say otherwise.
+  FSRC=windows
+  grep -q "Window #" "$FR" 2>/dev/null || { adb shell dumpsys window > "$FR" 2>&1; FSRC=full; }
+  # Line 1: "<x1> <y1> <x2> <y2> <confidence> <header>". Confidence 3 = the window's own header
+  # names the input method, 2 = the block does (a window's mAttrs carry ty=INPUT_METHOD), 1 = the
+  # header names our package. Losing candidates follow as "ALT <header>", and line "DIAG ..." always
+  # reports the raw shape of the dump, because the format is the one thing still unverified here.
+  python3 - "$FR" "$PKG" "$FSRC" > "$OUT/nfframe.txt" 2>/dev/null <<'PY'
 import re, sys
 try:
     txt = open(sys.argv[1], encoding="utf-8", errors="replace").read()
 except Exception:
+    print("0 0 0 0 0 unreadable")
+    print("DIAG unreadable")
     sys.exit(0)
 pkg = (sys.argv[2] if len(sys.argv) > 2 else "").lower()
-best = None
-alts = []
-for block in re.split(r'(?m)^(?=\s*Window #)', txt):
+src = sys.argv[3] if len(sys.argv) > 3 else "?"
+# Android 12 and later print a window's rectangle as a "Frames:" block with a lowercase frame=, not
+# the mFrame= of older releases. Match either, and do not care which.
+FRAME = re.compile(r'\bm?[Ff]rame=\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]')
+blocks = [b for b in re.split(r'(?m)^(?=\s*Window #)', txt) if b.strip().startswith("Window #")]
+best, alts, withframe = None, [], 0
+for block in blocks:
     head = block.split("\n", 1)[0].strip()
-    m = re.search(r'mFrame=\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]', block)
+    m = FRAME.search(block)
     if not m:
         continue
-    hl = head.lower()
-    conf = 2 if "inputmethod" in hl else (1 if pkg and pkg in hl else 0)
-    if not conf:
+    withframe += 1
+    hl, bl = head.lower(), block[:1500].lower()
+    if "inputmethod" in hl or "input_method" in hl:
+        conf = 3
+    elif "ty=input_method" in bl:
+        # the window TYPE, not merely a mention: a block can reference the input method as a target
+        # or a layer without being the input method's own window.
+        conf = 2
+    elif pkg and pkg in hl:
+        conf = 1
+    else:
         continue
-    x1, _y1, x2, _y2 = map(int, m.groups())
+    x1, y1, x2, y2 = map(int, m.groups())
     if best is None or conf > best[0]:
         if best is not None:
-            alts.append(best[3])
-        best = (conf, x1, x2, head[:64])
+            alts.append(best[5])
+        best = (conf, x1, y1, x2, y2, head[:56])
     else:
-        alts.append(head[:64])
-if best:
-    print("%d %d %d %s" % (best[1], best[2], best[0], best[3]))
+        alts.append(head[:56])
+keys = ",".join(k for k in ("mFrame=", "frame=", "Frames:", "ty=INPUT_METHOD") if k.lower() in txt.lower())
+print("%d %d %d %d %d %s" % (best[1], best[2], best[3], best[4], best[0], best[5]) if best
+      else "0 0 0 0 0 none")
 for a in alts[:2]:
     print("ALT %s" % a)
+print("DIAG src=%s blocks=%d withframe=%d keys=%s bytes=%d" % (src, len(blocks), withframe,
+                                                              keys or "none", len(txt)))
 PY
   frameout=$(head -1 "$OUT/nfframe.txt" 2>/dev/null)
+  DIAG=$(sed -n 's/^DIAG //p' "$OUT/nfframe.txt" 2>/dev/null | head -1)
+  W1=0; T1=0; W2=0; T2=0; CONF=0; WHDR=none
   if [ -n "$frameout" ]; then
-    W1=${frameout%% *}; _r=${frameout#* }
-    W2=${_r%% *}; _r=${_r#* }
-    CONF=${_r%% *}; WHDR=${_r#* }
-  else
-    W1=""; W2=""; CONF=0; WHDR=""
+    # the header is last and may contain spaces, so shift the five numeric fields off the front
+    set -- $frameout
+    W1=${1:-0}; T1=${2:-0}; W2=${3:-0}; T2=${4:-0}; CONF=${5:-0}
+    [ "$#" -ge 6 ] && { shift 5; WHDR="$*"; }
   fi
-  if [ "$CONF" = "2" ] && [ "$shown" = "mInputShown=true" ] && [ -n "$W1" ] && [ -n "$W2" ]; then
+  case "$CONF" in (*[!0-9]*|"") CONF=0 ;; esac
+  # Always annotated: notices are capped and get dropped past about the twelfth, so a PASS from here
+  # would never be readable, and the shape of this dump is the last unverified assumption in 7d.
+  ann warning "NFFRAME-DIAG ${DIAG:-none} conf=$CONF frame=[$W1,$T1][$W2,$T2] screen=${SW}x${SH} shown=${shown:-none} header='$WHDR' alt=[$(grep '^ALT' "$OUT/nfframe.txt" 2>/dev/null | cut -c5-56 | tr '\n' '|')] focus='$(focus)'"
+  if [ "$CONF" -ge 2 ] && [ "$shown" = "mInputShown=true" ]; then
     w=$((W2 - W1))
     if [ "$w" -gt 0 ] && [ "$w" -lt "$SW" ]; then
-      pass "floating narrowed the input-method WINDOW to ${w}px of ${SW}px: $WHDR"
+      pass "floating narrowed the input-method WINDOW to ${w}px of ${SW}px at y=${T1}: $WHDR"
     else
       NF_VERDICT=$([ "$NF_VERDICT" = "ok" ] && echo frm || echo "$NF_VERDICT")
-      fail "floating left the input-method window ${w}px wide on a ${SW}px screen: shown=${shown:-none} frame=[${W1},${W2}] header='$WHDR' candidates=$(wc -l < "$OUT/nfframe.txt" 2>/dev/null | tr -d ' ' || echo 0)"
+      fail "floating left the input-method window ${w}px wide on a ${SW}px screen: shown=${shown:-none} frame=[$W1,$T1][$W2,$T2] header='$WHDR' $DIAG"
     fi
   else
-    ann warning "NFFRAME not assertable (evidence only): shown=${shown:-none} conf=${CONF:-0} frame=[${W1:-?},${W2:-?}] header='${WHDR:-none}' alt=[$(grep '^ALT' "$OUT/nfframe.txt" 2>/dev/null | cut -c5-64 | tr '\n' '|')] focus='$(focus)'"
+    info "floating window not assertable from this dump (see the NFFRAME-DIAG annotation)"
   fi
   # Leave as we arrived. With an IME shown, BACK is consumed by the input method and hides it rather
   # than popping the activity, so the split check that follows finds the settings screen still there.
