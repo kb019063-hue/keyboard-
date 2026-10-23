@@ -916,8 +916,15 @@ nf_reach() {  # $1 = prefix, $2 = search query, $3 = control title, $4 = section
 # warnings survive annotation storage at all (notices are capped at about 12, errors survive).
 nf_frame_probe() {
   local f c shown frameout w W1 W2 CONF WHDR _r
-  adb shell am start -W -n "$PKG/$NS.LauncherActivity" > "$OUT/am-launcher-nf.log" 2>&1
-  sleep 6
+  # Bring the keyboard up over the activity we are ALREADY in, by focusing the settings search bar
+  # (SettingsScreen.kt:139 -- an OutlinedTextField, so focusing it shows the IME like any editor).
+  # Run 39804287846 is why this replaced a trip to LauncherActivity: `am start` from a shell implies
+  # FLAG_ACTIVITY_NEW_TASK, which brings the app's existing task forward instead of starting the
+  # named activity inside it, so focus stayed on SettingsActivity and three hunts looked for a
+  # launcher text field on a settings screen. The warning said so in as many words -- focus= and a
+  # ScrollView among the classes. The IME window is ours whichever app hosts the editor, so nothing
+  # about the measurement is weaker for staying put, and one navigation is one less thing to flake.
+  nf_totop
   c=""
   for f in 1 2 3; do
     dumpui "$OUT/ui-nfframe-$f.xml"
@@ -986,6 +993,10 @@ PY
   else
     ann warning "NFFRAME not assertable (evidence only): shown=${shown:-none} conf=${CONF:-0} frame=[${W1:-?},${W2:-?}] header='${WHDR:-none}' alt=[$(grep '^ALT' "$OUT/nfframe.txt" 2>/dev/null | cut -c5-64 | tr '\n' '|')] focus='$(focus)'"
   fi
+  # Leave as we arrived. With an IME shown, BACK is consumed by the input method and hides it rather
+  # than popping the activity, so the split check that follows finds the settings screen still there.
+  adb shell input keyevent KEYCODE_BACK > /dev/null 2>&1
+  sleep 3
 }
 
 # --- incognito, under Privacy ---

@@ -22,7 +22,8 @@ framefull    floating IS confirmed on and the input-method window is still full 
              genuine defect this probe exists to catch, so it must FAIL
 framepkg     the input-method window is titled with the package rather than InputMethodService, so it
              cannot be identified with confidence -> report, do not assert
-noime        no text field to focus, so no window to measure -> report, do not assert
+noime        no text field anywhere to focus, so no window to measure -> report, do not assert
+             (also loses the search route, so the scroll fallback has to carry all three checks)
 """
 import json
 import os
@@ -69,7 +70,7 @@ SCENARIOS = {
     "tapdeaf":     ({"tap_deaf": True},                                        0, "ok",  "none", "NFFRAME skipped"),
     "framefull":   ({"window_mode": "full"},                                   1, "frm", "fail", ""),
     "framepkg":    ({"window_mode": "pkg"},                                    0, "ok",  "none", "not assertable"),
-    "noime":       ({"no_launcher_field": True},                               0, "ok",  "none", "no text field"),
+    "noime":       ({"no_search_bar": True, "search_broken": True},             0, "ok",  "none", "no text field"),
 }
 
 

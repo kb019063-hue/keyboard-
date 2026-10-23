@@ -20,8 +20,11 @@ What it models, and why each detail is there:
 * A `SettingsSwitch` row as TWO nodes -- a `TextView` title with `checkable="false"` and an
   unlabelled `Switch` carrying the state -- because that is what run 39789396340's annotation
   reported from a real device, and reading the title node instead silently reports `false` forever.
-* A launcher screen whose text field brings the IME up, and a `dumpsys window windows` whose
-  input-method frame narrows only when the floating switch is on.
+* Text fields bring the IME up -- the settings search bar as well as the launcher's test field,
+  because `am start` from a shell implies NEW_TASK and run 39804287846 proved that navigating away
+  to find an editor does not actually navigate anywhere.
+* BACK with an IME shown hides the keyboard and keeps the activity; only a second BACK pops it.
+* `dumpsys window windows` whose input-method frame narrows only when the floating switch is on.
 
 Swipes apply NO fling momentum, so a device that flings further than it is dragged still passes
 what passes here. State lives in `$NFOFF_DIR/state.json`; every call is recorded so a failed
@@ -132,7 +135,8 @@ def unesc(t):
 def rows(s):
     """Layout rows in content space: (kind, text, height, section|None)."""
     out = [("title", "Settings", 90, None), ("desc", "Everything about your keyboard", 60, None)]
-    out.append(("searchbar", "Search settings\u2026", 144, None))
+    if not s.get("no_search_bar"):
+        out.append(("searchbar", "Search settings\u2026", 144, None))
     q = s.get("query", "")
     if q and not s.get("search_broken"):
         for title, sec in INDEX:
@@ -317,11 +321,16 @@ def main(argv):
         return 0
 
     if cmd[:2] == ["input", "keyevent"]:
-        # BACK out of SettingsActivity lands on the launcher: the exact mistake run 39783242401 made
         if cmd[2] == "KEYCODE_BACK" and s["screen"] == "settings":
-            s["screen"] = "launcher"
-            s["focused_field"] = None
-            s["ime_shown"] = False
+            if s.get("ime_shown"):
+                # the input method consumes BACK first and hides; the activity survives
+                s["ime_shown"] = False
+                s["focused_field"] = None
+            else:
+                # BACK out of SettingsActivity lands on the launcher: the mistake run 39783242401
+                # made, when it pressed BACK to "dismiss a keyboard" that was never up
+                s["screen"] = "launcher"
+                s["focused_field"] = None
         save(s)
         return 0
 
@@ -337,7 +346,10 @@ def main(argv):
                     s["focused_field"] = "launcher"
                     s["ime_shown"] = True
             elif "EditText" in cls:
+                # the settings search bar is an OutlinedTextField, so focusing it shows the IME
+                # exactly like the launcher's test field does -- that is what 7d's frame probe uses
                 s["focused_field"] = "search"
+                s["ime_shown"] = True
             elif (s.get("query") and not s.get("search_broken")
                   and text in [t for t, _ in INDEX]):
                 # executeSearchAction: clear the query, collapse everything, expand the target

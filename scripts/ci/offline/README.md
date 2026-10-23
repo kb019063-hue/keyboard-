@@ -30,9 +30,9 @@ Every detail here corresponds to something that broke a real run.
 | Collapsed sections compose no children | the reason each check is two-stage: expand, then look |
 | Search results, and tapping one collapses all sections, expands one, scrolls the control to the top | `SettingsSearch.kt:42-67`, the deterministic route 7d now uses |
 | A `SettingsSwitch` row as two nodes: a `TextView` title with `checkable="false"` and an unlabelled `Switch` carrying the state | reported by run 39789396340 from a real device; reading the title node reports `false` forever |
-| Launcher text field, and focusing it brings the IME up | the only way to get a window to measure |
+| Text fields bring the IME up -- the settings search bar as well as the launcher's test field | run 39804287846: `am start` from a shell implies NEW_TASK, which brings the app's existing task forward rather than starting the named activity in it, so "navigate to the launcher to find an editor" never navigated anywhere |
 | `dumpsys window windows` whose input-method frame narrows only when floating is on | the mechanism part 3 exists to implement |
-| `KEYCODE_BACK` out of SettingsActivity lands on the launcher | run 39783242401 pressed it to "dismiss the keyboard" and left the next hunt dumping the launcher |
+| BACK with an IME shown hides the keyboard and keeps the activity; only then does it pop | run 39783242401 pressed BACK to "dismiss a keyboard" that was never up, and left the next hunt dumping the launcher |
 | Swipes apply no fling momentum | a device flings further than it is dragged, so what passes here passes there |
 
 ## Scenarios
