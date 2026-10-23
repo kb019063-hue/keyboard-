@@ -189,6 +189,9 @@
     <string name="settings_split_gap_desc">How wide the gap between the two halves is</string>
     <string name="cmd_split_toggle">Split Keyboard</string>
     <string name="cmd_split_toggle_desc">Turn split keyboard mode on or off</string>
+    <string name="cmd_more_tools">More Tools</string>
+    <string name="cmd_more_tools_desc">Open the tools sheet: incognito, floating, split, one-handed, key sound, theme and settings</string>
+    <string name="more_tools_sheet_title">Keyboard Tools</string>
     <string name="split_toast_on">Split keyboard on</string>
     <string name="split_toast_off">Split keyboard off</string>
 

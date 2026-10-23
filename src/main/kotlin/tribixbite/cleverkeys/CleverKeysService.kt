@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.widget.Toast
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
@@ -1056,6 +1057,79 @@ class CleverKeysService : InputMethodService(),
             .apply()
         Toast.makeText(this, getString(if (next) R.string.incognito_toast_on else R.string.incognito_toast_off),
             Toast.LENGTH_SHORT).show()
+    }
+
+    /**
+     * The `more_tools` command (phase 4 part 3): an IME-safe sheet with the five feature toggles,
+     * theme and settings, one tap from the keyboard. Built on the same dialog mechanism the
+     * clipboard filter dialog and the voice-IME picker use — an AlertDialog on the keyboard's own
+     * window token, non-focusable per [ImeDialogWindowPolicy] — so it cannot hide the keyboard it
+     * was opened from.
+     *
+     * Every toggle goes through the method its command uses ([toggleIncognito], [toggleFloating],
+     * [toggleSplit], [toggleOneHandedMode], and the two writes the Accessibility sound switch
+     * makes), so the sheet shares one source of truth per feature and cannot drift from it. Rows
+     * carry their state as of opening; each tap writes the preference, and the ordinary listener
+     * refreshes [Config].
+     */
+    fun showMoreToolsSheet() {
+        val token = window?.window?.decorView?.windowToken ?: return
+        val cfg = _config
+        val rows = MoreToolsSheet.rows(
+            MoreToolsSheet.State(
+                incognito = cfg?.incognito_enabled ?: false,
+                floating = cfg?.floating_enabled ?: false,
+                split = cfg?.split_enabled ?: false,
+                oneHanded = cfg?.one_handed_enabled ?: false,
+                sound = cfg?.sound_enabled ?: false,
+            )
+        )
+        val labels: Array<CharSequence> = Array(rows.size) { getString(moreToolsLabel(rows[it].action)) }
+        val checked = BooleanArray(rows.size) { rows[it].checked }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.more_tools_sheet_title)
+            .setMultiChoiceItems(labels, checked) { _, which, _ ->
+                when (rows[which].action) {
+                    MoreToolsSheet.Action.INCOGNITO -> toggleIncognito()
+                    MoreToolsSheet.Action.FLOATING -> toggleFloating()
+                    MoreToolsSheet.Action.SPLIT -> toggleSplit()
+                    MoreToolsSheet.Action.ONE_HANDED -> toggleOneHandedMode()
+                    MoreToolsSheet.Action.SOUND -> toggleKeySound()
+                }
+            }
+            .setNeutralButton(R.string.activities_theme_title) { _, _ ->
+                startActivity(Intent(this, ThemeSettingsActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+            .setPositiveButton(R.string.cmd_config) { _, _ ->
+                startActivity(Intent(this, SettingsActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+            .setNegativeButton(R.string.common_close, null)
+            .create()
+        // Evidence channel for CI and for the field: the emulator's accessibility dumps never
+        // carry IME-window nodes (run 40's DUMPDIAG proved it), so a dialog over the keyboard is
+        // invisible to every dump-based check. logcat sees it, and this line says what opened.
+        Log.i("MoreToolsSheet", "shown rows=${rows.size} " +
+            rows.joinToString(" ") { "${it.action.name.lowercase()}=${if (it.checked) "on" else "off"}" })
+        Utils.show_dialog_on_ime(dialog, token)
+    }
+
+    private fun moreToolsLabel(action: MoreToolsSheet.Action): Int = when (action) {
+        MoreToolsSheet.Action.INCOGNITO -> R.string.cmd_incognito_toggle
+        MoreToolsSheet.Action.FLOATING -> R.string.cmd_floating_toggle
+        MoreToolsSheet.Action.SPLIT -> R.string.cmd_split_toggle
+        MoreToolsSheet.Action.ONE_HANDED -> R.string.cmd_one_handed_toggle
+        MoreToolsSheet.Action.SOUND -> R.string.settings_key_sound_title
+    }
+
+    /** Flip key sound from the sheet: the same two writes the Accessibility switch makes. */
+    private fun toggleKeySound() {
+        val next = !(_config?.sound_enabled ?: false)
+        DirectBootAwarePreferences.get_shared_preferences(this).edit()
+            .putBoolean("sound_enabled", next)
+            .apply()
+        Config.globalConfig().sound_enabled = next
     }
 
     /** Move the shrunken keyboard to the other edge (`one_handed_side` command). */

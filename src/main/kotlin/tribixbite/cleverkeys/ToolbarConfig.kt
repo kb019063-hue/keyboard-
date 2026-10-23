@@ -44,18 +44,21 @@ object ToolbarConfig {
     /**
      * Default buttons: HeliBoard's `ToolbarUtils.defaultToolbarPref`
      * (SETTINGS, VOICE, CLIPBOARD, UNDO, REDO, SELECT_WORD, COPY, PASTE, LEFT, RIGHT) mapped onto
-     * this codebase's command names. Keeping the same ten in the same order means a HeliBoard
-     * user's muscle memory transfers.
+     * this codebase's command names — with phase 4 part 3 replacing HeliBoard's SETTINGS slot
+     * with `more_tools`, the four-dot sheet key. The sheet hosts Settings and Theme Manager as
+     * buttons alongside the five feature toggles, so a separate `config` button would be a
+     * duplicate; `config` remains in the picker for anyone who wants the one-tap route back.
+     * The other nine stay in HeliBoard's order, so muscle memory still transfers.
      */
     const val DEFAULT_KEYS_STRING =
-        "config,voice_typing,switch_clipboard,undo,redo,select_word,copy,paste,cursor_left,cursor_right"
+        "more_tools,voice_typing,switch_clipboard,undo,redo,select_word,copy,paste,cursor_left,cursor_right"
 
     /**
      * [DEFAULT_KEYS_STRING] split, with the HeliBoard entry each one stands for:
      *
      * | position | this codebase | HeliBoard `ToolbarKey` | dispatch route |
      * |---|---|---|---|
-     * | 1 | `config`           | SETTINGS      | Kind.Event -> `triggerKeyboardEvent` |
+     * | 1 | `more_tools`       | SETTINGS (superset: the sheet hosts settings and theme) | custom command -> `showMoreToolsSheet` |
      * | 2 | `voice_typing`     | VOICE         | Kind.Event |
      * | 3 | `switch_clipboard` | CLIPBOARD     | Kind.Event, opens the clipboard pane |
      * | 4 | `undo`             | UNDO          | Kind.Editing -> `KeyEventHandler.key_up` |

@@ -265,6 +265,14 @@ object CommandRegistry {
         Command("split_toggle", R.string.cmd_split_toggle, R.string.cmd_split_toggle_desc,
             Category.EVENTS, symbol = "\u21E4\u21E5",
             keywords = listOf("split", "halves", "two", "thumb", "gap", "divide")),
+        // Phase 4 part 3: one key to every keyboard tool. Two vertical ellipses side by side draw
+        // the four-dot grid Gboard users know as "more"; two UTF-16 units, well inside the <=4
+        // ShortSwipeMapping enforces. Handled in Keyboard2View's custom-command block like the
+        // five toggles it collects.
+        Command("more_tools", R.string.cmd_more_tools, R.string.cmd_more_tools_desc,
+            Category.EVENTS, symbol = "\u22EE\u22EE",
+            keywords = listOf("more", "tools", "menu", "sheet", "quick", "incognito", "floating",
+                "split", "one", "handed", "sound", "theme", "settings")),
 
         // ========== MODIFIERS ==========
         Command("shift", R.string.cmd_shift, R.string.cmd_shift_desc, Category.MODIFIERS,

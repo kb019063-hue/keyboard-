@@ -1171,6 +1171,9 @@ class Keyboard2View @JvmOverloads constructor(
                 "incognito_toggle" -> { service.toggleIncognito(); true }
                 "floating_toggle" -> { service.toggleFloating(); true }
                 "split_toggle" -> { service.toggleSplit(); true }
+                // Phase 4 part 3: the sheet lives on the service (it needs the IME window token
+                // and the five toggle methods), like the toggles it collects.
+                "more_tools" -> { service.showMoreToolsSheet(); true }
                 else -> false
             }
 
