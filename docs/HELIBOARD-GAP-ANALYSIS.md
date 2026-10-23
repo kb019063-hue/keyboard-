@@ -61,10 +61,28 @@ derives 176 entries from the controls themselves, among them `Incognito Mode`, `
 so a search regression cannot mask a settings one.
 
 Asserted: that each of the three switches composes inside its own section, and — the part composition
-cannot show — that switching floating on narrows the **input-method window** itself (its `dumpsys
-window` frame is narrower than the screen), which is the entire mechanism of part 3. That assertion
-only fires once the switch reads `checked="true"` in the dump; an unconfirmed tap degrades to a
-reported warning, because a harness that guesses would blame the product for its own miss.
+cannot show — that switching floating on narrows the **input-method window** itself, which is the
+entire mechanism of part 3. That assertion only fires once the switch is confirmed on, by reading the
+toggle beside the title row or by the count of checked nodes rising across the tap; an unconfirmed tap
+degrades to a reported warning, because a harness that guesses would blame the product for its own
+miss.
+
+It fired on run 39878922950, and the numbers are worth keeping: the input-method window's frame came
+back as `[108,1412][972,2400]` on a 1080×2400 screen — **864 px wide, which is exactly the 80 %
+default, centred with 108 px of margin either side**. That is `FloatingConfig.widthPixels` and
+`xPixels` observed in the window manager rather than inferred from a unit test. Two facts about the
+device came with it, both of which an earlier revision of the probe had guessed wrong: API 34 titles
+the window `InputMethod` (not `InputMethodService`), and it prints the rectangle as a lowercase
+`frame=` under a `Frames:` block with `ty=INPUT_METHOD` in the window's attributes, not the `mFrame=`
+of older releases. The probe now accepts either spelling, identifies the window by its type token, and
+annotates the raw shape of the dump on every run — notices are capped and dropped past about the
+twelfth, so a PASS from this probe would otherwise never be readable from a sandbox that cannot fetch
+CI logs.
+
+Changes to this hunt logic are checked first against `scripts/ci/offline/`, a fake `adb` that models
+the settings screen closely enough to run the real section 7d across ten scenarios in about thirty
+seconds, four of which exist to prove the suite reports rather than asserts whenever it cannot
+confirm a precondition.
 
 Reported, never asserted: the switch state after tapping incognito and split, a screenshot in each
 state, and any window frame that could not be attributed to the input method with confidence.
