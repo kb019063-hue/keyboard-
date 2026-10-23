@@ -28,6 +28,9 @@ import tribixbite.cleverkeys.gif.GifInsertPolicy
 import tribixbite.cleverkeys.minimize.MinimizedStyle
 import tribixbite.cleverkeys.gif.GifGridManager
 import tribixbite.cleverkeys.gif.GifGroupButtonsBar
+import tribixbite.cleverkeys.voice.DictationController
+import tribixbite.cleverkeys.voice.DictationPolicy
+import tribixbite.cleverkeys.voice.VoiceTypingConfig
 
 /**
  * Handles keyboard events and state changes for CleverKeysService.
@@ -74,6 +77,32 @@ class KeyboardReceiver(
      * Pinned by [KeyboardViewLateBindingDriftTest].
      */
     private val keyboardView: Keyboard2View get() = keyboardViewProvider()
+
+    /**
+     * Phase 4 part 1: in-process dictation for the mic key. Created on first use and kept for the
+     * lifetime of the receiver, because a `SpeechRecognizer` is expensive to create and holds the
+     * audio route; [DictationController.cancel] is what the input-finish hook calls so a transcript
+     * can never land in the next field the user focuses.
+     */
+    private var dictationController: DictationController? = null
+
+    private fun dictation(): DictationController =
+        dictationController ?: DictationController(context).also { dictationController = it }
+
+    /** The keyboard side of dictation: where text goes and where status lines are shown. */
+    private val dictationSink = object : DictationController.Sink {
+        override fun commitText(text: String) {
+            keyboard2.currentInputConnection?.commitText(text, 1)
+        }
+
+        override fun textBeforeCursor(): String? =
+            keyboard2.currentInputConnection?.getTextBeforeCursor(JOIN_CONTEXT_CHARS, 0)?.toString()
+
+        override fun showMessage(message: String) {
+            // Toasts are suppressed for IMEs on Android 13+, so the suggestion bar carries it.
+            keyboard2.showSuggestionBarMessage(message)
+        }
+    }
 
     // View references
     private var emojiPane: ViewGroup? = null
@@ -177,6 +206,11 @@ class KeyboardReceiver(
         // Always reset pane type to prevent toggle issues
         currentPaneType = PaneType.NONE
         closeCurrentPaneRoutingState()
+
+        // Phase 4 part 1: a dictation session belongs to the field that started it. The editor is
+        // going away here, so end the session rather than let a late transcript commit into
+        // whatever the user focuses next.
+        dictationController?.cancel()
     }
 
     /**
@@ -603,16 +637,7 @@ class KeyboardReceiver(
                 set_shift_state(true, true)
             }
 
-            KeyValue.Event.SWITCH_VOICE_TYPING -> {
-                if (!VoiceImeSwitcher.switch_to_voice_ime(
-                        keyboard2,
-                        subtypeManager.inputMethodManager,
-                        Config.globalPrefs()
-                    )
-                ) {
-                    keyboard2.getConfig()?.shouldOfferVoiceTyping = false
-                }
-            }
+            KeyValue.Event.SWITCH_VOICE_TYPING -> handleVoiceTypingKey()
 
             KeyValue.Event.SWITCH_VOICE_TYPING_CHOOSER -> {
                 VoiceImeSwitcher.choose_voice_ime(
@@ -623,6 +648,50 @@ class KeyboardReceiver(
             }
 
             else -> {} // Unhandled events
+        }
+    }
+
+    /**
+     * Phase 4 part 1: the mic key.
+     *
+     * It used to do exactly one thing -- [VoiceImeSwitcher.switch_to_voice_ime] -- which on a phone
+     * with no cooperating voice IME shows a system toast and types nothing. The decision of what a
+     * press means now lives in [DictationPolicy] (pure, unit-tested), and this is only the wiring:
+     * read the two preferences, ask the policy, and act on the two answers that belong here because
+     * they need the service ([keyboard2]) and the subtype manager. Dictation itself, the permission
+     * request and the self-test commit all happen inside [DictationController].
+     */
+    private fun handleVoiceTypingKey() {
+        val prefs = Config.globalPrefs()
+        val mode = VoiceTypingConfig.modeOf(
+            prefs.getString(VoiceTypingConfig.PREF_MODE, VoiceTypingConfig.DEFAULT_MODE)
+        )
+        val selfTest = prefs.getBoolean(
+            VoiceTypingConfig.PREF_SELF_TEST,
+            VoiceTypingConfig.DEFAULT_SELF_TEST
+        )
+        val voiceImeAvailable = VoiceImeSwitcher.has_voice_ime(subtypeManager.inputMethodManager)
+        when (dictation().press(mode, selfTest, voiceImeAvailable, dictationSink)) {
+            DictationPolicy.Press.SWITCH_TO_VOICE_IME -> {
+                if (!VoiceImeSwitcher.switch_to_voice_ime(
+                        keyboard2,
+                        subtypeManager.inputMethodManager,
+                        prefs
+                    )
+                ) {
+                    keyboard2.getConfig()?.shouldOfferVoiceTyping = false
+                }
+            }
+            DictationPolicy.Press.REPORT_NO_VOICE_INPUT -> {
+                // The point of this branch: no voice input at all is a message, not a dead key.
+                keyboard2.showSuggestionBarMessage(
+                    context.getString(R.string.voice_typing_nothing_available)
+                )
+                keyboard2.getConfig()?.shouldOfferVoiceTyping = false
+            }
+            // START_LISTENING / STOP_LISTENING / REQUEST_PERMISSION / COMMIT_SELF_TEST were already
+            // acted on inside the controller.
+            else -> Unit
         }
     }
 
@@ -1084,6 +1153,13 @@ class KeyboardReceiver(
 
     companion object {
         private const val TAG = "KeyboardReceiver"
+
+        /**
+         * How much text before the cursor dictation looks at, purely to decide the joining space
+         * ([DictationPolicy.commitPrefix]). One character would do; 32 keeps the call cheap to
+         * reason about and is far below any editor's limit.
+         */
+        private const val JOIN_CONTEXT_CHARS = 32
 
         /**
          * Seam for the pane-sizing LayoutParams the three openers assign. Constructed here

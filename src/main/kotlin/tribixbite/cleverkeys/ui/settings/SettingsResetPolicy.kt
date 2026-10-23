@@ -1,6 +1,7 @@
 package tribixbite.cleverkeys.ui.settings
 
 import tribixbite.cleverkeys.Defaults
+import tribixbite.cleverkeys.voice.VoiceTypingConfig
 import tribixbite.cleverkeys.backup.NON_DEFAULTED_KEYS
 import tribixbite.cleverkeys.backup.SETTINGS_DEFAULTS
 import tribixbite.cleverkeys.backup.SettingsValidation
@@ -143,6 +144,10 @@ object SettingsResetPolicy {
         put("floating_width_percent", Defaults.FLOATING_WIDTH_PERCENT)
         put("floating_x_fraction", Defaults.FLOATING_X_FRACTION)
         put("floating_y_fraction", Defaults.FLOATING_Y_FRACTION)
+
+        // Voice typing (phase 4 part 1) - keys kept in sync with voice/VoiceTypingConfig.kt
+        put(VoiceTypingConfig.PREF_MODE, Defaults.VOICE_TYPING_MODE)
+        put(VoiceTypingConfig.PREF_SELF_TEST, Defaults.VOICE_TYPING_SELF_TEST)
         put("split_enabled", Defaults.SPLIT_ENABLED)
         put("split_gap_percent", Defaults.SPLIT_GAP_PERCENT)
         put("clipboard_pane_height_percent", Defaults.CLIPBOARD_PANE_HEIGHT_PERCENT)

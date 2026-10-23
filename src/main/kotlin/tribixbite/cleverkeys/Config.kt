@@ -12,6 +12,7 @@ import tribixbite.cleverkeys.prefs.ConfigSnapshot
 import tribixbite.cleverkeys.prefs.CustomExtraKeysPreference
 import tribixbite.cleverkeys.prefs.ExtraKeysPreference
 import tribixbite.cleverkeys.prefs.LayoutsPreference
+import tribixbite.cleverkeys.voice.VoiceTypingConfig
 import kotlin.math.roundToInt
 
 /**
@@ -496,6 +497,11 @@ object Defaults {
     // Split keyboard (phase 3 part 4): two halves with a gap between them.
     const val SPLIT_ENABLED = SplitConfig.DEFAULT_ENABLED
     const val SPLIT_GAP_PERCENT = SplitConfig.DEFAULT_GAP_PERCENT
+    // Voice typing (phase 4 part 1): the mic key dictates in-process by default, and the legacy
+    // voice-IME switch stays one setting away. Keys, values and parsing live in VoiceTypingConfig;
+    // these mirror its defaults the way every other Defaults entry mirrors its owner.
+    const val VOICE_TYPING_MODE = VoiceTypingConfig.DEFAULT_MODE
+    const val VOICE_TYPING_SELF_TEST = VoiceTypingConfig.DEFAULT_SELF_TEST
 
     // Accessibility
     const val STICKY_KEYS_ENABLED = false

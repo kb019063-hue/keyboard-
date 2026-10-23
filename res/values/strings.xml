@@ -192,6 +192,26 @@
     <string name="split_toast_on">Split keyboard on</string>
     <string name="split_toast_off">Split keyboard off</string>
 
+    <!-- ── Voice typing (phase 4 part 1): the mic key dictates in-process ── -->
+    <string name="voice_typing_mode_title">Voice Typing</string>
+    <string name="voice_typing_mode_desc">Dictate here recognises your speech inside this keyboard and types it out. Switching hands the field to a separate voice keyboard instead.</string>
+    <string name="voice_typing_mode_dictation">Dictate here (recommended)</string>
+    <string name="voice_typing_mode_switch_ime">Switch to a voice keyboard</string>
+    <string name="voice_typing_self_test_title">Dictation Self-Test</string>
+    <string name="voice_typing_self_test_desc">The mic key types a fixed sentence instead of listening. Proves the dictation path on a device with no microphone or no speech recogniser.</string>
+    <string name="voice_typing_self_test_text">voice dictation self test</string>
+    <string name="voice_typing_listening">Listening… tap the mic key again to finish</string>
+    <string name="voice_typing_nothing_heard">Didn\'t catch that. Try again.</string>
+    <string name="voice_typing_busy">The speech recogniser is busy. Try again in a moment.</string>
+    <string name="voice_typing_unavailable">No speech recogniser is available on this device</string>
+    <string name="voice_typing_failed">Voice input could not start</string>
+    <string name="voice_typing_nothing_available">No voice input on this device: no speech recogniser and no voice keyboard enabled</string>
+    <string name="voice_typing_permission_needed">Dictation needs microphone permission</string>
+    <string name="voice_typing_permission_rationale">Mr. Brown\'s Keyboard needs the microphone to type what you say. Audio is only captured while a dictation session is running.</string>
+    <string name="voice_typing_permission_granted">Microphone permission granted. Tap the mic key again to dictate.</string>
+    <string name="voice_typing_permission_denied">Microphone permission denied, so the mic key switches to a voice keyboard instead of dictating here.</string>
+    <string name="voice_typing_permission_activity_label">Microphone Permission</string>
+
     <!-- Accessibility Section -->
     <string name="settings_section_accessibility">♿ Accessibility</string>
     <!-- Sticky-keys and voice-guidance strings removed with their dead toggles

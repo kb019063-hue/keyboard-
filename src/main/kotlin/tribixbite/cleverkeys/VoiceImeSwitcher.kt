@@ -109,6 +109,17 @@ internal object VoiceImeSwitcher {
         return imes.map { it.getDisplayName(ims) }
     }
 
+    /**
+     * Whether the legacy switch has anywhere to switch TO (phase 4 part 1).
+     *
+     * [tribixbite.cleverkeys.voice.DictationPolicy] needs this to choose between falling back to the IME switch and telling the
+     * user plainly that this device has no voice input at all -- the mic key doing silently nothing
+     * is the bug this whole part exists to fix, so "nothing available" has to be a reported outcome
+     * rather than an unhandled branch.
+     */
+    @JvmStatic
+    fun has_voice_ime(imm: InputMethodManager): Boolean = getVoiceImeList(imm).isNotEmpty()
+
     private fun getVoiceImeList(imm: InputMethodManager): List<IME> {
         val imes = mutableListOf<IME>()
         for (im in imm.enabledInputMethodList) {

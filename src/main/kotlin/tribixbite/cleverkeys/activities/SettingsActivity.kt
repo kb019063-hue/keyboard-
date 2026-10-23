@@ -1,6 +1,7 @@
 package tribixbite.cleverkeys
 
 import android.content.Intent
+import tribixbite.cleverkeys.voice.VoiceTypingConfig
 import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Build
@@ -290,6 +291,10 @@ class SettingsActivity : ComponentActivity(), SharedPreferences.OnSharedPreferen
     // Split keyboard (phase 3 part 4)
     internal var splitEnabled by mutableStateOf(Defaults.SPLIT_ENABLED)
     internal var splitGapPercent by mutableStateOf(Defaults.SPLIT_GAP_PERCENT.toFloat())
+    // Voice typing (phase 4 part 1): dropdown index into VoiceTypingConfig.modes(), plus the
+    // self-test switch that proves the commit path without a microphone.
+    internal var voiceTypingModeIndex by mutableIntStateOf(VoiceTypingConfig.indexOf(VoiceTypingConfig.modeOf(Defaults.VOICE_TYPING_MODE)))
+    internal var voiceTypingSelfTest by mutableStateOf(Defaults.VOICE_TYPING_SELF_TEST)
     internal var clipboardHistoryLimit by mutableIntStateOf(Defaults.CLIPBOARD_HISTORY_LIMIT_FALLBACK)
     internal var clipboardHistoryDuration by mutableIntStateOf(Defaults.CLIPBOARD_HISTORY_DURATION_FALLBACK)  // Minutes; -1 = never expire
     internal var clipboardPaneHeightPercent by mutableIntStateOf(Defaults.CLIPBOARD_PANE_HEIGHT_PERCENT)

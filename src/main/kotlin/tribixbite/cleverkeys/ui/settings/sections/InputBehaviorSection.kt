@@ -31,6 +31,7 @@ import tribixbite.cleverkeys.ui.settings.SettingsSwitch
 import tribixbite.cleverkeys.ui.settings.openExtraKeysConfig
 import tribixbite.cleverkeys.ui.settings.openLayoutManager
 import tribixbite.cleverkeys.ui.settings.saveSetting
+import tribixbite.cleverkeys.voice.VoiceTypingConfig
 import kotlin.math.roundToInt
 
 @Composable
@@ -55,6 +56,37 @@ internal fun SettingsActivity.InputBehaviorSection() {
                 ) {
                     Text(stringResource(R.string.input_configure_extra_keys))
                 }
+
+                // ── VOICE TYPING (phase 4 part 1) ─────────────────────────
+                // The mic key dictates inside this keyboard by default; the dropdown keeps the
+                // legacy behaviour (hand the field to a separate voice IME) one tap away, and the
+                // self-test switch proves the commit path on a device with no microphone or no
+                // speech recogniser at all - which is exactly what the CI emulator is.
+                SettingsDropdown(
+                    title = stringResource(R.string.voice_typing_mode_title),
+                    description = stringResource(R.string.voice_typing_mode_desc),
+                    options = listOf(
+                        stringResource(R.string.voice_typing_mode_dictation),
+                        stringResource(R.string.voice_typing_mode_switch_ime)
+                    ),
+                    selectedIndex = voiceTypingModeIndex,
+                    onSelectionChange = { index ->
+                        voiceTypingModeIndex = index
+                        saveSetting(
+                            VoiceTypingConfig.PREF_MODE,
+                            VoiceTypingConfig.rawOf(VoiceTypingConfig.modes()[index])
+                        )
+                    }
+                )
+                SettingsSwitch(
+                    title = stringResource(R.string.voice_typing_self_test_title),
+                    description = stringResource(R.string.voice_typing_self_test_desc),
+                    checked = voiceTypingSelfTest,
+                    onCheckedChange = { enabled ->
+                        voiceTypingSelfTest = enabled
+                        saveSetting(VoiceTypingConfig.PREF_SELF_TEST, enabled)
+                    }
+                )
 
                 // Phase 1: Typing/Prediction Settings
                 SettingsSwitch(

@@ -20,6 +20,7 @@ import tribixbite.cleverkeys.SettingsActivity
 import tribixbite.cleverkeys.SettingsRanges
 import tribixbite.cleverkeys.autocorrect.AutocorrectTuning
 import tribixbite.cleverkeys.ui.settings.sections.setPrivateCopyToolbarComponentEnabled
+import tribixbite.cleverkeys.voice.VoiceTypingConfig
 import tribixbite.cleverkeys.ui.settings.io.detectAvailableV2Dictionaries
 import tribixbite.cleverkeys.ui.settings.io.recomputeCustomRulesStatus
 import tribixbite.cleverkeys.ui.settings.io.refreshInstalledGifPacks
@@ -289,6 +290,10 @@ internal fun SettingsActivity.loadCurrentSettings() {
         floatingWidthPercent = prefs.getSafeInt(FloatingConfig.PREF_WIDTH_PERCENT, Defaults.FLOATING_WIDTH_PERCENT).toFloat()
         splitEnabled = prefs.getSafeBoolean(SplitConfig.PREF_ENABLED, Defaults.SPLIT_ENABLED)
         splitGapPercent = prefs.getSafeInt(SplitConfig.PREF_GAP_PERCENT, Defaults.SPLIT_GAP_PERCENT).toFloat()
+        voiceTypingModeIndex = VoiceTypingConfig.indexOf(
+            VoiceTypingConfig.modeOf(prefs.getSafeString(VoiceTypingConfig.PREF_MODE, Defaults.VOICE_TYPING_MODE))
+        )
+        voiceTypingSelfTest = prefs.getSafeBoolean(VoiceTypingConfig.PREF_SELF_TEST, Defaults.VOICE_TYPING_SELF_TEST)
         clipboardHistoryLimit = prefs.getSafeString("clipboard_history_limit", Defaults.CLIPBOARD_HISTORY_LIMIT).toIntOrNull() ?: Defaults.CLIPBOARD_HISTORY_LIMIT_FALLBACK
         clipboardHistoryDuration = prefs.getSafeString("clipboard_history_duration", Defaults.CLIPBOARD_HISTORY_DURATION).toIntOrNull() ?: Defaults.CLIPBOARD_HISTORY_DURATION_FALLBACK
         clipboardPaneHeightPercent = Config.safeGetInt(prefs, "clipboard_pane_height_percent", Defaults.CLIPBOARD_PANE_HEIGHT_PERCENT)
@@ -396,6 +401,10 @@ internal fun SettingsActivity.loadCurrentSettings() {
         floatingWidthPercent = prefs.getSafeInt(FloatingConfig.PREF_WIDTH_PERCENT, Defaults.FLOATING_WIDTH_PERCENT).toFloat()
         splitEnabled = prefs.getSafeBoolean(SplitConfig.PREF_ENABLED, Defaults.SPLIT_ENABLED)
         splitGapPercent = prefs.getSafeInt(SplitConfig.PREF_GAP_PERCENT, Defaults.SPLIT_GAP_PERCENT).toFloat()
+        voiceTypingModeIndex = VoiceTypingConfig.indexOf(
+            VoiceTypingConfig.modeOf(prefs.getSafeString(VoiceTypingConfig.PREF_MODE, Defaults.VOICE_TYPING_MODE))
+        )
+        voiceTypingSelfTest = prefs.getSafeBoolean(VoiceTypingConfig.PREF_SELF_TEST, Defaults.VOICE_TYPING_SELF_TEST)
         customTerminalPackages = prefs.getSafeString("custom_terminal_packages", Defaults.CUSTOM_TERMINAL_PACKAGES)
         imeDefaultPromptEnabled = prefs.getSafeBoolean("ime_default_prompt_enabled", Defaults.IME_DEFAULT_PROMPT_ENABLED)
         vibrationDuration = prefs.getSafeInt("vibrate_duration", Defaults.VIBRATE_DURATION)
