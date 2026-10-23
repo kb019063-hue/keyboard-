@@ -1190,6 +1190,27 @@ VOICEDIAG=$(adb logcat -d -v brief 2>/dev/null | grep -E 'DictationController|Vo
             | tail -3 | tr '\n' '|' | tr -d '\r' | cut -c1-300)
 ann warning "VOICE-DIAG verdict=$VOICE_VERDICT mic='${MIC:-none}' grant='$GRANT' shown=$(shown) log='${VOICEDIAG:-none}'"
 
+# Run 39 returned mic='none' and view=0 while dumpsys said the IME was shown: either the dump
+# truly carries no IME-window nodes on this emulator, or the keyboard is composed but its nodes
+# look different than assumed. Warnings are the one CI channel that survives, so the dump gets to
+# describe itself here; the next run's DUMPDIAG line decides whether 7e/7f tap nodes or pixels.
+DUMPDIAG=$(python3 - "$OUT/ui-nfvoi-kb.xml" <<'PYD' 2>/dev/null
+import re, sys
+try:
+    xml = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+except Exception:
+    print("dump=unreadable"); sys.exit(0)
+nodes = re.findall(r"<node[^>]*>", xml)
+pkg = [t for t in nodes if 'package="tribixbite.cleverkeys' in t]
+desc = [t for t in nodes if 'content-desc="Voice Typing"' in t]
+kbv = [t for t in nodes if "Keyboard2View" in t]
+cls = sorted({(m.group(1) if (m := re.search(r'class="([^"]*)"', t)) else "?") for t in pkg})
+tail = ",".join(c.split(".")[-1] for c in cls[:6])
+print("nodes=%d pkg=%d descVoice=%d kbview=%d classes=%s" % (len(nodes), len(pkg), len(desc), len(kbv), tail or "-"))
+PYD
+)
+ann warning "DUMPDIAG ${DUMPDIAG:-dump=missing} (the ui-nfvoi-kb dump 7e tapped the mic from)"
+
 # --- 7f: does the keyboard fit inside its window (phase 4 part 2) -------------------------------
 # The owner's phone clipped the bottom key row at the screen edge. The mechanism: onMeasure adds
 # the navigation-bar inset to the view's height, and on a gesture-nav phone the pre-insets fallback
@@ -1238,12 +1259,20 @@ if [ "$(shown)" = "mInputShown=true" ]; then
   VB=$(kbclip_view_bottom "$F")
   FB=$(ime_frame_bottom)
   SB=$(dispsz | cut -dx -f2)
-  if [ -n "$VB" ] && [ -n "$FB" ] && [ "$VB" -gt "$((FB + 4))" ]; then
+  if [ -z "$VB" ] || [ "$VB" = "0" ] || [ -z "$FB" ] || [ "$FB" = "0" ]; then
+    # Run 39 proved this branch necessary: the dump carried no keyboard-view node at all
+    # (view=0 -- the helper prints 0 when the dump carries no Keyboard2View node), and the old
+    # else printed a confident "fits its window" over nothing. A check that cannot see the view
+    # reports that it cannot see it, and nothing more.
+    info "7f stood down: view bottom '${VB:-none}', frame bottom '${FB:-none}' (shown=$(shown))"
+    ann warning "KBCLIP skipped, no measurable pair: view='${VB:-none}' frame='${FB:-none}' screen='${SB:-?}'"
+  elif [ "$VB" -gt "$((FB + 4))" ]; then
+    ann warning "KBCLIP-DIAG view=$VB frame=$FB screen=${SB:-?} shown=$(shown)"
     fail "keyboard view bottom $VB overflows its window frame bottom $FB (screen ${SB:-?}): the last row is clipped"
   else
-    pass "keyboard fits its window (view bottom ${VB:-?}, window bottom ${FB:-?}, screen ${SB:-?}, reserved below window $(( ${SB:-0} - ${FB:-0} ))px)"
+    pass "keyboard fits its window (view bottom $VB, window bottom $FB, screen ${SB:-?}, reserved below window $(( ${SB:-0} - ${FB:-0} ))px)"
+    ann warning "KBCLIP-DIAG view=$VB frame=$FB screen=${SB:-?} shown=$(shown)"
   fi
-  ann warning "KBCLIP-DIAG view=${VB:-?} frame=${FB:-?} screen=${SB:-?} shown=$(shown)"
 else
   info "7f skipped: no keyboard up to measure (shown=$(shown))"
 fi

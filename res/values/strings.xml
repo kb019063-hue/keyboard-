@@ -213,6 +213,8 @@
     <string name="voice_typing_permission_activity_label">Microphone Permission</string>
     <string name="input_key_symbols_title">Print Every Symbol on Keys</string>
     <string name="input_key_symbols_desc">Show every corner symbol each key carries, the way the layout files define them. Off keeps one hint per key and leaves the rest to long-press and swipe.</string>
+    <string name="input_strip_always_title">Always Show Suggestion Strip</string>
+    <string name="input_strip_always_desc">Keep the strip\'s space reserved even when there is nothing to suggest. Off gives the band to the keys until a suggestion, message or autofill chip needs it.</string>
 
     <!-- Accessibility Section -->
     <string name="settings_section_accessibility">♿ Accessibility</string>

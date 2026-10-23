@@ -189,7 +189,9 @@ class KeyboardReceiver(
             return
         }
 
-        SuggestionBarPane.switchToSuggestionBarMode(top, content, scroll, suggestionBarHeight)
+        SuggestionBarPane.switchToSuggestionBarMode(
+            top, content, scroll, keyboard2.suggestionStripHeight(suggestionBarHeight)
+        )
     }
 
     /**

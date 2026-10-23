@@ -30,6 +30,8 @@ noime        no text field anywhere to focus, so no window to measure -> report,
 voicedeaf    7e: the mic key is tapped with the self-test confirmed on but nothing reaches the field
              -> the one genuine dictation defect this check exists to catch, so it must FAIL
 voicenokey   7e: no toolbar node carries the mic key's content-desc -> report, do not assert
+noimenodes   the dump carries no IME nodes at all while dumpsys says the IME is shown -- run 39's
+             emulator, exactly. Both 7e and 7f must stand down and say so, never pass over nothing
 kbclip       7f: the measure pass over-reserved the nav inset, so the keyboard view is 132px taller
              than its window and its last row is clipped -> the defect 7f exists to catch, FAIL
 
@@ -76,6 +78,7 @@ def base():
         "no_toolbar_mic": False,
         "voice_deaf": False,
         "kb_overflow": False,
+        "no_ime_nodes": False,
         "calls": [],
         "taps": [],
     }
@@ -100,6 +103,7 @@ SCENARIOS = {
     "voicedeaf":   ({"voice_deaf": True},                                      1, "ok",  "pass", "commit", "verdict=commit"),
     "voicenokey":  ({"no_toolbar_mic": True},                                  0, "ok",  "pass", "key", "no toolbar node"),
     "kbclip":      ({"kb_overflow": True},                                     1, "ok",  "pass", "ok", "KBCLIP-DIAG"),
+    "noimenodes":  ({"no_ime_nodes": True},                                    0, "ok",  "pass", "key", "KBCLIP skipped"),
 }
 
 

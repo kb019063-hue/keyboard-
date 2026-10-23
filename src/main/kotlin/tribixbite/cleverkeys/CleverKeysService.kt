@@ -110,6 +110,9 @@ class CleverKeysService : InputMethodService(),
 
     // UI components (remain in CleverKeysService for view integration)
     private var _suggestionBar: SuggestionBar? = null
+
+    /** The suggestion strip's band at full height, captured when the hierarchy is built. */
+    private var _stripFullHeightPx: Int = 0
     // Toolbar row above the suggestion strip (HeliBoard gap analysis phase 1).
     private var _keyboardToolbar: KeyboardToolbar? = null
 
@@ -853,6 +856,12 @@ class CleverKeysService : InputMethodService(),
         _topPane = predictionSetup.topPane
         _scrollView = predictionSetup.scrollView
         _keyboardToolbar = predictionSetup.toolbar
+        // Phase 4 part 2: while the strip has nothing to show, its band belongs to the keys.
+        // Capture the band's full height once, while it still holds the built-in value, and let
+        // the bar's occupancy reports drive it from then on.
+        if (_stripFullHeightPx <= 0) _stripFullHeightPx = _topPane?.layoutParams?.height ?: 0
+        _suggestionBar?.onOccupancyChanged = { occupied -> applyStripHeight(occupied) }
+        applyStripHeight(_suggestionBar?.isOccupied() == true)
         setInputView(predictionSetup.inputView)
 
         // #41 v5: Emoji search manager persists across onStartInputView calls
@@ -1483,6 +1492,11 @@ class CleverKeysService : InputMethodService(),
         }
         // Split mode needs no service-side state: the next draw and the next hit-test both read
         // the geometry params fresh, so a relayout is all the change requires.
+        // The strip's band is service-side state (topPane lives here), so the toggle applies
+        // straight away rather than on the next suggestion update.
+        if (key == "suggestion_strip_always_visible") {
+            applyStripHeight(_suggestionBar?.isOccupied() == true)
+        }
         if (key == SplitConfig.PREF_ENABLED || key == SplitConfig.PREF_GAP_PERCENT) {
             // Split holds no service-side state: the next draw and the next hit-test both read
             // the geometry params fresh, so all the change needs is a redraw. The service is not
@@ -1634,6 +1648,35 @@ class CleverKeysService : InputMethodService(),
      */
     fun showSuggestionBarMessage(message: String, durationMs: Long = 1500L) {
         _suggestionBar?.showTemporaryMessage(message, durationMs)
+    }
+
+    /**
+     * The height the suggestion strip's band should occupy right now (phase 4 part 2): the full
+     * band while the bar shows something or the always-visible preference is on, zero otherwise.
+     * [KeyboardReceiver.hideContentPane] asks this when it puts the strip back after a content
+     * pane, so closing the clipboard cannot resurrect an empty band.
+     */
+    fun suggestionStripHeight(fullHeightPx: Int): Int = SuggestionStripPolicy.heightPx(
+        _suggestionBar?.isOccupied() == true,
+        _config?.suggestion_strip_always_visible ?: false,
+        fullHeightPx
+    )
+
+    private fun applyStripHeight(occupied: Boolean) {
+        val top = _topPane ?: return
+        // Pane mode (clipboard, emoji, GIF) owns the band's height; never fight it.
+        if (top.childCount > 0 && top.getChildAt(0) !== _scrollView) return
+        val full = _stripFullHeightPx
+        if (full <= 0) return
+        val target = SuggestionStripPolicy.heightPx(
+            occupied,
+            _config?.suggestion_strip_always_visible ?: false,
+            full
+        )
+        if (top.layoutParams.height != target) {
+            top.layoutParams.height = target
+            top.requestLayout()
+        }
     }
 
     // Check if default IME, show notification if not (v1.32.377: Delegated to IMEStatusHelper)

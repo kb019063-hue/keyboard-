@@ -297,6 +297,7 @@ class SettingsActivity : ComponentActivity(), SharedPreferences.OnSharedPreferen
     internal var voiceTypingSelfTest by mutableStateOf(Defaults.VOICE_TYPING_SELF_TEST)
     // Calm key labels (phase 4 part 2)
     internal var printAllKeySymbols by mutableStateOf(Defaults.PRINT_ALL_KEY_SYMBOLS)
+    internal var suggestionStripAlwaysVisible by mutableStateOf(Defaults.SUGGESTION_STRIP_ALWAYS_VISIBLE)
     internal var clipboardHistoryLimit by mutableIntStateOf(Defaults.CLIPBOARD_HISTORY_LIMIT_FALLBACK)
     internal var clipboardHistoryDuration by mutableIntStateOf(Defaults.CLIPBOARD_HISTORY_DURATION_FALLBACK)  // Minutes; -1 = never expire
     internal var clipboardPaneHeightPercent by mutableIntStateOf(Defaults.CLIPBOARD_PANE_HEIGHT_PERCENT)

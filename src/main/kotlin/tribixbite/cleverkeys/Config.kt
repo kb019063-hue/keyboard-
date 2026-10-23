@@ -505,6 +505,9 @@ object Defaults {
     // Calm key labels (phase 4 part 2): off means one corner hint per character key and none on
     // functional keys; on is the dense Unexpected-Keyboard rendering this tree shipped with.
     const val PRINT_ALL_KEY_SYMBOLS = false
+    // Suggestion strip (phase 4 part 2): off collapses the band while the bar has nothing to
+    // show; on reserves it always, for a keyboard whose height never moves.
+    const val SUGGESTION_STRIP_ALWAYS_VISIBLE = false
 
     // Accessibility
     const val STICKY_KEYS_ENABLED = false
@@ -834,6 +837,7 @@ class Config private constructor(
     // #133: user multiplier applied to the secondary (flick) label size only.
     @JvmField var secondary_label_size_scale = Defaults.SECONDARY_LABEL_SIZE_SCALE
     @JvmField var print_all_key_symbols = Defaults.PRINT_ALL_KEY_SYMBOLS
+    @JvmField var suggestion_strip_always_visible = Defaults.SUGGESTION_STRIP_ALWAYS_VISIBLE
 
     // From preferences.
     // A field that refresh() reads straight from ONE preference is initialised to that
@@ -1281,6 +1285,7 @@ class Config private constructor(
             .coerceIn(SettingsRanges.CHARACTER_SIZE.start, SettingsRanges.CHARACTER_SIZE.endInclusive) * characterSizeScale
         secondary_label_size_scale = safeGetFloat(_prefs, "secondary_label_size_scale", Defaults.SECONDARY_LABEL_SIZE_SCALE)
         print_all_key_symbols = _prefs.getBoolean("print_all_key_symbols", Defaults.PRINT_ALL_KEY_SYMBOLS)
+        suggestion_strip_always_visible = _prefs.getBoolean("suggestion_strip_always_visible", Defaults.SUGGESTION_STRIP_ALWAYS_VISIBLE)
         // The global theme preference. The EFFECTIVE theme (themeName/theme) is resolved at the
         // end of refresh, once the layouts, the selection and wide_screen are known.
         user_theme_name = safeGetString(_prefs, "theme", Defaults.THEME)

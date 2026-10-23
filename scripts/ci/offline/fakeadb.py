@@ -229,7 +229,10 @@ def launcher_nodes(s):
 
 def ime_nodes(s):
     """The keyboard's own nodes. Only composed while the IME is up, as on a device."""
-    if not s.get("ime_shown"):
+    if not s.get("ime_shown") or s.get("no_ime_nodes"):
+        # no_ime_nodes models what run 39's emulator actually produced: dumpsys says the IME is
+        # shown, yet the accessibility dump carries none of its nodes, so neither 7e nor 7f can
+        # see anything to tap or measure.
         return []
     floating = bool(s["checked"].get("Floating Keyboard")) and s.get("window_mode", "narrow") != "full"
     # The view fills its window, so its bottom edge equals the frame's -- unless kb_overflow says

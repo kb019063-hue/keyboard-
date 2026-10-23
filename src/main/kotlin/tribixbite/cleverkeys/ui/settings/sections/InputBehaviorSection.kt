@@ -113,6 +113,20 @@ internal fun SettingsActivity.InputBehaviorSection() {
                         displayValue = "$suggestionBarOpacity%"
                     )
 
+                    // Phase 4 part 2: an empty strip read as a broken purple band on the owner's
+                    // phone, so collapsing it is the default; this is the way back to a keyboard
+                    // whose height never moves.
+                    SettingsSwitch(
+                        title = stringResource(R.string.input_strip_always_title),
+                        description = stringResource(R.string.input_strip_always_desc),
+                        checked = suggestionStripAlwaysVisible,
+                        onCheckedChange = { enabled ->
+                            suggestionStripAlwaysVisible = enabled
+                            saveSetting("suggestion_strip_always_visible", enabled)
+                            Config.globalConfig()?.suggestion_strip_always_visible = enabled
+                        }
+                    )
+
                     // #82: Auto-space after selecting suggestion
                     SettingsSwitch(
                         title = stringResource(R.string.input_auto_space_after_title),

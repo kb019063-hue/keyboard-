@@ -115,6 +115,23 @@ class SuggestionBar : LinearLayout {
     fun isShowingMessage(): Boolean = isShowingTemporaryMessage
 
     /**
+     * Phase 4 part 2: the service collapses the strip's band while it has nothing to show. The
+     * bar is the only thing that knows what it is showing, so it reports occupancy changes and
+     * the service, which owns the topPane the band belongs to, resizes it.
+     */
+    var onOccupancyChanged: ((Boolean) -> Unit)? = null
+
+    fun isOccupied(): Boolean = SuggestionStripPolicy.occupied(
+        currentSuggestions.isNotEmpty(),
+        isShowingTemporaryMessage,
+        inlineAutofillView != null
+    )
+
+    private fun notifyOccupancy() {
+        onOccupancyChanged?.invoke(isOccupied())
+    }
+
+    /**
      * Interface for providing InputConnection to read actual field content.
      */
     fun interface InputConnectionProvider {
@@ -666,6 +683,7 @@ class SuggestionBar : LinearLayout {
         } else {
             if (currentSuggestions.isEmpty()) GONE else VISIBLE
         }
+        notifyOccupancy()
     }
 
     /**
@@ -828,6 +846,7 @@ class SuggestionBar : LinearLayout {
 
         // Schedule restore
         mainHandler.postDelayed(restoreRunnable, durationMs)
+        notifyOccupancy()
     }
 
     /**
@@ -964,6 +983,7 @@ class SuggestionBar : LinearLayout {
         visibility = VISIBLE
 
         Log.d(TAG, "setInlineAutofillView: Displaying inline autofill suggestions (padding removed for full height)")
+        notifyOccupancy()
     }
 
     /**
@@ -981,6 +1001,7 @@ class SuggestionBar : LinearLayout {
 
             Log.d(TAG, "clearInlineAutofillView: Cleared inline autofill view, padding restored")
         }
+        notifyOccupancy()
     }
 
     /**

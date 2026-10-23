@@ -9,7 +9,7 @@ annotations (capped, and notices beyond roughly the twelfth are dropped) and the
 So a failed run yields one or two sentences of evidence, and guessing from those has already cost
 three runs. This harness removes the guessing for the parts of the script that are pure hunt logic:
 it runs the real sections 7d and 7e, unmodified, against a fake `adb` that models an emulator's
-settings screen, and checks that thirteen scenarios each produce exactly the verdicts they must.
+settings screen, and checks that fourteen scenarios each produce exactly the verdicts they must.
 
 ```
 scripts/ci/offline/run.sh          # every scenario, about twenty seconds
@@ -54,6 +54,12 @@ defect the owner's Huawei screenshot showed. It must fail. The fake therefore mo
 view's own bounds (matched on its class name, never on the package, which the settings activity
 shares) alongside the window frame 7d already models, and `hit()` returns the deepest node at a
 point so a tap on a toolbar key lands on the key and not on the view containing it.
+
+`noimenodes` is the shape run 39's real emulator produced: dumpsys says the IME is shown, yet the
+accessibility dump carries none of its nodes — only the settings screen behind it. Both 7e and 7f
+must stand down and say so (`voice=key`, a `KBCLIP skipped` warning), never pass over a view bottom
+of 0 that only means "no node found". A per-scenario run can now emit five warnings — NFFRAME-DIAG,
+VOICE skipped, VOICE-DIAG, DUMPDIAG, KBCLIP-DIAG — so the harness reads six.
 
 `voicedeaf` is 7e's mirror image and exists for the same reason: the mic key tapped with the
 self-test switch confirmed on, and no transcript reaching the field. That is the defect 7e exists to
