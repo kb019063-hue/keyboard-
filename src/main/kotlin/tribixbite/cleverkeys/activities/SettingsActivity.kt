@@ -623,6 +623,11 @@ class SettingsActivity : ComponentActivity(), SharedPreferences.OnSharedPreferen
     internal var settingsSearchQuery: String
         get() = settingsViewModel.settingsSearchQuery
         set(value) { settingsViewModel.settingsSearchQuery = value }
+
+    /** The drawer's selection (phase 4 part 4): which single section the content pane shows. */
+    internal var selectedSectionKey: String
+        get() = settingsViewModel.selectedSectionKey
+        set(value) { settingsViewModel.selectedSectionKey = value }
     internal var highlightedSettingId: String?  // For pulse animation
         get() = settingsViewModel.highlightedSettingId
         set(value) { settingsViewModel.highlightedSettingId = value }
@@ -696,6 +701,7 @@ class SettingsActivity : ComponentActivity(), SharedPreferences.OnSharedPreferen
         englishTitle = bareTitle(englishResources.getString(titleRes)),
         keywords = keywords,
         sectionName = sectionDisplayName(sectionKey),
+        sectionKey = sectionKey,
         activityClass = activityClass,
         expandSection = expandSection,
         gatedBy = gatedBy,
@@ -714,6 +720,7 @@ class SettingsActivity : ComponentActivity(), SharedPreferences.OnSharedPreferen
                     englishTitle = e.title,
                     keywords = e.keywords,
                     sectionName = sectionDisplayName(e.sectionKey),
+                    sectionKey = e.sectionKey,
                     // Controls inside the collapsed "Advanced Prediction Settings" sub-panel
                     // need it OPENED too, or the target is never composed, never registers a
                     // scroll position, and the search result silently lands nowhere (audit

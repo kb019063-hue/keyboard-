@@ -46,6 +46,7 @@ SCREEN_W, SCREEN_H = 1080, 2400
 # and must not win a hit test against a key. (The toolbar itself lives at the TOP of the IME
 # frame -- see ime_nodes -- but the keyboard's body occludes the bottom of the screen.)
 IME_BAND_TOP = SCREEN_H - 130
+IME_SHEET_TOP = 1488   # top of the IME window (ime_frame); an open drawer sheet ends here
 # The toolbar's height in px: 40dp at the 420dpi `wm density` reports. This is the band 7e's
 # coordinate fallback and 7g's more-key tap compute their points inside.
 TOOLBAR_H = 105
@@ -143,9 +144,15 @@ def unesc(t):
     return re.sub(r"&#(\d+);", lambda m: chr(int(m.group(1))), t).replace("&amp;", "&")
 
 
-def rows(s):
-    """Layout rows in content space: (kind, text, height, section|None)."""
-    out = [("title", "Settings", 90, None), ("desc", "Everything about your keyboard", 60, None)]
+def chrome_rows(s):
+    """Pinned chrome: app bar (title + hamburger) and the search bar / results under it.
+
+    Phase 4 part 4 pinned all of this above the pane -- the hamburger and the bar NEVER scroll
+    away, which is the whole point of the redesign and the property every Tier-1/Tier-2b hunt
+    now relies on. The real results Card caps at 200dp and scrolls internally; the fake lists
+    results flat, which is fine because every query the smoke types matches at most two rows.
+    """
+    out = [("title", "Settings", 90, None), ("hamburger", "", 90, None)]
     if not s.get("no_search_bar"):
         # The bar renders whatever the field holds: the placeholder while empty, the typed query
         # while searching, and -- the thing 7e asserts on -- the transcript dictation committed.
@@ -155,7 +162,28 @@ def rows(s):
         for title, sec in INDEX:
             if q.lower() in title.lower():
                 out.append(("result", title, 96, sec))
+    return out
+
+
+def drawer_rows(s):
+    """The open ModalNavigationDrawer sheet: its title and every section item.
+
+    The sheet replaces the whole screen in a dump. This SECTIONS order need not match the
+    product's SettingsDrawerItems.ORDER; the smoke hunts match items by title, never position.
+    """
+    out = [("drawertitle", "Settings", 90, None)]
+    for key, header, _kids in SECTIONS:
+        out.append(("draweritem", header, 100, key))
+    return out
+
+
+def pane_rows(s):
+    """The one section the drawer last selected (default testKeyboard), header first."""
+    sel = s.get("selected_section") or "testKeyboard"
+    out = []
     for key, header, kids in SECTIONS:
+        if key != sel:
+            continue
         out.append(("header", header, 130, key))
         if s["expanded"].get(key):
             for kind, text in kids:
@@ -164,18 +192,53 @@ def rows(s):
 
 
 def max_scroll(s):
-    return max(0, sum(r[2] + 16 for r in rows(s)) - VIEW_H)
+    """How far the scrollable region can still move up.
+
+    Closed screen: only the pane scrolls, in the viewport that is left below the pinned chrome.
+    Open drawer: the sheet scrolls in ITS viewport -- above the keyboard top when the IME is up
+    (the activity is adjustResize, so the sheet cannot extend under the keyboard), else the full
+    screen. The closed-screen case deliberately keeps the old IME_BAND_TOP suppression model
+    instead of resizing the pane: a documented fake simplification the scenarios calibrate to.
+    """
+    if s.get("drawer_open"):
+        view = (IME_SHEET_TOP if s.get("ime_shown") else SCREEN_H) - VIEW_TOP
+        return max(0, sum(r[2] + 16 for r in drawer_rows(s)) - view)
+    chrome = sum(r[2] + 16 for r in chrome_rows(s))
+    pane = sum(r[2] + 16 for r in pane_rows(s))
+    return max(0, chrome + pane - VIEW_H)
+
+
+def laid_out(s):
+    """(kind, text, height, section, top) for every row currently laid out on the settings screen.
+
+    Pinned chrome keeps its position regardless of scroll; only the pane (closed screen) or the
+    sheet (open drawer) moves. An open drawer sheet ends at the IME top when the keyboard is up,
+    so rows below that are not rendered -- the sheet scrolls instead, exactly like the resized
+    ModalDrawerSheet on a real adjustResize activity.
+    """
+    out = []
+    y = VIEW_TOP
+    if s.get("drawer_open"):
+        for kind, text, h, sec in drawer_rows(s):
+            out.append((kind, text, h, sec, y - s["scroll"]))
+            y += h + 16
+        return out
+    for kind, text, h, sec in chrome_rows(s):
+        out.append((kind, text, h, sec, y))
+        y += h + 16
+    for kind, text, h, sec in pane_rows(s):
+        out.append((kind, text, h, sec, y - s["scroll"]))
+        y += h + 16
+    return out
 
 
 def settings_nodes(s):
     n = []
-    y = 0
-    for kind, text, h, _sec in rows(s):
-        top = VIEW_TOP + y - s["scroll"]
-        y += h + 16
+    for kind, text, h, _sec, top in laid_out(s):
         if not (-h < top < SCREEN_H):
             continue
-        if s.get("ime_shown") and top + h > IME_BAND_TOP:
+        band = IME_SHEET_TOP if s.get("drawer_open") else IME_BAND_TOP
+        if s.get("ime_shown") and top + h > band:
             continue
         y1, y2 = max(0, top), min(SCREEN_H, top + h)
         state = s["checked"].get(text)
@@ -191,6 +254,15 @@ def settings_nodes(s):
                            'clickable="true" enabled="true" focusable="false" focused="false" '
                            'scrollable="false" bounds="[900,%d][1064,%d]" />'
                       % (len(n) + 1, s["pkg"], "true" if state else "false", top + 45, top + 105)))
+            continue
+        if kind == "hamburger":
+            # the TopAppBar navigation icon: no text at all, found by its content-desc, which is
+            # what the smoke's nodecenter_desc 'sections menu' taps
+            n.append((top, '<node index="%d" text="" resource-id="" class="android.widget.ImageView" '
+                           'package="%s" content-desc="Open sections menu" checkable="false" checked="false" '
+                           'clickable="true" enabled="true" focusable="true" focused="false" '
+                           'scrollable="false" bounds="[16,%d][120,%d]" />'
+                      % (len(n), s["pkg"], y1, y2)))
             continue
         cls = {"searchbar": "android.widget.EditText",
                "button": "android.widget.Button"}.get(kind, "android.view.View")
@@ -386,8 +458,9 @@ def row_title(s, tag):
 
 
 def control_y(s, title):
+    """The control's y inside the PANE content; scrolling to it puts it at the pane top."""
     y = 0
-    for kind, text, h, _sec in rows(s):
+    for kind, text, h, _sec in pane_rows(s):
         if text == title:
             return y
         y += h + 16
@@ -453,7 +526,11 @@ def main(argv):
 
     if cmd[:2] == ["input", "keyevent"]:
         if cmd[2] == "KEYCODE_BACK" and s["screen"] == "settings":
-            if s.get("ime_shown"):
+            if s.get("drawer_open"):
+                # ModalNavigationDrawer: BACK closes the sheet before anything else consumes it
+                s["drawer_open"] = False
+                s["scroll"] = 0
+            elif s.get("ime_shown"):
                 # the input method consumes BACK first and hides; the activity survives
                 s["ime_shown"] = False
                 s["focused_field"] = None
@@ -483,6 +560,14 @@ def main(argv):
                 more_tools_sheet(s)
                 save(s)
                 return 0
+            if desc and unesc(desc.group(1)) == "Open sections menu" and s["screen"] == "settings":
+                # phase 4 part 4: the TopAppBar hamburger opens the drawer sheet. The sheet has
+                # its own scroll state, fresh at its top on every open (the single s["scroll"]
+                # variable is shared: a documented fake simplification, reset on open/close).
+                s["drawer_open"] = True
+                s["scroll"] = 0
+                save(s)
+                return 0
             if s["screen"] == "launcher":
                 if "EditText" in cls:
                     s["focused_field"] = "launcher"
@@ -492,6 +577,16 @@ def main(argv):
                 # exactly like the launcher's test field does -- that is what 7d's frame probe uses
                 s["focused_field"] = "search"
                 s["ime_shown"] = True
+            elif s.get("drawer_open"):
+                # a tap while the sheet is open: an item selects AND expands its section, closes
+                # the drawer, and starts the pane at its top; any other tap just closes it
+                for key, header, _kids in SECTIONS:
+                    if text == header:
+                        s["selected_section"] = key
+                        s["expanded"][key] = True
+                        break
+                s["drawer_open"] = False
+                s["scroll"] = 0
             elif (s.get("query") and not s.get("search_broken")
                   and text in [t for t, _ in INDEX]):
                 # executeSearchAction: clear the query, collapse everything, expand the target
@@ -502,6 +597,8 @@ def main(argv):
                 for k in s["expanded"]:
                     s["expanded"][k] = False
                 s["expanded"][sec] = True
+                # executeSearchAction also SELECTS the section now: the pane shows one section
+                s["selected_section"] = sec
                 cy = control_y(s, text)
                 if cy is not None and not s.get("no_scroll_to"):
                     s["scroll"] = max(0, min(max_scroll(s), cy))

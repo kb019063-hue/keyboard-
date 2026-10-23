@@ -117,6 +117,9 @@ internal data class SearchableSetting(
     val englishTitle: String,
     val keywords: List<String>,
     val sectionName: String,
+    /** The drawer's key for this setting's section (phase 4 part 4); empty for entries that
+     *  navigate to an activity instead of landing on a control. */
+    val sectionKey: String = "",
     val activityClass: Class<*>? = null,
     val expandSection: () -> Unit = {},
     val gatedBy: String? = null,  // e.g., "swipe_typing" means needs swipe typing enabled
@@ -215,6 +218,15 @@ internal fun SettingsActivity.executeSearchAction(setting: SearchableSetting) {
     // Check if gated by a disabled toggle: land on the gating toggle instead.
     if (setting.gatedBy != null && !isGateEnabled(setting.gatedBy)) {
         val targetId = setting.gatedBy
+        // The drawer shows one section at a time (phase 4 part 4): travel to the one holding the
+        // gating toggle before expanding and scrolling inside it.
+        selectedSectionKey = when (targetId) {
+            "swipe_typing" -> "swipeTyping"
+            "short_gestures" -> "gestureTuning"
+            "multilang" -> "multiLang"
+            "gif_enabled" -> "gif"
+            else -> selectedSectionKey
+        }
         expandAndScrollTo(targetId) {
             collapseAllSections()
             when (targetId) {
@@ -234,11 +246,16 @@ internal fun SettingsActivity.executeSearchAction(setting: SearchableSetting) {
         // Special handling for What's New - opens external URL
         startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/tribixbite/CleverKeys/releases/latest")))
     } else if (setting.settingId.isNotEmpty()) {
+        // The drawer shows one section at a time (phase 4 part 4): a search result must select
+        // its section first, or the expand-and-scroll runs inside the wrong pane and the control
+        // is never composed. Entries with no key (activity navigation) select nothing.
+        if (setting.sectionKey.isNotEmpty()) selectedSectionKey = setting.sectionKey
         expandAndScrollTo(setting.settingId) {
             collapseAllSections()
             setting.expandSection()
         }
     } else {
+        if (setting.sectionKey.isNotEmpty()) selectedSectionKey = setting.sectionKey
         collapseAllSections()
         setting.expandSection()
     }

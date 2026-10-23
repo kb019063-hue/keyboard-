@@ -9,7 +9,7 @@ annotations (capped, and notices beyond roughly the twelfth are dropped) and the
 So a failed run yields one or two sentences of evidence, and guessing from those has already cost
 three runs. This harness removes the guessing for the parts of the script that are pure hunt logic:
 it runs the real sections 7d and 7e, unmodified, against a fake `adb` that models an emulator's
-settings screen, and checks that fifteen scenarios each produce exactly the verdicts they must.
+settings screen, and checks that sixteen scenarios each produce exactly the verdicts they must.
 
 ```
 scripts/ci/offline/run.sh          # every scenario, about twenty seconds
@@ -25,14 +25,14 @@ Every detail here corresponds to something that broke a real run.
 
 | Modelled behaviour | Why |
 |---|---|
-| One `verticalScroll` Column, so the search bar scrolls away with the content | `SettingsScreen.kt:106-139`; a hunt that assumes the bar is always on screen finds nothing |
+| A TopAppBar hamburger (`content-desc="Open sections menu"`), a pinned search bar, and a pane showing ONE section; an open drawer sheet replaces everything in the dump and -- keyboard up -- ends at the IME top and scrolls there | the phase 4 part 4 screen shape; the chrome never scrolls away, and a sheet item under the keyboard is genuinely untappable, so both properties must hold in the fake for the hunts to mean anything |
 | Rows outside the viewport are absent from the dump | Compose prunes them, which is what "below the fold" means and why every hunt must scroll |
-| Collapsed sections compose no children | the reason each check is two-stage: expand, then look |
-| Search results, and tapping one collapses all sections, expands one, scrolls the control to the top | `SettingsSearch.kt:42-67`, the deterministic route 7d now uses |
+| Collapsed sections compose no children, and a drawer item tap selects AND expands its section | the reason 7b/7c still confirm the switch after the item tap, and re-tap the pane header when it is missing |
+| Search results, and tapping one selects its section, expands it, and scrolls the control to the top | `SettingsSearch.kt`, the deterministic Tier-1 route 7d uses |
 | A `SettingsSwitch` row as two nodes: a `TextView` title with `checkable="false"` and an unlabelled `Switch` carrying the state | reported by run 39789396340 from a real device; reading the title node reports `false` forever |
 | Text fields bring the IME up -- the settings search bar as well as the launcher's test field | run 39804287846: `am start` from a shell implies NEW_TASK, which brings the app's existing task forward rather than starting the named activity in it, so "navigate to the launcher to find an editor" never navigated anywhere |
 | `dumpsys window windows` whose input-method frame narrows only when floating is on | the mechanism part 3 exists to implement |
-| BACK with an IME shown hides the keyboard and keeps the activity; only then does it pop | run 39783242401 pressed BACK to "dismiss a keyboard" that was never up, and left the next hunt dumping the launcher |
+| BACK: an open drawer sheet closes first; then an IME hides and the activity survives; only then does it pop | run 39783242401 pressed BACK to "dismiss a keyboard" that was never up, and left the next hunt dumping the launcher |
 | Swipes apply no fling momentum | a device flings further than it is dragged, so what passes here passes there |
 | While the IME is up, the keyboard occludes the bottom band of the screen and the settings rows there are absent | 7e taps the mic key by its `content-desc`, and a settings row rendering in the same band would win the hit test and be tapped instead |
 | The toolbar's ten default buttons evenly weighted across the top 40dp of the IME frame, at the 420dpi `wm density` reports | 7e's coordinate fallback and 7g compute button centres from the frame rect and the density; a formula bug must fail here in thirty seconds, not on the emulator in fifteen minutes |
@@ -51,6 +51,10 @@ measurement whose precondition was never confirmed, and `framepkg` and `noime` m
 asserting a window they cannot identify or reach. `framefull` is the mirror image — floating
 confirmed on, window still full width — and is the one scenario that must fail, because that is the
 defect the probe exists to catch.
+
+`nosearch` and `panescan` pin the fallback tiers down: with search broken, `nosearch` must reach
+every control through the drawer (Tier 2b), while `panescan` starts with the right section already
+selected and must answer from the pane scan (Tier 2a) without the drawer ever opening.
 
 `kbclip` is 7f's mirror image: the measure pass over-reserves the navigation inset, the keyboard
 view ends up 132px taller than its window, and the last key row is clipped at the screen edge — the

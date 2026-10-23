@@ -442,60 +442,65 @@ dumpui() {  # $1 = local filename; fresh uiautomator dump each call
 }
 texts() { grep -ohE 'text="[^"]{1,28}"' "$@" 2>/dev/null | sort -u | head -8 | tr '\n' ' '; }
 
-HDR=""
-for attempt in 1 2 3 4 5 6; do
-  F="$OUT/ui-tb-hdr-$attempt.xml"; dumpui "$F"
-  # 'text="…Toolbar' rather than a bare 'Toolbar': the only other string containing the word is
-  # cmd_show_text_menu_desc, a command DESCRIPTION that appears solely inside the picker dialog.
-  # Note the dump escapes the header's emoji as a numeric entity (&#129520;), which this pattern
-  # tolerates by matching the word rather than the glyph.
-  # An ANR dialog over the settings screen would otherwise burn all six attempts looking like a
-  # missing header, which is what run 39684027086 reported.
-  if grep -qiE "responding" "$F" 2>/dev/null; then
-    info "attempt $attempt: ANR dialog over the settings screen -- dismissing"
-    dismiss_anr || true
-    continue
-  fi
-  if grep -qE 'text="[^"]*Toolbar' "$F" 2>/dev/null; then HDR="$F"; break; fi
-  info "attempt $attempt: no toolbar header on screen, scrolling"
-  scrollup
-done
-
-if [ -z "$HDR" ]; then
-  TBUI_VERDICT=no-header
-  fail "toolbar section header never appeared after 6 dump/scroll attempts: texts=[$(texts "$OUT"/ui-tb-hdr-*.xml)]"
-else
-  pass "toolbar section header present in the settings list"
-  # Tap the header only once it sits in a safe vertical band. Run 39681883670 found the header at
-  # the bottom of the list and tapped y=2195 of a 2400px screen -- inside the gesture nav bar, so
-  # the section never expanded and the check failed for a reason that has nothing to do with the
-  # code under test. Nudge the list until the centre is comfortably on screen, then tap.
-  SAFE_LO=$((SH * 20 / 100)); SAFE_HI=$((SH * 75 / 100))
-  EXPANDED=""; SRC="$HDR"; LASTC=""; LASTE="$HDR"
-  for try in 1 2 3; do
-    for nudge in 1 2 3; do
-      C=$(nodecenter "$SRC" 'Toolbar'); [ -z "$C" ] && break
-      CY=${C#* }
-      [ "$CY" -ge "$SAFE_LO" ] && [ "$CY" -le "$SAFE_HI" ] && break
-      # Too low: content moves up. Too high: content moves down. Quarter-screen steps so the
-      # header cannot be scrolled clean past the viewport in one go.
-      if [ "$CY" -gt "$SAFE_HI" ]; then
-        adb shell input swipe $((SW / 2)) $((SH * 60 / 100)) $((SW / 2)) $((SH * 40 / 100)) 300
-      else
-        adb shell input swipe $((SW / 2)) $((SH * 40 / 100)) $((SW / 2)) $((SH * 60 / 100)) 300
+# Open the sections drawer and tap one item. Phase 4 part 4 replaced the stacked settings column
+# with a ModalNavigationDrawer: the hamburger in the top app bar (content-desc "Open sections
+# menu") opens a sheet listing every section, and tapping an item selects that section, expands
+# it, closes the sheet, and starts its pane at the top. Two rounds of test-then-scroll because a
+# mid-close frame or an ANR dialog can eat the first round, and re-opening the drawer is free.
+# $1 = dump-name tag, $2 = section title regex. Returns 0 when the item tap landed.
+nf_drawer_section() {
+  local tag="$1" sec="$2" round attempt E C
+  for round in 1 2; do
+    E="$OUT/ui-$tag-drawer-$round.xml"; dumpui "$E"
+    if grep -qiE "responding" "$E" 2>/dev/null; then
+      info "drawer $tag round $round: ANR dialog over the settings screen -- dismissing"
+      dismiss_anr || true
+    fi
+    C=$(nodecenter_desc "$E" 'sections menu')
+    if [ -z "$C" ]; then
+      info "drawer $tag round $round: hamburger not on screen yet"
+      continue
+    fi
+    adb shell input tap $C; sleep 3
+    for attempt in 1 2 3 4; do
+      E="$OUT/ui-$tag-drawer-$round-$attempt.xml"; dumpui "$E"
+      C=$(nodecenter "$E" "$sec")
+      if [ -n "$C" ]; then
+        adb shell input tap $C; sleep 3
+        pass "drawer: tapped the '$sec' section item (round $round)"
+        return 0
       fi
+      [ "$attempt" -eq 4 ] && break
+      # Sheet-safe scroll: with the keyboard up the sheet ends at the IME top (~62% of the
+      # screen -- the activity is adjustResize), so scrollup's 75%->25% drag would start on
+      # the keys and never reach the sheet. 55%->25% stays on the sheet with the IME up or down.
+      adb shell input swipe $((SW / 2)) $((SH * 55 / 100)) $((SW / 2)) $((SH * 25 / 100)) 300
       sleep 2
-      N="$OUT/ui-tb-nudge-$try-$nudge.xml"; dumpui "$N"
-      # Only adopt the new dump if the header is still in it, so an overshoot cannot lose the target.
-      grep -qE 'text="[^"]*Toolbar' "$N" 2>/dev/null && SRC="$N"
     done
-    C=$(nodecenter "$SRC" 'Toolbar'); LASTC="$C"
-    [ -n "$C" ] && { adb shell input tap $C; sleep 3; }
+    info "drawer $tag round $round: sheet open but no '$sec' item after 4 dumps, closing and retrying"
+    adb shell input keyevent KEYCODE_BACK; sleep 2
+  done
+  return 1
+}
+
+# --- end of harness helpers ---
+
+# The settings screen is a drawer of sections plus a one-section pane (phase 4 part 4). The old
+# six-attempt climb down a stacked column, and the safe-band nudges that kept header taps out of
+# the gesture nav bar (run 39681883670), died with the column: the hamburger opens a sheet whose
+# items are always on screen, and tapping one SELECTS the section, EXPANDS it, and lands its
+# content at the top of a fresh pane.
+if nf_drawer_section tb 'Toolbar'; then
+  EXPANDED=""; LASTC=""; LASTE="$OUT/ui-tb-expanded-3.xml"
+  for try in 1 2 3; do
     E="$OUT/ui-tb-expanded-$try.xml"; dumpui "$E"; LASTE="$E"
-    # A single tap on a collapsed header can only expand it, so re-tapping is safe -- but only
-    # after re-reading the screen, since the list may have shifted under the tap.
+    # The drawer tap expands the section itself, so the only way the switch is still missing is
+    # a collapsed pane header (an earlier step collapsed it). Tapping the header re-expands --
+    # safe to repeat, but only after re-reading the screen, since the pane may have shifted.
     if grep -qE 'text="Show toolbar"' "$E" 2>/dev/null; then EXPANDED="$E"; break; fi
-    info "attempt $try: tapped '${C:-none}' (band $SAFE_LO-$SAFE_HI), section still collapsed"
+    C=$(nodecenter "$E" 'Toolbar'); LASTC="$C"
+    [ -n "$C" ] && { adb shell input tap $C; sleep 3; }
+    info "attempt $try: drawer selected Toolbar, 'Show toolbar' not composed yet (header tap at '${C:-none}')"
   done
 
   if [ -n "$EXPANDED" ]; then
@@ -541,8 +546,11 @@ else
     adb shell input keyevent KEYCODE_BACK; sleep 2
   else
     TBUI_VERDICT=no-switch
-    fail "header found but 3 expand attempts never composed the switch: last tapped '${LASTC:-NOT-FOUND}' band=$SAFE_LO-$SAFE_HI screen=${SW}x${SH}: texts=[$(texts "$LASTE")]"
+    fail "drawer selected Toolbar but 3 attempts never composed the switch: last header tap '${LASTC:-NOT-FOUND}' screen=${SW}x${SH}: texts=[$(texts "$LASTE")]"
   fi
+else
+  TBUI_VERDICT=no-header
+  fail "toolbar section never appeared in the drawer after 2 rounds: texts=[$(texts "$OUT"/ui-tb-*.xml)]"
 fi
 
 # 7c. One-handed mode settings (gap analysis phase 2). Assertable for the same reason 7b is:
@@ -560,53 +568,26 @@ echo "== 7c. one-handed mode settings (phase 2 UI) =="
 adb shell am start -W -n "$PKG/$NS.SettingsActivity" > "$OUT/am-settings-oh.log" 2>&1
 sleep 5
 
-# Own safe band rather than reusing 7b's: those variables are set inside a branch that a header
-# miss would skip, and a tap near the screen edge hits the gesture nav bar (run 39681883670).
-OH_LO=$((SH * 20 / 100)); OH_HI=$((SH * 75 / 100))
-OH_HDR=""
-for attempt in 1 2 3 4 5 6 7 8; do
-  F="$OUT/ui-oh-hdr-$attempt.xml"; dumpui "$F"
-  if grep -qiE "responding" "$F" 2>/dev/null; then
-    info "attempt $attempt: ANR dialog over the settings screen -- dismissing"
-    dismiss_anr || true
-    continue
-  fi
-  if grep -qE 'text="[^"]*One-Handed Mode' "$F" 2>/dev/null; then OH_HDR="$F"; break; fi
-  info "attempt $attempt: no one-handed header on screen, scrolling"
-  scrollup
-done
-
-if [ -z "$OH_HDR" ]; then
-  OH_VERDICT=no-header
-  fail "one-handed section header never appeared after 8 dump/scroll attempts: texts=[$(texts "$OUT"/ui-oh-hdr-*.xml)]"
-else
-  pass "one-handed section header present in the settings list"
-  SRC="$OH_HDR"; OH_EXP=""; OH_LASTC=""
+# Same drawer route as 7b: hamburger -> sheet -> "One-Handed Mode" item, which selects the
+# section, expands it, and lands it at the top of a fresh pane. The old safe band is gone with
+# the stacked column -- sheet items are always comfortably on screen, and the pane starts at
+# its top, so there is no gesture-nav-bar edge left to nudge away from.
+if nf_drawer_section oh 'One-Handed Mode'; then
+  OH_EXP=""; OH_LASTC=""
   for try in 1 2 3; do
-    for nudge in 1 2 3; do
-      C=$(nodecenter "$SRC" 'One-Handed Mode'); [ -z "$C" ] && break
-      CY=${C#* }
-      [ "$CY" -ge "$OH_LO" ] && [ "$CY" -le "$OH_HI" ] && break
-      if [ "$CY" -gt "$OH_HI" ]; then
-        adb shell input swipe $((SW / 2)) $((SH * 60 / 100)) $((SW / 2)) $((SH * 40 / 100)) 300
-      else
-        adb shell input swipe $((SW / 2)) $((SH * 40 / 100)) $((SW / 2)) $((SH * 60 / 100)) 300
-      fi
-      sleep 2
-      N="$OUT/ui-oh-nudge-$try-$nudge.xml"; dumpui "$N"
-      # Only adopt the new dump if the header survived the scroll, so an overshoot cannot lose it.
-      grep -qE 'text="[^"]*One-Handed Mode' "$N" 2>/dev/null && SRC="$N"
-    done
-    C=$(nodecenter "$SRC" 'One-Handed Mode'); OH_LASTC="$C"
-    [ -n "$C" ] && { adb shell input tap $C; sleep 3; }
     E="$OUT/ui-oh-expanded-$try.xml"; dumpui "$E"
+    # The drawer tap expands the section itself; a missing switch can only mean a collapsed pane
+    # header, and the header ("One-Handed Mode", capital H) re-expands it. The switch row inside
+    # reads "One-handed mode" (lowercase h) -- the CASE-SENSITIVE grep below tells them apart.
     if grep -qE 'text="One-handed mode"' "$E" 2>/dev/null; then OH_EXP="$E"; break; fi
-    info "attempt $try: tapped '${C:-none}' (band $OH_LO-$OH_HI), section still collapsed"
+    C=$(nodecenter "$E" 'One-Handed Mode'); OH_LASTC="$C"
+    [ -n "$C" ] && { adb shell input tap $C; sleep 3; }
+    info "attempt $try: drawer selected One-Handed Mode, switch not composed yet (header tap at '${C:-none}')"
   done
 
   if [ -z "$OH_EXP" ]; then
     OH_VERDICT=no-switch
-    fail "one-handed header found but 3 expand attempts never composed the switch: last tapped '${OH_LASTC:-NOT-FOUND}' band=$OH_LO-$OH_HI screen=${SW}x${SH}: texts=[$(texts "$OUT"/ui-oh-expanded-*.xml)]"
+    fail "drawer selected One-Handed Mode but 3 attempts never composed the switch: last header tap '${OH_LASTC:-NOT-FOUND}' screen=${SW}x${SH}: texts=[$(texts "$OUT"/ui-oh-expanded-*.xml)]"
   else
     OH_VERDICT=switch
     pass "expanding the section composed the 'One-handed mode' switch"
@@ -635,28 +616,25 @@ else
     # never appeared. ^...$ can only match the switch title, whose label has no emoji prefix.
     C=$(nodecenter "$E" '^One-handed mode$')
     if [ -z "$C" ]; then
+      # The gated checks above may have scrolled the pane off the switch row: one scroll up, one
+      # re-locate, then decide. The drawer flow lands the pane at its top and the section is a
+      # handful of rows tall, so this rarely fires -- and the old safe-band nudge has no meaning
+      # left in a pane that short.
+      scrollup; N="$OUT/ui-oh-switch-nudge.xml"; dumpui "$N"
+      C=$(nodecenter "$N" '^One-handed mode$')
+    fi
+    if [ -z "$C" ]; then
       OH_VERDICT=no-toggle
       fail "could not locate the 'One-handed mode' row to tap: texts=[$(texts "$E")]"
     else
-      CY=${C#* }
-      if [ "$CY" -lt "$OH_LO" ] || [ "$CY" -gt "$OH_HI" ]; then
-        if [ "$CY" -gt "$OH_HI" ]; then
-          adb shell input swipe $((SW / 2)) $((SH * 60 / 100)) $((SW / 2)) $((SH * 40 / 100)) 300
-        else
-          adb shell input swipe $((SW / 2)) $((SH * 40 / 100)) $((SW / 2)) $((SH * 60 / 100)) 300
-        fi
-        sleep 2
-        N="$OUT/ui-oh-switch-nudge.xml"; dumpui "$N"
-        C2=$(nodecenter "$N" '^One-handed mode$'); [ -n "$C2" ] && C="$C2"
-      fi
       adb shell input tap $C; sleep 3
       # HUNT for the width control instead of failing on the first miss. Run 39727796466 reported
-      # oh=no-width with the toolbar section's own rows on screen ("10 / 12", "Add", "Copy",
-      # "Cursor Left", ...): 7b leaves that section EXPANDED, and its ten button rows sit directly
-      # above this one, so the switch landed at y=1726 of 2400 and the controls it reveals composed
-      # below the fold. The section was still expanded in that dump ("One-handed mode" present), so
-      # the tap had hit the row -- the assertion was simply looking one screenful too high. Same
-      # trap 7b's Add-button hunt exists for.
+      # oh=no-width with the switch tapped and the section still expanded ("One-handed mode"
+      # present in the dump): the controls the switch reveals composed BELOW the fold, so the
+      # assertion was simply looking one screenful too high. The stacked column that produced
+      # that fold is gone (phase 4 part 4), but a pane still scrolls and a toggle still
+      # recomposes lazily, so the dump/scroll hunt stays. Same trap 7b's Add-button hunt exists
+      # for.
       T=""; W=""
       for w in 1 2 3 4; do
         T="$OUT/ui-oh-toggled-$w.xml"; dumpui "$T"
@@ -696,22 +674,24 @@ else
       fi
     fi
   fi
+else
+  OH_VERDICT=no-header
+  fail "one-handed section never appeared in the drawer after 2 rounds: texts=[$(texts "$OUT"/ui-oh-*.xml)]"
 fi
 
 echo "== 7d. phase-3 feature switches (incognito, floating, split) =="
-# Composition evidence for the three phase-3 controls, reached through the settings SEARCH BAR
-# instead of by scrolling. Runs 39781367258 and 39783242401 are why: 7b and 7c leave the Toolbar
-# and Appearance sections expanded, so the list is several screens long by the time 7d starts and
-# every fixed scroll budget is a coin flip -- run 29 failed because its hunt started deep and
-# scrollup only reveals LOWER items, run 30 failed because it started at the top and ran out of
-# budget before Privacy. Search is deterministic: the bar sits at a known place at the top of the
-# screen, result rows are titled with the setting name, and tapping one runs executeSearchAction ->
-# collapseAllSections + expandSection + scrollToSetting, which polls up to 1.5 s for the control to
-# register its position and then puts it at the top of the viewport (SettingsSearch.kt:42-67). It
-# also proves the generated search index -- regenerated for parts 2-4, now 176 entries -- really
-# carries the new controls, which nothing else in this suite checks. The scroll route stays as a
-# fallback, so a search regression cannot mask a settings regression, and NF_ROUTE/NF_SEARCH say
-# which tier answered.
+# Composition evidence for the three phase-3 controls. Tier 1 is still the settings SEARCH BAR,
+# and it is deterministic: the bar is pinned above the pane (phase 4 part 4 made the screen a
+# drawer plus a one-section pane), result rows are titled with the setting name, and tapping one
+# runs executeSearchAction -> select the section + expand it + scrollToSetting, which polls up to
+# 1.5 s for the control to register its position and then puts it at the top of the viewport
+# (SettingsSearch.kt). It also proves the generated search index really carries the new controls,
+# which nothing else in this suite checks. Tier 2 is the drawer itself -- hamburger, sheet, item
+# tap -- with a pane-scan shortcut ahead of it for the case where the right section is already
+# selected. So a search regression still cannot mask a settings regression, and NF_ROUTE
+# (search|pane|drawer) and NF_SEARCH say which tier answered. The old stacked-column scroll hunt
+# died with the column: its safe-band nudges existed because section headers composed under the
+# floating keyboard mid-column, which a drawer sheet cannot do.
 # Beyond composition, floating gets the one check only a device can give: that enabling it narrows
 # the input-method WINDOW itself (WindowLayoutUtils.applyFloatingWindowLayoutParams), not merely a
 # view inside it. Tap outcomes stay evidence, never assertions -- whether a Compose switch flipped
@@ -724,12 +704,12 @@ NF_SRC=""
 NF_ROUTE=none
 NF_SEARCH=no
 
-# Twelve downward swipes: reach the top of the settings list from anywhere in it. Needed by both
-# tiers -- the search bar is inside the scrolling Column (SettingsScreen.kt:106-139), so a list
-# left scrolled deep by an earlier section hides it exactly like it hides a section header. Twelve
-# rather than eight because the offline harness models NO fling momentum (a 960px drag moves the
-# list 960px, where a device flings further), and eight only just reached the top from the bottom
-# of a list with two sections expanded.
+# Twelve downward swipes: reach the top of the settings PANE from anywhere in it. The search bar
+# is pinned above the pane now, so this no longer rescues the bar -- it resets pane scroll, which
+# Tier 2a's downward-only scan needs, because a pane left scrolled deep hides the controls above
+# the fold exactly like the old column hid a section header. Twelve rather than eight because the
+# offline harness models NO fling momentum (a 960px drag moves the pane 960px, where a device
+# flings further).
 nf_totop() {
   local n
   for n in 1 2 3 4 5 6 7 8 9 10 11 12; do
@@ -738,8 +718,10 @@ nf_totop() {
   done
 }
 
-# Dump, test, scroll down, repeat. Twelve big steps (85% -> 15% of the screen) because with two
-# sections left expanded by 7b/7c the list runs to several screens. Winner lands in NF_SRC.
+# Dump, test, scroll down, repeat. The twelve-big-step budget (85% -> 15% of the screen) survives
+# from the stacked-column era, when 7b/7c left two sections expanded and the list ran to several
+# screens; one section fills at most a screenful now, so a miss simply exhausts the budget.
+# Winner lands in NF_SRC.
 nf_scan() {  # $1 = dump-name prefix, $2 = text regex
   local pre="$1" re="$2" f n
   for n in 1 2 3 4 5 6 7 8 9 10 11 12; do
@@ -881,10 +863,9 @@ nf_evidence() {  # $1 = dump-name prefix
 #     the control scrolls to the top of the viewport.
 #   Tier 2 (scroll): only if tier 1 never produced the result row -- climb, scan down for the
 #     section header $4, centre it in the tap-safe band, tap to expand, then scan for the control.
-nf_reach() {  # $1 = prefix, $2 = search query, $3 = control title, $4 = section header regex
+nf_reach() {  # $1 = prefix, $2 = search query, $3 = control title, $4 = drawer item regex
   local pre="$1" q="$2" title="$3" hdr="$4"
-  local f c n cy src
-  local lo=$((SH * 20 / 100)) hi=$((SH * 75 / 100))
+  local f c n src
   NF_SRC=""; NF_ROUTE=none; NF_SEARCH=no
   adb shell am start -W -n "$PKG/$NS.SettingsActivity" > "$OUT/am-settings-$pre.log" 2>&1
   sleep 5
@@ -909,32 +890,23 @@ nf_reach() {  # $1 = prefix, $2 = search query, $3 = control title, $4 = section
       fi
     fi
   fi
-  # Tier 2: the scroll route, attempted TWICE. Tapping a header is a toggle, and an earlier section
-  # of this suite may have left the target expanded -- the offline harness's nosearch scenario fails
-  # on exactly that, collapsing Appearance and then scanning twelve screens for a control that is no
-  # longer composed. So: climb, find the header, centre it in the tap-safe band, tap, scan; if the
-  # control never composed, climb back and tap the header a second time, which reopens the section.
+  # Tier 2a: the pane. One section fills the pane now, so when an earlier hunt already selected
+  # this control's section -- nfspl right after nfflt, both Appearance -- the control is a short
+  # pane scroll away and a drawer round trip is pure waste. Scanning the pane first also keeps
+  # the routes unambiguous: what is found here can never be a drawer-item text match.
+  NF_ROUTE=pane
+  if nf_scan "$pre-pane" "$title"; then return 0; fi
+  # Tier 2b: the drawer, attempted TWICE. The hamburger opens the section sheet; tapping an item
+  # selects the section, expands it, and starts the pane at its top, so the control composes
+  # without any scroll hunt. Two rounds because the first can land on a stale frame -- an ANR
+  # dismissal, a sheet caught mid-close -- and re-opening the drawer is free. The old scroll
+  # route's second header tap (a toggle that reopened a collapsed section) is now the drawer
+  # item tap itself, which selects AND expands in one motion.
+  NF_ROUTE=drawer
   local round
   for round in 1 2; do
-    nf_totop
-    nf_scan "$pre-hdr$round" "$hdr" || return 1
-    src="$NF_SRC"
-    for n in 1 2 3; do
-      c=$(nodecenter "$src" "$hdr"); [ -z "$c" ] && break
-      cy=${c#* }
-      [ "$cy" -ge "$lo" ] && [ "$cy" -le "$hi" ] && break
-      if [ "$cy" -gt "$hi" ]; then
-        adb shell input swipe $((SW / 2)) $((SH * 60 / 100)) $((SW / 2)) $((SH * 40 / 100)) 300
-      else
-        adb shell input swipe $((SW / 2)) $((SH * 40 / 100)) $((SW / 2)) $((SH * 60 / 100)) 300
-      fi
-      sleep 2
-      f="$OUT/ui-$pre-hnudge-$round-$n.xml"; dumpui "$f"
-      grep -qE "text=\"[^\"]*$hdr" "$f" 2>/dev/null && src="$f"
-    done
-    c=$(nodecenter "$src" "$hdr")
-    if [ -n "$c" ]; then adb shell input tap $c; sleep 4; fi
-    if nf_scan "$pre-exp$round" "$title"; then NF_ROUTE=scroll; return 0; fi
+    nf_drawer_section "$pre-d$round" "$hdr" || continue
+    if nf_scan "$pre-exp$round" "$title"; then return 0; fi
   done
   return 1
 }
@@ -949,7 +921,8 @@ nf_reach() {  # $1 = prefix, $2 = search query, $3 = control title, $4 = section
 nf_frame_probe() {
   local f c shown frameout w W1 W2 CONF WHDR _r
   # Bring the keyboard up over the activity we are ALREADY in, by focusing the settings search bar
-  # (SettingsScreen.kt:139 -- an OutlinedTextField, so focusing it shows the IME like any editor).
+  # (pinned above the pane since phase 4 part 4 -- an OutlinedTextField, so focusing it shows the
+  # IME like any editor).
   # Run 39804287846 is why this replaced a trip to LauncherActivity: `am start` from a shell implies
   # FLAG_ACTIVITY_NEW_TASK, which brings the app's existing task forward instead of starting the
   # named activity inside it, so focus stayed on SettingsActivity and three hunts looked for a

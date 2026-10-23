@@ -9,10 +9,13 @@ Each scenario is a way the real device has already behaved, or a way it could be
 turn into a false accusation against the keyboard:
 
 happy        everything works; the frame probe asserts and passes
-run30        the state runs 39781367258 and 39783242401 died in: two sections left expanded by 7b/7c
-             and the list scrolled to the bottom, so the search bar itself is off screen
-nosearch     search renders no results, so the scroll fallback must carry all three checks, including
-             the second header tap for a section an earlier check left open
+run30        the state runs 39781367258 and 39783242401 died in: sections left expanded and the
+             list scrolled to the bottom. The bar is pinned now, so the premise mostly cannot
+             recur, but the deep scroll still exercises nf_totop's climb before every hunt
+nosearch     search renders no results, so the drawer fallback (Tier 2b) must carry all three
+             checks, including the second drawer round after a pane scan found nothing
+panescan     search is broken AND the right section is already selected, so the Tier 2a pane scan
+             must answer before the drawer ever opens
 noscrollto   executeSearchAction expands the section but the control never registers a scroll
              position, so the control is composed somewhere below the fold
 nochecked    dumps expose no checked/checkable attributes at all -> the frame probe must stand down
@@ -103,6 +106,8 @@ SCENARIOS = {
                      "scroll": 10 ** 6},                                       0, "ok",  "pass", "ok", ""),
     "nosearch":    ({"expanded": {"appearance": True, "toolbar": True},
                      "scroll": 10 ** 6, "search_broken": True},                0, "ok",  "pass", "ok", ""),
+    "panescan":    ({"search_broken": True, "selected_section": "appearance",
+                     "expanded": {"appearance": True}},                       0, "ok",  "pass", "ok", ""),
     "noscrollto":  ({"no_scroll_to": True},                                    0, "ok",  "pass", "ok", ""),
     "nochecked":   ({"hide_checked": True},                                    0, "ok",  "none", "sw", "NFFRAME skipped"),
     "tapdeaf":     ({"tap_deaf": True},                                        0, "ok",  "none", "sw", "NFFRAME skipped"),

@@ -491,6 +491,7 @@
 
     <!-- SettingsScreen chrome + SettingsDialogs -->
     <string name="settings_search_hint">Search settings…</string>
+    <string name="settings_drawer_open_desc">Open sections menu</string>
     <string name="settings_swipe_data_title">Swipe Data</string>
     <string name="settings_search_words_hint">Search words…</string>
     <string name="settings_perf_stats_title">Performance Statistics</string>

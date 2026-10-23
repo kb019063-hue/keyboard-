@@ -42,7 +42,7 @@ def find(pred, start=0):
 
 pre_end = find(lambda l: l.startswith("# --- locate the x86_64 split"))
 h_start = find(lambda l: l.startswith("scrollup() {"))
-h_end = find(lambda l: l.startswith("texts() {"), h_start)
+h_end = find(lambda l: l.startswith("# --- end of harness helpers"), h_start)
 nf_start = find(lambda l: l.startswith('echo "== 7d.'))
 nf_end = find(lambda l: l.startswith("# ThemeSettingsActivity hosts KeyboardPreviewHost"), nf_start)
 
@@ -50,7 +50,7 @@ glue = ["", 'PKG=tribixbite.cleverkeys.debug', 'SW=1080', 'SH=2400',
         'OUT="%s/out"' % __import__("os").environ["NFOFF_DIR"], 'mkdir -p "$OUT"', ""]
 tail = ["", 'write_summary', 'echo "SUMMARY $(cat "$OUT/summary.txt")"',
         'echo "HARNESS fails=$fails NF_VERDICT=$NF_VERDICT VOICE_VERDICT=$VOICE_VERDICT"']
-out = src[:pre_end] + src[h_start:h_end + 1] + glue + src[nf_start:nf_end - 1] + tail
+out = src[:pre_end] + src[h_start:h_end] + glue + src[nf_start:nf_end - 1] + tail
 open(sys.argv[2], "w").write("\n".join(out) + "\n")
 PY
 [ -f "$WORK/harness.sh" ] || { echo "harness build failed" >&2; exit 2; }

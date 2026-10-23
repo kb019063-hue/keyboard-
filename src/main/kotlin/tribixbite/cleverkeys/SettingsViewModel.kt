@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import tribixbite.cleverkeys.ml.SwipeMLData
+import tribixbite.cleverkeys.ui.settings.SettingsDrawerItems
 import tribixbite.cleverkeys.ml.SwipeMLDataStore
 
 /**
@@ -72,6 +73,8 @@ class SettingsViewModel : ViewModel() {
     // ── Settings search ───────────────────────────────────────────────────────
 
     var settingsSearchQuery by mutableStateOf("")
+    /** The drawer's selection (phase 4 part 4): which single section the content pane shows. */
+    var selectedSectionKey by mutableStateOf(SettingsDrawerItems.DEFAULT)
     /** Highlighted setting ID for pulse animation after scroll-to. */
     var highlightedSettingId by mutableStateOf<String?>(null)
 
