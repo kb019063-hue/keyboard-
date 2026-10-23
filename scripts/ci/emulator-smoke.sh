@@ -1135,7 +1135,42 @@ fi
 # the tap missed, the key legitimately does the legacy thing and a failure would blame the product
 # for the harness's miss. VOICE-DIAG is emitted whether or not anything was asserted, because
 # warnings survive annotation storage where notices are dropped at about twelve.
-MIC=""; GRANT="none"
+ime_frame_rect() {  # "l t r b" of the input-method window's frame, dialect-tolerant (see 7d/7f)
+  adb shell dumpsys window windows 2>/dev/null | python3 -c '
+import re, sys
+blocks = re.split(r"(?=Window #)", sys.stdin.read())
+for b in blocks:
+    head = b.split("\n", 1)[0]
+    if "ty=INPUT_METHOD" in b or "InputMethod" in head:
+        m = re.search(r"\bm?[Ff]rame=\[(\d+),(\d+)\]\[(\d+),(\d+)\]", b)
+        if m:
+            print(" ".join(m.groups())); sys.exit(0)
+'
+}
+
+kb_toolbar_center() {  # $1 = zero-based toolbar button index; echoes "x y" of its centre, or nothing
+  # Run 40's DUMPDIAG settled what run 39 raised: this emulator's accessibility dumps never carry
+  # IME-window nodes (41 nodes, all settings widgets, kbview=0 -- while dumpsys said the IME was
+  # shown), so node search cannot reach a toolbar key here, on any run, ever. The frame rect and
+  # the density locate one anyway: the toolbar is a 40dp band at the top of the IME frame, and the
+  # ten default buttons are evenly weighted across it (KeyboardToolbar gives each weight=1 with
+  # isFillViewport). A customised toolbar moves the buttons, so every caller treats "tapped,
+  # nothing happened" as unverifiable and never as a product defect.
+  local idx=$1 rect dpi l t r th
+  rect=$(ime_frame_rect)
+  [ -n "$rect" ] || return 1
+  dpi=$(adb shell wm density 2>/dev/null | sed -n 's/[^0-9]*\([0-9][0-9]*\)[^0-9]*$/\1/p' | tail -1)
+  case "$dpi" in ''|*[!0-9]*) return 1;; esac
+  [ "$dpi" -gt 0 ] || return 1
+  set -- $rect
+  l=$1; t=$2; r=$3
+  th=$(( 40 * dpi / 160 ))
+  # Space-separated, the same contract nodecenter/nodecenter_desc return: every caller does
+  # `adb shell input tap $POINT` and relies on word splitting for the two coordinates.
+  echo "$(( l + (r - l) * (2 * idx + 1) / 20 )) $(( t + th / 2 ))"
+}
+
+MIC=""; MROUTE=node; GRANT="none"
 if nf_reach nfvoi dictation 'Dictation Self-Test' 'Input'; then
   pass "dictation self-test switch composed under Input Behavior (route=$NF_ROUTE search-result=$NF_SEARCH)"
   PRE=$(nf_checkedcount "$NF_SRC")
@@ -1162,21 +1197,35 @@ if nf_reach nfvoi dictation 'Dictation Self-Test' 'Input'; then
     if [ -n "$FC" ]; then adb shell input tap $FC; sleep 3; fi
     F="$OUT/ui-nfvoi-kb.xml"; dumpui "$F"
     MIC=$(nodecenter_desc "$F" '^Voice Typing$')
-    info "self-test: field-tap='${FC:-none}' mic-node='${MIC:-none}' shown=$(shown)"
+    MROUTE=node
+    if [ -z "$MIC" ]; then
+      # The dump-blind emulator (run 40's DUMPDIAG): fall back to the computed second toolbar
+      # button -- the mic's default position. The transcript check below does not care which
+      # route found the key: the field lives in the SETTINGS window, which dumps always carry.
+      MIC=$(kb_toolbar_center 1) && MROUTE=coord || MIC=""
+    fi
+    info "self-test: field-tap='${FC:-none}' mic='${MIC:-none}' route=$MROUTE shown=$(shown)"
     if [ -n "$MIC" ]; then
       adb shell input tap $MIC; sleep 3
       F="$OUT/ui-nfvoi-after.xml"; dumpui "$F"
       shot 11-voice-selftest
       if grep -q 'voice dictation self test' "$F" 2>/dev/null; then
         VOICE_VERDICT=ok
-        pass "the mic key committed dictation's transcript into the focused field"
+        pass "the mic key committed dictation's transcript into the focused field (route=$MROUTE)"
+      elif [ "$MROUTE" = coord ] && ! adb logcat -d -v brief 2>/dev/null | grep -q 'DictationController: press'; then
+        # A computed point is not a witnessed tap: silence after it is the harness's miss (the
+        # toolbar may not carry the mic at its default position), never the product's defect. The
+        # controller's press log is what tells the two apart -- press logged but no commit is the
+        # genuine deaf-mic failure and falls through to the branch below.
+        VOICE_VERDICT=key
+        ann warning "VOICE skipped, coordinate tap at $MIC logged no dictation press: no toolbar node carries content-desc 'Voice Typing' and the fallback point hit nothing (shown=$(shown) focus='$(focus)')"
       else
         VOICE_VERDICT=commit
-        fail "mic key tapped at $MIC with self-test confirmed on, but no transcript reached the field: $(nf_evidence nfvoi)"
+        fail "mic key tapped at $MIC (route=$MROUTE) with self-test confirmed on, but no transcript reached the field: $(nf_evidence nfvoi)"
       fi
     else
       VOICE_VERDICT=key
-      ann warning "VOICE skipped, no toolbar node carries content-desc 'Voice Typing' (shown=$(shown) focus='$(focus)')"
+      ann warning "VOICE skipped, no toolbar node carries content-desc 'Voice Typing' and no IME frame/density to compute a tap point (shown=$(shown) focus='$(focus)')"
     fi
   else
     VOICE_VERDICT=sw
@@ -1188,7 +1237,7 @@ else
 fi
 VOICEDIAG=$(adb logcat -d -v brief 2>/dev/null | grep -E 'DictationController|VoicePermissionActivity' \
             | tail -3 | tr '\n' '|' | tr -d '\r' | cut -c1-300)
-ann warning "VOICE-DIAG verdict=$VOICE_VERDICT mic='${MIC:-none}' grant='$GRANT' shown=$(shown) log='${VOICEDIAG:-none}'"
+ann warning "VOICE-DIAG verdict=$VOICE_VERDICT mic='${MIC:-none}' route=$MROUTE grant='$GRANT' shown=$(shown) log='${VOICEDIAG:-none}'"
 
 # Run 39 returned mic='none' and view=0 while dumpsys said the IME was shown: either the dump
 # truly carries no IME-window nodes on this emulator, or the keyboard is composed but its nodes
@@ -1275,6 +1324,44 @@ if [ "$(shown)" = "mInputShown=true" ]; then
   fi
 else
   info "7f skipped: no keyboard up to measure (shown=$(shown))"
+fi
+
+# --- 7g: the more-tools sheet opens from the toolbar (phase 4 part 3) ----------------------------
+# "I didn't see incognito tools on the keyboard unless I looked for it in the settings (and I
+# didn't see many tools not only incognito)." The sheet is a dialog attached to the IME window,
+# and run 40 proved this emulator's dumps never carry IME windows -- so no dump-based check can
+# ever confirm the dialog opened. logcat is the witness instead: the service logs "press" when
+# the command dispatches and "shown rows=5 <state>" when the sheet is up. The tap is the computed
+# FIRST toolbar button (the more key's default position). Vocabulary: press+shown passes; press
+# without shown is the defect this section exists to catch -- the dispatch reached the service
+# and no dialog came up; silence means the computed point missed (a customised toolbar, or a
+# geometry the model got wrong) and stands down as a warning, because blaming the product for
+# the harness's miss is the one sin this script never commits.
+MTSHEET=notrun
+if [ "$(shown)" != "mInputShown=true" ]; then
+  info "7g stood down, keyboard not shown ($(shown))"
+else
+  MC=$(kb_toolbar_center 0)
+  if [ -z "$MC" ]; then
+    info "7g stood down, no IME frame/density to compute the more key's centre"
+  else
+    adb shell input tap $MC; sleep 3
+    MTLOG=$(adb logcat -d -v brief 2>/dev/null | grep 'MoreToolsSheet' | tail -2 | tr '\n' '|' | tr -d '\r' | cut -c1-220)
+    if printf '%s' "$MTLOG" | grep -q 'shown rows='; then
+      MTSHEET=shown
+      pass "the more-tools sheet opened from the toolbar's more key: $MTLOG"
+    elif printf '%s' "$MTLOG" | grep -q 'press'; then
+      MTSHEET=press
+      fail "toolbar dispatched more_tools (press logged) but the sheet never showed: log='$MTLOG'"
+    else
+      MTSHEET=silent
+      ann warning "MTSHEET skipped, tap at $MC logged nothing (toolbar may not carry the more key at position 1)"
+    fi
+    # Dismiss whatever opened: the sheet is non-focusable with FLAG_WATCH_OUTSIDE_TOUCH, so a tap
+    # on the status-bar strip closes it without touching the keyboard or the app below.
+    adb shell input tap 540 5 > /dev/null 2>&1; sleep 1
+    ann warning "MTSHEET-DIAG verdict=$MTSHEET tap=$MC shown=$(shown) log='${MTLOG:-none}'"
+  fi
 fi
 
 # ThemeSettingsActivity hosts KeyboardPreviewHost -> a real Keyboard2View rendered with the active

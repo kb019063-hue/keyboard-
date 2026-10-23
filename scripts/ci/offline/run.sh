@@ -67,7 +67,7 @@ verdict_of() {  # $1 = captured output
   printf '%s' "$out" | grep -q "FAIL  floating left the input-method window" && frame=fail
   # Four warnings, not two: 7e added VOICE-DIAG plus its own skip warnings, and a scenario's
   # required substring can be the third one emitted.
-  warn=$(printf '%s' "$out" | grep '^::warning::' | head -6 | tr '\n' ' ')  # 6: NFFRAME-DIAG, VOICE skipped, VOICE-DIAG, DUMPDIAG, KBCLIP-DIAG/skipped can all land in one run
+  warn=$(printf '%s' "$out" | grep '^::warning::' | head -8 | tr '\n' ' ')  # 8: NFFRAME-DIAG, VOICE skipped, VOICE-DIAG, DUMPDIAG, KBCLIP-DIAG/skipped, MTSHEET skipped, MTSHEET-DIAG can all land in one run
   printf '%s|%s|%s|%s|%s' "${fails:-?}" "${nf:-?}" "$frame" "${voice:-?}" "$warn"
 }
 

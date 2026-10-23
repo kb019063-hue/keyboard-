@@ -1073,7 +1073,15 @@ class CleverKeysService : InputMethodService(),
      * refreshes [Config].
      */
     fun showMoreToolsSheet() {
-        val token = window?.window?.decorView?.windowToken ?: return
+        // The press is logged before the sheet is built, and the sheet logs "shown" (below): over
+        // an IME, logcat is the only witness CI has — dumps never carry IME windows (run 40's
+        // DUMPDIAG) — so "press without shown" is the one signal that can convict this code of
+        // dispatching the command and then failing to open anything.
+        Log.i("MoreToolsSheet", "press")
+        val token = window?.window?.decorView?.windowToken ?: run {
+            Log.w("MoreToolsSheet", "press dropped, no window token")
+            return
+        }
         val cfg = _config
         val rows = MoreToolsSheet.rows(
             MoreToolsSheet.State(

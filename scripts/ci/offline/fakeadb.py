@@ -42,9 +42,13 @@ SDCARD = os.path.join(NFOFF, "sdcard-ui.xml")
 VIEW_TOP = 100      # screen y where the scrollable content starts
 VIEW_H = 2300       # content px visible at once
 SCREEN_W, SCREEN_H = 1080, 2400
-# While the IME is up its toolbar occupies this band at the bottom of the screen. Settings rows
-# that would render inside it are not on screen, and must not win a hit test against a key.
+# While the IME is up, settings rows that would render inside this bottom band are not on screen
+# and must not win a hit test against a key. (The toolbar itself lives at the TOP of the IME
+# frame -- see ime_nodes -- but the keyboard's body occludes the bottom of the screen.)
 IME_BAND_TOP = SCREEN_H - 130
+# The toolbar's height in px: 40dp at the 420dpi `wm density` reports. This is the band 7e's
+# coordinate fallback and 7g's more-key tap compute their points inside.
+TOOLBAR_H = 105
 PKG_DEFAULT = "tribixbite.cleverkeys.debug"
 
 
@@ -227,35 +231,76 @@ def launcher_nodes(s):
     return n
 
 
-def ime_nodes(s):
-    """The keyboard's own nodes. Only composed while the IME is up, as on a device."""
-    if not s.get("ime_shown") or s.get("no_ime_nodes"):
-        # no_ime_nodes models what run 39's emulator actually produced: dumpsys says the IME is
-        # shown, yet the accessibility dump carries none of its nodes, so neither 7e nor 7f can
-        # see anything to tap or measure.
-        return []
+def ime_frame(s):
+    """The input-method window's frame -- the same rect the fake's `dumpsys window` reports."""
     floating = bool(s["checked"].get("Floating Keyboard")) and s.get("window_mode", "narrow") != "full"
+    return [108, 1488, 972, 2340] if floating else [0, 1488, 1080, 2400]
+
+
+def ime_nodes(s, for_hit=False):
+    """The keyboard's own nodes. Only composed while the IME is up, as on a device.
+
+    for_hit=True composes them even under no_ime_nodes: a finger touches what the screen
+    renders, not what the accessibility dump exposes. Run 40's emulator renders the toolbar --
+    taps land and logcat proves it -- while its dumps carry no IME nodes at all, and the fake
+    must keep those two channels independently blind or the coordinate routes cannot be tested.
+    """
+    if not s.get("ime_shown") or (s.get("no_ime_nodes") and not for_hit):
+        # no_ime_nodes models what runs 39 and 40's emulator actually produced: dumpsys says the
+        # IME is shown, yet the accessibility dump carries none of its nodes.
+        return []
+    left, top, right, bottom = ime_frame(s)
     # The view fills its window, so its bottom edge equals the frame's -- unless kb_overflow says
     # the measure pass over-reserved the nav inset, which is the defect 7f exists to catch.
-    view_bottom = (2340 if floating else SCREEN_H) + (132 if s.get("kb_overflow") else 0)
+    view_bottom = bottom + (132 if s.get("kb_overflow") else 0)
+    # Known simplification: the root's TOP stays at the occlusion band, not the frame top. A real
+    # root spans the whole frame and would swallow every hunt tap on a settings row below the
+    # frame top -- rows the real settings window never renders there anyway (adjustResize ends
+    # the list at the keyboard), but which this fake still exposes down to IME_BAND_TOP. Nothing
+    # reads the root's top edge: 7f measures the bottom, DUMPDIAG counts classes.
     n = [(IME_BAND_TOP - 1,
           '<node index="0" text="" resource-id="" class="tribixbite.cleverkeys.Keyboard2View" '
           'package="%s" content-desc="" checkable="false" checked="false" clickable="true" '
           'enabled="true" focusable="true" focused="false" scrollable="false" '
-          'bounds="[0,%d][1080,%d]" />' % (s["pkg"], IME_BAND_TOP, view_bottom))]
-    descs = ["Voice Typing", "Clipboard", "Undo", "Redo", "Select Word", "Copy", "Paste"]
+          'bounds="[%d,%d][%d,%d]" />' % (s["pkg"], left, IME_BAND_TOP, right, view_bottom))]
+    # The toolbar: KeyboardToolbar's ten default buttons, evenly weighted across the top 40dp of
+    # the frame -- the geometry 7e/7g's coordinate taps compute against, so a formula bug fails
+    # here in thirty seconds instead of on the emulator in fifteen minutes. More Tools holds
+    # position 0 (phase 4 part 3 took the slot from config); no_toolbar_mic deletes the mic and
+    # the rest re-space, exactly like a user removing the button.
+    descs = ["More Tools", "Voice Typing", "Clipboard", "Undo", "Redo", "Select Word", "Copy",
+             "Paste", "Cursor Left", "Cursor Right"]
     if s.get("no_toolbar_mic"):
-        descs = descs[1:]
-    x = 16
-    for desc in descs:
+        descs.remove("Voice Typing")
+    slot = (right - left) / len(descs)
+    for i, desc in enumerate(descs):
         n.append((IME_BAND_TOP,
                   '<node index="%d" text="" resource-id="" class="android.widget.ImageButton" '
                   'package="%s" content-desc="%s" checkable="false" checked="false" '
                   'clickable="true" enabled="true" focusable="true" focused="false" '
                   'scrollable="false" bounds="[%d,%d][%d,%d]" />'
-                  % (len(n), s["pkg"], esc(desc), x, IME_BAND_TOP + 20, x + 110, IME_BAND_TOP + 110)))
-        x += 130
+                  % (len(n), s["pkg"], esc(desc),
+                     int(left + i * slot), top, int(left + (i + 1) * slot), top + TOOLBAR_H)))
     return n
+
+
+def more_tools_sheet(s):
+    """What the more key does (7g): the service logs the press, then the sheet it shows.
+
+    mt_deaf models the one defect 7g exists to catch -- the command dispatched, the dialog never
+    came up: press in logcat, no shown line. The state in the shown line mirrors the five rows
+    MoreToolsSheet.rows carries, read from the same switches 7d toggles.
+    """
+    s.setdefault("loglines", []).append("I MoreToolsSheet: press")
+    if s.get("mt_deaf"):
+        return
+    st = s["checked"]
+    s["loglines"].append(
+        "I MoreToolsSheet: shown rows=5 " + " ".join(
+            "%s=%s" % (label, "on" if st.get(name) else "off")
+            for label, name in (("incognito", "Incognito Mode"), ("floating", "Floating Keyboard"),
+                                ("split", "Split Keyboard"), ("one_handed", "One-Handed Mode"),
+                                ("sound", "Key Sound"))))
 
 
 def voice_mic(s):
@@ -285,17 +330,17 @@ def voice_mic(s):
         s["field_text"] = (s.get("field_text") or "") + prefix + "voice dictation self test"
 
 
-def nodes(s):
+def nodes(s, for_hit=False):
     if s["screen"] == "launcher":
         return launcher_nodes(s)
     if s["screen"] != "settings":
         return [(0, '<node index="0" text="Theme preview" class="android.view.View" package="%s" '
                     'bounds="[0,0][1080,2400]" />' % s["pkg"])]
-    return settings_nodes(s) + ime_nodes(s)
+    return settings_nodes(s) + ime_nodes(s, for_hit)
 
 
-def dump(s):
-    body = "\n".join(t for _, t in sorted(nodes(s), key=lambda p: p[0]))
+def dump(s, for_hit=False):
+    body = "\n".join(t for _, t in sorted(nodes(s, for_hit), key=lambda p: p[0]))
     return ("<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>\n"
             '<hierarchy rotation="0">\n%s\n</hierarchy>\n' % body)
 
@@ -306,7 +351,9 @@ def hit(s, x, y):
     # dispatch lands on the deepest view. Non-overlapping nodes -- everything else the model
     # emits -- have the same first and last match, so this changes nothing for them.
     found = None
-    for m in re.finditer(r'<node[^>]*>', dump(s)):
+    # for_hit: a finger touches what the screen renders, not what the dump exposes -- under
+    # no_ime_nodes the toolbar is invisible to `uiautomator dump` but still takes the tap.
+    for m in re.finditer(r'<node[^>]*>', dump(s, for_hit=True)):
         tag = m.group(0)
         b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', tag)
         if not b:
@@ -367,6 +414,15 @@ def main(argv):
             with open(SDCARD) as f, open(a[2], "w") as g:
                 g.write(f.read())
         return 0
+    # logcat is a HOST-side adb command -- the smoke script calls `adb logcat`, not
+    # `adb shell logcat` -- so it must be served before the shell gate below. Until this existed
+    # the fake swallowed every logcat call, which is why VOICE-DIAG always read log='none' even
+    # in scenarios where voice_mic had appended the controller's press line.
+    if a[:1] == ["logcat"]:
+        save(s)
+        for line in s.get("loglines", []):
+            print(line)
+        return 0
     if a[:1] != ["shell"]:
         save(s)
         return 0
@@ -420,6 +476,11 @@ def main(argv):
             if desc and unesc(desc.group(1)) == "Voice Typing":
                 # 7e: the toolbar's mic key, not the settings row that shares its label.
                 voice_mic(s)
+                save(s)
+                return 0
+            if desc and unesc(desc.group(1)) == "More Tools":
+                # 7g: the toolbar's more key dispatches more_tools; press, then shown.
+                more_tools_sheet(s)
                 save(s)
                 return 0
             if s["screen"] == "launcher":
@@ -482,9 +543,8 @@ def main(argv):
     if cmd[:3] == ["dumpsys", "window", "windows"]:
         save(s)
         modern = s.get("frame_format") == "modern"
-        floating = bool(s["checked"].get("Floating Keyboard"))
         mode = s.get("window_mode", "narrow")
-        frame = [108, 1488, 972, 2340] if (floating and mode != "full") else [0, 1488, 1080, 2400]
+        frame = ime_frame(s)
 
         def win(num, title, rect, ime=False):
             print("  Window #%d Window{%s u0 %s}" % (num, hex(0xaaa + num)[2:], title))
@@ -518,6 +578,10 @@ def main(argv):
     if cmd[:2] == ["wm", "size"]:
         save(s)
         print("Physical size: %dx%d" % (SCREEN_W, SCREEN_H))
+        return 0
+    if cmd[:2] == ["wm", "density"]:
+        save(s)
+        print("Physical density: 420")
         return 0
     if cmd[:2] == ["settings", "get"]:
         save(s)

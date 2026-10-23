@@ -30,14 +30,23 @@ noime        no text field anywhere to focus, so no window to measure -> report,
 voicedeaf    7e: the mic key is tapped with the self-test confirmed on but nothing reaches the field
              -> the one genuine dictation defect this check exists to catch, so it must FAIL
 voicenokey   7e: no toolbar node carries the mic key's content-desc -> report, do not assert
-noimenodes   the dump carries no IME nodes at all while dumpsys says the IME is shown -- run 39's
-             emulator, exactly. Both 7e and 7f must stand down and say so, never pass over nothing
+noimenodes   the dump carries no IME nodes at all while dumpsys says the IME is shown -- runs 39
+             and 40's emulator, exactly. 7f must stand down and say so, never pass over a view
+             bottom of 0. 7e must survive it anyway: with no node to aim at it falls back to the
+             COMPUTED mic position (frame rect + density), and the fake -- whose hit space sees
+             the toolbar even while its dump hides it, like the real emulator -- takes the tap,
+             so the transcript still lands and voice=ok
 kbclip       7f: the measure pass over-reserved the nav inset, so the keyboard view is 132px taller
              than its window and its last row is clipped -> the defect 7f exists to catch, FAIL
+mtdeaf       7g: the toolbar dispatched more_tools (press logged) but the sheet never showed ->
+             the one genuine defect 7g exists to catch, FAIL
 
-Every scenario also runs 7e, so each one states the voice verdict it must produce: `ok` (the
+Every scenario also runs 7e and 7g. 7e states the voice verdict each one must produce: `ok` (the
 transcript landed in the field), `sw` (the self-test switch never confirmed on, so the check stands
-down), `key` (no mic node to tap), `commit` (tapped, nothing committed).
+down), `key` (no mic node AND no usable computed point, or the computed tap logged no press --
+unverifiable, never a defect), `commit` (a witnessed tap -- node route, or coordinate route with
+the controller's press logged -- and nothing committed). 7g passes on every scenario whose toolbar
+still carries the more key at position 0; only mtdeaf fails it.
 """
 import json
 import os
@@ -79,6 +88,7 @@ def base():
         "voice_deaf": False,
         "kb_overflow": False,
         "no_ime_nodes": False,
+        "mt_deaf": False,
         "calls": [],
         "taps": [],
     }
@@ -103,7 +113,8 @@ SCENARIOS = {
     "voicedeaf":   ({"voice_deaf": True},                                      1, "ok",  "pass", "commit", "verdict=commit"),
     "voicenokey":  ({"no_toolbar_mic": True},                                  0, "ok",  "pass", "key", "no toolbar node"),
     "kbclip":      ({"kb_overflow": True},                                     1, "ok",  "pass", "ok", "KBCLIP-DIAG"),
-    "noimenodes":  ({"no_ime_nodes": True},                                    0, "ok",  "pass", "key", "KBCLIP skipped"),
+    "noimenodes":  ({"no_ime_nodes": True},                                    0, "ok",  "pass", "ok", "KBCLIP skipped"),
+    "mtdeaf":      ({"mt_deaf": True},                                         1, "ok",  "pass", "ok", "MTSHEET-DIAG verdict=press"),
 }
 
 
