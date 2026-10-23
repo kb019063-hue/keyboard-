@@ -1190,6 +1190,64 @@ VOICEDIAG=$(adb logcat -d -v brief 2>/dev/null | grep -E 'DictationController|Vo
             | tail -3 | tr '\n' '|' | tr -d '\r' | cut -c1-300)
 ann warning "VOICE-DIAG verdict=$VOICE_VERDICT mic='${MIC:-none}' grant='$GRANT' shown=$(shown) log='${VOICEDIAG:-none}'"
 
+# --- 7f: does the keyboard fit inside its window (phase 4 part 2) -------------------------------
+# The owner's phone clipped the bottom key row at the screen edge. The mechanism: onMeasure adds
+# the navigation-bar inset to the view's height, and on a gesture-nav phone the pre-insets fallback
+# reserved the FULL 3-button bar (it computed isGestureNav and then never read it), so the view
+# grew ~48dp taller than its window and the window manager clipped what did not fit. Two numbers
+# settle it on any device: the bottom edge of the keyboard view's own bounds in the accessibility
+# dump, and the bottom edge of the input-method window's frame in `dumpsys window`. A view that
+# ends below its window is being clipped and that is a failure; anything else passes with the
+# reserved strip reported, because space left for a nav bar below the window is device-specific.
+ime_frame_bottom() {  # bottom edge of the input-method window's frame, dialect-tolerant (see 7d)
+  adb shell dumpsys window windows 2>/dev/null | python3 -c '
+import re, sys
+blocks = re.split(r"(?=Window #)", sys.stdin.read())
+for b in blocks:
+    head = b.split("\n", 1)[0]
+    if "ty=INPUT_METHOD" in b or "InputMethod" in head:
+        m = re.search(r"\bm?[Ff]rame=\[(\d+),(\d+)\]\[(\d+),(\d+)\]", b)
+        if m:
+            print(m.group(4)); sys.exit(0)
+'
+}
+
+kbclip_view_bottom() {  # $1 = dump; lowest bottom edge of the keyboard view itself
+  # Matched on the class name, not the package: the settings activity is the SAME package, so a
+  # package match would take the tallest settings row and accuse the keyboard of nothing.
+  python3 - "$1" <<'PY' 2>/dev/null
+import re, sys
+try:
+    xml = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+except Exception:
+    sys.exit(0)
+best = 0
+for m in re.finditer(r'<node[^>]*>', xml):
+    tag = m.group(0)
+    if "Keyboard2View" not in tag:
+        continue
+    b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', tag)
+    if b:
+        best = max(best, int(b.group(4)))
+print(best)
+PY
+}
+
+if [ "$(shown)" = "mInputShown=true" ]; then
+  F="$OUT/ui-kbclip.xml"; dumpui "$F"
+  VB=$(kbclip_view_bottom "$F")
+  FB=$(ime_frame_bottom)
+  SB=$(dispsz | cut -dx -f2)
+  if [ -n "$VB" ] && [ -n "$FB" ] && [ "$VB" -gt "$((FB + 4))" ]; then
+    fail "keyboard view bottom $VB overflows its window frame bottom $FB (screen ${SB:-?}): the last row is clipped"
+  else
+    pass "keyboard fits its window (view bottom ${VB:-?}, window bottom ${FB:-?}, screen ${SB:-?}, reserved below window $(( ${SB:-0} - ${FB:-0} ))px)"
+  fi
+  ann warning "KBCLIP-DIAG view=${VB:-?} frame=${FB:-?} screen=${SB:-?} shown=$(shown)"
+else
+  info "7f skipped: no keyboard up to measure (shown=$(shown))"
+fi
+
 # ThemeSettingsActivity hosts KeyboardPreviewHost -> a real Keyboard2View rendered with the active
 # theme and layout: a direct visual check of the keyboard needing no IME connection at all.
 adb shell am start -W -n "$PKG/$NS.ThemeSettingsActivity" > "$OUT/am-theme.log" 2>&1

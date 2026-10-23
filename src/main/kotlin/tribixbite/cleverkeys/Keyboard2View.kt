@@ -348,11 +348,21 @@ class Keyboard2View @JvmOverloads constructor(
             navMode == 2
         } else false
 
-        // If gesture nav, nav bar height is smaller (pill only)
-        // If no nav bar at all, return 0
-        if (!hasNavBar && !isGestureNav) {
-            // Try to get height anyway - some devices report false but have nav bar
+        // If gesture nav, the reserved area is the pill, not the bar: reserving the full bar on a
+        // gesture-nav phone adds ~48dp of bottom margin nothing on screen occupies, and because
+        // onMeasure adds that margin to the view's height, the last key row overflows the window
+        // and is clipped at the screen edge -- exactly what the owner's Huawei screenshot showed
+        // (phase 4 part 2). The branch that detected gesture nav used to compute isGestureNav and
+        // then never read it; the empty if below was its only trace.
+        if (isGestureNav) {
+            val gestureId = resources.getIdentifier("navigation_bar_gesture_height", "dimen", "android")
+            if (gestureId > 0) return resources.getDimensionPixelSize(gestureId)
+            val barId = resources.getIdentifier("navigation_bar_height", "dimen", "android")
+            return if (barId > 0) resources.getDimensionPixelSize(barId) / 3 else 0
         }
+
+        // No nav bar at all (some tablets, immersive apps): reserve nothing.
+        if (!hasNavBar) return 0
 
         val resourceId = resources.getIdentifier("navigation_bar_height", "dimen", "android")
         return if (resourceId > 0) {

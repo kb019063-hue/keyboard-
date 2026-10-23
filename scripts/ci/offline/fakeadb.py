@@ -228,13 +228,21 @@ def launcher_nodes(s):
 
 
 def ime_nodes(s):
-    """The keyboard's toolbar band. Only composed while the IME is up, as on a device."""
+    """The keyboard's own nodes. Only composed while the IME is up, as on a device."""
     if not s.get("ime_shown"):
         return []
+    floating = bool(s["checked"].get("Floating Keyboard")) and s.get("window_mode", "narrow") != "full"
+    # The view fills its window, so its bottom edge equals the frame's -- unless kb_overflow says
+    # the measure pass over-reserved the nav inset, which is the defect 7f exists to catch.
+    view_bottom = (2340 if floating else SCREEN_H) + (132 if s.get("kb_overflow") else 0)
+    n = [(IME_BAND_TOP - 1,
+          '<node index="0" text="" resource-id="" class="tribixbite.cleverkeys.Keyboard2View" '
+          'package="%s" content-desc="" checkable="false" checked="false" clickable="true" '
+          'enabled="true" focusable="true" focused="false" scrollable="false" '
+          'bounds="[0,%d][1080,%d]" />' % (s["pkg"], IME_BAND_TOP, view_bottom))]
     descs = ["Voice Typing", "Clipboard", "Undo", "Redo", "Select Word", "Copy", "Paste"]
     if s.get("no_toolbar_mic"):
         descs = descs[1:]
-    n = []
     x = 16
     for desc in descs:
         n.append((IME_BAND_TOP,
@@ -290,6 +298,11 @@ def dump(s):
 
 
 def hit(s, x, y):
+    # The LAST node containing the point, not the first: the keyboard view node spans the whole
+    # IME band including its toolbar, and a tap must land on the key inside it, the way a real
+    # dispatch lands on the deepest view. Non-overlapping nodes -- everything else the model
+    # emits -- have the same first and last match, so this changes nothing for them.
+    found = None
     for m in re.finditer(r'<node[^>]*>', dump(s)):
         tag = m.group(0)
         b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', tag)
@@ -297,8 +310,8 @@ def hit(s, x, y):
             continue
         x1, y1, x2, y2 = map(int, b.groups())
         if x1 <= x <= x2 and y1 <= y <= y2:
-            return tag
-    return None
+            found = tag
+    return found
 
 
 def row_title(s, tag):
@@ -499,6 +512,10 @@ def main(argv):
         print("mCurrentFocus=Window{f0cus u0 %s/tribixbite.cleverkeys.%s}" % (s["pkg"], act))
         return 0
 
+    if cmd[:2] == ["wm", "size"]:
+        save(s)
+        print("Physical size: %dx%d" % (SCREEN_W, SCREEN_H))
+        return 0
     if cmd[:2] == ["settings", "get"]:
         save(s)
         print("%s/tribixbite.cleverkeys.CleverKeysService" % s["pkg"])

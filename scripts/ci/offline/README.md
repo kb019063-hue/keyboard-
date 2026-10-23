@@ -9,7 +9,7 @@ annotations (capped, and notices beyond roughly the twelfth are dropped) and the
 So a failed run yields one or two sentences of evidence, and guessing from those has already cost
 three runs. This harness removes the guessing for the parts of the script that are pure hunt logic:
 it runs the real sections 7d and 7e, unmodified, against a fake `adb` that models an emulator's
-settings screen, and checks that twelve scenarios each produce exactly the verdicts they must.
+settings screen, and checks that thirteen scenarios each produce exactly the verdicts they must.
 
 ```
 scripts/ci/offline/run.sh          # every scenario, about twenty seconds
@@ -47,6 +47,13 @@ measurement whose precondition was never confirmed, and `framepkg` and `noime` m
 asserting a window they cannot identify or reach. `framefull` is the mirror image — floating
 confirmed on, window still full width — and is the one scenario that must fail, because that is the
 defect the probe exists to catch.
+
+`kbclip` is 7f's mirror image: the measure pass over-reserves the navigation inset, the keyboard
+view ends up 132px taller than its window, and the last key row is clipped at the screen edge — the
+defect the owner's Huawei screenshot showed. It must fail. The fake therefore models the keyboard
+view's own bounds (matched on its class name, never on the package, which the settings activity
+shares) alongside the window frame 7d already models, and `hit()` returns the deepest node at a
+point so a tap on a toolbar key lands on the key and not on the view containing it.
 
 `voicedeaf` is 7e's mirror image and exists for the same reason: the mic key tapped with the
 self-test switch confirmed on, and no transcript reaching the field. That is the defect 7e exists to
