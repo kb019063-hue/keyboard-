@@ -1873,15 +1873,16 @@ class Keyboard2View @JvmOverloads constructor(
                 // swipes, hit-testing and the a11y tree still reach what is not drawn.
                 //
                 // `loc` corners are excluded here and in the draw loop below. The layout
-                // grammar reserves `loc <key>` for PLACEMENT: it says "if this layout ever
-                // grows this key, put it here" ("Symbols prefixed with 'loc ' are not visible
-                // on the keyboard", latn_qwerty_us.xml). KeyboardData parses that into
-                // Key.F_LOC, but nothing in the renderer consulted the flag, so every one of
-                // those placeholders printed as a sub-label -- `esc` under Q, `tab`/`capslock`
-                // on shift, `€` on E, `menu`/`page_up`/`page_down` on backspace. That is a
-                // large part of the "chaotic next to Gboard" look, and it is not even a
-                // reachable action: the symbol was never meant to be shown at all. Calm mode
-                // hid most of them only by accident, by picking one higher-priority corner.
+                // grammar reserves `loc <key>` for PLACEMENT -- "Symbols prefixed with 'loc '
+                // are not visible on the keyboard" (latn_qwerty_us.xml) -- and KeyboardData
+                // parses that into Key.F_LOC, but nothing in the renderer ever read the flag.
+                // The slots that survive to here are the ones whose key an Extra-keys checkbox
+                // has enabled (LayoutModifier nulls the rest, and the defaults turn on esc,
+                // tab, home, end, page_up, page_down, menu and compose), so Q printed `esc`,
+                // shift printed home/end/tab/capslock, backspace printed menu/page_up/
+                // page_down. That is a large part of what read as chaos next to Gboard. All of
+                // them stay reachable exactly as before by corner swipe; like the rest of calm
+                // mode they are simply no longer printed (docs/PHASE4-POLISH-DESIGN.md S1).
                 var presentCorners = 0
                 for (i in 1..8) {
                     if (k.keys[i] != null && !k.keyHasFlag(i, KeyboardData.Key.F_LOC))
