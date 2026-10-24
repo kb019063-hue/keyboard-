@@ -1,0 +1,708 @@
+package tribixbite.cleverkeys
+
+import tribixbite.cleverkeys.swipe.ctc.CtcDecodableLength
+
+import android.annotation.SuppressLint
+import android.app.AlertDialog
+import android.os.Bundle
+import android.text.InputType
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.Button
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.ScrollView
+import android.widget.TextView
+import android.widget.Toast
+import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import kotlinx.coroutines.launch
+
+/**
+ * Fragment displaying a list of words
+ */
+class WordListFragment : Fragment() {
+
+    private lateinit var recyclerView: RecyclerView
+    private lateinit var emptyText: TextView
+    private lateinit var loadingProgress: ProgressBar
+    // Custom tab only: the old-default-frequency raise offer (LegacyCustomWordFrequency).
+    private var legacyFrequencyNotice: View? = null
+    private var legacyFrequencyNoticeText: TextView? = null
+    private lateinit var dataSource: DictionaryDataSource
+    private lateinit var adapter: BaseWordAdapter
+
+    private var tabType: TabType = TabType.ACTIVE
+    private var languageCode: String? = null  // Language code for language-specific tabs (v1.1.86)
+    private var searchJob: kotlinx.coroutines.Job? = null  // Track search coroutine for cancellation
+
+    enum class TabType {
+        ACTIVE, DISABLED, USER, CUSTOM
+    }
+
+    companion object {
+        private const val ARG_TAB_TYPE = "tab_type"
+        private const val ARG_LANGUAGE_CODE = "language_code"
+
+        // #96: per-tab search context persisted across recreation (rotation, resize,
+        // split-screen). The activity saves its own copy for the toolbar widgets, but the
+        // fragment must self-restore: FragmentStateAdapter recreates it with default fields,
+        // and the activity's delayed re-dispatch is a race the unfiltered initial load can win.
+        private const val STATE_SEARCH_QUERY = "state_search_query"
+        private const val STATE_SORT_TYPE = "state_sort_type"
+        private const val STATE_LAYOUT_MANAGER = "state_layout_manager"
+
+        /**
+         * Create a new WordListFragment instance.
+         *
+         * @param tabType The type of word list to display
+         * @param languageCode Optional language code for language-specific tabs (e.g., "en", "es").
+         *                     If null, uses global/legacy storage.
+         * @since v1.1.86 - Added languageCode parameter
+         */
+        fun newInstance(tabType: TabType, languageCode: String? = null): WordListFragment {
+            val fragment = WordListFragment()
+            val args = Bundle()
+            args.putInt(ARG_TAB_TYPE, tabType.ordinal)
+            languageCode?.let { args.putString(ARG_LANGUAGE_CODE, it) }
+            fragment.arguments = args
+            return fragment
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        tabType = TabType.values()[arguments?.getInt(ARG_TAB_TYPE) ?: 0]
+        languageCode = arguments?.getString(ARG_LANGUAGE_CODE)
+    }
+
+    override fun onCreateView(
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View? {
+        return inflater.inflate(R.layout.fragment_word_list, container, false)
+    }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+
+        recyclerView = view.findViewById(R.id.recycler_view)
+        emptyText = view.findViewById(R.id.empty_text)
+        loadingProgress = view.findViewById(R.id.loading_progress)
+        legacyFrequencyNotice = view.findViewById(R.id.legacy_freq_notice)
+        legacyFrequencyNoticeText = view.findViewById(R.id.legacy_freq_notice_text)
+        view.findViewById<Button>(R.id.legacy_freq_review).setOnClickListener { showLegacyFrequencyDialog() }
+        view.findViewById<Button>(R.id.legacy_freq_dismiss).setOnClickListener {
+            (dataSource as? CustomDictionarySource)?.dismissLegacyFrequencyOffer()
+            updateLegacyFrequencyNotice()
+        }
+
+        recyclerView.layoutManager = LinearLayoutManager(requireContext())
+
+        // #96: restore the saved search context BEFORE the initial load so the first list a
+        // recreated fragment shows is already the filtered one. Restoring here (rather than
+        // relying on DictionaryManagerActivity's delayed performSearch re-dispatch) closes the
+        // race where an unfiltered initial load lands after the filtered re-dispatch and
+        // clobbers it — the list would show every word frequency-sorted while the search box
+        // still held the query.
+        if (savedInstanceState != null) {
+            currentSearchQuery = savedInstanceState.getString(STATE_SEARCH_QUERY, "") ?: ""
+            currentSortType = DictionaryManagerActivity.SortType.values()
+                .getOrElse(savedInstanceState.getInt(STATE_SORT_TYPE, 0)) {
+                    DictionaryManagerActivity.SortType.FREQ
+                }
+            pendingLayoutManagerState = savedInstanceState.getParcelable(STATE_LAYOUT_MANAGER)
+        }
+
+        initializeDataSource()
+        setupAdapter()
+        loadWords()
+    }
+
+    // #96: the fragment owns its search context across recreation. The scroll position is
+    // captured as the layout manager's own saved state; it cannot auto-restore through the
+    // view hierarchy because the list content arrives asynchronously (the RecyclerView is
+    // empty at view-state-restore time), so filter() re-applies it once data lands.
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString(STATE_SEARCH_QUERY, currentSearchQuery)
+        outState.putInt(STATE_SORT_TYPE, currentSortType.ordinal)
+        if (::recyclerView.isInitialized) {
+            outState.putParcelable(STATE_LAYOUT_MANAGER, recyclerView.layoutManager?.onSaveInstanceState())
+        }
+    }
+
+    /**
+     * Initialize the data source based on tab type and language code.
+     *
+     * @since v1.1.86 - Uses language-specific storage when languageCode is provided
+     */
+    private fun initializeDataSource() {
+        val defaultPrefs = DirectBootAwarePreferences.get_shared_preferences(requireContext())
+        // Use language-specific DisabledDictionarySource when languageCode is provided
+        val disabledSource = DisabledDictionarySource(defaultPrefs, languageCode)
+
+        dataSource = when (tabType) {
+            // v1.1.89: Pass language code to load correct dictionary (not always English)
+            TabType.ACTIVE -> MainDictionarySource(requireContext(), disabledSource, languageCode ?: "en")
+            TabType.DISABLED -> disabledSource
+            TabType.USER -> UserDictionarySource(requireContext(), requireContext().contentResolver)
+            TabType.CUSTOM -> {
+                // v1.1.87: Use language-specific custom words storage
+                // This matches OptimizedVocabulary's storage format for swipe prediction
+                val customPrefs = DirectBootAwarePreferences.get_shared_preferences(requireContext())
+                CustomDictionarySource(customPrefs, languageCode ?: "en")
+            }
+        }
+    }
+
+    private fun setupAdapter() {
+        adapter = when (tabType) {
+            TabType.CUSTOM -> {
+                WordEditableAdapter(
+                    onEdit = { word -> showEditDialog(word) },
+                    onDelete = { word -> deleteWord(word) },
+                    onAdd = { showAddDialog() }
+                )
+            }
+            else -> {
+                WordToggleAdapter { word, enabled ->
+                    toggleWord(word, enabled)
+                }
+            }
+        }
+
+        recyclerView.adapter = adapter
+    }
+
+    private fun loadWords() {
+        // Guard against calling before view is created
+        if (!::loadingProgress.isInitialized) return
+
+        loadingProgress.visibility = View.VISIBLE
+        emptyText.visibility = View.GONE
+
+        // #96: the load MUST go through filter() — never a private unfiltered coroutine.
+        // filter() (a) applies the current (possibly restored) search context instead of
+        // resetting to the full frequency-sorted list, and (b) tracks the load in searchJob,
+        // so a later dispatch (typing, the activity's post-recreation re-dispatch) cancels
+        // this one. Before this delegation the initial load raced those dispatches and,
+        // landing last after a cold 50k-word parse, clobbered the filtered result.
+        filter(currentSearchQuery, currentSortType)
+    }
+
+    private var currentSortType: DictionaryManagerActivity.SortType = DictionaryManagerActivity.SortType.FREQ
+    private var currentSearchQuery: String = ""  // #96: Track search query for refresh()
+    // #96: scroll position captured in onSaveInstanceState, re-applied by filter() once the
+    // restored list content is actually set (see onSaveInstanceState doc).
+    private var pendingLayoutManagerState: android.os.Parcelable? = null
+
+    fun filter(query: String, sortType: DictionaryManagerActivity.SortType = DictionaryManagerActivity.SortType.FREQ) {
+        if (!::adapter.isInitialized) return
+        currentSearchQuery = query  // #96: Persist query so refresh() can reapply
+        currentSortType = sortType
+
+        // Cancel previous search to prevent multiple concurrent operations
+        searchJob?.cancel()
+
+        // Use DictionaryDataSource.searchWords() which has prefix indexing
+        // instead of in-memory filtering of 50k words on main thread
+        searchJob = lifecycleScope.launch {
+            try {
+                // Normalize query: trim whitespace and treat pure whitespace as blank
+                val normalizedQuery = query.trim()
+
+                val rawWords = if (normalizedQuery.isBlank()) {
+                    // No search - show all words from this tab's data source
+                    dataSource.getAllWords()
+                } else {
+                    // Has search query - use prefix indexing
+                    dataSource.searchWords(normalizedQuery)
+                }
+
+                // ACTIVE tab should only show enabled words (disabled ones appear in DISABLED tab)
+                val words = if (tabType == TabType.ACTIVE) {
+                    rawWords.filter { it.enabled }
+                } else {
+                    rawWords
+                }
+
+                // v1.2.7: Apply sorting based on sort type
+                val sortedWords = sortWordsForDisplay(words, sortType, normalizedQuery)
+
+                adapter.setWords(sortedWords)
+                updateEmptyState()
+                // Every load/refresh/edit of the Custom tab re-evaluates the offer, so a word
+                // edited away from the old default, a raise, or a backup import is reflected.
+                updateLegacyFrequencyNotice()
+
+                // #96: re-apply the saved scroll position once the restored content is in the
+                // adapter. One-shot: consumed on the first successful population after
+                // recreation; later filters scroll naturally.
+                pendingLayoutManagerState?.let { state ->
+                    recyclerView.layoutManager?.onRestoreInstanceState(state)
+                    pendingLayoutManagerState = null
+                }
+                loadingProgress.visibility = View.GONE
+
+                // Notify activity to update tab counts after filter completes
+                (activity as? DictionaryManagerActivity)?.onFragmentDataLoaded()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // Search was cancelled - this is expected, don't log as error. The loading
+                // indicator (if shown by loadWords) is left up: the superseding filter job
+                // owns hiding it.
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                    android.util.Log.d("WordListFragment", "Search cancelled")
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("WordListFragment", "Error filtering words", e)
+                // Preserve loadWords()' historical error surface now that it delegates here.
+                emptyText.text = getString(R.string.dict_error_loading, e.message ?: "")
+                emptyText.visibility = View.VISIBLE
+                loadingProgress.visibility = View.GONE
+            }
+        }
+    }
+
+    fun getFilteredCount(): Int {
+        if (!::adapter.isInitialized) return 0
+        return adapter.getFilteredCount()
+    }
+
+    private fun updateEmptyState() {
+        if (!::adapter.isInitialized) return
+        // Rows, not words: the Custom tab's "+ Add word" row keeps its list visible even
+        // with no words, so the Add button stays reachable on a fresh install.
+        if (adapter.itemCount == 0) {
+            emptyText.visibility = View.VISIBLE
+            recyclerView.visibility = View.GONE
+        } else {
+            emptyText.visibility = View.GONE
+            recyclerView.visibility = View.VISIBLE
+        }
+    }
+
+    private fun toggleWord(word: DictionaryWord, enabled: Boolean) {
+        lifecycleScope.launch {
+            try {
+                dataSource.toggleWord(word.word, enabled)
+                filter(currentSearchQuery, currentSortType)  // #96: Preserve search state
+                // Notify parent activity to refresh other tabs
+                (activity as? DictionaryManagerActivity)?.refreshAllTabs()
+            } catch (e: Exception) {
+                showErrorDialog(R.string.dict_error_toggle_word, e)
+            }
+        }
+    }
+
+    private fun deleteWord(word: DictionaryWord) {
+        AlertDialog.Builder(requireContext())
+            .setTitle(R.string.dict_delete_word_title)
+            .setMessage(getString(R.string.dict_delete_word_message, word.word))
+            .setPositiveButton(R.string.common_delete) { _, _ ->
+                lifecycleScope.launch {
+                    try {
+                        dataSource.deleteWord(word.word)
+                        filter(currentSearchQuery, currentSortType)  // #96: Preserve search state
+                        // Notify parent activity to refresh predictions
+                        (activity as? DictionaryManagerActivity)?.refreshAllTabs()
+                    } catch (e: Exception) {
+                        showErrorDialog(R.string.dict_error_delete_word, e)
+                    }
+                }
+            }
+            .setNegativeButton(R.string.common_cancel, null)
+            .show()
+    }
+
+    // SetTextI18n: the frequency EditText is prefilled with a raw integer that is
+    // parsed back via toIntOrNull(); locale-formatting it (grouping separators)
+    // would break parsing, so the plain digit string is intentional.
+    @SuppressLint("SetTextI18n")
+    private fun showAddDialog() {
+        // Create layout with word and frequency inputs
+        val layout = android.widget.LinearLayout(requireContext())
+        layout.orientation = android.widget.LinearLayout.VERTICAL
+        layout.setPadding(60, 40, 60, 20)
+
+        val wordInput = EditText(requireContext())
+        wordInput.inputType = InputType.TYPE_CLASS_TEXT
+        wordInput.hint = getString(R.string.dict_word_input_hint)
+        layout.addView(wordInput)
+
+        // Wave U2: the stored scale is 1..255 (UserWordFrequency; AOSP user-dictionary
+        // convention), and every ranking consumer calibrates it onto its own base scale.
+        // The old "1-10000" hint was fiction — no consumer read that scale — and the old
+        // default of 100 ranked a fresh custom word BELOW the entire base dictionary in
+        // the swipe lexicon prior. Default 255: a user adding a word wants it to WIN;
+        // they can lower it here to demote it.
+        val freqInput = EditText(requireContext())
+        freqInput.inputType = InputType.TYPE_CLASS_NUMBER
+        freqInput.hint = getString(R.string.dict_frequency_input_hint)
+        freqInput.setText(UserWordFrequency.DEFAULT.toString())
+        freqInput.selectAll()
+        layout.addView(freqInput)
+
+        val priorityGroup = addSwipePriorityPicker(layout, SwipePriority.NORMAL, freqInput)
+
+        AlertDialog.Builder(requireContext())
+            .setTitle(R.string.dict_add_word_title)
+            .setView(layout)
+            .setPositiveButton(R.string.dict_add_word_confirm) { _, _ ->
+                val word = wordInput.text.toString().trim()
+                val freqText = freqInput.text.toString().trim()
+                val frequency = freqText.toIntOrNull() ?: UserWordFrequency.DEFAULT
+
+                val priority = selectedSwipePriority(priorityGroup)
+
+                if (word.isNotBlank()) {
+                    lifecycleScope.launch {
+                        try {
+                            val clamped = frequency.coerceIn(UserWordFrequency.MIN, UserWordFrequency.MAX)
+                            val source = dataSource
+                            if (source is CustomDictionarySource) {
+                                source.addWord(word, clamped, priority)
+                            } else {
+                                dataSource.addWord(word, clamped)
+                            }
+                            loadWords()
+                            // Notify parent activity to refresh predictions
+                            (activity as? DictionaryManagerActivity)?.refreshAllTabs()
+
+                            // The word IS added — tap typing and the geometric engine handle any
+                            // length. But the CTC encoder emits a fixed 32 frames, and a CTC path
+                            // needs one frame per letter plus a blank between doubled letters, so
+                            // past that budget NO alignment exists and the beam can never produce
+                            // it. Without this the word would simply never appear on a swipe, with
+                            // nothing to distinguish that from a bad gesture.
+                            if (!CtcDecodableLength.isDecodable(word)) {
+                                AlertDialog.Builder(requireContext())
+                                    .setTitle(R.string.dict_word_too_long_for_swipe_title)
+                                    .setMessage(
+                                        resources.getQuantityString(
+                                            R.plurals.dict_word_too_long_for_swipe_msg,
+                                            CtcDecodableLength.EMISSION_FRAMES,
+                                            word,
+                                            CtcDecodableLength.framesRequired(word),
+                                            CtcDecodableLength.EMISSION_FRAMES
+                                        )
+                                    )
+                                    .setPositiveButton(android.R.string.ok, null)
+                                    .show()
+                            }
+                        } catch (e: Exception) {
+                            showErrorDialog(R.string.dict_error_add_word, e)
+                        }
+                    }
+                }
+            }
+            .setNegativeButton(R.string.common_cancel, null)
+            .show()
+    }
+
+    // SetTextI18n: same as showAddDialog — the frequency field holds a raw integer
+    // that must stay machine-parseable (toIntOrNull), so no locale formatting.
+    @SuppressLint("SetTextI18n")
+    private fun showEditDialog(word: DictionaryWord) {
+        // Create layout with word and frequency inputs
+        val layout = android.widget.LinearLayout(requireContext())
+        layout.orientation = android.widget.LinearLayout.VERTICAL
+        layout.setPadding(60, 40, 60, 20)
+
+        val wordInput = EditText(requireContext())
+        wordInput.inputType = InputType.TYPE_CLASS_TEXT
+        wordInput.hint = getString(R.string.dict_word_edit_hint)
+        wordInput.setText(word.word)
+        wordInput.selectAll()
+        layout.addView(wordInput)
+
+        // Wave U2: same 1..255 stored scale as the Add dialog. Legacy stored values
+        // above 255 (old 1-10000 dialog era) prefill coerced — saving writes the
+        // calibrated-scale equivalent without touching words the user doesn't edit.
+        val freqInput = EditText(requireContext())
+        freqInput.inputType = InputType.TYPE_CLASS_NUMBER
+        freqInput.hint = getString(R.string.dict_frequency_input_hint)
+        freqInput.setText(word.frequency.coerceIn(UserWordFrequency.MIN, UserWordFrequency.MAX).toString())
+        layout.addView(freqInput)
+
+        val priorityGroup = addSwipePriorityPicker(layout, word.swipePriority, freqInput)
+
+        AlertDialog.Builder(requireContext())
+            .setTitle(R.string.dict_edit_word_title)
+            .setView(layout)
+            .setPositiveButton(R.string.common_save) { _, _ ->
+                val newWord = wordInput.text.toString().trim()
+                val freqText = freqInput.text.toString().trim()
+                val newFrequency = freqText.toIntOrNull() ?: word.frequency
+                val priority = selectedSwipePriority(priorityGroup)
+
+                if (newWord.isNotBlank()) {
+                    lifecycleScope.launch {
+                        try {
+                            val clamped = newFrequency.coerceIn(UserWordFrequency.MIN, UserWordFrequency.MAX)
+                            val source = dataSource
+                            if (source is CustomDictionarySource) {
+                                source.updateWord(word.word, newWord, clamped, priority)
+                            } else {
+                                dataSource.updateWord(word.word, newWord, clamped)
+                            }
+                            loadWords()
+                            // Notify parent activity to refresh predictions
+                            (activity as? DictionaryManagerActivity)?.refreshAllTabs()
+                        } catch (e: Exception) {
+                            showErrorDialog(R.string.dict_error_update_word, e)
+                        }
+                    }
+                }
+            }
+            .setNegativeButton(R.string.common_cancel, null)
+            .show()
+    }
+
+    /**
+     * Append the "Swipe priority" picker (label, Normal/High/Highest radio buttons, and the
+     * explanation of what the levels and the frequency field each do) to [layout], with
+     * [initial] checked. The radio buttons carry their [SwipePriority] as the view tag;
+     * [selectedSwipePriority] reads it back.
+     *
+     * Radio buttons rather than a slider: each level is one discrete, measured bonus
+     * (`docs/eval/2026-10-08-user-swipe-priority.md`), and the store is written once on Save,
+     * so no debouncing of lexicon rebuilds is needed.
+     *
+     * Selecting High or Highest while [freqInput] holds less than 255 (or nothing parseable)
+     * sets it to 255 and shows a line saying so ([UserWordFrequency.liftedForPriority],
+     * maintainer decision 2026-10-10): a lower stored frequency would silently cancel part of
+     * the bonus (the device `adb` at the legacy 100 lost at Highest). Normal leaves the field
+     * alone — except that it undoes a lift THIS dialog made, while the field still shows it
+     * ([UserWordFrequency.restoredAfterLift]) — and the [initial] check does not fire the
+     * listener, so opening the dialog never changes a value by itself.
+     */
+    private fun addSwipePriorityPicker(
+        layout: android.widget.LinearLayout,
+        initial: SwipePriority,
+        freqInput: EditText,
+    ): android.widget.RadioGroup {
+        val ctx = requireContext()
+        val label = TextView(ctx)
+        label.text = getString(R.string.dict_swipe_priority_label)
+        label.setPadding(0, 24, 0, 0)
+        layout.addView(label)
+
+        val group = android.widget.RadioGroup(ctx)
+        group.orientation = android.widget.RadioGroup.HORIZONTAL
+        for (level in SwipePriority.entries) {
+            val button = android.widget.RadioButton(ctx)
+            button.id = View.generateViewId()
+            button.text = getString(swipePriorityLabelRes(level))
+            button.tag = level
+            group.addView(button)
+            if (level == initial) group.check(button.id)
+        }
+        layout.addView(group)
+
+        val raisedNote = TextView(ctx)
+        raisedNote.textSize = 12f
+        raisedNote.visibility = View.GONE
+        layout.addView(raisedNote)
+        // What this dialog lifted the field to, and the text it held before — so going back to
+        // Normal can undo the lift (UserWordFrequency.restoredAfterLift).
+        var liftedTo: Int? = null
+        var beforeLift: String? = null
+        // Set AFTER the initial check, so only a user selection can lift the frequency.
+        group.setOnCheckedChangeListener { g, checkedId ->
+            val level = g.findViewById<View>(checkedId)?.tag as? SwipePriority ?: return@setOnCheckedChangeListener
+            val current = freqInput.text.toString()
+            UserWordFrequency.restoredAfterLift(level, current, liftedTo, beforeLift)?.let { restored ->
+                freqInput.setText(restored)
+                raisedNote.visibility = View.GONE
+                liftedTo = null
+                beforeLift = null
+                return@setOnCheckedChangeListener
+            }
+            val lifted = UserWordFrequency.liftedForPriority(level, current.trim().toIntOrNull())
+                ?: return@setOnCheckedChangeListener
+            beforeLift = current
+            liftedTo = lifted
+            freqInput.setText(lifted.toString())
+            raisedNote.text = getString(R.string.dict_swipe_priority_frequency_raised, lifted)
+            raisedNote.visibility = View.VISIBLE
+        }
+
+        val help = TextView(ctx)
+        help.text = getString(R.string.dict_swipe_priority_help)
+        help.textSize = 12f
+        help.alpha = 0.8f
+        layout.addView(help)
+        return group
+    }
+
+    /** The level whose radio button is checked in [group]; NORMAL when none is. */
+    private fun selectedSwipePriority(group: android.widget.RadioGroup): SwipePriority =
+        group.findViewById<View>(group.checkedRadioButtonId)?.tag as? SwipePriority ?: SwipePriority.NORMAL
+
+    /**
+     * Show or hide the Custom tab's old-default-frequency notice: visible while this language
+     * has a custom word at exactly [LegacyCustomWordFrequency.LEGACY_DEFAULT] that the user has
+     * not dismissed. The store is one small JSON preference, read on the main thread like the
+     * dialogs' own reads.
+     */
+    private fun updateLegacyFrequencyNotice() {
+        val notice = legacyFrequencyNotice ?: return
+        val source = dataSource as? CustomDictionarySource
+        if (tabType != TabType.CUSTOM || source == null || !source.shouldOfferLegacyFrequencyRaise()) {
+            notice.visibility = View.GONE
+            return
+        }
+        val count = source.legacyFrequencyWords().size
+        legacyFrequencyNoticeText?.text = resources.getQuantityString(
+            R.plurals.dict_legacy_freq_notice, count,
+            count, LegacyCustomWordFrequency.LEGACY_DEFAULT, UserWordFrequency.DEFAULT,
+        )
+        notice.visibility = View.VISIBLE
+    }
+
+    /**
+     * "Review": list every word still at the old default and confirm before raising them
+     * (Raise / Not now). "Not now" changes nothing and keeps the notice; only Dismiss on the
+     * notice hides it. Raising re-reads the store, so a word edited meanwhile is left alone.
+     */
+    @SuppressLint("SetTextI18n")
+    private fun showLegacyFrequencyDialog() {
+        val source = dataSource as? CustomDictionarySource ?: return
+        val words = source.legacyFrequencyWords()
+        if (words.isEmpty()) {
+            updateLegacyFrequencyNotice()
+            return
+        }
+        val ctx = requireContext()
+        val column = LinearLayout(ctx)
+        column.orientation = LinearLayout.VERTICAL
+        column.setPadding(60, 40, 60, 20)
+        val message = TextView(ctx)
+        message.text = getString(
+            R.string.dict_legacy_freq_dialog_message,
+            LegacyCustomWordFrequency.LEGACY_DEFAULT, UserWordFrequency.DEFAULT,
+        )
+        column.addView(message)
+        // The words themselves, not translatable text: a plain comma-separated list.
+        val list = TextView(ctx)
+        list.text = words.joinToString(", ")
+        list.setPadding(0, 24, 0, 0)
+        list.setTypeface(list.typeface, android.graphics.Typeface.BOLD)
+        column.addView(list)
+        val scroll = ScrollView(ctx)
+        scroll.addView(column)
+
+        AlertDialog.Builder(ctx)
+            .setTitle(R.string.dict_legacy_freq_dialog_title)
+            .setView(scroll)
+            .setPositiveButton(R.string.dict_legacy_freq_raise) { _, _ ->
+                lifecycleScope.launch {
+                    try {
+                        val raised = source.raiseLegacyFrequencies(words)
+                        loadWords()
+                        // Same propagation as an Edit: other tabs refresh and the tap predictor
+                        // reloads; the swipe engines re-key on the custom-words content.
+                        (activity as? DictionaryManagerActivity)?.refreshAllTabs()
+                        context?.let {
+                            Toast.makeText(
+                                it,
+                                it.resources.getQuantityString(
+                                    R.plurals.dict_legacy_freq_raised, raised, raised, UserWordFrequency.DEFAULT,
+                                ),
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        }
+                    } catch (e: Exception) {
+                        showErrorDialog(R.string.dict_error_update_word, e)
+                    }
+                }
+            }
+            .setNegativeButton(R.string.dict_legacy_freq_not_now, null)
+            .show()
+    }
+
+    /**
+     * Show the shared "operation failed" dialog for a word action.
+     *
+     * @param messageRes a string taking the failure detail as `%1$s`
+     * @param e the failure; its message is the detail, or the localized "Unknown error"
+     *   when the exception carries none (so the dialog never reads "…: null")
+     */
+    private fun showErrorDialog(@androidx.annotation.StringRes messageRes: Int, e: Exception) {
+        val ctx = context ?: return  // fragment detached while the coroutine ran
+        val detail = e.message ?: ctx.getString(R.string.common_unknown_error)
+        AlertDialog.Builder(ctx)
+            .setTitle(R.string.dict_error_title)
+            .setMessage(ctx.getString(messageRes, detail))
+            .setPositiveButton(R.string.common_ok, null)
+            .show()
+    }
+
+    fun refresh() {
+        // Re-sync cached enabled states from persistent storage before re-filtering.
+        // Fixes cross-source coherence: DisabledDictionarySource.toggleWord() updates
+        // SharedPreferences but MainDictionarySource's cached DictionaryWord.enabled
+        // flags remain stale until this call.
+        dataSource.onRefresh()
+        // #96: Reapply current search/sort state instead of loading unfiltered
+        filter(currentSearchQuery, currentSortType)
+    }
+}
+
+/**
+ * Order [words] for display under [sortType].
+ *
+ * [normalizedQuery] is the trimmed contents of the Dictionary Manager search box; only
+ * [DictionaryManagerActivity.SortType.MATCH] reads it, and with a blank query MATCH is defined
+ * to fall back to frequency order (there is no relevance to rank by).
+ *
+ * Extracted VERBATIM from [WordListFragment.filter] (2026-09-03) so the four orderings the
+ * v1.2.6 / v1.2.8 release notes promise — "Sort by Frequency/Match/A-Z/Z-A" — can be pinned
+ * without a Fragment, a lifecycle scope or a data source. Pure: no Android types, no state,
+ * no I/O. Behaviour is unchanged; `filter` now calls this and does nothing else differently.
+ * Pinned by `DictionarySortOrderTest`.
+ */
+internal fun sortWordsForDisplay(
+    words: List<DictionaryWord>,
+    sortType: DictionaryManagerActivity.SortType,
+    normalizedQuery: String,
+): List<DictionaryWord> = when (sortType) {
+    DictionaryManagerActivity.SortType.FREQ -> {
+        // Sort by frequency (highest first) - default
+        words.sortedByDescending { it.frequency }
+    }
+    DictionaryManagerActivity.SortType.MATCH -> {
+        // Sort by match quality: exact match first, then prefix match, then by frequency
+        if (normalizedQuery.isNotBlank()) {
+            words.sortedWith(compareBy(
+                // Exact match gets priority 0, prefix match gets 1, others get 2
+                { word ->
+                    when {
+                        word.word.equals(normalizedQuery, ignoreCase = true) -> 0
+                        word.word.startsWith(normalizedQuery, ignoreCase = true) -> 1
+                        else -> 2
+                    }
+                },
+                // Secondary sort by frequency (descending, so negate)
+                { -it.frequency }
+            ))
+        } else {
+            // No query, fall back to frequency sort
+            words.sortedByDescending { it.frequency }
+        }
+    }
+    DictionaryManagerActivity.SortType.A_Z -> {
+        // Alphabetical ascending
+        words.sortedBy { it.word.lowercase() }
+    }
+    DictionaryManagerActivity.SortType.Z_A -> {
+        // Alphabetical descending
+        words.sortedByDescending { it.word.lowercase() }
+    }
+}

@@ -1,0 +1,164 @@
+package tribixbite.cleverkeys
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/**
+ * Pure-JVM tests for [LearningGate] (Task A master privacy gate): every gate
+ * combination and the learn-funnel dispatch semantics.
+ */
+class LearningGateTest {
+
+    // ---------------------------------------------------------------- gates
+
+    @Test
+    fun `context learning requires master AND feature gate`() {
+        assertTrue(LearningGate.canLearnContext(onDeviceLearningEnabled = true, contextAwareEnabled = true))
+        assertFalse(LearningGate.canLearnContext(onDeviceLearningEnabled = false, contextAwareEnabled = true))
+        assertFalse(LearningGate.canLearnContext(onDeviceLearningEnabled = true, contextAwareEnabled = false))
+        assertFalse(LearningGate.canLearnContext(onDeviceLearningEnabled = false, contextAwareEnabled = false))
+    }
+
+    @Test
+    fun `personalization learning requires master AND feature gate`() {
+        assertTrue(LearningGate.canLearnPersonalization(true, true))
+        assertFalse(LearningGate.canLearnPersonalization(false, true))
+        assertFalse(LearningGate.canLearnPersonalization(true, false))
+        assertFalse(LearningGate.canLearnPersonalization(false, false))
+    }
+
+    @Test
+    fun `adaptation learning follows the master gate alone`() {
+        assertTrue(LearningGate.canLearnAdaptation(true))
+        assertFalse(LearningGate.canLearnAdaptation(false))
+    }
+
+    @Test
+    fun `adaptation READS are gated too - master off makes selection history inert`() {
+        // H3 (review 2026-08-06): the multiplier read re-ranks predictions and
+        // suppresses add-to-dictionary prompts — it must go dark with master off.
+        assertTrue(LearningGate.canUseAdaptation(true))
+        assertFalse(LearningGate.canUseAdaptation(false))
+    }
+
+    @Test
+    fun `incognito field flag decodes IME_FLAG_NO_PERSONALIZED_LEARNING`() {
+        // M5: mirrors EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING (0x1000000).
+        assertEquals(0x1000000, LearningGate.IME_FLAG_NO_PERSONALIZED_LEARNING)
+        assertTrue(LearningGate.fieldAllowsPersonalizedLearning(0))
+        assertFalse(LearningGate.fieldAllowsPersonalizedLearning(LearningGate.IME_FLAG_NO_PERSONALIZED_LEARNING))
+        // Flag combined with unrelated imeOptions bits still detected.
+        assertFalse(
+            LearningGate.fieldAllowsPersonalizedLearning(
+                LearningGate.IME_FLAG_NO_PERSONALIZED_LEARNING or 0x00000006
+            )
+        )
+    }
+
+    @Test
+    fun `swipe ML collection requires master AND collection toggle`() {
+        assertTrue(LearningGate.canCollectSwipeMl(true, true))
+        assertFalse(LearningGate.canCollectSwipeMl(false, true))
+        assertFalse(LearningGate.canCollectSwipeMl(true, false))
+        assertFalse(LearningGate.canCollectSwipeMl(false, false))
+    }
+
+    @Test
+    fun `learned-context reads are gated too - master off makes the store inert`() {
+        assertTrue(LearningGate.canUseLearnedContext(true, true))
+        assertFalse(LearningGate.canUseLearnedContext(false, true))
+        assertFalse(LearningGate.canUseLearnedContext(true, false))
+    }
+
+    @Test
+    fun `learned next-word tier needs master AND context-aware AND a field that allows learning`() {
+        // Maintainer decision 2026-09-26: the next-word STATIC tier is outside this gate; the
+        // LEARNED tier is canUseLearnedContext plus the per-field incognito flag.
+        for (master in listOf(true, false)) for (ctx in listOf(true, false)) for (field in listOf(true, false)) {
+            assertEquals(
+                "master=$master ctx=$ctx field=$field",
+                master && ctx && field,
+                LearningGate.canUseLearnedNextWord(master, ctx, field)
+            )
+        }
+    }
+
+    // --------------------------------------------------------------- funnel
+
+    private class Recorder {
+        val sequences = mutableListOf<List<String>>()
+        val words = mutableListOf<String>()
+        fun learn(
+            recent: List<String>,
+            word: String,
+            master: Boolean,
+            contextAware: Boolean = true,
+            personalized: Boolean = true,
+            fieldAllows: Boolean = true
+        ) = LearningGate.learnCommittedWord(
+            recentWords = recent,
+            committedWord = word,
+            onDeviceLearningEnabled = master,
+            contextAwareEnabled = contextAware,
+            personalizedLearningEnabled = personalized,
+            recordSequence = { sequences.add(it) },
+            recordWordUsage = { words.add(it) },
+            fieldAllowsPersonalizedLearning = fieldAllows
+        )
+    }
+
+    @Test
+    fun `funnel records both paths when all gates pass`() {
+        val r = Recorder()
+        r.learn(listOf("i", "want", "to"), "to", master = true)
+        assertEquals(listOf(listOf("i", "want", "to")), r.sequences)
+        assertEquals(listOf("to"), r.words)
+    }
+
+    @Test
+    fun `funnel caps the context window at CONTEXT_WINDOW words`() {
+        val r = Recorder()
+        r.learn(listOf("a", "b", "c", "d", "e", "f"), "f", master = true)
+        assertEquals(listOf("c", "d", "e", "f"), r.sequences.single())
+    }
+
+    @Test
+    fun `funnel skips the context path below two words`() {
+        val r = Recorder()
+        r.learn(listOf("hello"), "hello", master = true)
+        assertTrue(r.sequences.isEmpty())
+        assertEquals(listOf("hello"), r.words)
+    }
+
+    @Test
+    fun `master off short-circuits BOTH sinks - no lambda runs at all`() {
+        val r = Recorder()
+        repeat(50) { i -> r.learn(listOf("w$i", "x$i"), "x$i", master = false) }
+        assertTrue(r.sequences.isEmpty())
+        assertTrue(r.words.isEmpty())
+    }
+
+    @Test
+    fun `incognito field short-circuits BOTH sinks despite every pref being on`() {
+        // M5: IME_FLAG_NO_PERSONALIZED_LEARNING outranks all user preferences.
+        val r = Recorder()
+        repeat(20) { i -> r.learn(listOf("a$i", "b$i"), "b$i", master = true, fieldAllows = false) }
+        assertTrue(r.sequences.isEmpty())
+        assertTrue(r.words.isEmpty())
+    }
+
+    @Test
+    fun `per-feature gates operate independently under master on`() {
+        val contextOnly = Recorder()
+        contextOnly.learn(listOf("a", "b"), "b", master = true, personalized = false)
+        assertEquals(1, contextOnly.sequences.size)
+        assertTrue(contextOnly.words.isEmpty())
+
+        val personalOnly = Recorder()
+        personalOnly.learn(listOf("a", "b"), "b", master = true, contextAware = false)
+        assertTrue(personalOnly.sequences.isEmpty())
+        assertEquals(listOf("b"), personalOnly.words)
+    }
+}

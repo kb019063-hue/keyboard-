@@ -1,0 +1,205 @@
+package tribixbite.cleverkeys
+
+/**
+ * MASTER PRIVACY GATE for all on-device learning (audit follow-up 2026-08-06,
+ * Task A). Single source of truth for the question "may this typing-derived
+ * signal be recorded/persisted right now?".
+ *
+ * The `on_device_learning_enabled` preference (opt-IN on fresh installs since
+ * v2.0 — default OFF; upgrading installs are seeded an explicit `true` by the
+ * v4 migration so an update never silently changes behavior, see
+ * [LearningMigration]) short-circuits EVERY learn path at the write layer:
+ *
+ * | Path | Store | Gated via |
+ * |---|---|---|
+ * | Context LM (bigrams + trigrams) | `BigramStore`/`TrigramStore` | [learnCommittedWord] → [canLearnContext] |
+ * | Personalization vocabulary | `UserVocabulary` | [learnCommittedWord] → [canLearnPersonalization] (plus `PersonalizationEngine.setEnabled` sync in `WordPredictor.setConfig`) |
+ * | Selection adaptation | `UserAdaptationManager` prefs | [canLearnAdaptation] (call site: `SuggestionHandler.onSuggestionSelected`) |
+ * | Swipe-ML traces | `SwipeMLDataStore` | [canCollectSwipeMl] (call site: `PrivacyManager.canCollectSwipeData`, checked by `MLDataCollector` before storing) |
+ * | Swipe corrections (the "Prefer “Y” when swiping?" offer + ML-row relabel) | `SwipeCorrectionStore` | [canLearnSwipeCorrections] + incognito + password (call site: `SuggestionHandler.swipeCorrectionsAllowed`) |
+ *
+ * READ paths that surface previously learned data are gated too, so turning the
+ * master off makes the learned stores fully inert (neither written nor read):
+ *
+ * | Read path | Source | Gated via |
+ * |---|---|---|
+ * | Dynamic context boost (prefix scoring), swipe rescoring evidence | `ContextModel` | [canUseLearnedContext] |
+ * | Next-word LEARNED tier (n-gram continuations, personalization re-rank, learned-vocabulary allow-list) | `ContextModel`, `UserVocabulary` | [canUseLearnedNextWord] (call site: `NextWordPredictor.decideTiers` → `candidatesFor`) |
+ * | Next-word STATIC tier (shipped context LM / curated bigram seed) | `BigramModel` asset — NOT learned | none of the learning gates, by design (maintainer decision 2026-09-26): feature pref + ordinary suggestion-bar guards only, see `NextWordPredictor.decideTiers` |
+ * | Personalization boost | `PersonalizationEngine` | returns 0 once the engine is disabled |
+ *
+ * Accepting a next-word candidate is an ordinary bar selection: the committed word reaches
+ * [learnCommittedWord] and `UserAdaptationManager` through the same gates as any other
+ * commit, so with the master off it is not recorded anywhere.
+ *
+ * Everything here is pure JVM so the privacy contract is unit-testable
+ * ([tribixbite.cleverkeys.OnDeviceLearningPrivacyTest] wires this funnel to the
+ * real stores over in-memory storage and asserts nothing is recorded or
+ * persisted with the master gate off).
+ *
+ * OUT OF SCOPE — deliberate (L7, review 2026-08-06; the settings toggle copy is
+ * scoped to match): the master gate covers AUTOMATIC recording of typing
+ * behavior. Data the user EXPLICITLY creates is governed by its own controls:
+ * - `SwipePerformanceStats` — prediction latency/accuracy aggregates behind
+ *   the separate performance-stats preference (no text content).
+ * - Backup restore — importing a backup repopulates learned stores even with
+ *   the master off; restoring one's own exported data is an explicit act.
+ *
+ * Corrected 2026-08-28: this list used to name `SwipeCalibrationActivity` traces as a
+ * third exception. That activity was DELETED on 2026-08-18 with the neural engine.
+ * (`ShortSwipeCalibrationActivity` still exists but is unrelated: short-swipe gesture
+ * tuning, zero `SwipeMLDataStore` references.) `strings.xml`'s
+ * `privacy_on_device_learning_desc` carried the same stale exception and was corrected
+ * with it — see the translation-debt note there.
+ *
+ * Updated 2026-09-03 (Swipe Playground): a user-started trace-collection session exists
+ * AGAIN. `SwipeMLDataStore` now has exactly TWO write paths:
+ *  - `MLDataCollector` — AUTOMATIC collection during normal typing, INSIDE the master
+ *    gate (`PrivacyManager.canCollectSwipeData` → [canCollectSwipeMl]);
+ *  - `tribixbite.cleverkeys.ml.PlaygroundTraceRecorder` — records ONLY while the Swipe
+ *    Playground (`SwipeDebugActivity`) is open, i.e. during an explicit user session on
+ *    a screen whose stated purpose is recording swipes (the successor to the deleted
+ *    calibration activity). Like the other explicit-act exceptions above it sits
+ *    OUTSIDE the master gate; the playground UI discloses that traces contain typed
+ *    content, and it never writes a row the automatic path already stored.
+ */
+object LearningGate {
+
+    /** Longest word window handed to the context LM (trigram-ready, audit §1.3-D). */
+    const val CONTEXT_WINDOW = 4
+
+    /**
+     * Mirror of `android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING`
+     * (`0x1000000`, API 26+). Duplicated here so the incognito-field gate logic is
+     * pure JVM and unit-testable without android.jar; [LearningGateTest] pins the
+     * value against the platform constant.
+     */
+    const val IME_FLAG_NO_PERSONALIZED_LEARNING = 0x1000000
+
+    /**
+     * Incognito-keyboard contract (M5, review 2026-08-06): an editor that sets
+     * `IME_FLAG_NO_PERSONALIZED_LEARNING` (e.g. a browser's private tab) asks the
+     * IME not to learn from — or personalize based on — what is typed in it.
+     *
+     * @param imeOptions the raw `EditorInfo.imeOptions` bits for the active field
+     * @return false when the field forbids personalized learning
+     */
+    fun fieldAllowsPersonalizedLearning(imeOptions: Int): Boolean =
+        (imeOptions and IME_FLAG_NO_PERSONALIZED_LEARNING) == 0
+
+    /** May the context LM (bigram/trigram stores) record new sequences? */
+    fun canLearnContext(onDeviceLearningEnabled: Boolean, contextAwareEnabled: Boolean): Boolean =
+        onDeviceLearningEnabled && contextAwareEnabled
+
+    /** May the personalization vocabulary record word usage? */
+    fun canLearnPersonalization(onDeviceLearningEnabled: Boolean, personalizedLearningEnabled: Boolean): Boolean =
+        onDeviceLearningEnabled && personalizedLearningEnabled
+
+    /**
+     * May `UserAdaptationManager` record a suggestion selection?
+     * (Pre-existing privacy gap: this store had NO preference gate at all — it
+     * recorded and persisted selection counts unconditionally. The master gate
+     * now covers it.)
+     */
+    fun canLearnAdaptation(onDeviceLearningEnabled: Boolean): Boolean = onDeviceLearningEnabled
+
+    /**
+     * May previously learned SELECTION history be READ (H3, review 2026-08-06)?
+     * The adaptation multiplier re-ranks predictions and suppresses
+     * add-to-dictionary prompts from persisted selection counts — with the
+     * master off that history must be inert, not just frozen (same contract as
+     * [canUseLearnedContext] for the context LM).
+     */
+    fun canUseAdaptation(onDeviceLearningEnabled: Boolean): Boolean = onDeviceLearningEnabled
+
+    /**
+     * May swipe corrections (a swipe auto-insert the user replaced or undid, and the word they
+     * wanted) be recorded, and may the recorded counts drive the "Prefer “Y” when swiping?"
+     * offer (learning-system audit 2026-09-26, Resolution)? Master gate only: the store feeds an
+     * OFFER the user must accept, not a ranking signal, so no per-feature pref sits beside it.
+     * The caller additionally requires a field that allows personalized learning and is not a
+     * password field.
+     */
+    fun canLearnSwipeCorrections(onDeviceLearningEnabled: Boolean): Boolean = onDeviceLearningEnabled
+
+    /** May swipe-ML trajectory data be collected/stored? */
+    fun canCollectSwipeMl(onDeviceLearningEnabled: Boolean, collectSwipeEnabled: Boolean): Boolean =
+        onDeviceLearningEnabled && collectSwipeEnabled
+
+    /**
+     * May previously learned context data be READ (dynamic context boost, swipe
+     * rescoring, next-word LEARNED-tier candidates — the latter via [canUseLearnedNextWord])? Master off ⇒ the learned store is fully
+     * inert, not just frozen.
+     */
+    fun canUseLearnedContext(onDeviceLearningEnabled: Boolean, contextAwareEnabled: Boolean): Boolean =
+        onDeviceLearningEnabled && contextAwareEnabled
+
+    /**
+     * May next-word read its LEARNED tier (the user's n-gram continuations, the personalization
+     * boost that re-ranks them, and the learned-vocabulary allow-list)? [canUseLearnedContext]
+     * plus the per-field incognito flag: an `IME_FLAG_NO_PERSONALIZED_LEARNING` field must not
+     * be shown suggestions derived from what the user typed elsewhere.
+     *
+     * The static (shipped) tier is deliberately NOT behind this gate — see
+     * `NextWordPredictor.decideTiers` for why neither the master gate, the context-aware pref
+     * nor the incognito flag applies to it.
+     */
+    fun canUseLearnedNextWord(
+        onDeviceLearningEnabled: Boolean,
+        contextAwareEnabled: Boolean,
+        fieldAllowsPersonalizedLearning: Boolean
+    ): Boolean =
+        canUseLearnedContext(onDeviceLearningEnabled, contextAwareEnabled) && fieldAllowsPersonalizedLearning
+
+    /**
+     * THE learn funnel for a committed word (production caller:
+     * `WordPredictor.addWordToContext`). Runs each learn path only when its
+     * gate passes — with the master gate off (or the active field forbidding
+     * personalized learning, M5), NEITHER lambda is invoked, so no in-RAM
+     * state mutates and nothing can be persisted.
+     *
+     * The context sink receives the trailing [CONTEXT_WINDOW]-word window; the
+     * production sink (`ContextModel.recordCommit`) records ONLY the NEWEST
+     * bigram/trigram ending at [committedWord] (M3, review 2026-08-06 — the
+     * previous full-window replay re-recorded earlier pairs on every commit,
+     * so a single typing inflated frequencies past the "seen ≥2×" floor).
+     *
+     * Typo hygiene (learning-system audit 2026-09-26): the production context sink applies
+     * [tribixbite.cleverkeys.LearnableWordPolicy] per n-gram, so an out-of-lexicon word
+     * reaches the context LM only once the user has committed it repeatedly (or added it to
+     * their dictionary). The personalization sink still receives every committed word: it IS
+     * the repeat tally the policy reads, and its read paths apply the same policy.
+     *
+     * @param recentWords rolling committed-word window, most recent last,
+     *   INCLUDING [committedWord]
+     * @param committedWord the normalized word just committed
+     * @param fieldAllowsPersonalizedLearning false when the active editor set
+     *   `IME_FLAG_NO_PERSONALIZED_LEARNING` (incognito field) — suppresses
+     *   BOTH learn paths regardless of user preferences
+     * @param recordSequence context-LM sink (`ContextModel.recordCommit`)
+     * @param recordWordUsage personalization sink (`PersonalizationEngine.recordWordTyped`)
+     */
+    fun learnCommittedWord(
+        recentWords: List<String>,
+        committedWord: String,
+        onDeviceLearningEnabled: Boolean,
+        contextAwareEnabled: Boolean,
+        personalizedLearningEnabled: Boolean,
+        recordSequence: (List<String>) -> Unit,
+        recordWordUsage: (String) -> Unit,
+        fieldAllowsPersonalizedLearning: Boolean = true
+    ) {
+        // M5: an incognito field's no-learning request outranks every user pref.
+        val master = onDeviceLearningEnabled && fieldAllowsPersonalizedLearning
+        // ORDER MATTERS (typo hygiene, 2026-09-26): the vocabulary tally runs FIRST so the
+        // context sink's LearnableWordPolicy sees this commit in the word's observation
+        // count — "committed 3 times" then means the third commit learns, not the fourth.
+        if (canLearnPersonalization(master, personalizedLearningEnabled)) {
+            recordWordUsage(committedWord)
+        }
+        if (canLearnContext(master, contextAwareEnabled) && recentWords.size >= 2) {
+            val sequenceLength = kotlin.math.min(CONTEXT_WINDOW, recentWords.size)
+            recordSequence(recentWords.takeLast(sequenceLength))
+        }
+    }
+}

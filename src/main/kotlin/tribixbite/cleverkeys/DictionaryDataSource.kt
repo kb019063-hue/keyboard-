@@ -1,0 +1,736 @@
+package tribixbite.cleverkeys
+
+import android.content.ContentResolver
+import android.content.Context
+import android.content.SharedPreferences
+import android.provider.UserDictionary
+import android.util.Log
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+/**
+ * Interface for dictionary data sources
+ */
+interface DictionaryDataSource {
+    suspend fun getAllWords(): List<DictionaryWord>
+    suspend fun searchWords(query: String): List<DictionaryWord>
+    suspend fun toggleWord(word: String, enabled: Boolean)
+    // Wave U2: default is the top of the 1..255 stored user scale — an added word
+    // should win its own gesture (see UserWordFrequency).
+    suspend fun addWord(word: String, frequency: Int = UserWordFrequency.DEFAULT)
+    suspend fun deleteWord(word: String)
+    suspend fun updateWord(oldWord: String, newWord: String, frequency: Int)
+
+    /**
+     * Re-sync cached state from persistent storage.
+     * Called by [WordListFragment.refresh] before re-filtering, so that changes made
+     * by a different data source (e.g. DisabledDictionarySource toggling a word that
+     * MainDictionarySource has cached) are reflected.
+     * Default no-op — only sources with in-memory caches need to override.
+     */
+    fun onRefresh() {}
+}
+
+/**
+ * Main dictionary source - loads from assets dictionary file
+ * Uses prefix indexing for fast search with 98k vocabulary
+ *
+ * v1.1.89: Added language support - loads language-specific dictionary when available
+ *
+ * @param languageCode ISO 639-1 language code (e.g., "en", "fr", "es"). Defaults to "en".
+ */
+class MainDictionarySource(
+    private val context: Context,
+    private val disabledSource: DisabledDictionarySource,
+    private val languageCode: String = "en"
+) : DictionaryDataSource {
+
+    // Instance-level cache references (point to shared static cache when language matches)
+    private var cachedWords: List<DictionaryWord>? = null
+    // Prefix index for fast search: prefix -> list of matching words
+    private var prefixIndex: Map<String, List<DictionaryWord>>? = null
+
+    init {
+        // Reuse shared cache if it was built for this language.
+        // This avoids re-parsing the 98k binary dictionary every time
+        // the user opens Dictionary Manager or switches tabs.
+        synchronized(Companion) {
+            sharedCache[languageCode]?.let { cached ->
+                cachedWords = cached.words
+                prefixIndex = cached.prefixIndex
+            }
+        }
+    }
+
+    override suspend fun getAllWords(): List<DictionaryWord> = withContext(Dispatchers.IO) {
+        Log.d(TAG, "getAllWords() called for language: $languageCode")
+
+        // Return cached if available (instance-level fast path)
+        if (cachedWords != null) {
+            Log.d(TAG, "Returning ${cachedWords!!.size} cached words for $languageCode")
+            return@withContext cachedWords!!
+        }
+
+        // Double-check shared cache: another fragment for this language may have
+        // finished loading while we were waiting for the IO dispatcher
+        synchronized(Companion) {
+            sharedCache[languageCode]?.let { cached ->
+                cachedWords = cached.words
+                prefixIndex = cached.prefixIndex
+                Log.d(TAG, "Returning ${cached.words.size} words from shared cache for $languageCode")
+                return@withContext cached.words
+            }
+        }
+
+        try {
+            val disabled = disabledSource.getDisabledWords()
+            val words = mutableListOf<DictionaryWord>()
+
+            // v1.1.89: Try language-specific binary dictionary first
+            // v1.1.96: Also check installed language packs
+            // v1.1.97: Fixed - also load English from V2 binary (was skipping to JSON with 128-255 scale)
+            run {
+                Log.d(TAG, "Trying binary dictionary for language: $languageCode")
+
+                // First try installed language pack
+                try {
+                    val packManager = tribixbite.cleverkeys.langpack.LanguagePackManager.getInstance(context)
+                    val packPath = packManager.getDictionaryPath(languageCode)
+                    if (packPath != null) {
+                        Log.d(TAG, "Found language pack dictionary: ${packPath.absolutePath}")
+                        val loaded = loadBinaryDictionaryFromFile(packPath, words, disabled)
+                        if (loaded) {
+                            Log.d(TAG, "Loaded ${words.size} words from language pack: $languageCode")
+                            cachedWords = words.sorted()
+                            buildPrefixIndex(cachedWords!!)
+                            return@withContext cachedWords!!
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Language pack not found for $languageCode, trying bundled assets", e)
+                }
+
+                // Fall back to bundled assets
+                try {
+                    val binFilename = "dictionaries/${languageCode}_enhanced.bin"
+                    val loaded = loadBinaryDictionary(binFilename, words, disabled)
+                    if (loaded) {
+                        Log.d(TAG, "Loaded ${words.size} words from bundled binary dictionary: $binFilename")
+                        cachedWords = words.sorted()
+                        buildPrefixIndex(cachedWords!!)
+                        return@withContext cachedWords!!
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Binary dictionary not found for $languageCode, trying JSON/TXT fallback")
+                }
+            }
+
+            // Try JSON format first (98k words with frequencies)
+            try {
+                val jsonFilename = "dictionaries/${languageCode}_enhanced.json"
+                val jsonString = context.assets.open(jsonFilename).bufferedReader().use { it.readText() }
+                val jsonDict = org.json.JSONObject(jsonString)
+                val keys = jsonDict.keys()
+
+                while (keys.hasNext()) {
+                    val word = keys.next().lowercase()
+                    if (word.matches(Regex("^[\\p{L}'-]+$"))) {
+                        val frequency = jsonDict.getInt(word)
+                        // Use raw frequency from JSON (128-255 range)
+                        words.add(
+                            DictionaryWord(
+                                word = word,
+                                frequency = frequency,
+                                source = WordSource.MAIN,
+                                enabled = !disabled.contains(word)
+                            )
+                        )
+                    }
+                }
+                Log.d(TAG, "Loaded ${words.size} words from JSON dictionary")
+            } catch (e: Exception) {
+                // No JSON lexicon either — and there is no further fallback. The historical
+                // "${languageCode}_enhanced.txt" branch was dead code: no *_enhanced.txt asset
+                // ever shipped, so it always threw into the outer handler. Preserve that
+                // outcome (no cache, empty result) explicitly so a later retry can still load.
+                Log.w(TAG, "No bundled dictionary (bin/json) for $languageCode", e)
+                return@withContext emptyList()
+            }
+
+            cachedWords = words.sorted()
+
+            // Build prefix index for fast search
+            buildPrefixIndex(cachedWords!!)
+
+            cachedWords!!
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading main dictionary", e)
+            emptyList()
+        }
+    }
+
+    /**
+     * Build prefix index for fast word search.
+     * Creates mapping from prefixes (1-3 chars) to lists of matching words.
+     * Performance: Reduces 98k linear search to ~100-500 comparisons.
+     * Also updates shared static cache so subsequent MainDictionarySource
+     * instances for the same language skip the full load.
+     */
+    private fun buildPrefixIndex(words: List<DictionaryWord>) {
+        val index = mutableMapOf<String, MutableList<DictionaryWord>>()
+
+        for (word in words) {
+            val maxLen = minOf(PREFIX_INDEX_MAX_LENGTH, word.word.length)
+            for (len in 1..maxLen) {
+                val prefix = word.word.substring(0, len).lowercase()
+                index.getOrPut(prefix) { mutableListOf() }.add(word)
+            }
+        }
+
+        prefixIndex = index
+        Log.d(TAG, "Built prefix index: ${index.size} prefixes for ${words.size} words")
+
+        // Persist to shared static cache for cross-instance reuse
+        synchronized(Companion) {
+            sharedCache[languageCode] = LanguageCache(words, index)
+        }
+    }
+
+    override suspend fun searchWords(query: String): List<DictionaryWord> {
+        if (query.isBlank()) return getAllWords()
+
+        val lowerQuery = query.lowercase()
+
+        // Use prefix index if query starts at beginning of word (most common case)
+        if (lowerQuery.length <= PREFIX_INDEX_MAX_LENGTH) {
+            // Exact prefix match - use index
+            val candidates = prefixIndex?.get(lowerQuery) ?: emptyList()
+            // Filter for substring match (in case user typed middle of word)
+            return candidates.filter { it.word.contains(lowerQuery, ignoreCase = true) }
+        } else if (lowerQuery.length > PREFIX_INDEX_MAX_LENGTH) {
+            // Use first 3 chars from index, then filter
+            val prefix = lowerQuery.substring(0, PREFIX_INDEX_MAX_LENGTH)
+            val candidates = prefixIndex?.get(prefix) ?: emptyList()
+            return candidates.filter { it.word.contains(lowerQuery, ignoreCase = true) }
+        }
+
+        // Fallback to full search (should rarely happen)
+        return getAllWords().filter { it.word.contains(query, ignoreCase = true) }
+    }
+
+    /**
+     * Re-sync all cached DictionaryWord.enabled flags from the current disabled set.
+     * Handles cross-source coherence: when DisabledDictionarySource toggles a word,
+     * this source's cache becomes stale. Called by WordListFragment.refresh() before
+     * re-filtering. O(n) scan of ~98k words against a HashSet — <10ms.
+     *
+     * The prefix index stores the SAME DictionaryWord object references as cachedWords,
+     * so mutating .enabled here also fixes prefix index search results.
+     */
+    override fun onRefresh() {
+        cachedWords?.let { words ->
+            val disabled = disabledSource.getDisabledWords()
+            for (dw in words) {
+                dw.enabled = !disabled.contains(dw.word)
+            }
+        }
+    }
+
+    override suspend fun toggleWord(word: String, enabled: Boolean) {
+        disabledSource.setWordEnabled(word, enabled)
+        // Update cached entries in-place so subsequent getAllWords()/searchWords()
+        // reflect the new enabled state without a full 98k-word reload
+        cachedWords?.forEach { dw ->
+            if (dw.word.equals(word, ignoreCase = true)) {
+                dw.enabled = enabled
+            }
+        }
+    }
+
+    override suspend fun addWord(word: String, frequency: Int) {
+        // Main dictionary is read-only
+        throw UnsupportedOperationException("Cannot add words to main dictionary")
+    }
+
+    override suspend fun deleteWord(word: String) {
+        // Main dictionary is read-only
+        throw UnsupportedOperationException("Cannot delete words from main dictionary")
+    }
+
+    override suspend fun updateWord(oldWord: String, newWord: String, frequency: Int) {
+        // Main dictionary is read-only
+        throw UnsupportedOperationException("Cannot update words in main dictionary")
+    }
+
+    /**
+     * Load dictionary from binary file (File object, for language packs).
+     * v1.1.96: Added for language pack support.
+     */
+    private fun loadBinaryDictionaryFromFile(
+        file: java.io.File,
+        words: MutableList<DictionaryWord>,
+        disabled: Set<String>
+    ): Boolean {
+        return try {
+            val index = NormalizedPrefixIndex()
+            val loaded = BinaryDictionaryLoader.loadIntoNormalizedIndexFromFile(file, index)
+            if (loaded) {
+                extractWordsFromIndex(index, words, disabled)
+                true
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading binary dictionary from file: ${file.absolutePath}", e)
+            false
+        }
+    }
+
+    /**
+     * Load dictionary from binary format (.bin files for non-English languages).
+     * Uses NormalizedPrefixIndex to read the binary format.
+     */
+    private fun loadBinaryDictionary(
+        filename: String,
+        words: MutableList<DictionaryWord>,
+        disabled: Set<String>
+    ): Boolean {
+        return try {
+            val index = NormalizedPrefixIndex()
+            val loaded = BinaryDictionaryLoader.loadIntoNormalizedIndex(context, filename, index)
+            if (loaded) {
+                extractWordsFromIndex(index, words, disabled)
+                true
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading binary dictionary: $filename", e)
+            false
+        }
+    }
+
+    /**
+     * Extract words from NormalizedPrefixIndex into word list.
+     * Shared by both loadBinaryDictionary() and loadBinaryDictionaryFromFile().
+     */
+    private fun extractWordsFromIndex(
+        index: NormalizedPrefixIndex,
+        words: MutableList<DictionaryWord>,
+        disabled: Set<String>
+    ) {
+        val normalizedWords = index.getAllNormalizedWords()
+        for (word in normalizedWords) {
+            // Get canonical form (with accents) and frequency rank
+            val results = index.getWordsWithPrefix(word)
+            val match = results.find { it.normalized == word }
+            val canonical = match?.bestCanonical ?: word
+            // Convert rank (0-255, 0=most common) to display frequency (1-10000)
+            // rank 0 → 10000, rank 255 → 1
+            val rank = match?.bestFrequencyRank ?: 255
+            val frequency = 10000 - (rank * 39)  // ~10000 to ~50
+            words.add(
+                DictionaryWord(
+                    word = canonical,  // Show accented form
+                    frequency = frequency.coerceIn(1, 10000),
+                    source = WordSource.MAIN,
+                    enabled = !disabled.contains(word) && !disabled.contains(canonical)
+                )
+            )
+        }
+    }
+
+    companion object {
+        private const val TAG = "MainDictionarySource"
+        private const val PREFIX_INDEX_MAX_LENGTH = 3
+
+        // Per-language shared cache across MainDictionarySource instances.
+        // Eliminates redundant 98k-word binary dict parsing when DictionaryManager
+        // is reopened or tabs are switched (each fragment creates a new instance).
+        // Keyed by language code so multilang tabs don't evict each other.
+        // Thread-safe: synchronized on Companion in init{} and buildPrefixIndex().
+        private data class LanguageCache(
+            val words: List<DictionaryWord>,
+            val prefixIndex: Map<String, List<DictionaryWord>>
+        )
+        private val sharedCache = mutableMapOf<String, LanguageCache>()
+
+        /** Invalidate shared cache for all languages. */
+        fun invalidateCache() {
+            synchronized(this) {
+                sharedCache.clear()
+            }
+        }
+
+        /** Invalidate shared cache for a specific language. */
+        fun invalidateCache(languageCode: String) {
+            synchronized(this) {
+                sharedCache.remove(languageCode)
+            }
+        }
+    }
+}
+
+/**
+ * Disabled words source - manages disabled word list.
+ *
+ * @param prefs SharedPreferences to use
+ * @param languageCode ISO 639-1 language code (e.g., "en", "es") for language-specific storage.
+ *                     If null, uses global key (legacy behavior).
+ * @since v1.1.86 - Added language-specific storage support
+ */
+class DisabledDictionarySource(
+    private val prefs: SharedPreferences,
+    private val languageCode: String? = null
+) : DictionaryDataSource {
+
+    /**
+     * Get the preference key for disabled words.
+     * Uses language-specific key if languageCode is provided, otherwise legacy global key.
+     */
+    private val disabledWordsKey: String
+        get() = if (languageCode != null) {
+            LanguagePreferenceKeys.disabledWordsKey(languageCode)
+        } else {
+            PREF_DISABLED_WORDS_LEGACY
+        }
+
+    fun getDisabledWords(): Set<String> {
+        return prefs.getStringSet(disabledWordsKey, emptySet()) ?: emptySet()
+    }
+
+    fun setWordEnabled(word: String, enabled: Boolean) {
+        val disabled = getDisabledWords().toMutableSet()
+        if (enabled) {
+            disabled.remove(word)
+        } else {
+            disabled.add(word)
+        }
+        prefs.edit().putStringSet(disabledWordsKey, disabled).apply()
+    }
+
+    override suspend fun getAllWords(): List<DictionaryWord> = withContext(Dispatchers.IO) {
+        getDisabledWords()
+            .map { DictionaryWord(it, 0, WordSource.MAIN, false) }
+            .sorted()
+    }
+
+    override suspend fun searchWords(query: String): List<DictionaryWord> {
+        if (query.isBlank()) return getAllWords()
+        return getAllWords().filter { it.word.contains(query, ignoreCase = true) }
+    }
+
+    override suspend fun toggleWord(word: String, enabled: Boolean) {
+        setWordEnabled(word, enabled)
+    }
+
+    override suspend fun addWord(word: String, frequency: Int) {
+        // Disabled list doesn't support adding
+        throw UnsupportedOperationException("Use toggleWord instead")
+    }
+
+    override suspend fun deleteWord(word: String) {
+        setWordEnabled(word, true) // Re-enable word
+    }
+
+    override suspend fun updateWord(oldWord: String, newWord: String, frequency: Int) {
+        // Disabled list doesn't support updating
+        throw UnsupportedOperationException("Use toggleWord instead")
+    }
+
+    companion object {
+        // Legacy global key (pre-v1.1.86)
+        private const val PREF_DISABLED_WORDS_LEGACY = "disabled_words"
+    }
+}
+
+/**
+ * User dictionary source - reads from Android's UserDictionary
+ */
+class UserDictionarySource(
+    private val context: Context,
+    private val contentResolver: ContentResolver
+) : DictionaryDataSource {
+
+    override suspend fun getAllWords(): List<DictionaryWord> = withContext(Dispatchers.IO) {
+        try {
+            val words = mutableListOf<DictionaryWord>()
+            val cursor = contentResolver.query(
+                UserDictionary.Words.CONTENT_URI,
+                arrayOf(
+                    UserDictionary.Words.WORD,
+                    UserDictionary.Words.FREQUENCY
+                ),
+                null,
+                null,
+                "${UserDictionary.Words.WORD} ASC"
+            )
+
+            cursor?.use {
+                val wordIndex = it.getColumnIndex(UserDictionary.Words.WORD)
+                val freqIndex = it.getColumnIndex(UserDictionary.Words.FREQUENCY)
+
+                while (it.moveToNext()) {
+                    val word = it.getString(wordIndex)
+                    val freq = if (freqIndex >= 0) it.getInt(freqIndex) else 100
+                    words.add(DictionaryWord(word, freq, WordSource.USER, true))
+                }
+            }
+
+            words.sorted()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading user dictionary", e)
+            emptyList()
+        }
+    }
+
+    override suspend fun searchWords(query: String): List<DictionaryWord> = withContext(Dispatchers.IO) {
+        if (query.isBlank()) return@withContext getAllWords()
+
+        try {
+            val words = mutableListOf<DictionaryWord>()
+            val selection = "${UserDictionary.Words.WORD} LIKE ?"
+            val selectionArgs = arrayOf("%$query%")
+            val cursor = contentResolver.query(
+                UserDictionary.Words.CONTENT_URI,
+                arrayOf(
+                    UserDictionary.Words.WORD,
+                    UserDictionary.Words.FREQUENCY
+                ),
+                selection,
+                selectionArgs,
+                "${UserDictionary.Words.WORD} ASC"
+            )
+
+            cursor?.use {
+                val wordIndex = it.getColumnIndex(UserDictionary.Words.WORD)
+                val freqIndex = it.getColumnIndex(UserDictionary.Words.FREQUENCY)
+
+                while (it.moveToNext()) {
+                    val word = it.getString(wordIndex)
+                    val freq = if (freqIndex >= 0) it.getInt(freqIndex) else 100
+                    words.add(DictionaryWord(word, freq, WordSource.USER, true))
+                }
+            }
+
+            words.sorted()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error searching user dictionary", e)
+            emptyList()
+        }
+    }
+
+    override suspend fun toggleWord(word: String, enabled: Boolean) {
+        // User dictionary doesn't support disabling, only deleting
+        if (!enabled) deleteWord(word)
+    }
+
+    override suspend fun addWord(word: String, frequency: Int) = withContext(Dispatchers.IO) {
+        // Use UserDictionary API to add word
+        UserDictionary.Words.addWord(
+            context,
+            word,
+            frequency,
+            null,
+            null
+        )
+    }
+
+    override suspend fun deleteWord(word: String): Unit = withContext(Dispatchers.IO) {
+        contentResolver.delete(
+            UserDictionary.Words.CONTENT_URI,
+            "${UserDictionary.Words.WORD}=?",
+            arrayOf(word)
+        )
+        Unit
+    }
+
+    override suspend fun updateWord(oldWord: String, newWord: String, frequency: Int) {
+        deleteWord(oldWord)
+        addWord(newWord, frequency)
+    }
+
+    companion object {
+        private const val TAG = "UserDictionarySource"
+    }
+}
+
+/**
+ * Custom dictionary source - app-specific custom words (language-aware)
+ *
+ * v1.1.87: Now uses language-specific storage via LanguagePreferenceKeys.
+ * This matches how OptimizedVocabulary stores custom words for swipe prediction.
+ *
+ * @param prefs SharedPreferences for storage (typically DirectBootAwarePreferences)
+ * @param languageCode Language code for language-specific storage (e.g., "en", "fr")
+ *                     If null, uses legacy global key "custom_words" for backwards compatibility
+ */
+class CustomDictionarySource(
+    private val prefs: SharedPreferences,
+    private val languageCode: String? = null
+) : DictionaryDataSource {
+
+    private val gson = Gson()
+
+    // Use language-specific key when languageCode is provided
+    private val customWordsKey: String = if (languageCode != null) {
+        LanguagePreferenceKeys.customWordsKey(languageCode)
+    } else {
+        PREF_CUSTOM_WORDS_LEGACY
+    }
+
+    private fun getCustomWords(): MutableMap<String, Int> {
+        // Try JSON format first (used by OptimizedVocabulary)
+        val jsonString = prefs.getString(customWordsKey, null)
+        if (jsonString != null) {
+            return try {
+                val type = object : com.google.gson.reflect.TypeToken<MutableMap<String, Int>>() {}.type
+                gson.fromJson(jsonString, type) ?: mutableMapOf()
+            } catch (e: Exception) {
+                mutableMapOf()
+            }
+        }
+        return mutableMapOf()
+    }
+
+    private fun saveCustomWords(words: Map<String, Int>) {
+        prefs.edit().putString(customWordsKey, gson.toJson(words)).apply()
+    }
+
+    /**
+     * Swipe-priority key for this language (2026-10-08). The legacy global source (null
+     * [languageCode]) has none: priorities only exist for the per-language stores the swipe
+     * engines read.
+     */
+    private val swipePriorityKey: String? = languageCode?.let { LanguagePreferenceKeys.swipePriorityKey(it) }
+
+    /** The stored raised levels of this language; empty for the legacy source. */
+    fun getSwipePriorities(): Map<String, SwipePriority> =
+        swipePriorityKey?.let { SwipePriority.parseMap(prefs.getString(it, null)) } ?: emptyMap()
+
+    /** Persist [map]; an empty map removes the key, so "nothing raised" is the absent default. */
+    private fun saveSwipePriorities(map: Map<String, SwipePriority>) {
+        val key = swipePriorityKey ?: return
+        val edit = prefs.edit()
+        if (map.isEmpty()) edit.remove(key) else edit.putString(key, SwipePriority.toJson(map))
+        edit.apply()
+    }
+
+    override suspend fun getAllWords(): List<DictionaryWord> = withContext(Dispatchers.IO) {
+        val priorities = getSwipePriorities()
+        getCustomWords()
+            .map { (word, freq) ->
+                // The stored 1..255 frequency, as written (legacy 100s are offered a raise,
+                // never rewritten silently — see LegacyCustomWordFrequency).
+                DictionaryWord(word, freq, WordSource.CUSTOM, true, priorities[word] ?: SwipePriority.NORMAL)
+            }
+            .sorted()
+    }
+
+    override suspend fun searchWords(query: String): List<DictionaryWord> {
+        if (query.isBlank()) return getAllWords()
+        return getAllWords().filter { it.word.contains(query, ignoreCase = true) }
+    }
+
+    override suspend fun toggleWord(word: String, enabled: Boolean) {
+        // Custom words are always enabled, use delete to remove
+        if (!enabled) deleteWord(word)
+    }
+
+    override suspend fun addWord(word: String, frequency: Int) {
+        val words = getCustomWords()
+        words[word] = frequency
+        saveCustomWords(words)
+    }
+
+    /** Add [word] with an explicit swipe [priority] (Dictionary Manager "Add word" dialog). */
+    suspend fun addWord(word: String, frequency: Int, priority: SwipePriority) {
+        addWord(word, frequency)
+        saveSwipePriorities(SwipePriority.withLevel(getSwipePriorities(), word, priority))
+    }
+
+    override suspend fun deleteWord(word: String) {
+        val words = getCustomWords()
+        words.remove(word)
+        saveCustomWords(words)
+        // A removed word keeps no level: re-adding it later starts at NORMAL.
+        val priorities = getSwipePriorities()
+        if (word in priorities) saveSwipePriorities(SwipePriority.without(priorities, listOf(word)))
+    }
+
+    override suspend fun updateWord(oldWord: String, newWord: String, frequency: Int) {
+        val words = getCustomWords()
+        words.remove(oldWord)
+        words[newWord] = frequency
+        saveCustomWords(words)
+        // A rename carries the word's swipe priority with it.
+        val priorities = getSwipePriorities()
+        if (oldWord != newWord && oldWord in priorities) {
+            saveSwipePriorities(SwipePriority.renamed(priorities, oldWord, newWord))
+        }
+    }
+
+    /** Edit [oldWord] into [newWord] at [frequency] and set its swipe [priority] (Edit dialog). */
+    suspend fun updateWord(oldWord: String, newWord: String, frequency: Int, priority: SwipePriority) {
+        val words = getCustomWords()
+        words.remove(oldWord)
+        words[newWord] = frequency
+        saveCustomWords(words)
+        val priorities = SwipePriority.without(getSwipePriorities(), listOf(oldWord))
+        saveSwipePriorities(SwipePriority.withLevel(priorities, newWord, priority))
+    }
+
+    // ── Legacy default-frequency offer (maintainer decision A, 2026-10-10) ──────────────────
+    // Policy and evidence for the legacy value live in the pure LegacyCustomWordFrequency;
+    // these methods only read and write this language's stores.
+
+    /** This language's custom words still at the old default frequency (display order). */
+    fun legacyFrequencyWords(): List<String> =
+        LegacyCustomWordFrequency.legacyWords(getCustomWords())
+
+    /**
+     * Should the Custom tab show the legacy-frequency notice? True when a legacy word exists that
+     * the user has not already dismissed. Never for the legacy global store (no language).
+     */
+    fun shouldOfferLegacyFrequencyRaise(): Boolean {
+        val lang = languageCode ?: return false
+        val dismissed = LegacyCustomWordFrequency.dismissedFor(
+            prefs.getString(LegacyCustomWordFrequency.DISMISSED_PREF_KEY, null), lang
+        )
+        return LegacyCustomWordFrequency.shouldOffer(legacyFrequencyWords(), dismissed)
+    }
+
+    /**
+     * Raise [words] that are STILL at the old default to [UserWordFrequency.DEFAULT], in one
+     * write; swipe priorities are untouched. Reads the store fresh, so a word edited or removed
+     * since the list was shown is left as it now is.
+     *
+     * @return how many words were raised
+     */
+    suspend fun raiseLegacyFrequencies(words: Collection<String>): Int {
+        val stored = getCustomWords()
+        val count = LegacyCustomWordFrequency.raisableCount(stored, words)
+        if (count > 0) saveCustomWords(LegacyCustomWordFrequency.raise(stored, words))
+        return count
+    }
+
+    /**
+     * Remember that the user dismissed the notice for the legacy words shown now, so it stays
+     * hidden until a legacy word outside this set appears (e.g. from a backup import).
+     */
+    fun dismissLegacyFrequencyOffer() {
+        val lang = languageCode ?: return
+        val key = LegacyCustomWordFrequency.DISMISSED_PREF_KEY
+        prefs.edit().putString(
+            key,
+            LegacyCustomWordFrequency.withDismissed(prefs.getString(key, null), lang, legacyFrequencyWords()),
+        ).apply()
+    }
+
+    companion object {
+        // Legacy key for backwards compatibility (used when languageCode is null)
+        private const val PREF_CUSTOM_WORDS_LEGACY = "custom_words"
+    }
+}

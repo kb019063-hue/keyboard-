@@ -1,0 +1,526 @@
+package tribixbite.cleverkeys.personalization
+
+import android.content.Context
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
+import tribixbite.cleverkeys.Config
+import tribixbite.cleverkeys.Defaults
+import tribixbite.cleverkeys.persist.DebouncedPersister
+import tribixbite.cleverkeys.persist.LearnedDataStorage
+import tribixbite.cleverkeys.persist.SharedPrefsLearnedStorage
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ScheduledExecutorService
+import kotlin.concurrent.thread
+
+/**
+ * User vocabulary tracker for personalized word prediction.
+ *
+ * Maintains a personal dictionary of words the user frequently types, with usage statistics
+ * that enable adaptive prediction boosting. All data is stored locally in SharedPreferences
+ * for privacy preservation.
+ *
+ * PROCESS-WIDE SINGLETON (2026-08-06 persistence fix): every per-language
+ * `WordPredictor` used to construct its own instance over the SAME prefs file —
+ * concurrent whole-map saves from different instances clobbered each other.
+ * [getInstance] guarantees a single writer.
+ *
+ * Persistence is dirty-flag + debounced write-back (~5 s debounce, ~30 s cap) via
+ * [DebouncedPersister] — the previous implementation spawned a raw Thread and
+ * re-serialized all ~5000 entries on EVERY committed word. Lifecycle call sites
+ * flush via [flush]/[requestFlush].
+ *
+ * Thread-safe for concurrent access during typing.
+ *
+ * Example:
+ * ```kotlin
+ * val vocabulary = UserVocabulary.getInstance(context)
+ * vocabulary.recordWordUsage("kotlin") // Learn from typing
+ * val boost = vocabulary.getPersonalizationBoost("kotlin") // Get prediction boost
+ * vocabulary.cleanupStaleWords() // Periodic maintenance
+ * ```
+ */
+class UserVocabulary internal constructor(
+    private val storage: LearnedDataStorage,
+    debounceMs: Long = DebouncedPersister.DEFAULT_DEBOUNCE_MS,
+    maxDelayMs: Long = DebouncedPersister.DEFAULT_MAX_DELAY_MS,
+    scheduler: ScheduledExecutorService = DebouncedPersister.sharedScheduler(),
+    private val log: (String, Throwable?) -> Unit = { _, _ -> },
+    private val maxWords: () -> Int = { Defaults.PERSONALIZATION_MAX_WORDS }
+) {
+    companion object {
+        private const val TAG = "UserVocabulary"
+        private const val PREFS_NAME = "user_vocabulary"
+        private const val PREFS_KEY_WORDS = "vocabulary_data"
+
+        // Limits to prevent unbounded growth. The size cap is user-configurable
+        // via the `personalization_max_words` pref (default
+        // Defaults.PERSONALIZATION_MAX_WORDS = 5000) and threaded in as the
+        // [maxWords] provider; MIN_VOCABULARY_CAP guards corrupt/absurd values.
+        const val MIN_VOCABULARY_CAP = 100
+        private const val MIN_USAGE_THRESHOLD = 2 // Must use word 2+ times to keep it
+
+        // Cleanup frequency
+        private const val CLEANUP_INTERVAL_MS = 86400000L // 24 hours
+
+        @Volatile
+        private var instance: UserVocabulary? = null
+
+        /** Process-wide singleton backed by the `user_vocabulary` SharedPreferences file. */
+        @JvmStatic
+        fun getInstance(context: Context): UserVocabulary {
+            return instance ?: synchronized(this) {
+                instance ?: UserVocabulary(
+                    storage = SharedPrefsLearnedStorage(
+                        context.applicationContext
+                            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    ),
+                    log = { msg, e ->
+                        if (e != null) android.util.Log.e(TAG, msg, e)
+                        else android.util.Log.d(TAG, msg)
+                    },
+                    // Dynamic provider: the singleton picks up preference
+                    // changes without reconstruction. Falls back to the
+                    // compile-time default before Config is initialized.
+                    maxWords = {
+                        // globalConfigOrNull, NOT globalConfig(): the latter THROWS
+                        // before initGlobalConfig() (Config-less contexts: instrumented
+                        // tests, early activity starts) — the ?. can't catch a throw.
+                        Config.globalConfigOrNull()?.personalization_max_words
+                            ?: Defaults.PERSONALIZATION_MAX_WORDS
+                    }
+                ).also { instance = it }
+            }
+        }
+    }
+
+    // Primary storage: word → usage data
+    private val vocabulary: ConcurrentHashMap<String, UserWordUsage> = ConcurrentHashMap()
+
+    // Gson for JSON serialization
+    private val gson = Gson()
+
+    // Debounced write-back — coalesces the per-word save storm into one write.
+    private val persister = DebouncedPersister(debounceMs, maxDelayMs, scheduler) {
+        writeToStorage()
+    }
+
+    // Track last cleanup time
+    private var lastCleanup: Long = System.currentTimeMillis()
+
+    init {
+        loadFromStorage()
+        // The user may have lowered the cap while nothing was loaded (or the
+        // persisted store predates a smaller cap) — trim down on load, off the
+        // typing hot path.
+        val trimmed = enforceCap()
+        log(
+            "UserVocabulary initialized with ${vocabulary.size} words" +
+                if (trimmed > 0) " ($trimmed trimmed to cap ${currentCap()})" else "",
+            null
+        )
+    }
+
+    /**
+     * Effective vocabulary size cap: the user-configured
+     * `personalization_max_words` value (default
+     * [Defaults.PERSONALIZATION_MAX_WORDS]), clamped to [MIN_VOCABULARY_CAP]
+     * to guard against corrupt preference values.
+     */
+    fun currentCap(): Int = maxWords().coerceAtLeast(MIN_VOCABULARY_CAP)
+
+    /**
+     * Evict lowest-value words until the vocabulary fits [currentCap].
+     *
+     * Called on load and when the user lowers the cap (settings slider) — NOT
+     * on the per-word hot path, which only ever needs to free one slot.
+     * Persists via the debounced persister + async flush when anything was
+     * evicted.
+     *
+     * @return number of words evicted (0 when already within the cap)
+     */
+    fun enforceCap(currentTime: Long = System.currentTimeMillis()): Int {
+        val removed: Int
+        synchronized(this) {
+            val overflow = vocabulary.size - currentCap()
+            if (overflow <= 0) return 0
+            mutationVersion++
+            removeLowestValueWords(overflow, currentTime)
+            removed = overflow
+        }
+        log("Evicted $removed words to enforce cap ${currentCap()}", null)
+        persister.markDirty()
+        persister.requestFlush()
+        return removed
+    }
+
+    /**
+     * Record that the user typed a word.
+     *
+     * If the word is already tracked, increments usage count and updates timestamp.
+     * If new, adds to vocabulary with initial usage count of 1.
+     *
+     * Persistence: marks the store dirty; the debounced persister writes back
+     * in the background (NOT a per-word serialization).
+     */
+    // Store-wide invalidation intentionally expires a receipt after any unrelated mutation,
+    // including cleanup, imports and explicit forget. A reset never revives an old token.
+    private var mutationVersion: Long = 0
+
+    internal class IncrementReceipt internal constructor(
+        internal val owner: UserVocabulary, internal val version: Long, internal val word: String
+    ) {
+        internal var consumed = false
+    }
+
+    internal fun receiptVersion(): Long = synchronized(this) { mutationVersion }
+
+    internal fun isReceiptCurrent(receipt: IncrementReceipt): Boolean = synchronized(this) {
+        receipt.owner === this && !receipt.consumed && receipt.version == mutationVersion
+    }
+
+    /** Reverses one owned count; timestamp updates and capacity evictions are not rewound. */
+    internal fun rollbackReceipt(receipt: IncrementReceipt): Boolean = synchronized(this) {
+        if (!isReceiptCurrent(receipt)) return false
+        receipt.consumed = true
+        unrecordWordUsage(receipt.word)
+    }
+
+    fun recordWordUsage(word: String, timestamp: Long = System.currentTimeMillis()) {
+        recordWordUsageWithReceipt(word, timestamp)
+    }
+
+    internal fun recordWordUsageWithReceipt(word: String, timestamp: Long = System.currentTimeMillis()): IncrementReceipt? {
+        val normalized = UserWordUsage.normalizeWord(word)
+
+        if (normalized.isEmpty() || normalized.length < 2) {
+            return null // Skip very short words
+        }
+
+        val receipt = synchronized(this) {
+            mutationVersion++
+            val existing = vocabulary[normalized]
+
+            if (existing != null) {
+                // Update existing entry
+                vocabulary[normalized] = existing.recordNewUsage(timestamp)
+            } else {
+                // Add new entry
+                val cap = currentCap()
+                if (vocabulary.size >= cap) {
+                    // At capacity, remove least valuable word(s) before adding.
+                    // Normally frees exactly one slot; also absorbs a cap that
+                    // was lowered without an intervening enforceCap().
+                    removeLowestValueWords(vocabulary.size - cap + 1, timestamp)
+                }
+                vocabulary[normalized] = UserWordUsage(
+                    word = normalized,
+                    usageCount = 1,
+                    lastUsed = timestamp,
+                    firstUsed = timestamp
+                )
+            }
+
+            // Periodic cleanup (async, non-blocking)
+            if (timestamp - lastCleanup > CLEANUP_INTERVAL_MS) {
+                performCleanupAsync()
+            }
+            IncrementReceipt(this, mutationVersion, normalized)
+        }
+
+        persister.markDirty()
+        return receipt
+    }
+
+    /**
+     * Inverse of [recordWordUsage] (learning rollback, learning-system audit 2026-09-26):
+     * remove ONE usage of [word] because the commit that recorded it was rejected by the
+     * user. At zero the entry is removed entirely, so a rejected never-before-seen word
+     * leaves no trace. `lastUsed`/`firstUsed` are left as they are — the rollback cannot
+     * know the previous timestamp, and recency only feeds the boost of a word that is still
+     * tracked; no other word is touched. No-op for an unknown word.
+     *
+     * @return true if a usage was removed
+     */
+    fun unrecordWordUsage(word: String): Boolean {
+        val normalized = UserWordUsage.normalizeWord(word)
+        if (normalized.isEmpty()) return false
+        val changed = synchronized(this) {
+            mutationVersion++
+            val existing = vocabulary[normalized] ?: return false
+            if (existing.usageCount <= 1) {
+                vocabulary.remove(normalized)
+            } else {
+                vocabulary[normalized] = existing.copy(usageCount = existing.usageCount - 1)
+            }
+            true
+        }
+        if (changed) persister.markDirty()
+        return changed
+    }
+
+    /**
+     * Get personalization boost for a word.
+     *
+     * Returns:
+     * - 0.0-4.0 for known words (based on frequency and recency)
+     * - 0.0 for unknown words
+     */
+    fun getPersonalizationBoost(word: String, currentTime: Long = System.currentTimeMillis()): Float {
+        val normalized = UserWordUsage.normalizeWord(word)
+        val usage = vocabulary[normalized] ?: return 0.0f
+
+        return usage.getPersonalizationBoost(currentTime)
+    }
+
+    /**
+     * Check if a word is in the user's vocabulary.
+     */
+    fun hasWord(word: String): Boolean {
+        val normalized = UserWordUsage.normalizeWord(word)
+        return vocabulary.containsKey(normalized)
+    }
+
+    /**
+     * Get usage statistics for a word.
+     */
+    fun getWordUsage(word: String): UserWordUsage? {
+        val normalized = UserWordUsage.normalizeWord(word)
+        return vocabulary[normalized]
+    }
+
+    /**
+     * Get all words in vocabulary, sorted by personalization boost (descending).
+     */
+    fun getAllWords(): List<UserWordUsage> {
+        val currentTime = System.currentTimeMillis()
+        return vocabulary.values
+            .sortedByDescending { it.getPersonalizationBoost(currentTime) }
+    }
+
+    /**
+     * Get top N most personalized words.
+     */
+    fun getTopWords(limit: Int = 100): List<UserWordUsage> {
+        return getAllWords().take(limit)
+    }
+
+    /**
+     * Get vocabulary size.
+     */
+    fun size(): Int = vocabulary.size
+
+    /**
+     * Remove a single word from the vocabulary (user-initiated edit from the
+     * learned-data manager).
+     *
+     * @return true if the word was present and removed
+     */
+    fun removeWord(word: String): Boolean {
+        val normalized = UserWordUsage.normalizeWord(word)
+        val removed = synchronized(this) {
+            mutationVersion++
+            vocabulary.remove(normalized) != null
+        }
+        if (removed) {
+            persister.markDirty()
+            // L4 (review 2026-08-06): user-initiated delete — flush promptly so
+            // process death inside the debounce window can't resurrect the word.
+            persister.requestFlush()
+        }
+        return removed
+    }
+
+    /**
+     * Remove stale words from vocabulary.
+     *
+     * A word is stale if:
+     * - Last used more than 90 days ago, OR
+     * - Only used once and more than 30 days old
+     */
+    fun cleanupStaleWords(currentTime: Long = System.currentTimeMillis()): Int {
+        var removedCount = 0
+
+        synchronized(this) {
+            val staleWords = vocabulary.values.filter { it.isStale(currentTime) }
+            if (staleWords.isNotEmpty()) mutationVersion++
+
+            staleWords.forEach { usage ->
+                vocabulary.remove(usage.word)
+                removedCount++
+            }
+
+            lastCleanup = currentTime
+        }
+
+        if (removedCount > 0) {
+            log("Cleaned up $removedCount stale words", null)
+            persister.markDirty()
+        }
+
+        return removedCount
+    }
+
+    /**
+     * Evict the [count] words with the lowest personalization boost.
+     * Caller must hold the instance lock.
+     */
+    private fun removeLowestValueWords(count: Int, currentTime: Long) {
+        if (count <= 0) return
+        vocabulary.values
+            .sortedBy { it.getPersonalizationBoost(currentTime) }
+            .take(count)
+            .forEach { usage ->
+                vocabulary.remove(usage.word)
+                log("Removed low-value word: ${usage.word}", null)
+            }
+    }
+
+    /**
+     * Clear all vocabulary data (user reset). Persists the removal immediately.
+     */
+    fun clearAll() {
+        // M1 (review 2026-08-06): the storage removal happens INSIDE the same
+        // lock [writeToStorage] holds across serialize+write, so an in-flight
+        // flush can never re-persist the just-forgotten vocabulary.
+        synchronized(this) {
+            mutationVersion++
+            vocabulary.clear()
+            lastCleanup = System.currentTimeMillis()
+            storage.remove(PREFS_KEY_WORDS)
+        }
+        log("User vocabulary cleared", null)
+    }
+
+    /**
+     * Export vocabulary to JSON string.
+     */
+    fun exportToJson(): String {
+        val data = getAllWords()
+        return gson.toJson(data)
+    }
+
+    /**
+     * Import vocabulary from JSON string (replaces current vocabulary).
+     *
+     * @return number of words imported (0 on parse failure)
+     */
+    fun importFromJson(json: String): Int {
+        return try {
+            val type = object : TypeToken<List<UserWordUsage>>() {}.type
+            val imported: List<UserWordUsage> = gson.fromJson(json, type)
+
+            synchronized(this) {
+                mutationVersion++
+                vocabulary.clear()
+
+                // Exports are sorted by boost descending (getAllWords), so a
+                // first-N cut keeps the highest-value words when the payload
+                // exceeds the configured cap.
+                val cap = currentCap()
+                imported.forEach { usage ->
+                    if (vocabulary.size < cap) {
+                        vocabulary[usage.word] = usage
+                    }
+                }
+            }
+
+            persister.markDirty()
+            persister.flush()
+            log("Imported ${vocabulary.size} words from JSON", null)
+            vocabulary.size
+        } catch (e: Exception) {
+            log("Failed to import vocabulary from JSON", e)
+            0
+        }
+    }
+
+    /** @return true if there are unflushed in-RAM changes. */
+    fun isDirty(): Boolean = persister.isDirty()
+
+    /**
+     * Synchronously flush unflushed changes (idempotent, no-op when clean).
+     */
+    fun flush() = persister.flush()
+
+    /**
+     * Asynchronously flush on the persistence thread — preferred from
+     * main-thread lifecycle call sites. No-op when clean.
+     */
+    fun requestFlush() = persister.requestFlush()
+
+    /**
+     * Load vocabulary from storage.
+     */
+    private fun loadFromStorage() {
+        val json = storage.getString(PREFS_KEY_WORDS) ?: return
+
+        try {
+            val type = object : TypeToken<List<UserWordUsage>>() {}.type
+            val loaded: List<UserWordUsage> = gson.fromJson(json, type)
+
+            loaded.forEach { usage ->
+                vocabulary[usage.word] = usage
+            }
+
+            log("Loaded ${vocabulary.size} words from storage", null)
+        } catch (e: Exception) {
+            log("Failed to load vocabulary from storage", e)
+        }
+    }
+
+    /**
+     * Serialize the whole vocabulary and write it to storage.
+     * Runs on the persistence thread (or the caller of [flush]).
+     */
+    private fun writeToStorage() {
+        // M1 (review 2026-08-06): serialize AND write under ONE lock (shared with
+        // [clearAll]) so a forget can never interleave between them and be
+        // resurrected. An empty vocabulary maps to key REMOVAL (post-clear flush,
+        // or last word removed) — never an empty-blob overwrite of a forget.
+        val size = synchronized(this) {
+            if (vocabulary.isEmpty()) {
+                storage.remove(PREFS_KEY_WORDS)
+            } else {
+                storage.putString(PREFS_KEY_WORDS, gson.toJson(getAllWords()))
+            }
+            vocabulary.size
+        }
+        log("Saved $size words to storage", null)
+    }
+
+    /**
+     * Perform cleanup asynchronously.
+     */
+    private fun performCleanupAsync() {
+        thread {
+            cleanupStaleWords()
+        }
+    }
+
+    /**
+     * Get statistics about the vocabulary.
+     */
+    fun getStats(): VocabularyStats {
+        val currentTime = System.currentTimeMillis()
+        val allWords = vocabulary.values.toList()
+
+        return VocabularyStats(
+            totalWords = allWords.size,
+            averageUsageCount = allWords.map { it.usageCount }.average(),
+            mostUsedWord = allWords.maxByOrNull { it.usageCount },
+            recentlyUsedCount = allWords.count {
+                (currentTime - it.lastUsed) < 7 * 86400000L // Last 7 days
+            }
+        )
+    }
+}
+
+/**
+ * Statistics about user vocabulary.
+ */
+data class VocabularyStats(
+    val totalWords: Int,
+    val averageUsageCount: Double,
+    val mostUsedWord: UserWordUsage?,
+    val recentlyUsedCount: Int
+)

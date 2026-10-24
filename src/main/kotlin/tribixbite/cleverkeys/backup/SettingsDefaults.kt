@@ -1,0 +1,331 @@
+package tribixbite.cleverkeys.backup
+
+import tribixbite.cleverkeys.Defaults
+import tribixbite.cleverkeys.KeyboardHeightPrefs
+import tribixbite.cleverkeys.OneHandedConfig
+import tribixbite.cleverkeys.ToolbarConfig
+import tribixbite.cleverkeys.autocorrect.AutocorrectTuning
+
+/**
+ * Effective compile-time defaults for every preference key the app reads.
+ *
+ * # Contract
+ *
+ * Used by `SettingsImportPlanBuilder.fromJson` to suppress preview rows
+ * where the imported value equals what the user would experience anyway.
+ * On a fresh install the prefs map is empty — without this map, every key
+ * in the import file appears as ADDED (`current=Unset → proposed=X`),
+ * including keys whose proposed value equals the default the user
+ * already has in effect.
+ *
+ * # Three-bucket classification
+ *
+ * Every pref key read in `src/main/kotlin/` must fall into exactly one of:
+ *
+ *   1. **`SETTINGS_DEFAULTS`** (this map) — keys with a known compile-time
+ *      default value. The import diff compares against this default and
+ *      skips rows where `proposed == default`. Rows that DO change show
+ *      the default as `current` so the dialog renders a real before/after.
+ *
+ *   2. **`NON_DEFAULTED_KEYS`** (below) — keys whose runtime default is
+ *      literally `null` (e.g. optional URIs). These intentionally fall
+ *      through to `current=PrefValue.Unset` in the preview.
+ *
+ *   3. **`SettingsValidation.INTERNAL_KEYS`** — migration-version markers
+ *      and runtime-device state that should never be imported or exported.
+ *      Filtered before the diff even runs.
+ *
+ * `SettingsDefaultsDriftTest` walks the source tree and asserts every
+ * pref-read key is classified. **If that test fails, classify the key
+ * into one of the three buckets** — do not just suppress the failure.
+ *
+ * # Type discipline
+ *
+ *   - `PrefValue.IntV(...)` for keys read via `getInt` / `safeGetInt`.
+ *   - `PrefValue.FloatV(...)` for keys read via `getFloat`/`safeGetFloat`.
+ *   - `PrefValue.Str(...)` for keys read via `getString`/`safeGetString`,
+ *     INCLUDING numeric-looking strings like `"50"` (some sliders store
+ *     stringly-typed values for backwards compat with legacy XML prefs).
+ */
+internal val SETTINGS_DEFAULTS: Map<String, PrefValue> = mapOf(
+    // ── Appearance ────────────────────────────────────────────────────
+    "theme" to PrefValue.Str(Defaults.THEME),
+    "keyboard_height" to PrefValue.IntV(Defaults.KEYBOARD_HEIGHT_PORTRAIT),
+    "keyboard_height_landscape" to PrefValue.IntV(Defaults.KEYBOARD_HEIGHT_LANDSCAPE),
+    "label_brightness" to PrefValue.IntV(Defaults.LABEL_BRIGHTNESS),
+    "keyboard_opacity" to PrefValue.IntV(Defaults.KEYBOARD_OPACITY),
+    "key_opacity" to PrefValue.IntV(Defaults.KEY_OPACITY),
+    "key_activated_opacity" to PrefValue.IntV(Defaults.KEY_ACTIVATED_OPACITY),
+    "character_size" to PrefValue.FloatV(Defaults.CHARACTER_SIZE),
+    "secondary_label_size_scale" to PrefValue.FloatV(Defaults.SECONDARY_LABEL_SIZE_SCALE),
+    "key_vertical_margin" to PrefValue.FloatV(Defaults.KEY_VERTICAL_MARGIN),
+    "key_horizontal_margin" to PrefValue.FloatV(Defaults.KEY_HORIZONTAL_MARGIN),
+    "border_config" to PrefValue.Bool(Defaults.BORDER_CONFIG),
+    "custom_border_radius" to PrefValue.IntV(Defaults.CUSTOM_BORDER_RADIUS),
+    "custom_border_line_width" to PrefValue.FloatV(Defaults.CUSTOM_BORDER_LINE_WIDTH.toFloat()),
+
+    // ── Margins (percent of screen dimension) ─────────────────────────
+    "margin_bottom_portrait" to PrefValue.IntV(Defaults.MARGIN_BOTTOM_PORTRAIT),
+    "margin_bottom_landscape" to PrefValue.IntV(Defaults.MARGIN_BOTTOM_LANDSCAPE),
+    "margin_left_portrait" to PrefValue.IntV(Defaults.MARGIN_LEFT_PORTRAIT),
+    "margin_left_landscape" to PrefValue.IntV(Defaults.MARGIN_LEFT_LANDSCAPE),
+    "margin_right_portrait" to PrefValue.IntV(Defaults.MARGIN_RIGHT_PORTRAIT),
+    "margin_right_landscape" to PrefValue.IntV(Defaults.MARGIN_RIGHT_LANDSCAPE),
+
+    // ── Layout ────────────────────────────────────────────────────────
+    "show_numpad" to PrefValue.Str(Defaults.SHOW_NUMPAD),
+    "numpad_layout" to PrefValue.Str(Defaults.NUMPAD_LAYOUT),
+    "number_row" to PrefValue.Str(Defaults.NUMBER_ROW),
+    "number_entry_layout" to PrefValue.Str(Defaults.NUMBER_ENTRY_LAYOUT),
+    "scale_numpad_height" to PrefValue.Bool(Defaults.SCALE_NUMPAD_HEIGHT),
+
+    // ── Input behavior ───────────────────────────────────────────────
+    "vibrate_custom" to PrefValue.Bool(Defaults.VIBRATE_CUSTOM),
+    "vibrate_duration" to PrefValue.IntV(Defaults.VIBRATE_DURATION),
+    "vibration_enabled" to PrefValue.Bool(Defaults.HAPTIC_ENABLED),
+    "haptic_key_press" to PrefValue.Bool(Defaults.HAPTIC_KEY_PRESS),
+    "haptic_prediction_tap" to PrefValue.Bool(Defaults.HAPTIC_PREDICTION_TAP),
+    "haptic_trackpoint_activate" to PrefValue.Bool(Defaults.HAPTIC_TRACKPOINT_ACTIVATE),
+    "haptic_long_press" to PrefValue.Bool(Defaults.HAPTIC_LONG_PRESS),
+    "haptic_swipe_complete" to PrefValue.Bool(Defaults.HAPTIC_SWIPE_COMPLETE),
+    "longpress_timeout" to PrefValue.IntV(Defaults.LONGPRESS_TIMEOUT),
+    "longpress_interval" to PrefValue.IntV(Defaults.LONGPRESS_INTERVAL),
+    "keyrepeat_enabled" to PrefValue.Bool(Defaults.KEYREPEAT_ENABLED),
+    "keyrepeat_backspace_only" to PrefValue.Bool(Defaults.KEYREPEAT_BACKSPACE_ONLY),
+    "lock_double_tap" to PrefValue.Bool(Defaults.DOUBLE_TAP_LOCK_SHIFT),
+    "autocapitalisation" to PrefValue.Bool(Defaults.AUTOCAPITALISATION),
+    "switch_input_immediate" to PrefValue.Bool(Defaults.SWITCH_INPUT_IMMEDIATE),
+    "enter_always_newline" to PrefValue.Bool(Defaults.ENTER_ALWAYS_NEWLINE),
+    "smart_punctuation" to PrefValue.Bool(Defaults.SMART_PUNCTUATION),
+    "tap_duration_threshold" to PrefValue.IntV(Defaults.TAP_DURATION_THRESHOLD),
+
+    // ── Gesture ───────────────────────────────────────────────────────
+    "swipe_dist" to PrefValue.Str(Defaults.SWIPE_DIST),
+    "slider_sensitivity" to PrefValue.Str(Defaults.SLIDER_SENSITIVITY),
+    "circle_sensitivity" to PrefValue.Str(Defaults.CIRCLE_SENSITIVITY),
+    "double_space_to_period" to PrefValue.Bool(Defaults.DOUBLE_SPACE_TO_PERIOD),
+    "double_space_threshold" to PrefValue.IntV(Defaults.DOUBLE_SPACE_THRESHOLD),
+    "swipe_min_distance" to PrefValue.FloatV(Defaults.SWIPE_MIN_DISTANCE),
+    "swipe_min_key_distance" to PrefValue.FloatV(Defaults.SWIPE_MIN_KEY_DISTANCE),
+    "swipe_min_dwell_time" to PrefValue.IntV(Defaults.SWIPE_MIN_DWELL_TIME),
+    "swipe_noise_threshold" to PrefValue.FloatV(Defaults.SWIPE_NOISE_THRESHOLD),
+    "swipe_high_velocity_threshold" to PrefValue.FloatV(Defaults.SWIPE_HIGH_VELOCITY_THRESHOLD),
+    "slider_speed_smoothing" to PrefValue.FloatV(Defaults.SLIDER_SPEED_SMOOTHING),
+    "slider_speed_max" to PrefValue.FloatV(Defaults.SLIDER_SPEED_MAX),
+
+    // ── Short gestures ───────────────────────────────────────────────
+    "short_gestures_enabled" to PrefValue.Bool(Defaults.SHORT_GESTURES_ENABLED),
+    "short_gesture_min_distance" to PrefValue.IntV(Defaults.SHORT_GESTURE_MIN_DISTANCE),
+    "short_gesture_max_distance" to PrefValue.IntV(Defaults.SHORT_GESTURE_MAX_DISTANCE),
+    "short_swipes_only" to PrefValue.Bool(Defaults.SHORT_SWIPES_ONLY),
+
+    // ── Subkey popover (hold-then-select) ────────────────────────────
+    "subkey_popover_enabled" to PrefValue.Bool(Defaults.SUBKEY_POPOVER_ENABLED),
+    "subkey_popover_neutral_width" to PrefValue.IntV(Defaults.SUBKEY_POPOVER_NEUTRAL_WIDTH),
+    "subkey_popover_neutral_height" to PrefValue.IntV(Defaults.SUBKEY_POPOVER_NEUTRAL_HEIGHT),
+
+    // ── Selection-delete ─────────────────────────────────────────────
+    "selection_delete_vertical_threshold" to PrefValue.IntV(Defaults.SELECTION_DELETE_VERTICAL_THRESHOLD),
+    "selection_delete_vertical_speed" to PrefValue.FloatV(Defaults.SELECTION_DELETE_VERTICAL_SPEED),
+    "selection_delete_mode" to PrefValue.Str(Defaults.SELECTION_DELETE_MODE),
+    "selection_delete_step_dp" to PrefValue.IntV(Defaults.SELECTION_DELETE_STEP_DP),
+
+    // ── Swipe trail ──────────────────────────────────────────────────
+    "swipe_trail_enabled" to PrefValue.Bool(Defaults.SWIPE_TRAIL_ENABLED),
+    "swipe_trail_effect" to PrefValue.Str(Defaults.SWIPE_TRAIL_EFFECT),
+    "swipe_trail_color" to PrefValue.IntV(Defaults.SWIPE_TRAIL_COLOR),
+    "swipe_trail_width" to PrefValue.FloatV(Defaults.SWIPE_TRAIL_WIDTH),
+    "swipe_trail_glow_radius" to PrefValue.FloatV(Defaults.SWIPE_TRAIL_GLOW_RADIUS),
+
+    // ── Swipe decoding ───────────────────────────────────────────────
+    "swipe_smoothing_window" to PrefValue.IntV(Defaults.SWIPE_SMOOTHING_WINDOW),
+    "finger_occlusion_offset" to PrefValue.IntV(Defaults.FINGER_OCCLUSION_OFFSET),
+    "onnx_xnnpack_threads" to PrefValue.IntV(Defaults.ONNX_XNNPACK_THREADS),
+
+    // ── Word prediction ──────────────────────────────────────────────
+    "continuous_swipe_enabled" to PrefValue.Bool(Defaults.CONTINUOUS_SWIPE_ENABLED),
+    "swipe_typing_enabled" to PrefValue.Bool(Defaults.SWIPE_TYPING_ENABLED),
+    "swipe_on_password_fields" to PrefValue.Bool(Defaults.SWIPE_ON_PASSWORD_FIELDS),
+    "word_prediction_enabled" to PrefValue.Bool(Defaults.WORD_PREDICTION_ENABLED),
+    "suggestion_bar_opacity" to PrefValue.IntV(Defaults.SUGGESTION_BAR_OPACITY),
+    // Toolbar (HeliBoard gap analysis phase 1). Listed here so backup/restore carries it;
+    // a key present in Config but absent from this map is silently dropped from backups.
+    ToolbarConfig.PREF_ENABLED to PrefValue.Bool(Defaults.TOOLBAR_ENABLED),
+    ToolbarConfig.PREF_KEYS to PrefValue.Str(Defaults.TOOLBAR_KEYS),
+    // One-handed mode (HeliBoard gap analysis phase 2), for the same reason as the toolbar above.
+    OneHandedConfig.PREF_ENABLED to PrefValue.Bool(Defaults.ONE_HANDED_ENABLED),
+    OneHandedConfig.PREF_SIDE to PrefValue.Str(Defaults.ONE_HANDED_SIDE),
+    OneHandedConfig.PREF_SCALE to PrefValue.IntV(Defaults.ONE_HANDED_SCALE),
+    "show_exact_typed_word" to PrefValue.Bool(Defaults.SHOW_EXACT_TYPED_WORD),
+    "context_aware_predictions_enabled" to PrefValue.Bool(Defaults.CONTEXT_AWARE_PREDICTIONS_ENABLED),
+    "personalized_learning_enabled" to PrefValue.Bool(Defaults.PERSONALIZED_LEARNING_ENABLED),
+    "next_word_prediction_enabled" to PrefValue.Bool(Defaults.NEXT_WORD_PREDICTION_ENABLED),
+    "context_source" to PrefValue.Str(Defaults.CONTEXT_SOURCE),
+    "personalization_weight" to PrefValue.FloatV(Defaults.PERSONALIZATION_WEIGHT),
+    "personalization_max_words" to PrefValue.IntV(Defaults.PERSONALIZATION_MAX_WORDS),
+    "learning_aggression" to PrefValue.Str(Defaults.LEARNING_AGGRESSION),
+    "prediction_context_boost" to PrefValue.FloatV(Defaults.PREDICTION_CONTEXT_BOOST),
+    "prediction_frequency_scale" to PrefValue.FloatV(Defaults.PREDICTION_FREQUENCY_SCALE),
+    "auto_space_after_suggestion" to PrefValue.Bool(Defaults.AUTO_SPACE_AFTER_SUGGESTION),
+    "auto_space_before_suggestion" to PrefValue.Bool(Defaults.AUTO_SPACE_BEFORE_SUGGESTION),
+    "backspace_undo_swipe" to PrefValue.Bool(Defaults.BACKSPACE_UNDO_SWIPE),
+    "backspace_undo_autocorrect" to PrefValue.Bool(Defaults.BACKSPACE_UNDO_AUTOCORRECT),
+
+    // ── Autocorrect ──────────────────────────────────────────────────
+    "autocorrect_enabled" to PrefValue.Bool(Defaults.AUTOCORRECT_ENABLED),
+    "autocorrect_min_word_length" to PrefValue.IntV(Defaults.AUTOCORRECT_MIN_WORD_LENGTH),
+    "autocorrect_char_match_threshold" to PrefValue.FloatV(Defaults.AUTOCORRECT_CHAR_MATCH_THRESHOLD),
+    "autocorrect_confidence_min_frequency" to PrefValue.IntV(Defaults.AUTOCORRECT_MIN_FREQUENCY),
+    "autocorrect_max_length_diff" to PrefValue.IntV(Defaults.AUTOCORRECT_MAX_LENGTH_DIFF),
+    "autocorrect_prefix_length" to PrefValue.IntV(Defaults.AUTOCORRECT_PREFIX_LENGTH),
+    "swipe_final_autocorrect_enabled" to PrefValue.Bool(Defaults.SWIPE_FINAL_AUTOCORRECT_ENABLED),
+    "autocapitalize_i_words" to PrefValue.Bool(Defaults.AUTOCAPITALIZE_I_WORDS),
+    // Ranking & Tuning (2026-10-18): the 22 AutocorrectTuning.Keys, typed from their single
+    // definition (floats/ints/bools/strings), so a new tuning key is classified by adding it there.
+    *autocorrectTuningDefaults(),
+
+    // ── Multi-language ──────────────────────────────────────────────
+    "pref_enable_multilang" to PrefValue.Bool(Defaults.ENABLE_MULTILANG),
+    "pref_primary_language" to PrefValue.Str(Defaults.PRIMARY_LANGUAGE),
+    // ARC-100 reclassified these after preview-behavior tests; constants since audit M10.
+    "pref_primary_language_alt" to PrefValue.Str(Defaults.PRIMARY_LANGUAGE_ALT),
+    "pref_secondary_language" to PrefValue.Str(Defaults.SECONDARY_LANGUAGE),
+    "pref_secondary_language_alt" to PrefValue.Str(Defaults.SECONDARY_LANGUAGE_ALT),
+    "pref_auto_detect_language" to PrefValue.Bool(Defaults.AUTO_DETECT_LANGUAGE),
+    "pref_language_detection_sensitivity" to PrefValue.FloatV(Defaults.LANGUAGE_DETECTION_SENSITIVITY),
+    "pref_secondary_prediction_weight" to PrefValue.FloatV(Defaults.SECONDARY_PREDICTION_WEIGHT),
+
+    // NOTE (F-7, 2026-09-06): the five cgr_* keys that sat here are now in
+    // SettingsValidation.DEPRECATED_KEYS — their SwipeCalibrationActivity died
+    // with the neural engine (2026-08-18) and NO reader or writer remained, yet
+    // they were being seeded into every settings export. Only
+    // has_visited_calibration in that block is still live (LauncherActivity).
+    "has_visited_calibration" to PrefValue.Bool(false),
+
+    // NOTE (F-6, 2026-09-06): pin_entry_enabled moved to DEPRECATED_KEYS. The
+    // Pin Entry Layout switch now writes `number_entry_layout` (above) directly;
+    // the old key's only reader is Config.migrate's one-time seeding.
+
+    // ── Clipboard ────────────────────────────────────────────────────
+    "clipboard_history_enabled" to PrefValue.Bool(Defaults.CLIPBOARD_HISTORY_ENABLED),
+    "clipboard_history_limit" to PrefValue.Str(Defaults.CLIPBOARD_HISTORY_LIMIT),
+    "clipboard_history_duration" to PrefValue.Str(Defaults.CLIPBOARD_HISTORY_DURATION),
+    "clipboard_pane_height_percent" to PrefValue.IntV(Defaults.CLIPBOARD_PANE_HEIGHT_PERCENT),
+    "clipboard_max_item_size_kb" to PrefValue.Str(Defaults.CLIPBOARD_MAX_ITEM_SIZE_KB),
+    "clipboard_limit_type" to PrefValue.Str(Defaults.CLIPBOARD_LIMIT_TYPE),
+    "clipboard_size_limit_mb" to PrefValue.Str(Defaults.CLIPBOARD_SIZE_LIMIT_MB),
+    // clipboard_pinned_rows retired 2026-09-07: its only reader was ClipboardPinView,
+    // deleted as dead legacy (D-9). Old backups carrying it hit DEPRECATED_KEYS.
+    "clipboard_exclude_password_managers" to PrefValue.Bool(Defaults.CLIPBOARD_EXCLUDE_PASSWORD_MANAGERS),
+    "clipboard_respect_sensitive_flag" to PrefValue.Bool(Defaults.CLIPBOARD_RESPECT_SENSITIVE_FLAG),
+    // URL-sanitization (Chunk 4): transforms OFF; the system-clipboard write-back ON (it acts
+    // only when a transform is on and changed a URL). One definition each in Defaults (M3).
+    "clipboard_sanitize_links_enabled" to PrefValue.Bool(Defaults.CLIPBOARD_SANITIZE_LINKS_ENABLED),
+    "clipboard_embed_enrich_enabled" to PrefValue.Bool(Defaults.CLIPBOARD_EMBED_ENRICH_ENABLED),
+    "clipboard_custom_rules_enabled" to PrefValue.Bool(Defaults.CLIPBOARD_CUSTOM_RULES_ENABLED),
+    "clipboard_sanitize_system_clipboard" to PrefValue.Bool(Defaults.CLIPBOARD_SANITIZE_SYSTEM_CLIPBOARD),
+    // Clipboard tab visibility / text-only display.
+    "clipboard_text_only" to PrefValue.Bool(Defaults.CLIPBOARD_TEXT_ONLY),
+    "clipboard_pinned_enabled" to PrefValue.Bool(Defaults.CLIPBOARD_PINNED_ENABLED),
+    "clipboard_todo_enabled" to PrefValue.Bool(Defaults.CLIPBOARD_TODO_ENABLED),
+    // GH #175(2): swipe-to-delete on clipboard rows; an ordinary exportable UI toggle.
+    "clipboard_swipe_delete_enabled" to PrefValue.Bool(Defaults.CLIPBOARD_SWIPE_DELETE_ENABLED),
+    "clipboard_media_enabled" to PrefValue.Bool(Defaults.CLIPBOARD_MEDIA_ENABLED),
+    "clipboard_max_media_size_mb" to PrefValue.IntV(Defaults.CLIPBOARD_MAX_MEDIA_SIZE_MB),
+    // #156: PROCESS_TEXT selection-toolbar entry point — opt-in, default false (design §6.6).
+    // A normal exportable UI toggle. The component-enabled state is derived from this pref
+    // (single source of truth); re-applied on load via setPrivateCopyToolbarComponentEnabled.
+    "clipboard_private_copy_toolbar_enabled" to PrefValue.Bool(Defaults.CLIPBOARD_PRIVATE_COPY_TOOLBAR_ENABLED),
+    // ARC-037: the PROCESS_TEXT confirmation toast. Same bucket and same nature as the toggle
+    // above — a normal exportable UI preference with a compile-time default — but opt-OUT
+    // (true): suppressing a confirmation is a preference, not a security decision, so it must
+    // not silently become the default the way an unset opt-in key would.
+    "clipboard_private_copy_toast_enabled" to PrefValue.Bool(Defaults.CLIPBOARD_PRIVATE_COPY_TOAST_ENABLED),
+
+    // ── GIF panel ────────────────────────────────────────────────────
+    "gif_enabled" to PrefValue.Bool(Defaults.GIF_ENABLED),
+    "gif_thumbnail_columns" to PrefValue.IntV(Defaults.GIF_THUMBNAIL_COLUMNS),
+
+    // ── Privacy / debug / accessibility ──────────────────────────────
+    "debug_enabled" to PrefValue.Bool(Defaults.DEBUG_ENABLED),
+    // MASTER on-device learning gate (Task A 2026-08-06) — opt-OUT, default ON
+    "on_device_learning_enabled" to PrefValue.Bool(Defaults.ON_DEVICE_LEARNING_ENABLED),
+    // Task B Tier 2: opt-in suggestion origin markers
+    "suggestion_provenance_markers" to PrefValue.Bool(Defaults.SUGGESTION_PROVENANCE_MARKERS),
+    "privacy_collect_swipe" to PrefValue.Bool(Defaults.PRIVACY_COLLECT_SWIPE),
+    "privacy_collect_performance" to PrefValue.Bool(Defaults.PRIVACY_COLLECT_PERFORMANCE),
+    "privacy_collect_errors" to PrefValue.Bool(Defaults.PRIVACY_COLLECT_ERRORS),
+    // NOTE: sticky_keys_* and voice_guidance_enabled were removed in the TalkBack
+    // release — they are now in SettingsValidation.DEPRECATED_KEYS (no reader).
+
+    // NOTE: swipe_correction_preset (the "Correction Style" preset, the sole member of the
+    // former "Presets" group) was removed in ARC-085 — it is now in
+    // SettingsValidation.DEPRECATED_KEYS (it never had a reader).
+
+    // ── Misc / runtime ───────────────────────────────────────────────
+    "custom_terminal_packages" to PrefValue.Str(Defaults.CUSTOM_TERMINAL_PACKAGES),
+    // I-7 (2026-09-08): the default-IME reminder switch — the "don't ask again"
+    // pref. Portable (a user choice, not device state); default ON = prompting
+    // enabled. The once-per-boot record (ime_prompt_last_boot_ms) is INTERNAL.
+    "ime_default_prompt_enabled" to PrefValue.Bool(Defaults.IME_DEFAULT_PROMPT_ENABLED),
+    // NOTE: unified_swipe_pipeline (WP9 step-4 QA escape hatch) was removed in step 6 —
+    // now in SettingsValidation.DEPRECATED_KEYS (no reader).
+    // WP9 R-1 step 7 (v1.2): swipe engine mode selector ("ctc" | "geometric").
+    // Supersedes the short-lived (never-released) geometric_swipe_engine Boolean.
+    "swipe_engine_mode" to PrefValue.Str(Defaults.SWIPE_ENGINE_MODE),
+    // Full Geometric Settings (GeometricSettingsActivity) — user-tunable geo engine knobs.
+    "geo_max_results" to PrefValue.IntV(Defaults.GEO_MAX_RESULTS),
+    "geo_frequency_weight" to PrefValue.FloatV(Defaults.GEO_FREQUENCY_WEIGHT),
+    "geo_endpoint_inset_kw" to PrefValue.FloatV(Defaults.GEO_ENDPOINT_INSET_KW),
+    // Full CTC Settings (CtcSettingsActivity) — G5 ctc engine knob.
+    "ctc_beam_width" to PrefValue.IntV(Defaults.CTC_BEAM_WIDTH),
+    "swipe_context_rescoring" to PrefValue.Bool(Defaults.SWIPE_CONTEXT_RESCORING),
+    "swipe_debug_detailed_logging" to PrefValue.Bool(Defaults.SWIPE_DEBUG_DETAILED_LOGGING),
+    "swipe_show_debug_scores" to PrefValue.Bool(Defaults.SWIPE_SHOW_DEBUG_SCORES),
+)
+
+/**
+ * Resolve a key's effective default. Used by `SettingsImportPlanBuilder` to decide
+ * whether a key represents a real change vs. a no-op against the default.
+ *
+ * The former `PATTERN_DEFAULTS` prefix map went with the neural engine (2026-08-18): its
+ * only two entries were `neural_prefix_boost_{multiplier,max}_<lang>`, and those keys are
+ * now filtered out upstream by `SettingsValidation.isDeprecatedPreference`, which grew the
+ * matching prefix rule. No surviving pref key is per-language except the dictionary blobs,
+ * which `isDictionaryPreference` routes to the separate DictImportPlan flow.
+ */
+internal fun lookupDefault(key: String): PrefValue? = SETTINGS_DEFAULTS[key]
+
+/**
+ * Keys whose runtime default is literally `null` (read site passes `null`
+ * to `prefs.getString`). Importing such a key with a non-null proposed
+ * value is a real change — but we cannot express "the absence of a value"
+ * as a `PrefValue` variant other than `Unset`. Listing them here:
+ *
+ *   1. Documents the intentional fall-through to `Unset` in the preview
+ *      (the dialog will render "(unset) → value", which is correct here —
+ *      there really is no prior value to compare against).
+ *   2. Allows `SettingsDefaultsDriftTest` to recognize these as classified
+ *      so the test doesn't flag them as missing-from-`SETTINGS_DEFAULTS`.
+ */
+internal val NON_DEFAULTED_KEYS: Set<String> = setOf(
+    "clipboard_custom_rules_uri",      // SAF URI for user-supplied URL rules
+    // Inner-screen (unfolded) keyboard heights: "unset" means "follow the outer-screen height"
+    // (KeyboardHeightPrefs), so Reset removes them and never seeds a value.
+    KeyboardHeightPrefs.PORTRAIT_UNFOLDED,
+    KeyboardHeightPrefs.LANDSCAPE_UNFOLDED,
+)
+
+/**
+ * `SETTINGS_DEFAULTS` entries for every [AutocorrectTuning.Keys] preference, with the PrefValue
+ * type its reader (`AutocorrectTuning.fromPrefs`) uses. A function rather than a property so the
+ * map initializer above can call it regardless of declaration order.
+ */
+private fun autocorrectTuningDefaults(): Array<Pair<String, PrefValue>> = with(AutocorrectTuning.Keys) {
+    buildList<Pair<String, PrefValue>> {
+        FLOATS.forEach { add(it.key to PrefValue.FloatV(it.default)) }
+        INTS.forEach { add(it.key to PrefValue.IntV(it.default)) }
+        BOOLS.forEach { add(it.key to PrefValue.Bool(it.default)) }
+        STRINGS.forEach { add(it.key to PrefValue.Str(it.default)) }
+    }.toTypedArray()
+}

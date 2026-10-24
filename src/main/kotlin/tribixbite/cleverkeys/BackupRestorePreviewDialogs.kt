@@ -1,0 +1,978 @@
+package tribixbite.cleverkeys
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import tribixbite.cleverkeys.backup.*
+
+/**
+ * Production [ResultText]: resolves through the given [android.content.res.Resources], i.e. the
+ * current locale. Lives here (an Android file) so `BackupRestoreResultMessages.kt` stays pure.
+ */
+internal class ResourcesResultText(private val resources: android.content.res.Resources) : ResultText {
+    override fun string(id: Int, vararg args: Any): String =
+        if (args.isEmpty()) resources.getString(id) else resources.getString(id, *args)
+
+    override fun plural(id: Int, count: Int, vararg args: Any): String =
+        resources.getQuantityString(id, count, *args)
+}
+
+/**
+ * [ResultText] for the pure render helpers called from composables. Keyed on the configuration
+ * so a locale change recomposes with freshly resolved text.
+ */
+@Composable
+internal fun rememberResultText(): ResultText {
+    val configuration = LocalConfiguration.current
+    val resources = LocalContext.current.resources
+    return remember(configuration, resources) { ResourcesResultText(resources) }
+}
+
+/**
+ * Top-level entry point for the settings import preview.
+ *
+ * onApply receives the user's exclusion set and the chosen short-swipe
+ * mode. Empty exclusion + MERGE mode = "approve everything" path.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsImportPreviewDialog(
+    plan: SettingsImportPlan,
+    onCancel: () -> Unit,
+    onApply: (excludedKeys: Set<String>, shortSwipeMode: ShortSwipeImportMode) -> Unit,
+) {
+    val excluded = remember { mutableStateOf(emptySet<String>()) }
+    val shortSwipeMode = remember { mutableStateOf(ShortSwipeImportMode.MERGE) }
+
+    Dialog(
+        onDismissRequest = onCancel,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                SettingsPreviewTopBar(
+                    appliedCount = plan.changes.size - excluded.value.size,
+                    onCancel = onCancel,
+                    onApply = { onApply(excluded.value, shortSwipeMode.value) },
+                )
+                LazyColumn(modifier = Modifier.weight(1f)) {
+                    item { SettingsPreviewHeaderCard(plan) }
+
+                    val modified = plan.changes.filter { it.type == ChangeType.MODIFIED }
+                    if (modified.isNotEmpty()) {
+                        item {
+                            SectionHeader(
+                                stringResource(R.string.import_preview_modified, modified.size)
+                            )
+                        }
+                        items(modified, key = { it.key }) { change ->
+                            SettingsChangeRow(
+                                change = change,
+                                isExcluded = change.key in excluded.value,
+                                onToggle = { excluded.value = toggle(excluded.value, change.key) },
+                            )
+                        }
+                    }
+
+                    val added = plan.changes.filter { it.type == ChangeType.ADDED }
+                    if (added.isNotEmpty()) {
+                        item {
+                            SectionHeader(
+                                stringResource(R.string.import_preview_added, added.size)
+                            )
+                        }
+                        items(added, key = { it.key }) { change ->
+                            SettingsChangeRow(
+                                change = change,
+                                isExcluded = change.key in excluded.value,
+                                onToggle = { excluded.value = toggle(excluded.value, change.key) },
+                            )
+                        }
+                    }
+
+                    if (plan.shortSwipeImportSize > 0) {
+                        item { SectionHeader(stringResource(R.string.import_preview_short_swipe_header)) }
+                        // Diff section (above the radio) shows exactly which
+                        // key+direction mappings change. Null when current
+                        // state couldn't be captured — radio still works.
+                        val diff = computeShortSwipeDiff(
+                            currentJson = plan.currentShortSwipeRawJson,
+                            proposedJson = plan.shortSwipeImportRawJson,
+                        )
+                        if (diff != null && !diff.isEmpty) {
+                            item { ShortSwipeDiffSummary(diff) }
+                        }
+                        item {
+                            ShortSwipeModeRadio(
+                                size = plan.shortSwipeImportSize,
+                                selected = shortSwipeMode.value,
+                                onSelect = { shortSwipeMode.value = it },
+                            )
+                        }
+                    }
+
+                    if (plan.parseSkippedKeys.isNotEmpty()) {
+                        item { SkippedSection(plan.parseSkippedKeys) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun toggle(set: Set<String>, key: String): Set<String> =
+    if (key in set) set - key else set + key
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsPreviewTopBar(
+    appliedCount: Int,
+    onCancel: () -> Unit,
+    onApply: () -> Unit,
+) {
+    TopAppBar(
+        title = { Text(stringResource(R.string.import_preview_title)) },
+        navigationIcon = {
+            IconButton(onClick = onCancel) {
+                Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = stringResource(R.string.import_preview_cancel_desc)
+                    )
+            }
+        },
+        actions = {
+            // Always enabled — empty selection means "Nothing imported" result
+            // (see spec §Error handling).
+            TextButton(onClick = onApply) {
+                Text(stringResource(R.string.import_preview_apply, appliedCount))
+            }
+        }
+    )
+}
+
+/**
+ * ARC-036: the one-line notice describing the FILE a preview was built from.
+ *
+ * Pure (no Compose, no Android) so both branches are unit-tested: the backup-encryption design
+ * accepted the replay risk (§7 residual #2) on the basis that an encrypted import shows its
+ * header's export timestamp — a replayed old backup is then visibly stale before the user taps
+ * Apply — and §9 owes a plaintext import the "re-export encrypted" advisory. Both were absent.
+ *
+ * [formatTimestamp] is injectable purely so tests are timezone-independent; [text] resolves the
+ * copy (string resources) so the helper needs no Context.
+ */
+internal fun renderBackupSourceNotice(
+    source: BackupSourceInfo,
+    text: ResultText,
+    formatTimestamp: (Long) -> String = ::formatBackupTimestamp,
+): String = if (source.encrypted) {
+    val ts = source.exportTimestampMs
+    // A CKENC1 header always carries a timestamp; the null branch is defensive, not reachable
+    // through readJsonWithSource, and degrades to the badge alone rather than printing "null".
+    if (ts == null) text.string(R.string.import_preview_source_encrypted)
+    else text.string(R.string.import_preview_source_encrypted_at, formatTimestamp(ts))
+} else {
+    text.string(R.string.import_preview_source_plaintext)
+}
+
+/** Default rendering of a container's export timestamp: device timezone, minute precision. */
+internal fun formatBackupTimestamp(timestampMs: Long): String =
+    java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+        .format(java.util.Date(timestampMs))
+
+/**
+ * ARC-036: renders [renderBackupSourceNotice]. Encrypted sources read as neutral information;
+ * a plaintext source is an advisory, so it takes the theme's error color like the neighbouring
+ * screen-size warning does.
+ */
+@Composable
+internal fun BackupSourceNotice(source: BackupSourceInfo, modifier: Modifier = Modifier) {
+    Text(
+        text = renderBackupSourceNotice(source, rememberResultText()),
+        modifier = modifier,
+        fontSize = 12.sp,
+        fontWeight = if (source.encrypted) FontWeight.SemiBold else FontWeight.Normal,
+        color = if (source.encrypted) MaterialTheme.colorScheme.onSurface
+            else MaterialTheme.colorScheme.error,
+    )
+}
+
+@Composable
+private fun SettingsPreviewHeaderCard(plan: SettingsImportPlan) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(16.dp),
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            // ARC-036: file provenance first — it qualifies everything below it.
+            BackupSourceNotice(plan.source)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                stringResource(R.string.import_preview_source_version, plan.sourceVersion),
+                fontWeight = FontWeight.SemiBold
+            )
+            val s = plan.sourceScreen
+            val c = plan.currentScreen
+            Text(
+                stringResource(
+                    R.string.import_preview_source_screen, s.width, s.height, s.density
+                ),
+                fontSize = 12.sp
+            )
+            Text(
+                stringResource(
+                    R.string.import_preview_current_screen, c.width, c.height, c.density
+                ),
+                fontSize = 12.sp
+            )
+            if (s.width != c.width || s.height != c.height) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.import_preview_screen_mismatch),
+                    color = MaterialTheme.colorScheme.error,
+                    fontSize = 12.sp,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionHeader(title: String) {
+    Text(
+        text = title,
+        fontWeight = FontWeight.Bold,
+        fontSize = 14.sp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        color = MaterialTheme.colorScheme.primary,
+    )
+}
+
+@Composable
+private fun SettingsChangeRow(
+    change: SettingsChange,
+    isExcluded: Boolean,
+    onToggle: () -> Unit,
+) {
+    // Whole-row toggle so taps on the key text — not just the checkbox glyph —
+    // flip exclusion. Without `toggleable`, narrow checkbox hit-targets miss
+    // on touch and tests targeting onNodeWithText(key).performClick() fail.
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .toggleable(
+                value = !isExcluded,
+                role = Role.Checkbox,
+                onValueChange = { onToggle() },
+            )
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Checkbox(checked = !isExcluded, onCheckedChange = null)
+        Spacer(Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(change.key, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Text(
+                text = renderDelta(change, rememberResultText()),
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        TypeChip(change.proposed)
+    }
+}
+
+/*
+ * Diff rendering (below): every word is a string resource resolved through [ResultText]. The
+ * `+` / `−` / `~` bucket markers are language-neutral symbols and stay in code; every `→`
+ * (value/count change) lives inside a resource so RTL translations can reverse it.
+ */
+internal fun renderDelta(change: SettingsChange, text: ResultText): String {
+    // Specialized JSON-blob diff path: when BOTH sides are JsonBlob, compute
+    // a structured diff (added/removed/changed names) instead of rendering
+    // each side independently as a count. The combined-string output is more
+    // informative than "[3 layouts] → [5 layouts]".
+    val cur = change.current
+    val prop = change.proposed
+    if (cur is PrefValue.JsonBlob && prop is PrefValue.JsonBlob) {
+        return renderJsonBlobDelta(cur.raw, prop.raw, text)
+    }
+    // Asymmetric case (ADDED with Unset → JsonBlob, or vice versa): fall
+    // through to per-side rendering so the dialog shows "(none) → [3 layouts]".
+    val current = renderPrefValue(cur, text)
+    val proposed = renderPrefValue(prop, text)
+    // A resource, not "$current → $proposed": RTL locales point the change arrow the other way.
+    return text.string(R.string.import_preview_value_change, current, proposed)
+}
+
+internal fun renderPrefValue(v: PrefValue, text: ResultText): String = when (v) {
+    // "(none)" reads more naturally than "(unset)" for multi-language slots
+    // (`pref_secondary_language` → "de" → "(none) → 'de'") and for any
+    // unknown key that falls through to the Unset sentinel.
+    PrefValue.Unset -> text.string(R.string.import_preview_value_none)
+    is PrefValue.Bool -> v.v.toString()
+    is PrefValue.IntV -> v.v.toString()
+    is PrefValue.FloatV -> v.v.toString()
+    is PrefValue.Str -> "\"${v.v}\""
+    is PrefValue.JsonBlob -> renderJsonBlobSummary(v.raw, text)
+}
+
+/**
+ * Summarize a JSON blob for a SINGLE-side render (used when the other side
+ * is Unset, i.e. ADDED rows). Output examples:
+ *   - `[3 layouts: qwerty, dvorak, azerty]` for the `layouts` key
+ *   - `{4 keys}` for `extra_keys` / `custom_extra_keys` (JSON object shape)
+ *   - `[N items]` for other array shapes
+ *   - `(JSON change)` for malformed input
+ */
+internal fun renderJsonBlobSummary(raw: String, text: ResultText): String = try {
+    val el = com.google.gson.JsonParser.parseString(raw)
+    when {
+        el.isJsonArray -> renderArraySummary(el.asJsonArray, text)
+        el.isJsonObject -> el.asJsonObject.size().let { n ->
+            text.plural(R.plurals.import_preview_json_object_keys, n, n)
+        }
+        else -> text.string(R.string.import_preview_json_change)
+    }
+} catch (_: Exception) {
+    text.string(R.string.import_preview_json_change)
+}
+
+private fun renderArraySummary(arr: com.google.gson.JsonArray, text: ResultText): String {
+    val size = arr.size()
+    if (size == 0) return text.string(R.string.import_preview_json_empty)
+    val isLayouts = arr.all { it.isJsonObject && it.asJsonObject.has("name") }
+    if (!isLayouts) return text.plural(R.plurals.import_preview_json_items, size, size)
+    val names = arr.map { it.asJsonObject.get("name").asString }
+    // Truncate the names list at ~50 chars so the row stays readable on
+    // narrow phone widths. Excess names land in a "+N more" suffix.
+    val joined = truncateNameList(names, maxLen = 50, text = text)
+    return text.plural(R.plurals.import_preview_json_layouts, size, size, joined)
+}
+
+/**
+ * Diff between current and proposed JSON blobs. Specialized for the known
+ * blob shapes (`layouts` array, `extra_keys`/`custom_extra_keys` objects).
+ *
+ * Output examples:
+ *   - `+ azerty, − dvorak  (3 unchanged)`     for `layouts`
+ *   - `+ key_dollar, key_euro  (5 unchanged)` for `extra_keys`
+ *   - `[3 items → 5 items]`                   for other JSON arrays
+ *   - `[3 keys → 4 keys]`                     for other JSON objects
+ *   - `(JSON change)`                         for malformed / mixed shapes
+ */
+internal fun renderJsonBlobDelta(curRaw: String, propRaw: String, text: ResultText): String = try {
+    val cur = com.google.gson.JsonParser.parseString(curRaw)
+    val prop = com.google.gson.JsonParser.parseString(propRaw)
+    when {
+        cur.isJsonArray && prop.isJsonArray -> renderArrayDelta(cur.asJsonArray, prop.asJsonArray, text)
+        cur.isJsonObject && prop.isJsonObject -> renderObjectDelta(cur.asJsonObject, prop.asJsonObject, text)
+        else -> text.string(R.string.import_preview_json_change)
+    }
+} catch (_: Exception) {
+    text.string(R.string.import_preview_json_change)
+}
+
+private fun renderArrayDelta(
+    cur: com.google.gson.JsonArray,
+    prop: com.google.gson.JsonArray,
+    text: ResultText,
+): String {
+    // The stored `layouts` preference shape (plain names and `{"kind":…}` objects, checked
+    // BEFORE the `{"name":…}` shape below, which a list of only bound named entries also
+    // matches): a per-layout theme binding is a field INSIDE an entry, so a backup that only
+    // re-binds themes would otherwise read "[N → N items]".
+    if (tribixbite.cleverkeys.backup.LayoutThemeBindingDiff.isLayoutEntries(cur) &&
+        tribixbite.cleverkeys.backup.LayoutThemeBindingDiff.isLayoutEntries(prop)
+    ) {
+        val countDelta = text.plural(R.plurals.import_preview_json_items_delta, prop.size(), cur.size(), prop.size())
+        val themeChanges = tribixbite.cleverkeys.backup.LayoutThemeBindingDiff.themeChanges(cur, prop)
+        if (themeChanges.isEmpty()) return countDelta
+        val lines = themeChanges.map { renderLayoutThemeChange(it, text) }
+        return (if (cur.size() != prop.size()) listOf(countDelta) + lines else lines).joinToString("  ")
+    }
+    // Layouts: array of objects with `name` field — diff by name + per-layout
+    // deep-diff (key-count delta) for shared names.
+    val curIsLayouts = cur.size() > 0 && cur.all { it.isJsonObject && it.asJsonObject.has("name") }
+    val propIsLayouts = prop.size() > 0 && prop.all { it.isJsonObject && it.asJsonObject.has("name") }
+    if (curIsLayouts && propIsLayouts) {
+        return renderLayoutsDelta(cur, prop, text)
+    }
+    // Generic array — count delta; the noun agrees with the proposed count.
+    return text.plural(R.plurals.import_preview_json_items_delta, prop.size(), cur.size(), prop.size())
+}
+
+/** `<layout>: theme <from> → <to>`, with "Follow global theme" for an unbound side. */
+internal fun renderLayoutThemeChange(
+    change: tribixbite.cleverkeys.backup.LayoutThemeBindingDiff.Change,
+    text: ResultText,
+): String {
+    val label = change.name ?: when (change.kind) {
+        tribixbite.cleverkeys.backup.LayoutThemeBindingDiff.Kind.SYSTEM ->
+            text.string(R.string.layout_manager_system_layout_name)
+        else -> text.string(R.string.layout_manager_custom_layout_name)
+    }
+    val follow = text.string(R.string.layout_theme_follow_global)
+    return text.string(R.string.import_preview_layout_theme_change, label, change.from ?: follow, change.to ?: follow)
+}
+
+/**
+ * Layouts-specific deep diff:
+ *  - Set diff by `name` (added / removed / unchanged-name).
+ *  - For each shared-name layout, compare key counts; report
+ *    "name: M→N keys" if counts differ, otherwise drop from output.
+ *  - If shared names match exactly AND every layout's key count is equal,
+ *    the difference is in some sub-field (e.g. key glyphs / script tag) —
+ *    report as "[N unchanged; internal field change]".
+ */
+private fun renderLayoutsDelta(
+    cur: com.google.gson.JsonArray,
+    prop: com.google.gson.JsonArray,
+    text: ResultText,
+): String {
+    val curByName = cur.associate { it.asJsonObject.get("name").asString to it.asJsonObject }
+    val propByName = prop.associate { it.asJsonObject.get("name").asString to it.asJsonObject }
+    val added = propByName.keys - curByName.keys
+    val removed = curByName.keys - propByName.keys
+    val shared = curByName.keys intersect propByName.keys
+
+    // Per-shared-layout key-count delta.
+    val keyCountChanges = shared.mapNotNull { name ->
+        val curKeys = safeKeyCount(curByName[name])
+        val propKeys = safeKeyCount(propByName[name])
+        if (curKeys != propKeys) {
+            text.plural(R.plurals.import_preview_layout_key_delta, propKeys, name, curKeys, propKeys)
+        } else {
+            null
+        }
+    }
+    // Shared layouts whose objects differ but key count is the same.
+    val internalChanges = shared.count { name ->
+        val a = curByName[name]
+        val b = propByName[name]
+        a != b && safeKeyCount(a) == safeKeyCount(b)
+    }
+    val pureUnchanged = shared.size - keyCountChanges.size - internalChanges
+
+    val parts = mutableListOf<String>()
+    if (added.isNotEmpty()) parts += "+ ${truncateNameList(added.toList(), maxLen = 30, text = text)}"
+    if (removed.isNotEmpty()) parts += "− ${truncateNameList(removed.toList(), maxLen = 30, text = text)}"
+    if (keyCountChanges.isNotEmpty()) {
+        parts += "~ ${truncateNameList(keyCountChanges, maxLen = 40, text = text)}"
+    }
+    if (internalChanges > 0) {
+        parts += text.plural(R.plurals.import_preview_layouts_internal_changes, internalChanges, internalChanges)
+    }
+    if (pureUnchanged > 0) parts += text.string(R.string.import_preview_diff_unchanged, pureUnchanged)
+    return if (parts.isEmpty()) text.string(R.string.import_preview_json_no_differences) else parts.joinToString("  ")
+}
+
+private fun renderObjectDelta(
+    cur: com.google.gson.JsonObject,
+    prop: com.google.gson.JsonObject,
+    text: ResultText,
+): String {
+    // extra_keys / custom_extra_keys / any object — diff by key membership.
+    // Detects value-only changes too (same key, different value).
+    val curKeys = cur.keySet()
+    val propKeys = prop.keySet()
+    val added = propKeys - curKeys
+    val removed = curKeys - propKeys
+    val both = curKeys intersect propKeys
+    val changed = both.filter { cur.get(it) != prop.get(it) }.toSet()
+    return formatObjectDelta(both.size - changed.size, added, removed, changed, text)
+}
+
+/** Safe `keys` field length — returns 0 for missing / non-array shapes. */
+private fun safeKeyCount(obj: com.google.gson.JsonObject?): Int = try {
+    obj?.getAsJsonArray("keys")?.size() ?: 0
+} catch (_: Exception) {
+    0
+}
+
+private fun formatObjectDelta(
+    unchangedCount: Int,
+    added: Set<String>,
+    removed: Set<String>,
+    changed: Set<String>,
+    text: ResultText,
+): String {
+    if (added.isEmpty() && removed.isEmpty() && changed.isEmpty()) {
+        return text.plural(R.plurals.import_preview_json_all_unchanged, unchangedCount, unchangedCount)
+    }
+    val parts = mutableListOf<String>()
+    if (added.isNotEmpty()) parts += "+ ${truncateNameList(added.toList(), maxLen = 30, text = text)}"
+    if (removed.isNotEmpty()) parts += "− ${truncateNameList(removed.toList(), maxLen = 30, text = text)}"
+    if (changed.isNotEmpty()) parts += "~ ${truncateNameList(changed.toList(), maxLen = 30, text = text)}"
+    if (unchangedCount > 0) parts += text.string(R.string.import_preview_diff_unchanged, unchangedCount)
+    return parts.joinToString("  ")
+}
+
+/**
+ * Join `names` with the locale's list separator, ellipsizing at the first name that would push
+ * the total over `maxLen` characters. Output suffix is "+N more" when truncated.
+ */
+private fun truncateNameList(names: List<String>, maxLen: Int, text: ResultText): String {
+    if (names.isEmpty()) return ""
+    val separator = text.string(R.string.import_preview_name_separator)
+    val sb = StringBuilder()
+    var shown = 0
+    for (name in names) {
+        val sep = if (sb.isEmpty()) "" else separator
+        val tentative = sep + name
+        if (sb.length + tentative.length > maxLen && shown > 0) break
+        sb.append(tentative)
+        shown++
+    }
+    if (shown < names.size) {
+        val hidden = names.size - shown
+        sb.append(separator).append(text.plural(R.plurals.import_preview_names_more, hidden, hidden))
+    }
+    return sb.toString()
+}
+
+@Composable
+private fun TypeChip(value: PrefValue) {
+    // Data-type chip. "JSON" is a format name and "—" a dash, so neither is a resource.
+    val label = when (value) {
+        is PrefValue.Bool -> stringResource(R.string.import_preview_type_bool)
+        is PrefValue.IntV -> stringResource(R.string.import_preview_type_int)
+        is PrefValue.FloatV -> stringResource(R.string.import_preview_type_float)
+        is PrefValue.Str -> stringResource(R.string.import_preview_type_str)
+        is PrefValue.JsonBlob -> "JSON"
+        PrefValue.Unset -> "\u2014"
+    }
+    AssistChip(onClick = {}, label = { Text(label, fontSize = 10.sp) })
+}
+
+/**
+ * Inline summary of the short-swipe diff (counts of added / removed /
+ * changed / unchanged mapping ids). Sample names are shown via the
+ * existing `truncateNameList` helper so a user can recognize specific
+ * mappings without expanding into a full table.
+ *
+ * Rendered above [ShortSwipeModeRadio] so the user picks Skip / Merge /
+ * Replace with concrete delta data in view.
+ */
+@Composable
+private fun ShortSwipeDiffSummary(diff: ShortSwipeDiff) {
+    val text = rememberResultText()
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        // Headline counts on one line for at-a-glance reading.
+        val countParts = buildList {
+            if (diff.added.isNotEmpty()) {
+                add(stringResource(R.string.import_preview_diff_new, diff.added.size))
+            }
+            if (diff.removed.isNotEmpty()) {
+                add(stringResource(R.string.import_preview_diff_removed, diff.removed.size))
+            }
+            if (diff.changed.isNotEmpty()) {
+                add(stringResource(R.string.import_preview_diff_changed, diff.changed.size))
+            }
+            if (diff.unchanged > 0) {
+                add(stringResource(R.string.import_preview_diff_unchanged, diff.unchanged))
+            }
+        }
+        Text(
+            countParts.joinToString("  "),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        // Detail lines (truncated). Each non-empty bucket gets one line.
+        if (diff.added.isNotEmpty()) {
+            Text(
+                "  + ${truncateNameList(diff.added, maxLen = 60, text = text)}",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (diff.removed.isNotEmpty()) {
+            Text(
+                "  \u2212 ${truncateNameList(diff.removed, maxLen = 60, text = text)}",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (diff.changed.isNotEmpty()) {
+            Text(
+                "  ~ ${truncateNameList(diff.changed, maxLen = 60, text = text)}",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ShortSwipeModeRadio(
+    size: Int,
+    selected: ShortSwipeImportMode,
+    onSelect: (ShortSwipeImportMode) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Text(
+            pluralStringResource(R.plurals.import_preview_short_swipe_count, size, size),
+            fontWeight = FontWeight.SemiBold,
+        )
+        ShortSwipeImportMode.entries.forEach { mode ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .selectable(
+                        selected = (mode == selected),
+                        role = Role.RadioButton,
+                        onClick = { onSelect(mode) },
+                    )
+                    .padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(selected = (mode == selected), onClick = null)
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(when (mode) {
+                    ShortSwipeImportMode.SKIP -> R.string.import_preview_short_swipe_skip
+                    ShortSwipeImportMode.MERGE -> R.string.import_preview_short_swipe_merge
+                    ShortSwipeImportMode.REPLACE -> R.string.import_preview_short_swipe_replace
+                }))
+            }
+        }
+        // Warning only when REPLACE is the active selection — see spec
+        // "Red warning text shown only when REPLACE is selected".
+        if (selected == ShortSwipeImportMode.REPLACE) {
+            Text(
+                text = pluralStringResource(R.plurals.import_preview_short_swipe_warning, size, size),
+                color = MaterialTheme.colorScheme.error,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(start = 48.dp, top = 4.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SkippedSection(skipped: List<SkippedKey>) {
+    var expanded by remember { mutableStateOf(false) }
+    Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+        TextButton(onClick = { expanded = !expanded }) {
+            Text(
+                stringResource(
+                    if (expanded) R.string.import_preview_skipped_collapse
+                    else R.string.import_preview_skipped_expand,
+                    skipped.size,
+                ),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (expanded) {
+            skipped.forEach { sk ->
+                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                    Text(sk.key, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    // The typed kind, localized; the English detail (sk.reason) stays in logs.
+                    Text(
+                        stringResource(sk.kind.labelRes),
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Dictionary import preview
+// =============================================================================
+
+@Composable
+private fun LanguageSection(
+    lang: String,
+    changes: LangChanges,
+    excludedCustom: Set<LangWord>,
+    excludedDisabled: Set<LangWord>,
+    onToggleWord: (LangWord, isCustom: Boolean) -> Unit,
+    onToggleAll: (lang: String, allOn: Boolean) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    // `metadata` is a plain (String) -> String lambda handed to LangSubgroup, so it cannot
+    // call stringResource; it formats through the Context instead.
+    val ctx = LocalContext.current
+    val totalCount = changes.newCustomWords.size + changes.newDisabledWords.size
+    val excludedCount = changes.newCustomWords.keys.count { LangWord(lang, it) in excludedCustom } +
+        changes.newDisabledWords.count { LangWord(lang, it) in excludedDisabled }
+    val selectedCount = totalCount - excludedCount
+    val allSelected = (selectedCount == totalCount && totalCount > 0)
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .toggleable(
+                    value = allSelected,
+                    role = Role.Checkbox,
+                    onValueChange = { onToggleAll(lang, it) },
+                )
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // 2-state checkbox: checked iff all selected, unchecked otherwise.
+            // Partial state is communicated via the badge — NOT via a tri-state
+            // glyph that destroys cherry-picked selections on tap.
+            Checkbox(
+                checked = allSelected,
+                onCheckedChange = null,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = lang.uppercase(),
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = stringResource(R.string.import_preview_selected_count, selectedCount, totalCount),
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.width(8.dp))
+            TextButton(onClick = { expanded = !expanded }) {
+                Text(
+                    stringResource(
+                        if (expanded) R.string.import_preview_hide
+                        else R.string.import_preview_expand
+                    )
+                )
+            }
+        }
+
+        if (expanded) {
+            LangSubgroup(
+                title = stringResource(R.string.import_preview_custom_words, changes.newCustomWords.size),
+                words = changes.newCustomWords.keys.toList(),
+                isExcluded = { word -> LangWord(lang, word) in excludedCustom },
+                onToggle = { word -> onToggleWord(LangWord(lang, word), true) },
+                metadata = { word ->
+                    changes.newCustomWords[word]
+                        ?.let { freq -> ctx.getString(R.string.import_preview_word_freq, freq) }
+                        ?: ""
+                },
+            )
+            LangSubgroup(
+                title = stringResource(R.string.import_preview_disabled_words, changes.newDisabledWords.size),
+                words = changes.newDisabledWords,
+                isExcluded = { word -> LangWord(lang, word) in excludedDisabled },
+                onToggle = { word -> onToggleWord(LangWord(lang, word), false) },
+                metadata = { "" },
+            )
+        }
+    }
+}
+
+@Composable
+private fun LangSubgroup(
+    title: String,
+    words: List<String>,
+    isExcluded: (String) -> Boolean,
+    onToggle: (String) -> Unit,
+    metadata: (String) -> String,
+) {
+    if (words.isEmpty()) return
+    var query by remember { mutableStateOf("") }
+    val filtered = remember(query, words) {
+        if (query.isBlank()) words else words.filter { it.contains(query, ignoreCase = true) }
+    }
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp)) {
+        Text(title, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            placeholder = { Text(stringResource(R.string.import_preview_search_hint)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        // Bounded height — required because this LazyColumn is nested inside
+        // a scrollable parent; without heightIn, Compose throws.
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
+        ) {
+            items(filtered, key = { it }) { word ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .toggleable(
+                            value = !isExcluded(word),
+                            role = Role.Checkbox,
+                            onValueChange = { onToggle(word) },
+                        )
+                        .padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(checked = !isExcluded(word), onCheckedChange = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(word, modifier = Modifier.weight(1f), fontSize = 13.sp)
+                    val meta = metadata(word)
+                    if (meta.isNotEmpty()) Text(meta, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LearnedDataPreviewCard(learned: LearnedDataImportPlan) {
+    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+                text = stringResource(R.string.import_preview_learned_title),
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = stringResource(R.string.import_preview_learned_desc),
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (learned.bigramEntries > 0) {
+                Text(
+                    stringResource(
+                        R.string.import_preview_learned_bigrams,
+                        learned.bigramEntries,
+                    ),
+                    fontSize = 12.sp,
+                )
+            }
+            if (learned.trigramEntries > 0) {
+                Text(
+                    stringResource(
+                        R.string.import_preview_learned_trigrams,
+                        learned.trigramEntries,
+                    ),
+                    fontSize = 12.sp,
+                )
+            }
+            if (learned.vocabularyPresent) {
+                Text(
+                    pluralStringResource(
+                        R.plurals.import_preview_learned_vocabulary,
+                        learned.vocabularyWords,
+                        learned.vocabularyWords,
+                    ),
+                    fontSize = 12.sp,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Top-level entry point for the dictionary import preview.
+ *
+ * Custom and disabled words remain individually selectable. Learned-data rows are a
+ * non-selectable group: phrase counts merge and the personal vocabulary replaces its current
+ * list, exactly as stated in the card rendered above the language sections.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DictionaryImportPreviewDialog(
+    plan: DictImportPlan,
+    onCancel: () -> Unit,
+    onApply: (excludedCustom: Set<LangWord>, excludedDisabled: Set<LangWord>) -> Unit,
+) {
+    val excludedCustom = remember { mutableStateOf(emptySet<LangWord>()) }
+    val excludedDisabled = remember { mutableStateOf(emptySet<LangWord>()) }
+
+    val totalCustom = plan.perLanguage.values.sumOf { it.newCustomWords.size }
+    val totalDisabled = plan.perLanguage.values.sumOf { it.newDisabledWords.size }
+    val applyCount = (totalCustom - excludedCustom.value.size) +
+        (totalDisabled - excludedDisabled.value.size) + plan.learnedData.totalEntries
+
+    Dialog(
+        onDismissRequest = onCancel,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                TopAppBar(
+                    title = { Text(stringResource(R.string.import_preview_dict_title)) },
+                    navigationIcon = {
+                        IconButton(onClick = onCancel) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = stringResource(R.string.import_preview_cancel_desc),
+                            )
+                        }
+                    },
+                    actions = {
+                        TextButton(onClick = {
+                            onApply(excludedCustom.value, excludedDisabled.value)
+                        }) {
+                            Text(stringResource(R.string.import_preview_apply, applyCount))
+                        }
+                    },
+                )
+                // ARC-036: file provenance. The dictionary preview has no header card, so the
+                // notice sits directly under the bar, above the per-language sections.
+                BackupSourceNotice(
+                    source = plan.source,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+                LazyColumn(modifier = Modifier.weight(1f)) {
+                    if (plan.learnedData.hasEffect) {
+                        item(key = "learned-data") {
+                            LearnedDataPreviewCard(plan.learnedData)
+                        }
+                    }
+                    items(plan.perLanguage.entries.toList(), key = { it.key }) { (lang, changes) ->
+                        LanguageSection(
+                            lang = lang,
+                            changes = changes,
+                            excludedCustom = excludedCustom.value,
+                            excludedDisabled = excludedDisabled.value,
+                            onToggleWord = { lw, isCustom ->
+                                if (isCustom) {
+                                    excludedCustom.value = toggleLW(excludedCustom.value, lw)
+                                } else {
+                                    excludedDisabled.value = toggleLW(excludedDisabled.value, lw)
+                                }
+                            },
+                            onToggleAll = { l, allOn ->
+                                val langCustom = plan.perLanguage[l]!!.newCustomWords.keys
+                                    .map { LangWord(l, it) }.toSet()
+                                val langDisabled = plan.perLanguage[l]!!.newDisabledWords
+                                    .map { LangWord(l, it) }.toSet()
+                                if (allOn) {
+                                    excludedCustom.value = excludedCustom.value - langCustom
+                                    excludedDisabled.value = excludedDisabled.value - langDisabled
+                                } else {
+                                    excludedCustom.value = excludedCustom.value + langCustom
+                                    excludedDisabled.value = excludedDisabled.value + langDisabled
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun toggleLW(set: Set<LangWord>, lw: LangWord): Set<LangWord> =
+    if (lw in set) set - lw else set + lw

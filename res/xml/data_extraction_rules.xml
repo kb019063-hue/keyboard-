@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Data extraction rules for Android 12+ (API 31+).
+
+  PRIVACY-FIRST APPROACH: only aesthetic/visual SharedPreferences are backed up.
+  User data, learning samples, and privacy-sensitive data stay on-device only.
+
+  ALLOWLIST SEMANTICS (important):
+  Each ruleset below declares <include> entries, so Auto Backup / device
+  transfer runs in allowlist mode: ONLY the explicitly <include>-ed paths are
+  captured and EVERYTHING ELSE is excluded automatically. Adding <exclude>
+  entries for paths that are not under an <include> is invalid and produces a
+  Fatal FullBackupContent lint error, so those redundant excludes were removed.
+  The resulting surface is identical in intent and strictly tighter.
+
+  What IS backed up (the only 3 SharedPreferences files listed below):
+  - custom_theme_prefs.xml   custom theme definitions
+  - material_theme_prefs.xml Material You / dynamic-color settings
+  - emoji_last_use.xml       recently-used emoji ordering (non-PII)
+
+  What is NOT backed up (implicitly excluded by allowlist mode):
+  - The main settings file (tribixbite.cleverkeys_preferences.xml) and all
+    other SharedPreferences (privacy_settings, personalization/adaptation,
+    user_dictionary, swipe selection stats, bigram store, etc.)
+  - ALL databases (clipboard history, ML training data)
+  - ALL files (short_swipe_customizations.json, clipboard_media/, everything)
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- Aesthetic SharedPreferences only. Everything not listed is excluded. -->
+        <include domain="sharedpref" path="custom_theme_prefs.xml" />
+        <include domain="sharedpref" path="material_theme_prefs.xml" />
+        <include domain="sharedpref" path="emoji_last_use.xml" />
+    </cloud-backup>
+
+    <!-- Device-to-device transfer: same allowlist as cloud backup. -->
+    <device-transfer>
+        <include domain="sharedpref" path="custom_theme_prefs.xml" />
+        <include domain="sharedpref" path="material_theme_prefs.xml" />
+        <include domain="sharedpref" path="emoji_last_use.xml" />
+    </device-transfer>
+</data-extraction-rules>

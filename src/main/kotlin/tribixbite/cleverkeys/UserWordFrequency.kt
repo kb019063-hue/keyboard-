@@ -1,0 +1,100 @@
+package tribixbite.cleverkeys
+
+/**
+ * The user-word frequency scale and its calibration onto a base lexicon's scale
+ * (wave U2 — maintainer report: "custom and unusual words are harder to swipe than
+ * they should be — especially custom words").
+ *
+ * ## The stored scale
+ *
+ * A custom word's frequency — the value in the `custom_words_<lang>` JSON preference
+ * and the platform `UserDictionary.Words.FREQUENCY` column — is a **1..255** value,
+ * the AOSP user-dictionary convention. The Add/Edit Word dialogs write it, backup
+ * round-trips it, and [DEFAULT] (255) is what a plain "add this word" means: the user
+ * wants their word to *win* its own gesture, and can lower it deliberately.
+ *
+ * ## Why consumers must NOT use the stored value raw
+ *
+ * Each ranking consumer runs on its own base-lexicon scale, and none of them start
+ * at 1:
+ *
+ *  - the CTC en lexicon (`en_enhanced.json`) is a compressed byte scale spanning
+ *    **134..255** (measured floor over all 98,140 words), and the en preset's λ = 4.0
+ *    multiplies `ln(freq)` on that scale — a raw stored 100 (the historical dialog
+ *    default) carried a weaker prior than EVERY base word (`ln 100 < ln 134`);
+ *  - the tap dictionary loads en as binary CKDT ranks converted to **~5.5K..1M**
+ *    (`BinaryDictionaryLoader`: `1000000 − rank·3900`), or JSON scaled to
+ *    **100..10000** — a raw stored 100 sat at/below the floor of both.
+ *
+ * So the stored value is interpreted RELATIVE to whatever scale the consumer's base
+ * lexicon actually spans: [scaleOnto] maps stored `[1..255]` linearly onto
+ * `[lexiconFloor..lexiconCeil]`. Properties the tests pin:
+ *
+ *  - **order-preserving** (strictly monotonic in the stored value);
+ *  - **stored 1 → the base floor** — a custom word can tie the rarest base word but
+ *    can never rank below the entire dictionary;
+ *  - **stored 255 → the base ceiling**; out-of-range stored values saturate;
+ *  - **identity on full-range bases** (floor 1, ceiling 255 — the CKDT swipe
+ *    lexicons), so scales that were already calibrated stay byte-for-byte unchanged.
+ *
+ * Legacy stored values (e.g. the old default 100, or pre-fix 1..10000 dialog values)
+ * are deliberately NOT rewritten silently — this mapping lifts them at read time
+ * (100 → mid-scale, ≥256 → ceiling), and rewriting would destroy the user's chosen
+ * relative ordering for nothing. Mid-scale still loses swipes a raised priority should win
+ * (the device `adb` case, 2026-10-10), so the Dictionary Manager OFFERS to raise words at
+ * exactly the old default 100, listing them and asking first ([LegacyCustomWordFrequency]).
+ */
+object UserWordFrequency {
+
+    /** Bottom of the stored user-word scale (AOSP user-dictionary convention). */
+    const val MIN = 1
+
+    /** Top of the stored user-word scale. */
+    const val MAX = 255
+
+    /**
+     * Default frequency for a newly added user word: the top of the scale. A user
+     * adding a word intends it to win its own gesture; they can lower it in the
+     * Dictionary Manager if they want it demoted.
+     */
+    const val DEFAULT = MAX
+
+    /**
+     * Map a stored user-word frequency onto the active base lexicon's scale:
+     * `[MIN..MAX]` → `[lexiconFloor..lexiconCeil]`, linear and order-preserving.
+     * Degenerate scales (ceiling ≤ floor, e.g. a single-frequency base) collapse to
+     * the floor.
+     */
+    fun scaleOnto(stored: Int, lexiconFloor: Double, lexiconCeil: Double): Double {
+        val s = stored.coerceIn(MIN, MAX)
+        if (lexiconCeil <= lexiconFloor) return lexiconFloor
+        return lexiconFloor + (s - MIN).toDouble() / (MAX - MIN) * (lexiconCeil - lexiconFloor)
+    }
+
+    /**
+     * The frequency the Add/Edit Word dialog switches to when the user selects swipe [priority]
+     * while the frequency field holds [frequency] (maintainer decision, 2026-10-10), or null to
+     * leave the field as it is.
+     *
+     * A raised level is a bonus ON TOP of the frequency prior: at a stored frequency below [MAX]
+     * the word first pays λ·ln of the calibrated ratio (−1.37 final-score nats at the legacy 100,
+     * `docs/eval/2026-10-08-user-swipe-priority.md` §9), which silently cancels most of what the
+     * user just asked for. So High/Highest lift a lower — or empty/unparseable ([frequency] null)
+     * — field to [MAX]; [SwipePriority.NORMAL] never touches it, and a field already at the top
+     * stays as it is.
+     */
+    fun liftedForPriority(priority: SwipePriority, frequency: Int?): Int? =
+        if (priority != SwipePriority.NORMAL && (frequency == null || frequency < MAX)) MAX else null
+
+    /**
+     * The undo of [liftedForPriority] within one dialog: going back to [SwipePriority.NORMAL]
+     * after the dialog lifted the field to [liftedTo] returns the text it held before the lift
+     * ([beforeLift]), so trying Highest and then Normal does not silently keep 255 (Pixel,
+     * 2026-10-11). Null — leave the field alone — when the level is still raised, when nothing
+     * was lifted, or when [current] no longer shows the lifted value (the user typed their own).
+     */
+    fun restoredAfterLift(priority: SwipePriority, current: String, liftedTo: Int?, beforeLift: String?): String? =
+        if (priority == SwipePriority.NORMAL && liftedTo != null && beforeLift != null &&
+            current.trim() == liftedTo.toString()
+        ) beforeLift else null
+}

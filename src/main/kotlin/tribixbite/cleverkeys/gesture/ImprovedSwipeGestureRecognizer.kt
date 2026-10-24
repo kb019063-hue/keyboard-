@@ -1,0 +1,526 @@
+package tribixbite.cleverkeys
+
+import android.graphics.PointF
+import android.util.Log
+import tribixbite.cleverkeys.gesture.ContinuousSwipe
+import tribixbite.cleverkeys.swipe.KeyLetter
+import java.util.ArrayList
+import kotlin.collections.List // Ensure kotlin.collections.List is used
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.sqrt
+
+/**
+ * Improved swipe gesture recognizer with better noise filtering.
+ * Allocates PointF directly. The former TrajectoryObjectPool was deleted with the neural
+ * engine (2026-08-18): nothing ever recycled into it, so after the first ~200 points every
+ * obtain() already fell through to a fresh PointF while the pool kept 200 PointF + 200
+ * TrajectoryPoint + 30 ArrayLists eagerly allocated for the life of the process.
+ */
+open class ImprovedSwipeGestureRecognizer(
+    /**
+     * Wall clock for sample timestamps (ms). Injectable so host tests can drive a
+     * deterministic timeline; production always uses [System.currentTimeMillis], the same
+     * clock the continuous-swipe segmenter stamps its samples with.
+     */
+    private val clock: () -> Long = System::currentTimeMillis,
+) {
+
+    private val _rawPath: MutableList<PointF> = ArrayList()
+    private val _smoothedPath: MutableList<PointF> = ArrayList()
+    private val _timestamps: MutableList<Long> = ArrayList()
+    private var _probabilisticDetector: ProbabilisticKeyDetector? = null
+    private var _currentKeyboard: KeyboardData? = null
+
+    /**
+     * The key-registration filter (extracted pure core, ARC-112). Owns the touched-key
+     * list, the recent-duplicate window, and the minimum-travel gate measured from the
+     * last REGISTRATION POINT (not the per-sample step — see SwipeKeyRegistrar's KDoc for
+     * why the old basis silently dropped dense-sampled swipes).
+     */
+    private val _registrar = SwipeKeyRegistrar<KeyboardData.Key>(
+        minKeyDistance = { MIN_KEY_DISTANCE },
+        minDwellTimeMs = { MIN_DWELL_TIME_MS },
+        highVelocityThreshold = { HIGH_VELOCITY_THRESHOLD },
+    )
+    private val _touchedKeys: MutableList<KeyboardData.Key>
+        get() = _registrar.touchedKeys
+
+    /** One sample at finger lift (ACTION_UP), CTC-only; see [recordLift]. */
+    private var _lift: ContinuousSwipe.Sample? = null
+
+    private var _isSwipeTyping: Boolean = false
+    private var _startTime: Long = 0
+    private var _lastPointTime: Long = 0
+    private var _totalDistance: Float = 0f
+
+    // Thresholds for improved filtering
+    private val SMOOTHING_WINDOW: Int
+        get() = Config.globalConfig().swipe_smoothing_window.coerceIn(SettingsRanges.SWIPE_SMOOTHING_WINDOW)
+    // Equal to ContinuousSwipe.MAX_LIFT_GAP_MS, the clamp on the finger-lift sample.
+    private val MAX_POINT_INTERVAL_MS = 500L
+
+    // Configurable thresholds from settings
+    private val MIN_SWIPE_DISTANCE: Float
+        get() = Config.globalConfig().swipe_min_distance
+    private val MIN_KEY_DISTANCE: Float
+        get() = Config.globalConfig().swipe_min_key_distance
+    private val MIN_DWELL_TIME_MS: Long
+        get() = Config.globalConfig().swipe_min_dwell_time
+    private val NOISE_THRESHOLD: Float
+        get() = Config.globalConfig().swipe_noise_threshold
+    private val HIGH_VELOCITY_THRESHOLD: Float
+        get() = Config.globalConfig().swipe_high_velocity_threshold
+
+    // For velocity-based filtering
+    private var _recentVelocity: Float = 0f
+
+    // v1.2.8: Track shift state at swipe START for proper autocap behavior after period
+    // This captures the shift state when the user begins swiping, not when they lift their finger
+    private var _shiftActiveAtStart: Boolean = false
+    private var _shiftLockedAtStart: Boolean = false
+    
+    /**
+     * Set the current keyboard for probabilistic detection
+     * @param marginLeft Left margin offset for touch coordinate mapping (screen-relative to keyboard-relative)
+     */
+    fun setKeyboard(keyboard: KeyboardData?, width: Float, height: Float, marginLeft: Float = 0f) {
+        _currentKeyboard = keyboard
+        if (keyboard != null) {
+            _probabilisticDetector = ProbabilisticKeyDetector(keyboard, width, height, marginLeft)
+        }
+    }
+    
+    /**
+     * Start tracking a new swipe gesture
+     * @param shiftActive v1.2.8: Capture shift state at swipe start for proper autocap
+     * @param shiftLocked v1.2.8: Capture shift lock state at swipe start for caps lock
+     */
+    fun startSwipe(x: Float, y: Float, key: KeyboardData.Key?, shiftActive: Boolean = false, shiftLocked: Boolean = false) {
+        reset()
+        // v1.2.8: Store shift state at start - critical for autocap after period
+        _shiftActiveAtStart = shiftActive
+        _shiftLockedAtStart = shiftLocked
+
+        val startPoint = PointF(x, y)
+        _rawPath.add(startPoint)
+        _smoothedPath.add(startPoint)
+        
+        _startTime = clock()
+        _lastPointTime = _startTime
+        _timestamps.add(_startTime)
+        
+        // Only register starting key if it's alphabetic
+        if (key != null && isValidAlphabeticKey(key)) {
+            _registrar.registerStartKey(key, x, y)
+        }
+        
+        _totalDistance = 0f
+        _recentVelocity = 0f
+    }
+    
+    /**
+     * Add a point to the current swipe path with improved filtering
+     */
+    fun addPoint(x: Float, y: Float, key: KeyboardData.Key?) {
+        if (_rawPath.isEmpty())
+            return
+        
+        val now = clock()
+        val timeSinceLastPoint = now - _lastPointTime
+
+        // Duplicate or backward timestamp - skip without moving the anchor.
+        if (timeSinceLastPoint <= 0) {
+            return
+        }
+        // Long pause mid-gesture (e.g. a slow/deliberate swiper holding still to aim).
+        // Re-anchor the timing to NOW and skip just this resume sample. _lastPointTime is
+        // only advanced for accepted points, so WITHOUT this re-anchor a single
+        // >MAX_POINT_INTERVAL_MS gap leaves _lastPointTime stale, every subsequent sample's
+        // delta grows even larger, and the rest of the swipe is dropped -- permanently
+        // starving key/path registration (the "slow swipe never triggers" bug). The next
+        // sample resumes normally; skipping this one avoids a pause-spanning path segment.
+        if (timeSinceLastPoint > MAX_POINT_INTERVAL_MS) {
+            _lastPointTime = now
+            return
+        }
+        
+        val lastRawPoint = _rawPath.last()
+        val dx = x - lastRawPoint.x
+        val dy = y - lastRawPoint.y
+        val distance = sqrt(dx * dx + dy * dy)
+        
+        // Ignore tiny movements (noise)
+        if (distance < NOISE_THRESHOLD) {
+            return
+        }
+        
+        // Calculate velocity
+        _recentVelocity = (distance / timeSinceLastPoint) * 1000f // pixels per second
+
+        // Add raw point (using object pool)
+        _rawPath.add(PointF(x, y))
+        _timestamps.add(now)
+        _lastPointTime = now
+        _totalDistance += distance
+
+        // Apply smoothing (also uses object pool)
+        val smoothedPoint = applySmoothing(x, y)
+        _smoothedPath.add(smoothedPoint)
+        
+        // Check if this should be considered swipe typing.
+        // NOTE: this runs BEFORE registerKeyWithFiltering below, so a key registered by
+        // THIS sample is not seen until the next sample's promotion check. Touch-up paths
+        // that need candidacy including the final sample use promoteWordCandidacy().
+        if (!_isSwipeTyping && _totalDistance > MIN_SWIPE_DISTANCE) {
+            _isSwipeTyping = shouldConsiderSwipeTyping()
+        }
+        
+        // Process key registration with improved filtering
+        if (key != null && isValidAlphabeticKey(key)) {
+            registerKeyWithFiltering(key, x, y, timeSinceLastPoint)
+        }
+    }
+    
+    /**
+     * Apply moving average smoothing to coordinates.
+     * Uses object pool to avoid allocation on every touch event.
+     */
+    private fun applySmoothing(x: Float, y: Float): PointF {
+        if (_rawPath.size < SMOOTHING_WINDOW) {
+            return PointF(x, y)
+        }
+
+        // Calculate moving average over last N points
+        var avgX = 0f
+        var avgY = 0f
+        val startIdx = max(0, _rawPath.size - SMOOTHING_WINDOW)
+        var count = 0
+
+        for (i in startIdx until _rawPath.size) {
+            val p = _rawPath[i]
+            avgX += p.x
+            avgY += p.y
+            count++
+        }
+
+        return PointF(avgX / count, avgY / count)
+    }
+    
+    /**
+     * Register key with improved filtering logic — delegates to [SwipeKeyRegistrar], the
+     * extracted pure core holding the four gates (same-key, dwell/velocity, recent
+     * duplicate, minimum travel). ARC-112: passes the sample POSITION, not the per-sample
+     * step distance, so the minimum-travel gate is measured from the last registration
+     * point and a high-report-rate digitizer (tiny steps) can no longer starve key
+     * registration. MIN_KEY_DISTANCE keeps its original purpose: boundary chatter — a
+     * finger oscillating a few px on a key seam — must not register the neighbour key.
+     */
+    private fun registerKeyWithFiltering(key: KeyboardData.Key, x: Float, y: Float, timeDelta: Long) {
+        _registrar.offer(key, x, y, timeDelta, _recentVelocity)
+    }
+
+
+    /**
+     * End the swipe gesture and return the touched keys if it was swipe typing
+     */
+    fun endSwipe(): SwipeResult {
+        // Apply endpoint stabilization
+        stabilizeEndpoints()
+        
+        // Re-evaluate swipe typing status after stabilization
+        // This handles cases where the swipe was too fast/short to trigger detection during movement,
+        // but endpoint stabilization found a second valid key (e.g. "for", "not", "it")
+        if (!_isSwipeTyping && _touchedKeys.size >= 2 && _totalDistance > MIN_SWIPE_DISTANCE) {
+            _isSwipeTyping = shouldConsiderSwipeTyping()
+        }
+        
+        if (_isSwipeTyping && _touchedKeys.size >= 2) {
+            val finalKeys: MutableList<KeyboardData.Key>
+            
+            // Try probabilistic detection if available
+            if (_probabilisticDetector != null && _smoothedPath.size > 5) {
+                // Apply Ramer-Douglas-Peucker simplification first
+                val simplifiedPath = ProbabilisticKeyDetector.simplifyPath(_smoothedPath, 15.0f)
+                
+                // Get probabilistic key detection
+                val probabilisticKeys = _probabilisticDetector!!.detectKeys(simplifiedPath)
+                
+                // If probabilistic detection gives good results, use it
+                if (probabilisticKeys != null && probabilisticKeys.size >= 2) {
+                    finalKeys = probabilisticKeys.toMutableList()
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                        Log.d("SwipeRecognizer", "Using probabilistic keys: ${probabilisticKeys.size}")
+                    }
+                } else {
+                    // Fall back to traditional detection
+                    finalKeys = applyFinalFiltering(_touchedKeys)
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                        Log.d("SwipeRecognizer", "Using traditional keys: ${finalKeys.size}")
+                    }
+                }
+            } else {
+                // Use traditional detection
+                finalKeys = applyFinalFiltering(_touchedKeys)
+            }
+            
+            return SwipeResult(
+                finalKeys,
+                _smoothedPath.toList(), // Changed to .toList()
+                _timestamps.toList(),   // Changed to .toList()
+                _totalDistance,
+                _isSwipeTyping,
+                ctcTrace(),
+            )
+        }
+
+        // ARC-112: a gesture the classifier already routed to the swipe decoder ("Sending
+        // to swipe decoder") can still die RIGHT HERE with no commit and no signal when
+        // key registration starved (the Wave-K2 dense-sampling finding logged exactly
+        // "Keys touched: 1" then went silent). Same philosophy as CtcDecodeDelivery: no
+        // path is allowed to answer silently — name the cause before returning nothing.
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+            Log.d("SwipeRecognizer", "Empty swipe decode: keysTouched=${_touchedKeys.size} " +
+                "isSwipeTyping=$_isSwipeTyping totalDistance=$_totalDistance — no key path, nothing committed")
+        }
+        return SwipeResult(null, null, null, 0f, false)
+    }
+    
+    /**
+     * Stabilize first and last keys using multiple points
+     */
+    private fun stabilizeEndpoints() {
+        if (_smoothedPath.size < 10 || _touchedKeys.size < 2)
+            return
+        
+        // Check first key stability
+        val avgStart = calculateAveragePoint(_smoothedPath, 0, 5)
+        val stableStartKey = findKeyAtPoint(avgStart)
+        if (stableStartKey != null && isValidAlphabeticKey(stableStartKey)) {
+            _touchedKeys[0] = stableStartKey
+        }
+        
+        // Check last key stability
+        val endIdx = _smoothedPath.size - 1
+        val avgEnd = calculateAveragePoint(_smoothedPath, max(0, endIdx - 5), endIdx)
+        val stableEndKey = findKeyAtPoint(avgEnd)
+        if (stableEndKey != null && isValidAlphabeticKey(stableEndKey)) {
+            _touchedKeys[_touchedKeys.size - 1] = stableEndKey
+        }
+    }
+    
+    /**
+     * Calculate average point over a range.
+     * Uses object pool to avoid allocation.
+     */
+    private fun calculateAveragePoint(points: List<PointF>, start: Int, end: Int): PointF {
+        var sumX = 0f
+        var sumY = 0f
+        var count = 0
+
+        for (i in start..min(end, points.size - 1)) {
+            val p = points[i]
+            sumX += p.x
+            sumY += p.y
+            count++
+        }
+
+        return PointF(sumX / count, sumY / count)
+    }
+    
+    /**
+     * Find key at a given point (placeholder - needs keyboard layout)
+     */
+    private fun findKeyAtPoint(point: PointF): KeyboardData.Key? {
+        // Use the probabilistic detector to find the key
+        if (_probabilisticDetector != null) {
+            return _probabilisticDetector!!.getKeyAt(point.x, point.y)
+        }
+        
+        // Fallback if detector not available (shouldn't happen if setKeyboard called)
+        return null
+    }
+    
+    /**
+     * Apply final filtering to remove obvious noise
+     */
+    private fun applyFinalFiltering(keys: List<KeyboardData.Key>): MutableList<KeyboardData.Key> {
+        if (keys.size <= 3)
+            return keys.toMutableList() // Ensure mutable list is returned for small sizes
+        
+        val filtered = mutableListOf<KeyboardData.Key>()
+        
+        // Always keep first key
+        filtered.add(keys[0])
+        
+        // Keep all middle keys. A zigzag/noise filter based on key positions was
+        // never implemented (the old isLikelyNoise() was a no-op stub returning
+        // false, so every middle key was always retained). Preserve that behavior.
+        for (i in 1 until keys.size - 1) {
+            filtered.add(keys[i])
+        }
+
+        // Always keep last key
+        filtered.add(keys[keys.size - 1])
+
+        return filtered
+    }
+
+    /**
+     * Check if the current gesture should be considered swipe typing
+     */
+    private fun shouldConsiderSwipeTyping(): Boolean {
+        // Add debug logging for swipe detection (only in debug builds for performance)
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+            Log.d("ImprovedSwipeGestRec", "🔍 SWIPE DETECTION CHECK:")
+            Log.d("ImprovedSwipeGestRec", "- Keys touched: ${_touchedKeys.size}")
+            Log.d("ImprovedSwipeGestRec", "- Total distance: ${_totalDistance} (need ${MIN_SWIPE_DISTANCE})")
+        }
+
+        // Need at least 2 alphabetic keys
+        if (_touchedKeys.size < 2) {
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                Log.d("ImprovedSwipeGestRec", "❌ Too few keys: ${_touchedKeys.size} < 2")
+            }
+            return false
+        }
+
+        // Check total distance
+        if (_totalDistance < MIN_SWIPE_DISTANCE) {
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                Log.d("ImprovedSwipeGestRec", "❌ Distance too short: ${_totalDistance} < ${MIN_SWIPE_DISTANCE}")
+            }
+            return false
+        }
+
+        // Check if all touched keys are alphabetic
+        for (key in _touchedKeys) {
+            if (!isValidAlphabeticKey(key)) {
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                    Log.d("ImprovedSwipeGestRec", "❌ Non-alphabetic key touched")
+                }
+                return false
+            }
+        }
+
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+            Log.d("ImprovedSwipeGestRec", "✅ SWIPE DETECTED - proceeding with swipe typing")
+        }
+        return true
+    }
+    
+    /**
+     * Check if a key is a valid alphabetic key — i.e. its CENTRE value is a single letter
+     * in ANY script.
+     *
+     * B-1 fix (2026-09-06 audit): this gate was hard-coded `'a'..'z' || 'A'..'Z'`, so on a
+     * Cyrillic/Greek/Hebrew board NO letter key could ever join the touched-key path,
+     * `isSwipeTyping()` stayed false for the whole gesture, and a word swipe reached
+     * NEITHER engine — the routed script languages (ru/el/uk/bg/mk/he) and geometric's
+     * non-Latin coverage were unreachable from a real touch stream. The predicate is now
+     * [KeyLetter.centreLetterOf], the SAME single implementation the CTC routing gate
+     * (`CtcEngineAdapter.buildMappedLayout`) and the fallback card use, so "which keys
+     * count as letters" cannot drift between the gesture layer and engine routing.
+     * Behavior-identical for Latin boards; digits, action keys and combining marks are
+     * still rejected. Pinned by SwipeNonLatinSwipeTypingTest.
+     */
+    private fun isValidAlphabeticKey(key: KeyboardData.Key): Boolean =
+        KeyLetter.centreLetterOf(key.keys.getOrNull(0)) != null
+    
+    /**
+     * Get the current swipe path
+     */
+    fun getSwipePath(): List<PointF> {
+        return _smoothedPath.toList()
+    }
+    
+    /**
+     * Records the finger-lift sample (ACTION_UP position, lift time on [clock]). Called by
+     * [Pointers] immediately before it ends a word swipe. A later call replaces an earlier
+     * one, so a trace never carries more than one lift sample. No-op without an active path
+     * or for non-finite coordinates.
+     */
+    fun recordLift(x: Float, y: Float) {
+        if (_rawPath.isEmpty() || !x.isFinite() || !y.isFinite()) return
+        _lift = ContinuousSwipe.Sample(x, y, clock())
+    }
+
+    /** The lift sample recorded for the current gesture, if any (continuous segments). */
+    fun liftSample(): ContinuousSwipe.Sample? = _lift
+
+    /**
+     * The CTC encoder's input for the current gesture — see [RawSwipeTrace]: the accepted
+     * samples WITHOUT smoothing (the [NOISE_THRESHOLD] drop and the pause rule still apply;
+     * [_timestamps] is parallel to [_rawPath]) plus the [recordLift] sample. Null when no path
+     * has been started. The smoothed path stays the geometric engine's input.
+     */
+    fun ctcTrace(): RawSwipeTrace? = RawSwipeTrace.withLift(_rawPath, _timestamps, _lift)
+
+    /**
+     * Get the timestamps
+     */
+    fun getTimestamps(): List<Long> {
+        return _timestamps.toList()
+    }
+    
+    /**
+     * Check if currently swipe typing
+     */
+    /** A verified continuous-space boundary establishes deliberate word intent. */
+    fun confirmContinuousSwipe() { _isSwipeTyping = true }
+
+    fun isSwipeTyping(): Boolean {
+        return _isSwipeTyping
+    }
+
+    /**
+     * Word candidacy for touch-up decisions, INCLUDING a key registered on the final
+     * sample. addPoint's promotion check runs before that sample's key registration, so a
+     * gesture ending exactly as it enters its 2nd key never promotes mid-move. This runs
+     * the same promotion once more and persists it, so the downstream
+     * onSwipeEnd -> isSwipeTyping() check agrees. Mirrors endSwipe's own re-evaluation.
+     */
+    fun promoteWordCandidacy(): Boolean {
+        if (!_isSwipeTyping && _touchedKeys.size >= 2 && _totalDistance > MIN_SWIPE_DISTANCE) {
+            _isSwipeTyping = shouldConsiderSwipeTyping()
+        }
+        return _isSwipeTyping
+    }
+
+    /**
+     * v1.2.8: Check if shift was active at swipe START
+     * Used for autocap after period - capitalize first letter of swiped word
+     */
+    fun wasShiftActiveAtStart(): Boolean {
+        return _shiftActiveAtStart
+    }
+
+    /**
+     * v1.2.8: Check if shift was LOCKED at swipe START
+     * Used for caps lock - entire word should be uppercase
+     */
+    fun wasShiftLockedAtStart(): Boolean {
+        return _shiftLockedAtStart
+    }
+
+    /**
+     * Reset the recognizer for a new gesture.
+     * Note: We don't recycle PointF objects here because they may still be referenced
+     * elsewhere (e.g., in SwipeResult returned by endSwipe()). The pool will naturally
+     * reuse objects on subsequent swipes.
+     */
+    fun reset() {
+        _rawPath.clear()
+        _smoothedPath.clear()
+        _timestamps.clear()
+        _lift = null
+        _registrar.reset()
+        _isSwipeTyping = false
+        _totalDistance = 0f
+        _recentVelocity = 0f
+        // v1.2.8: Clear shift flags on reset
+        _shiftActiveAtStart = false
+        _shiftLockedAtStart = false
+    }
+}

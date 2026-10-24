@@ -1,0 +1,278 @@
+package tribixbite.cleverkeys
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import tribixbite.cleverkeys.prefs.ExtraKeysPreference
+import tribixbite.cleverkeys.theme.CleverKeysTheme
+
+/**
+ * Extra Keys Configuration Activity - Manage Extra Keyboard Keys
+ *
+ * Features:
+ * - Configure 85+ extra keys (system, navigation, editing, accents, symbols)
+ * - Categorized key selection with search
+ * - Key descriptions and preview
+ * - Persist to SharedPreferences
+ * - Integration with existing ExtraKeysPreference system
+ */
+class ExtraKeysConfigActivity : ComponentActivity() {
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        setContent {
+            // WP8: unified under CleverKeysTheme (branded scheme + keyboard type/shape scale),
+            // matching its sibling settings activities. Follows the system day/night setting.
+            CleverKeysTheme {
+                ExtraKeysConfigScreen(
+                    onBack = { finish() }
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ExtraKeysConfigScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    // CRITICAL: Use DirectBootAwarePreferences to get the SAME SharedPreferences as the keyboard service
+    val prefs = remember { DirectBootAwarePreferences.get_shared_preferences(context) }
+
+    // Load enabled keys from preferences
+    val enabledKeys = remember {
+        mutableStateMapOf<String, Boolean>().apply {
+            ExtraKeysPreference.extraKeys.forEach { keyName ->
+                val prefKey = ExtraKeysPreference.prefKeyOfKeyName(keyName)
+                this[keyName] = prefs.getBoolean(prefKey, ExtraKeysPreference.defaultChecked(keyName))
+            }
+        }
+    }
+
+    // Search query
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+
+    // Filter keys by search
+    val filteredKeys = remember(searchQuery) {
+        if (searchQuery.isBlank()) {
+            ExtraKeysPreference.extraKeys.toList()
+        } else {
+            ExtraKeysPreference.extraKeys.filter { keyName ->
+                keyName.contains(searchQuery, ignoreCase = true) ||
+                ExtraKeysPreference.keyTitle(context.resources, keyName)
+                    .contains(searchQuery, ignoreCase = true) ||
+                ExtraKeysPreference.keyDescription(context.resources, keyName)
+                    ?.contains(searchQuery, ignoreCase = true) == true
+            }
+        }
+    }
+
+    // Categorize keys: group header string resource -> keys in that group (headers are
+    // display-only, resolved at render time so they follow the app locale)
+    val categorizedKeys = remember(filteredKeys) {
+        ExtraKeysPreference.categorizedKeys(filteredKeys)
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.extra_keys_title)) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.common_back)
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
+                )
+            )
+        }
+    ) { paddingValues ->
+        // Headers share the rows’ viewport: fixed controls must not crowd out keys
+        // in landscape, split-screen or large-font configurations.
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            item(key = "header:search") {
+                // Search bar
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier
+                        .fillMaxWidth(),
+                    placeholder = { Text(stringResource(R.string.extra_keys_search_hint)) },
+                    leadingIcon = {
+                        Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.common_search))
+                    },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.common_clear))
+                            }
+                        }
+                    },
+                    singleLine = true
+                )
+            }
+            item(key = "header:info") {
+                // Info card
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        val enabledCount = enabledKeys.values.count { it }
+                        Text(
+                            text = stringResource(R.string.extra_keys_enabled_count, enabledCount, ExtraKeysPreference.extraKeys.size),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Text(
+                            text = stringResource(R.string.extra_keys_info),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+            }
+            item(key = "header:reset") {
+                // Reset to defaults button
+                OutlinedButton(
+                    onClick = {
+                        ExtraKeysPreference.extraKeys.forEach { keyName ->
+                            enabledKeys[keyName] = ExtraKeysPreference.defaultChecked(keyName)
+                            val prefKey = ExtraKeysPreference.prefKeyOfKeyName(keyName)
+                            prefs.edit().putBoolean(prefKey, enabledKeys[keyName] ?: false).apply()
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp)
+                ) {
+                    Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(stringResource(R.string.extra_keys_reset))
+                }
+            }
+
+            categorizedKeys.forEach { (categoryRes, keys) ->
+                item(key = "category:$categoryRes") {
+                    Text(
+                        text = stringResource(categoryRes),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                }
+
+                items(keys, key = { it }) { keyName ->
+                    ExtraKeyItem(
+                        keyName = keyName,
+                        isEnabled = enabledKeys[keyName] ?: false,
+                        onToggle = { enabled ->
+                            enabledKeys[keyName] = enabled
+                            val prefKey = ExtraKeysPreference.prefKeyOfKeyName(keyName)
+                            prefs.edit().putBoolean(prefKey, enabled).apply()
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ExtraKeyItem(
+    keyName: String,
+    isEnabled: Boolean,
+    onToggle: (Boolean) -> Unit
+) {
+    val context = LocalContext.current
+    val title = ExtraKeysPreference.keyTitle(context.resources, keyName)
+    val description = ExtraKeysPreference.keyDescription(context.resources, keyName)
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isEnabled)
+                MaterialTheme.colorScheme.secondaryContainer
+            else
+                MaterialTheme.colorScheme.surfaceVariant
+        ),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Checkbox
+            Checkbox(
+                checked = isEnabled,
+                onCheckedChange = onToggle
+            )
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // Key info
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                if (description != null) {
+                    Text(
+                        text = description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                // Show key name for debugging/clarity
+                Text(
+                    text = keyName,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                )
+            }
+        }
+    }
+}

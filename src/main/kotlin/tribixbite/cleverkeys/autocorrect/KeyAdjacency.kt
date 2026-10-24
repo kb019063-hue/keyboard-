@@ -1,0 +1,405 @@
+package tribixbite.cleverkeys.autocorrect
+
+import kotlin.math.hypot
+
+/**
+ * Keyboard-physical-adjacency model used by autocorrect to score
+ * character substitutions by physical distance on a QWERTY layout.
+ *
+ * # Why
+ *
+ * Users mistype keys most often by hitting an ADJACENT key — fat-finger
+ * errors, thumb drift, etc. A correction candidate that requires
+ * "wuestion → question" (one substitution, `w↔q` are adjacent on
+ * QWERTY) is far more likely to be the intended word than one that
+ * requires "wuestion → westion" (also one substitution, but `q↔w` and
+ * `m↔n` are different distances). Position-only matching can't tell
+ * these apart.
+ *
+ * # How
+ *
+ * Hardcoded US-QWERTY layout. Each letter is positioned by its visual
+ * grid coordinate (row offsets are conventional: middle row indented
+ * half a key, bottom row indented one full key).
+ *
+ *   Row 0:   q  w  e  r  t  y  u  i  o  p     (x = 0..9, y = 0)
+ *   Row 1:    a  s  d  f  g  h  j  k  l       (x = 0.5..8.5, y = 1)
+ *   Row 2:     z  x  c  v  b  n  m            (x = 1, 2, 3, 4, 5, 6, 7; y = 2)
+ *
+ * `keyDistance(a, b)` returns a value in `[0, 1]`:
+ *   - 0.0 = same key
+ *   - ~0.13 = adjacent keys (one key-width apart)
+ *   - 1.0 = farthest pair (`q` ↔ `m`, ~7.28 key-widths)
+ *
+ * `substitutionScore(a, b) = 1 - keyDistance(a, b)`.
+ *
+ * # Non-Latin boards
+ *
+ * Letters the QWERTY table does not cover (Hebrew, Cyrillic, Greek, Arabic …) are
+ * positioned from the ACTIVE layout's own key grid via [setLayoutLetters]
+ * (`Keyboard2View.setKeyboard` → [LayoutLetterGrid.of]), on the same key-pitch scale, so a
+ * neighbour typo on a Hebrew board earns the same credit as one on QWERTY.
+ *
+ * # Future extension
+ *
+ * The current QWERTY table is hardcoded — it correctly handles the
+ * default English layout. A future Tier-B improvement would accept a
+ * runtime `Map<Char, PointF>` from `Keyboard2View.keyPositions` (already
+ * produced + already wired into the swipe engine) to support Dvorak /
+ * AZERTY / custom layouts. The shape of this API anticipates that
+ * extension: replace the `POSITIONS` table with a setter-injected one.
+ */
+object KeyAdjacency {
+
+    /**
+     * Default US-QWERTY position table. Each entry: char → (x, y) on a
+     * uniform-key-width grid. Used when no runtime layout has been
+     * injected via [setLayout]. Common accented Latin chars are mapped
+     * to the position of their unaccented base so de/fr/es/it/pt/sv
+     * users get adjacency credit on `é`, `ñ`, `ü`, etc.
+     */
+    private val DEFAULT_POSITIONS: Map<Char, Pair<Float, Float>> = buildMap {
+        // Top row
+        listOf('q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p')
+            .forEachIndexed { i, c -> put(c, i.toFloat() to 0f) }
+        // Home row — half-key indent
+        listOf('a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l')
+            .forEachIndexed { i, c -> put(c, (i + 0.5f) to 1f) }
+        // Bottom row — one full key indent on left; right end of row is shorter
+        listOf('z', 'x', 'c', 'v', 'b', 'n', 'm')
+            .forEachIndexed { i, c -> put(c, (i + 1f) to 2f) }
+
+        // Accented Latin chars share their unaccented base's position. This
+        // means typos like `cafe → café` cost ~0 for the e↔é position (both
+        // map to (2,0)), letting adjacency-aware autocorrect bridge accent
+        // omissions on languages where the user's physical layout doesn't
+        // include the accented form. When the user IS on a layout with a
+        // dedicated key for the accent (German with ü, French with é etc.),
+        // `setLayout` overrides this default with the real key position.
+        listOf('á', 'à', 'â', 'ä', 'ã', 'å').forEach { put(it, get('a')!!) }
+        listOf('é', 'è', 'ê', 'ë').forEach { put(it, get('e')!!) }
+        listOf('í', 'ì', 'î', 'ï').forEach { put(it, get('i')!!) }
+        listOf('ó', 'ò', 'ô', 'ö', 'õ', 'ø').forEach { put(it, get('o')!!) }
+        listOf('ú', 'ù', 'û', 'ü').forEach { put(it, get('u')!!) }
+        listOf('ñ').forEach { put(it, get('n')!!) }
+        listOf('ç').forEach { put(it, get('c')!!) }
+        listOf('ß').forEach { put(it, get('s')!!) }
+        listOf('ý', 'ÿ').forEach { put(it, get('y')!!) }
+    }
+
+    /**
+     * Normalizer for [layoutLetters] distances: the built-in QWERTY table's span (9 key
+     * pitches, `q` ↔ `p`). Both tables are in key-grid units, so dividing by the same span
+     * makes one key pitch cost the same on a Hebrew or Cyrillic board as on QWERTY
+     * (≈ 0.11, substitution score ≈ 0.89) — the calibration every autocorrect threshold
+     * was tuned on. Not the layout's own span: an 11-key row would otherwise make its
+     * neighbours look closer than QWERTY's.
+     */
+    private val GRID_SCALE: Float = computeMaxDistance(DEFAULT_POSITIONS)
+
+    /**
+     * Currently-active position table — defaults to QWERTY, replaced by
+     * the most recent [setLayout] call. `@Volatile` so calls from the UI
+     * thread (`Keyboard2View.onLayout`) are visible to autocorrect calls
+     * on the prediction thread without locking.
+     */
+    @Volatile
+    private var positions: Map<Char, Pair<Float, Float>> = DEFAULT_POSITIONS
+
+    /**
+     * Normalization constant for [keyDistance]. Recomputed when the
+     * layout changes; for the default QWERTY this is `q ↔ p = 9.0`
+     * (both ends of the top row — farther than q↔m's √53 ≈ 7.28, the
+     * value previously hardcoded). Computed via [computeMaxDistance]
+     * so accent additions and runtime layouts can't drift out of sync.
+     */
+    @Volatile
+    private var maxDistance: Float = computeMaxDistance(DEFAULT_POSITIONS)
+
+    /**
+     * Inject a runtime layout. Coordinates can be in any unit (pixels,
+     * key-widths, anything); only relative distances matter. Each
+     * char-to-position mapping replaces the default. Call from
+     * `Keyboard2View.onLayout` (or equivalent) whenever the keyboard's
+     * physical layout changes — orientation flip, layout swap, custom
+     * layout import, etc.
+     *
+     * Pass an empty map (or call [resetLayout]) to revert to the
+     * default US-QWERTY + accents table. This is also the safe state
+     * when the layout isn't yet known (boot, layout load failure).
+     */
+    @JvmStatic
+    fun setLayout(layoutPositions: Map<Char, Pair<Float, Float>>) {
+        if (layoutPositions.isEmpty()) {
+            positions = DEFAULT_POSITIONS
+            maxDistance = computeMaxDistance(DEFAULT_POSITIONS)
+            azDist = buildAzDist(DEFAULT_POSITIONS, maxDistance)
+            neighborRadius = computeNeighborRadius(DEFAULT_POSITIONS, maxDistance)
+            return
+        }
+        // Lower-case keys for case-insensitive lookup.
+        val normalized = layoutPositions.mapKeys { it.key.lowercaseChar() }
+        positions = normalized
+        maxDistance = computeMaxDistance(normalized).coerceAtLeast(1e-6f)
+        azDist = buildAzDist(normalized, maxDistance)
+        neighborRadius = computeNeighborRadius(normalized, maxDistance)
+    }
+
+    /**
+     * Letters of the ACTIVE layout that the Latin table does not position — Hebrew,
+     * Cyrillic, Greek, Arabic … — in key-grid units ([LayoutLetterGrid]). Empty on a Latin
+     * board. Without this every substitution between two such letters cost 1.0 (as far
+     * apart as the board allows), so a neighbour-key typo on a Hebrew board got no more
+     * credit than a random letter and lost to transpositions and insertions
+     * (`החא` → `האח` instead of `הוא`).
+     *
+     * Deliberately a SEPARATE table: the Latin table stays authoritative for every letter
+     * it covers (switching Latin letters to live geometry is a separate, unmeasured change —
+     * see the TODO in `Keyboard2View.onLayout`), and a pair with one letter in each table
+     * keeps the "unrelated keys" distance 1.0.
+     */
+    @Volatile
+    private var layoutLetters: Map<Char, Pair<Float, Float>> = emptyMap()
+
+    /**
+     * Install the active layout's letter-key grid ([LayoutLetterGrid.of]). Letters the Latin
+     * table already positions are ignored, so a Latin board leaves this empty and changes
+     * nothing. Called by `Keyboard2View.setKeyboard` for the live (non-preview) keyboard;
+     * an empty map clears it.
+     */
+    @JvmStatic
+    fun setLayoutLetters(gridPositions: Map<Char, Pair<Float, Float>>) {
+        val own = HashMap<Char, Pair<Float, Float>>()
+        for ((c, p) in gridPositions) {
+            val lc = c.lowercaseChar()
+            if (lc !in DEFAULT_POSITIONS) own[lc] = p
+        }
+        // Two @Volatile writes, no lock: a lookup racing a layout switch may pair one board's
+        // letters with the other's radius once — harmless for a typo heuristic.
+        layoutLetterNeighborRadius = computeNeighborRadius(own, GRID_SCALE)
+        layoutLetters = own
+    }
+
+    /** Revert to the default US-QWERTY position table (plus accents). */
+    @JvmStatic
+    fun resetLayout() {
+        positions = DEFAULT_POSITIONS
+        maxDistance = computeMaxDistance(DEFAULT_POSITIONS)
+        azDist = buildAzDist(DEFAULT_POSITIONS, maxDistance)
+        neighborRadius = computeNeighborRadius(DEFAULT_POSITIONS, maxDistance)
+    }
+
+    /**
+     * Farthest pair distance in the position table. Used as the
+     * normalization denominator so all distances land in [0, 1].
+     * Computed by full O(n²) pairwise comparison since the table is
+     * tiny (~30 entries) and recomputed only on layout change.
+     */
+    private fun computeMaxDistance(p: Map<Char, Pair<Float, Float>>): Float {
+        val values = p.values.toList()
+        var max = 0f
+        for (i in values.indices) {
+            for (j in i + 1 until values.size) {
+                val d = hypot(
+                    values[i].first - values[j].first,
+                    values[i].second - values[j].second
+                )
+                if (d > max) max = d
+            }
+        }
+        return max
+    }
+
+    /**
+     * Normalized euclidean distance between two characters' centers on
+     * the active position table. Both chars are lowercased.
+     *
+     *   - Same char → 0.0
+     *   - Adjacent keys → ≈ 0.137 (QWERTY default)
+     *   - Distant corners → 1.0
+     *
+     * For characters NOT in the active table (digits, punctuation,
+     * chars not on the user's layout), returns 1.0 — "as different as
+     * possible." Safer than guessing a position for unknown chars.
+     */
+    fun keyDistance(a: Char, b: Char): Float {
+        if (a == b) return 0f
+        val ca = a.lowercaseChar()
+        val cb = b.lowercaseChar()
+        // Fast path: both are ASCII letters → precomputed table lookup. The
+        // autocorrect sweep calls keyDistance ~1M times per correction over the
+        // 98k dictionary; this replaces a HashMap<Char> lookup (autoboxing) +
+        // hypot with a dense array read. Values are identical to the fallback.
+        if (ca in 'a'..'z' && cb in 'a'..'z') {
+            return azDist[ca - 'a'][cb - 'a']
+        }
+        val p = positions  // local snapshot to dodge mid-call layout swap
+        val pa = p[ca]
+        val pb = p[cb]
+        if (pa != null && pb != null) {
+            val d = hypot(pa.first - pb.first, pa.second - pb.second)
+            return (d / maxDistance).coerceIn(0f, 1f)
+        }
+        // Both letters on the active layout's own (non-Latin) grid → the same physics, on
+        // the QWERTY scale. A letter in neither table, or one in each, stays "unrelated".
+        val l = layoutLetters
+        val la = l[ca] ?: return 1f
+        val lb = l[cb] ?: return 1f
+        return (hypot(la.first - lb.first, la.second - lb.second) / GRID_SCALE).coerceIn(0f, 1f)
+    }
+
+    /**
+     * Precomputed a–z × a–z distance table for [keyDistance]'s fast path.
+     * Rebuilt (via [buildAzDist]) whenever [positions]/[maxDistance] change.
+     * A cell is 1.0 when either letter is absent from the active layout,
+     * mirroring the map-lookup fallback.
+     */
+    @Volatile
+    private var azDist: Array<FloatArray> = buildAzDist(DEFAULT_POSITIONS, computeMaxDistance(DEFAULT_POSITIONS))
+
+    private fun buildAzDist(p: Map<Char, Pair<Float, Float>>, maxD: Float): Array<FloatArray> =
+        Array(26) { i ->
+            val pa = p['a' + i]
+            FloatArray(26) { j ->
+                if (i == j) 0f
+                else {
+                    val pb = p['a' + j]
+                    if (pa == null || pb == null) 1f
+                    else (hypot(pa.first - pb.first, pa.second - pb.second) / maxD).coerceIn(0f, 1f)
+                }
+            }
+        }
+
+    /**
+     * How far, in KEY PITCHES, a key may sit from another and still count as its
+     * neighbour for [areNeighbors]. 1.5 pitches admits the whole first ring of a
+     * staggered (QWERTY-style) board — same-row neighbours at 1.0 and the four
+     * diagonal row-neighbours at ≈1.12 — and the diagonals of an unstaggered grid
+     * (√2 ≈ 1.41), while excluding the second ring (≥ 1.8 on QWERTY: `k`↔`u`).
+     */
+    private const val NEIGHBOR_RADIUS_PITCHES = 1.5f
+
+    /**
+     * The layout's key pitch in [keyDistance] units: the MEDIAN over distinct key
+     * positions of each key's nearest-other-key distance. Median (not min) so a
+     * single oddly-packed key (a narrow punctuation key squeezed between letters)
+     * cannot shrink the neighbourhood for the whole board. Works for any unit the
+     * layout was injected in, since both the pitch and [maxDistance] come from the
+     * same table.
+     */
+    private fun computeNeighborRadius(p: Map<Char, Pair<Float, Float>>, maxD: Float): Float {
+        val points = p.values.distinct()
+        if (points.size < 2 || maxD <= 0f) return 0f
+        val nearest = FloatArray(points.size) { i ->
+            var best = Float.MAX_VALUE
+            for (j in points.indices) {
+                if (i == j) continue
+                val d = hypot(points[i].first - points[j].first, points[i].second - points[j].second)
+                if (d < best) best = d
+            }
+            best
+        }
+        nearest.sort()
+        val pitch = nearest[nearest.size / 2]
+        return NEIGHBOR_RADIUS_PITCHES * pitch / maxD
+    }
+
+    /**
+     * [keyDistance] radius within which two keys are neighbours on the ACTIVE layout
+     * (derived from the injected geometry — see [computeNeighborRadius]). Rebuilt on
+     * every [setLayout]/[resetLayout] together with the distance tables.
+     */
+    @Volatile
+    private var neighborRadius: Float =
+        computeNeighborRadius(DEFAULT_POSITIONS, computeMaxDistance(DEFAULT_POSITIONS))
+
+    /**
+     * True iff [a] and [b] are DIFFERENT keys that sit next to each other on the
+     * active layout — the fat-finger substitution class. Case-insensitive; a char
+     * that is not on the layout is nobody's neighbour. Two chars that share one
+     * key position (an accent folded onto its base letter in the default table)
+     * are distance 0 and therefore also report true; callers that want to price
+     * accent variants separately must check for that first.
+     */
+    fun areNeighbors(a: Char, b: Char): Boolean {
+        val ca = a.lowercaseChar()
+        val cb = b.lowercaseChar()
+        if (ca == cb) return false
+        val l = layoutLetters
+        if (ca in l && cb in l) return keyDistance(ca, cb) <= layoutLetterNeighborRadius
+        return keyDistance(a, b) <= neighborRadius
+    }
+
+    /**
+     * [areNeighbors] radius for two [layoutLetters] keys: [NEIGHBOR_RADIUS_PITCHES] of that
+     * grid's own median key pitch ([computeNeighborRadius]) on the [GRID_SCALE] scale.
+     * Rebuilt by [setLayoutLetters].
+     */
+    @Volatile
+    private var layoutLetterNeighborRadius: Float = 0f
+
+    /**
+     * Substitution score = 1 - keyDistance. Returned value:
+     *   - Same char → 1.0
+     *   - Adjacent → ≈ 0.86
+     *   - Distant  → 0.0
+     *
+     * Designed to be summed across positions in a same-length word
+     * comparison: `score = sum(substitutionScore(a[i], b[i])) / length`,
+     * landing in `[0, 1]` for the overall match quality.
+     */
+    fun substitutionScore(a: Char, b: Char): Float = 1f - keyDistance(a, b)
+
+    /**
+     * Weighted Levenshtein distance: insertion / deletion cost 1.0,
+     * substitution cost = `keyDistance(a, b)`. Adjacent-key substitutions
+     * cost less than distant-key ones.
+     *
+     * Used for ±length-diff candidates: when the typed word and the
+     * candidate differ in length by 1+ chars, position-wise comparison
+     * can't apply, so we fall through to this edit-distance metric.
+     */
+    fun weightedEditDistance(a: String, b: String): Float =
+        weightedEditDistance(a, b, Float.MAX_VALUE)
+
+    /**
+     * As [weightedEditDistance], with an early-abandon [maxDistance] budget.
+     *
+     * When the true distance is ≤ [maxDistance] the exact value is returned
+     * (identical to the unbounded call). When a completed DP row's minimum
+     * already exceeds [maxDistance] — meaning no remaining path can finish
+     * within budget, since edit costs are non-negative — the DP stops and
+     * returns that minimum (a lower bound that is itself > [maxDistance]). The
+     * autocorrect sweep only tests `ed <= maxEd`, so an above-budget lower
+     * bound is a correct rejection, and this prunes the ~50% of the 98k
+     * dictionary that are unrelated words after 2-3 rows instead of n full rows.
+     *
+     * Also uses a zero-allocation two-row swap (no per-row `copyOf`).
+     */
+    fun weightedEditDistance(a: String, b: String, maxDistance: Float): Float {
+        val n = a.length
+        val m = b.length
+        if (n == 0) return m.toFloat()
+        if (m == 0) return n.toFloat()
+        // Rolling two-row DP with in-place row reuse.
+        var prev = FloatArray(m + 1) { it.toFloat() }
+        var curr = FloatArray(m + 1)
+        for (i in 1..n) {
+            curr[0] = i.toFloat()
+            val ai = a[i - 1]
+            var rowMin = curr[0]
+            for (j in 1..m) {
+                val bj = b[j - 1]
+                val sub = prev[j - 1] + keyDistance(ai, bj)
+                val ins = curr[j - 1] + 1f
+                val del = prev[j] + 1f
+                val v = minOf(sub, ins, del)
+                curr[j] = v
+                if (v < rowMin) rowMin = v
+            }
+            if (rowMin > maxDistance) return rowMin
+            val tmp = prev; prev = curr; curr = tmp
+        }
+        return prev[m]
+    }
+}

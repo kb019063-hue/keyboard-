@@ -1,0 +1,748 @@
+package tribixbite.cleverkeys.langpack
+
+import tribixbite.cleverkeys.IoFailureReason
+import tribixbite.cleverkeys.LanguageAvailability
+import tribixbite.cleverkeys.PackImportFailure
+import android.annotation.SuppressLint
+import android.content.Context
+import android.net.Uri
+import android.util.Log
+import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
+import java.io.InputStream
+import java.util.zip.ZipInputStream
+import tribixbite.cleverkeys.swipe.ctc.CtcPackModel
+import tribixbite.cleverkeys.swipe.geometric.CkdtDictionaryReader
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+
+/**
+ * Language Pack Manager - handles import, validation, and storage of language packs.
+ *
+ * Language packs are ZIP files containing:
+ * - manifest.json: metadata (language code, name, version, hasPrefixBoost)
+ * - dictionary.bin: V2 binary dictionary with accent normalization
+ * - unigrams.txt: word frequency list for language detection
+ * - contractions.json: optional apostrophe word mappings (e.g., "cest" -> "c'est")
+ * - prefix_boost.bin: optional Aho-Corasick trie for prefix boosting. Its only consumer,
+ *   the neural beam search, was removed on 2026-08-18. The file is still ACCEPTED and
+ *   copied on import so existing packs keep installing cleanly; nothing reads it back.
+ * - model.onnx: optional CTC swipe encoder for a non-Latin script (added 2026-09-10). Accepted
+ *   only when the manifest DECLARES it — `"model": {"file": "model.onnx", "sha256": "…"}` —
+ *   and the bytes hash to what the manifest says. See "The model member" below.
+ * - NOTICE.txt: optional full data-attribution text (every pack built since the 2026-09-26
+ *   data-licensing audit carries one). Kept on install so the credits CC BY-SA requires travel
+ *   with the data onto the device, and shown from the language-pack manager ([readNotice]).
+ *   The manifest's `license` / `attribution` / `source` keys carry the short form.
+ *
+ * Packs are imported via Storage Access Framework (no internet permission needed).
+ * Stored in app internal storage: files/langpacks/{code}/
+ *
+ * ## The model member, and the two checks that are NOT the same check
+ *
+ * The six per-script CTC encoders (ru/el/uk/bg/mk/he) left the APK on 2026-09-10 and travel in
+ * their packs instead: every one of those languages is langpack-sourced, so the model could
+ * only ever run for a user who had imported the pack anyway, and shipping it to everyone else
+ * was 3.1 MB of dead payload. Two independent gates stand between a pack file and ORT:
+ *
+ *  1. **Here, at import** — does the pack match its OWN manifest? That catches a corrupt or
+ *     truncated download and reports it as a failed import, rather than installing bytes that
+ *     will silently never load. It is an integrity check, and nothing more: the manifest is
+ *     written by whoever wrote the pack, so a hostile pack passes this trivially.
+ *  2. **At load** — [tribixbite.cleverkeys.swipe.ctc.CtcPackModel] refuses to hand ORT anything
+ *     that is not byte-identical to a sha256 compiled into this APK. That is the security
+ *     property, and it trusts nothing the pack says about itself.
+ *
+ * Hence the size cap enforced during EXTRACTION (a pack naming a multi-gigabyte `model.onnx`
+ * must not fill the cache dir before anything looks at its size), and hence an UNDECLARED
+ * `model.onnx` being dropped rather than rejected: nothing can verify it, gate 2 would refuse
+ * it anyway, and failing the whole import would punish the user for a stray file.
+ */
+class LanguagePackManager(
+    private val context: Context,
+    private val fileOps: PackFileOps = PackFileOps.Real,
+) {
+
+    companion object {
+        private const val TAG = "LanguagePackManager"
+        private const val LANGPACKS_DIR = "langpacks"
+        private const val MANIFEST_FILE = "manifest.json"
+        private const val DICTIONARY_FILE = "dictionary.bin"
+        private const val UNIGRAMS_FILE = "unigrams.txt"
+        private const val CONTRACTIONS_FILE = "contractions.json"
+        private const val PREFIX_BOOST_FILE = "prefix_boost.bin"
+        private const val NOTICE_FILE = "NOTICE.txt"
+
+        /**
+         * Upper bound on each manifest attribution field (`license`, `attribution`, `source`).
+         * The real values are a few hundred characters; a pack is untrusted input, so a
+         * megabyte "attribution" must not reach a dialog `Text` unbounded.
+         */
+        const val MAX_ATTRIBUTION_FIELD_CHARS = 2_000
+
+        /**
+         * Upper bound on the NOTICE.txt text [readNotice] returns. The shipped notices are ~3 KB;
+         * the cap keeps a hostile pack's multi-megabyte notice out of memory and out of the UI.
+         */
+        const val MAX_NOTICE_CHARS = 64 * 1024
+
+        /**
+         * The pack's optional CTC encoder. Name and size cap come from [CtcPackModel] so the
+         * importer and the loader can never disagree about which file this is or how big it is
+         * allowed to be.
+         */
+        private val MODEL_FILE = CtcPackModel.PACK_MODEL_FILE
+        private val MAX_MODEL_BYTES = CtcPackModel.MAX_PACK_MODEL_BYTES
+
+        // V2 dictionary magic number: "CKDT"
+        private const val DICT_MAGIC = 0x54444B43
+
+        /**
+         * G-1 (comprehensive audit 2026-09-06): `manifest.code` becomes a path component
+         * of the install directory, so it MUST be a plain code — a hostile pack carrying
+         * `"code":".."` used to make the importer `deleteRecursively()` the app's entire
+         * files dir and install there. Accepted shapes cover every shipped pack
+         * (`en`, `ru`, `pt` …) and the build tooling's variant names (`en-web-50k`,
+         * `en-opensubtitles`, `pt_br`): a 2-3 letter base plus up to 4 alphanumeric
+         * segments separated by `-`/`_`. No `/`, `\`, `.` or empty codes, ever. Defined
+         * beside the swap so its recovery acts only on names the importer can produce.
+         */
+        private val VALID_PACK_CODE = LanguagePackSwap.VALID_PACK_CODE
+
+        // Process-lifetime singleton holding only the applicationContext (see getInstance),
+        // so it never leaks an Activity/Service. The reference lives as long as the process.
+        @SuppressLint("StaticFieldLeak")
+        @Volatile
+        private var instance: LanguagePackManager? = null
+
+        fun getInstance(context: Context): LanguagePackManager {
+            return instance ?: synchronized(this) {
+                instance ?: LanguagePackManager(context.applicationContext).also { instance = it }
+            }
+        }
+    }
+
+    private val langpacksDir: File by lazy {
+        File(context.filesDir, LANGPACKS_DIR).apply { mkdirs() }
+    }
+
+    /** Install/remove swap and its crash recovery over [langpacksDir] (todo item 11). */
+    private val swap: LanguagePackSwap by lazy { LanguagePackSwap(langpacksDir, fileOps) }
+
+    /**
+     * Serialises staging, the install swap, removal and recovery: recovery deletes staging
+     * directories, so it must never run while an import of this manager is mid-staging.
+     */
+    private val installLock = Any()
+
+    @Volatile
+    private var recovered = false
+
+    /**
+     * The langpacks directory, after repairing anything an interrupted install or removal left
+     * behind ([LanguagePackSwap.recover]). Runs once per manager — i.e. once per process for the
+     * [getInstance] singleton — before any pack is listed, resolved or installed, so no reader
+     * going through this class can observe a half-swapped pack. Normally a single directory
+     * listing; it renames or deletes only after an interruption.
+     */
+    private fun packsRoot(): File {
+        if (!recovered) {
+            synchronized(installLock) {
+                if (!recovered) {
+                    try {
+                        swap.recover().forEach { Log.w(TAG, "Pack recovery: $it") }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Pack recovery failed", e)
+                    }
+                    recovered = true
+                }
+            }
+        }
+        return langpacksDir
+    }
+
+    /**
+     * Import a language pack from a ZIP file URI.
+     *
+     * @param uri URI to the ZIP file (from file picker)
+     * @return ImportResult indicating success or failure with details
+     */
+    fun importLanguagePack(uri: Uri): ImportResult {
+        Log.d(TAG, "Importing language pack from: $uri")
+
+        return try {
+            val inputStream = context.contentResolver.openInputStream(uri)
+                ?: return ImportResult.Error(
+                    PackImportFailure.Io(IoFailureReason.FILE_NOT_FOUND, "Cannot open file")
+                )
+
+            importFromStream(inputStream)
+        } catch (e: Exception) {
+            Log.e(TAG, "Import failed", e)
+            ImportResult.Error(PackImportFailure.fromException(e))
+        } finally {
+            // Success installs a pack; a failure late in the swap can remove the old one. Either
+            // way the installed set may have changed, so the cached availability scan is stale.
+            LanguageAvailability.invalidate()
+        }
+    }
+
+    /**
+     * Import from an InputStream (ZIP content).
+     */
+    private fun importFromStream(inputStream: InputStream): ImportResult {
+        val tempDir = File(context.cacheDir, "langpack_import_${System.currentTimeMillis()}")
+        tempDir.mkdirs()
+
+        try {
+            // Extract ZIP contents to temp directory
+            val extractedFiles = mutableSetOf<String>()
+            var entryCount = 0
+            var extractedBytes = 0L
+            ZipInputStream(inputStream).use { zis ->
+                var entry = zis.nextEntry
+                while (entry != null) {
+                    // Flatten benign wrapper folders, but reject ambiguous or unsafe names.
+                    val parts = entry.name.split('/')
+                    if (++entryCount > 64 || entry.name.startsWith('/') ||
+                        entry.name.contains('\\') || entry.name.contains('\u0000') ||
+                        parts.any { it == ".." || it == "." }) {
+                        return ImportResult.Error(PackImportFailure.InvalidMember(entry.name))
+                    }
+                    if (!entry.isDirectory) {
+                        val fileName = parts.last()
+                        if (fileName.isEmpty() || !extractedFiles.add(fileName)) {
+                            return ImportResult.Error(PackImportFailure.InvalidMember(fileName))
+                        }
+                        val outFile = File(tempDir, fileName)
+                        val memberCap = when (fileName) {
+                            MODEL_FILE -> MAX_MODEL_BYTES
+                            MANIFEST_FILE, NOTICE_FILE -> 64L * 1024
+                            else -> CkdtDictionaryReader.MAX_DICTIONARY_BYTES
+                        }
+                        val remaining = 64L * 1024 * 1024 - extractedBytes
+                        val cap = minOf(memberCap, remaining)
+                        val withinCap = FileOutputStream(outFile).use { fos ->
+                            copyBounded(zis, fos, cap)
+                        }
+                        if (!withinCap) {
+                            val limitMiB = (cap / (1024 * 1024)).toInt()
+                            val failure = when {
+                                cap < memberCap -> PackImportFailure.MemberTooLarge("ZIP", 64 * 1024)
+                                fileName == MODEL_FILE -> PackImportFailure.ModelTooLarge(fileName, limitMiB)
+                                else -> PackImportFailure.MemberTooLarge(fileName, (memberCap / 1024).toInt())
+                            }
+                            return ImportResult.Error(failure)
+                        }
+                        extractedBytes += outFile.length()
+                    }
+                    entry = zis.nextEntry
+                }
+            }
+
+            // Validate required files exist
+            if (MANIFEST_FILE !in extractedFiles) {
+                return ImportResult.Error(PackImportFailure.MissingMember(MANIFEST_FILE))
+            }
+            if (DICTIONARY_FILE !in extractedFiles) {
+                return ImportResult.Error(PackImportFailure.MissingMember(DICTIONARY_FILE))
+            }
+
+            // Parse manifest
+            val manifestFile = File(tempDir, MANIFEST_FILE)
+            val manifest = parseManifest(manifestFile.readText())
+                ?: return ImportResult.Error(PackImportFailure.InvalidMember(MANIFEST_FILE))
+
+            // Validate dictionary binary
+            val dictFile = File(tempDir, DICTIONARY_FILE)
+            validateDictionary(dictFile)?.let { return ImportResult.Error(it) }
+
+            // G-1: validate the code BEFORE it is used as a path component. Regex first,
+            // then a canonical-path containment check as belt-and-braces — the install
+            // dir must be a direct child of langpacksDir, nothing else.
+            if (!VALID_PACK_CODE.matches(manifest.code)) {
+                return ImportResult.Error(PackImportFailure.InvalidLanguageCode(manifest.code))
+            }
+
+            // Move to final location
+            val packsRoot = packsRoot()
+            val packDir = File(packsRoot, manifest.code)
+            if (packDir.canonicalFile.parentFile != packsRoot.canonicalFile) {
+                return ImportResult.Error(PackImportFailure.InvalidLanguageCode(manifest.code))
+            }
+
+            // The model member: the pack must agree with itself. A DECLARED model that is
+            // missing, misnamed or hashes to something else means a corrupt download, and
+            // saying so beats installing a language whose swipe silently falls back forever.
+            // An UNDECLARED model.onnx is simply not installed (see the class KDoc).
+            val modelFile = File(tempDir, MODEL_FILE)
+            val installModel = manifest.modelSha256 != null
+            if (installModel) {
+                if (manifest.modelFile != MODEL_FILE) {
+                    return ImportResult.Error(PackImportFailure.UnsupportedModel(manifest.modelFile.orEmpty()))
+                }
+                if (!modelFile.exists()) {
+                    return ImportResult.Error(PackImportFailure.MissingMember(MODEL_FILE))
+                }
+                if (!sha256OfFile(modelFile).equals(manifest.modelSha256, ignoreCase = true)) {
+                    return ImportResult.Error(PackImportFailure.ModelChecksumMismatch(MODEL_FILE))
+                }
+            } else if (modelFile.exists()) {
+                Log.w(TAG, "Ignoring undeclared $MODEL_FILE in pack ${manifest.code}")
+            }
+
+            // G-6 (comprehensive audit 2026-09-06): stage into a sibling dir and swap.
+            // The old order (deleteRecursively the installed pack, THEN copy) meant a
+            // mid-copy IO failure (disk full) destroyed the working pack and left a
+            // manifest-only ghost that getInstalledPacks() listed while every dictionary
+            // consumer treated it as absent. Staging first means a failure anywhere in
+            // the copy phase leaves the installed pack untouched. The dot-prefixed name
+            // keeps a half-built staging dir invisible to getInstalledPacks(). Within
+            // the staging dir the manifest is copied LAST, so even a crash between
+            // steps can never produce a manifest-without-dictionary directory.
+            return synchronized(installLock) { stageAndSwap(manifest, tempDir, installModel) }
+
+        } finally {
+            // Cleanup temp directory
+            tempDir.deleteRecursively()
+        }
+    }
+
+    /**
+     * Copy the validated members from [tempDir] into a staging directory and swap it in as the
+     * installed pack (G-6 staging, todo item 11 swap). Caller holds [installLock].
+     */
+    private fun stageAndSwap(
+        manifest: LanguagePackManifest,
+        tempDir: File,
+        installModel: Boolean,
+    ): ImportResult {
+        val dictFile = File(tempDir, DICTIONARY_FILE)
+        val manifestFile = File(tempDir, MANIFEST_FILE)
+        val modelFile = File(tempDir, MODEL_FILE)
+        val stagingDir = swap.stagingDir(manifest.code, System.currentTimeMillis())
+        stagingDir.mkdirs()
+        try {
+            dictFile.copyTo(File(stagingDir, DICTIONARY_FILE), overwrite = true)
+
+            // Copy unigrams if present
+            val unigramsFile = File(tempDir, UNIGRAMS_FILE)
+            if (unigramsFile.exists()) {
+                unigramsFile.copyTo(File(stagingDir, UNIGRAMS_FILE), overwrite = true)
+            }
+
+            // Copy contractions if present
+            val contractionsFile = File(tempDir, CONTRACTIONS_FILE)
+            if (contractionsFile.exists()) {
+                contractionsFile.copyTo(File(stagingDir, CONTRACTIONS_FILE), overwrite = true)
+                Log.d(TAG, "Copied contractions.json for ${manifest.code}")
+            }
+
+            // Copy prefix boost trie if present
+            val prefixBoostFile = File(tempDir, PREFIX_BOOST_FILE)
+            if (prefixBoostFile.exists()) {
+                prefixBoostFile.copyTo(File(stagingDir, PREFIX_BOOST_FILE), overwrite = true)
+                Log.d(TAG, "Copied prefix_boost.bin for ${manifest.code} (${prefixBoostFile.length() / 1024}KB)")
+            }
+
+            // Keep the full attribution text (2026-09-26 data-licensing audit): the pack's
+            // CC BY-SA credits must travel with the data, and the manifest's short
+            // `attribution` line points at this file. Absent from older packs.
+            val noticeFile = File(tempDir, NOTICE_FILE)
+            if (noticeFile.exists()) {
+                noticeFile.copyTo(File(stagingDir, NOTICE_FILE), overwrite = true)
+            }
+
+            // Copy the CTC encoder if the manifest declared it and it verified above.
+            if (installModel) {
+                modelFile.copyTo(File(stagingDir, MODEL_FILE), overwrite = true)
+                Log.d(TAG, "Copied $MODEL_FILE for ${manifest.code} (${modelFile.length() / 1024}KB)")
+            }
+
+            // Manifest last — a staged dir only becomes "complete" at this point.
+            manifestFile.copyTo(File(stagingDir, MANIFEST_FILE), overwrite = true)
+
+            // Swap (todo item 11): the old pack is renamed aside, the staged one renamed
+            // into place, and only then is the old copy deleted — at no point is there zero
+            // complete copies on disk. See LanguagePackSwap for the full state machine.
+            val outcome = try {
+                swap.install(stagingDir, manifest.code)
+            } catch (e: Exception) {
+                // A throwing rename/delete (e.g. SecurityException): settle the directory
+                // now rather than leave it to the next start.
+                swap.recover().forEach { Log.w(TAG, "Pack recovery: $it") }
+                throw e
+            }
+            when (outcome) {
+                is LanguagePackSwap.Outcome.Installed -> if (outcome.backupLeft) {
+                    Log.w(TAG, "Previous ${manifest.code} pack not fully deleted; recovery retries it")
+                }
+                LanguagePackSwap.Outcome.Refused ->
+                    return ImportResult.Error(PackImportFailure.InstallFailed)
+                LanguagePackSwap.Outcome.RollbackPending -> {
+                    // Old pack is intact under its backup name; try to put it back now.
+                    swap.recover().forEach { Log.w(TAG, "Pack recovery: $it") }
+                    return ImportResult.Error(PackImportFailure.InstallFailed)
+                }
+            }
+        } finally {
+            if (fileOps.exists(stagingDir)) {
+                fileOps.deleteRecursively(stagingDir)
+            }
+        }
+
+        Log.i(TAG, "Successfully imported language pack: ${manifest.name} (${manifest.code})")
+        return ImportResult.Success(manifest)
+    }
+
+    /**
+     * Parse manifest.json into LanguagePackManifest.
+     */
+    private fun parseManifest(json: String): LanguagePackManifest? {
+        return try {
+            val obj = JSONObject(json)
+            // `model` is absent from every pack built before 2026-09-10, and from every pack for
+            // a Latin language — optJSONObject keeps those parsing exactly as they did.
+            val model = obj.optJSONObject("model")
+            LanguagePackManifest(
+                code = obj.getString("code"),
+                name = obj.getString("name"),
+                version = obj.optInt("version", 1),
+                author = obj.optString("author", ""),
+                wordCount = obj.optInt("wordCount", 0),
+                hasPrefixBoost = obj.optBoolean("hasPrefixBoost", false),
+                modelFile = model?.optString("file")?.takeIf { it.isNotEmpty() },
+                modelSha256 = model?.optString("sha256")?.takeIf { it.isNotEmpty() },
+                // Data attribution (2026-09-26 licensing audit). Absent from every pack built
+                // before 2026-09-27, so each one is optional; see attributionField.
+                license = attributionField(obj, "license"),
+                attribution = attributionField(obj, "attribution"),
+                source = attributionField(obj, "source"),
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to parse manifest", e)
+            null
+        }
+    }
+
+    /**
+     * One attribution key from a manifest, or null when it is absent, blank or not a JSON
+     * string. Deliberately NOT `optString`: that stringifies a number to "42", and depending on
+     * the org.json build a JSON `null` to the text "null" — neither is a licence or a credit.
+     * Trimmed and capped at [MAX_ATTRIBUTION_FIELD_CHARS] because a pack is untrusted input
+     * and the value is rendered verbatim in the language-pack manager.
+     */
+    private fun attributionField(obj: JSONObject, key: String): String? =
+        (obj.opt(key) as? String)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?.take(MAX_ATTRIBUTION_FIELD_CHARS)
+
+    /**
+     * Copy at most [limit] bytes from [input] to [output].
+     *
+     * @return true when the whole stream fit, false the moment it would exceed [limit] (the
+     *   output then holds a truncated prefix, which the caller discards with the temp dir).
+     *
+     * Streamed in fixed-size chunks for the same reason every other entry is: peak memory must
+     * not scale with what the pack claims to contain.
+     */
+    private fun copyBounded(input: InputStream, output: java.io.OutputStream, limit: Long): Boolean {
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        var written = 0L
+        while (true) {
+            val read = input.read(buffer)
+            if (read <= 0) return true
+            written += read
+            if (written > limit) return false
+            output.write(buffer, 0, read)
+        }
+    }
+
+    /**
+     * Lowercase hex sha256 of [file], read in fixed-size chunks.
+     *
+     * Streaming rather than `readBytes()` keeps the importer's one invariant intact — no pack
+     * entry is ever materialised whole, whatever its declared size (the v1.1.96/v1.1.97 OOM
+     * fix, pinned by `theImportPathNeverReadsAWholeEntryIntoMemory`).
+     */
+    private fun sha256OfFile(file: File): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        file.inputStream().use { input ->
+            while (true) {
+                val read = input.read(buffer)
+                if (read <= 0) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * Validate dictionary binary has correct magic number and version.
+     */
+    private fun validateDictionary(file: File): PackImportFailure? {
+        if (!file.exists() || file.length() < 48) {
+            return PackImportFailure.InvalidMember(DICTIONARY_FILE)
+        }
+        return try {
+            file.inputStream().use { fis ->
+                // Fixed header only: never allocate from manifest.wordCount or read the body.
+                val header = ByteArray(16)
+                java.io.DataInputStream(fis).readFully(header)
+                val buffer = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN)
+                val magic = buffer.int
+                val version = buffer.int
+                val wordCount = buffer.getInt(12)
+                when {
+                    magic != DICT_MAGIC || version != 2 || wordCount < 0 ->
+                        PackImportFailure.InvalidMember(DICTIONARY_FILE)
+                    wordCount > CkdtDictionaryReader.MAX_WORD_COUNT ->
+                        PackImportFailure.DictionaryTooLarge(wordCount, CkdtDictionaryReader.MAX_WORD_COUNT)
+                    else -> null
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Dictionary validation failed", e)
+            PackImportFailure.InvalidMember(DICTIONARY_FILE)
+        }
+    }
+
+    /**
+     * Get list of installed language packs.
+     */
+    fun getInstalledPacks(): List<LanguagePackManifest> {
+        val packs = mutableListOf<LanguagePackManifest>()
+
+        packsRoot().listFiles()?.forEach { dir ->
+            // Dot-prefixed dirs are swap staging/backup/trash (G-6, item 11) — never installed packs.
+            if (dir.isDirectory && !dir.name.startsWith(".")) {
+                val manifestFile = File(dir, MANIFEST_FILE)
+                if (manifestFile.exists()) {
+                    parseManifest(manifestFile.readText())?.let { packs.add(it) }
+                }
+            }
+        }
+
+        return packs.sortedBy { it.name }
+    }
+
+    /**
+     * gh #184: why an INSTALLED pack's dictionary will not load, or null when it will. Packs
+     * imported before the 100,000-word cap existed are still on disk; the loader refuses them
+     * (before allocating), so Settings shows this message instead of failing silently.
+     * Reads only the 16-byte header.
+     */
+    fun installedDictionaryProblem(code: String): PackImportFailure? =
+        getDictionaryPath(code)?.let { validateDictionary(it) }
+
+    /**
+     * Get dictionary file path for a language code.
+     * Returns null if pack not installed.
+     */
+    fun getDictionaryPath(code: String): File? {
+        val dictFile = File(packsRoot(), "$code/$DICTIONARY_FILE")
+        return if (dictFile.exists()) dictFile else null
+    }
+
+    /**
+     * Get unigrams file path for a language code.
+     * Returns null if not available.
+     */
+    fun getUnigramsPath(code: String): File? {
+        val unigramsFile = File(packsRoot(), "$code/$UNIGRAMS_FILE")
+        return if (unigramsFile.exists()) unigramsFile else null
+    }
+
+    /**
+     * Get contractions file path for a language code.
+     * Returns null if not available.
+     */
+    fun getContractionsPath(code: String): File? {
+        val contractionsFile = File(packsRoot(), "$code/$CONTRACTIONS_FILE")
+        return if (contractionsFile.exists()) contractionsFile else null
+    }
+
+    /**
+     * Path to an installed pack's prefix-boost trie, or null if the pack has none.
+     *
+     * No live consumer since 2026-08-18: the neural beam search that applied these boosts was
+     * removed. Kept (with [PREFIX_BOOST_FILE] still copied on import) so that packs built
+     * against the old format continue to install without error, and so a future re-use of the
+     * data does not require a pack-format change. Marked @Suppress rather than deleted for
+     * exactly that reason.
+     */
+    @Suppress("unused")
+    fun getPrefixBoostPath(code: String): File? {
+        val prefixBoostFile = File(packsRoot(), "$code/$PREFIX_BOOST_FILE")
+        return if (prefixBoostFile.exists()) prefixBoostFile else null
+    }
+
+    /**
+     * Path to an installed pack's CTC encoder, or null when the pack carries none.
+     *
+     * Present only for the non-Latin scripts whose model is pack-delivered, and present at ALL
+     * only when the pack declared it and the bytes matched that declaration on import. This is
+     * the same path [CtcPackModel.packModelFile] resolves, and it is deliberately NOT the
+     * loading API: the loader re-hashes the file against the app's own pin, because this
+     * class's check only established that the pack agrees with itself.
+     */
+    fun getModelPath(code: String): File? {
+        val modelFile = File(packsRoot(), "$code/$MODEL_FILE")
+        return if (modelFile.exists()) modelFile else null
+    }
+
+    /**
+     * Path to an installed pack's NOTICE.txt, or null when the pack carries none (every pack
+     * built before the 2026-09-26 audit, and packs imported by app versions that dropped the
+     * member on install).
+     */
+    fun getNoticePath(code: String): File? {
+        val noticeFile = File(packsRoot(), "$code/$NOTICE_FILE")
+        return if (noticeFile.isFile) noticeFile else null
+    }
+
+    /**
+     * The installed pack's NOTICE.txt as text, at most [MAX_NOTICE_CHARS] characters, or null
+     * when there is none or it cannot be read. Read in chunks so a hostile oversized notice is
+     * never materialised whole. Does file IO: call off the main thread.
+     */
+    fun readNotice(code: String): String? {
+        val noticeFile = getNoticePath(code) ?: return null
+        return try {
+            noticeFile.reader(Charsets.UTF_8).use { reader ->
+                val out = StringBuilder()
+                val buffer = CharArray(DEFAULT_BUFFER_SIZE)
+                while (out.length < MAX_NOTICE_CHARS) {
+                    val read = reader.read(buffer, 0, minOf(buffer.size, MAX_NOTICE_CHARS - out.length))
+                    if (read <= 0) break
+                    out.append(buffer, 0, read)
+                }
+                out.toString()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to read $NOTICE_FILE for $code", e)
+            null
+        }
+    }
+
+    /**
+     * Check if a language pack is installed.
+     */
+    fun isInstalled(code: String): Boolean {
+        return getDictionaryPath(code) != null
+    }
+
+    /**
+     * Delete a language pack.
+     */
+    fun deletePack(code: String): Boolean {
+        val root = packsRoot()
+        // Must name a direct, non-dot child of the langpacks dir. Not the import regex: a pack
+        // installed before G-1 (2026-09-06) may carry a code it would refuse, and must stay
+        // deletable.
+        if (code.isEmpty() || code.startsWith(".") ||
+            File(root, code).canonicalFile.parentFile != root.canonicalFile) {
+            return false
+        }
+        return try {
+            // Renamed to an invisible trash name first, then deleted: a delete that stops half
+            // way can no longer leave a manifest-only ghost under the pack's own name.
+            synchronized(installLock) { swap.remove(code, System.currentTimeMillis()) }
+        } finally {
+            // Even a partial delete changes what is installed.
+            LanguageAvailability.invalidate()
+        }
+    }
+
+    /**
+     * Get all available languages (bundled + installed packs).
+     */
+    fun getAllAvailableLanguages(): List<LanguageInfo> {
+        val languages = mutableListOf<LanguageInfo>()
+
+        // Bundled languages (always available)
+        languages.add(LanguageInfo("en", "English", LanguageSource.BUNDLED))
+        languages.add(LanguageInfo("es", "Spanish", LanguageSource.BUNDLED))
+
+        // Installed language packs
+        getInstalledPacks().forEach { pack ->
+            // Don't duplicate bundled languages
+            if (languages.none { it.code == pack.code }) {
+                languages.add(LanguageInfo(pack.code, pack.name, LanguageSource.PACK))
+            }
+        }
+
+        return languages.sortedBy { it.name }
+    }
+}
+
+/**
+ * Language pack manifest data.
+ */
+data class LanguagePackManifest(
+    val code: String,              // ISO 639-1 code (e.g., "fr", "de")
+    val name: String,              // Display name (e.g., "French", "German")
+    val version: Int = 1,          // Pack version
+    val author: String = "",       // Pack author
+    val wordCount: Int = 0,        // Number of words in dictionary
+    val hasPrefixBoost: Boolean = false, // Whether pack includes prefix boost trie
+    /**
+     * `model.file` — the pack member holding the CTC encoder, when the pack declares one.
+     * Only `model.onnx` is supported; anything else is refused with its own message rather
+     * than silently ignored, so a pack cannot declare a hash for a file nothing reads.
+     */
+    val modelFile: String? = null,
+    /**
+     * `model.sha256` — the pack's own statement of its encoder's hash. Checked at import to
+     * catch a corrupt download. NOT a permission to load: that decision belongs to the app's
+     * pinned hash (`CtcPackModel`), which trusts nothing in this field.
+     */
+    val modelSha256: String? = null,
+    /**
+     * `license` — the pack's own licence identifier (`GPL-3.0-only` for every shipped pack).
+     * Null when absent (packs built before 2026-09-27), blank, or not a JSON string.
+     */
+    val license: String? = null,
+    /**
+     * `attribution` — the short credit line for the pack's word data: upstream author, upstream
+     * licence and the change note CC BY-SA requires. Null under the same rules as [license].
+     */
+    val attribution: String? = null,
+    /**
+     * `source` — where the word data came from: one URL, or several separated by spaces. Null
+     * under the same rules as [license]. Rendering (which tokens become links) is decided by
+     * [PackAttributionDisplay].
+     */
+    val source: String? = null,
+)
+
+/**
+ * Import result sealed class.
+ */
+sealed class ImportResult {
+    data class Success(val manifest: LanguagePackManifest) : ImportResult()
+    /** A refused import; [failure] renders the localized reason, [message] is the English log text. */
+    data class Error(val failure: PackImportFailure) : ImportResult() {
+        val message: String get() = failure.logMessage
+    }
+}
+
+/**
+ * Language source enum.
+ */
+enum class LanguageSource {
+    BUNDLED,  // Included in app assets
+    PACK      // From imported language pack
+}
+
+/**
+ * Language info for display.
+ */
+data class LanguageInfo(
+    val code: String,
+    val name: String,
+    val source: LanguageSource
+)

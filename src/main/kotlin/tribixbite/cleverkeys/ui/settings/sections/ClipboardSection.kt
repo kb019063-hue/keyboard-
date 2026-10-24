@@ -1,0 +1,444 @@
+package tribixbite.cleverkeys.ui.settings.sections
+
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import tribixbite.cleverkeys.ClipboardHistoryService
+import tribixbite.cleverkeys.clipboard.ClipboardPendingDeletion
+import tribixbite.cleverkeys.PrivateCopyProcessTextActivity
+import tribixbite.cleverkeys.R
+import tribixbite.cleverkeys.SettingsActivity
+import tribixbite.cleverkeys.SettingsRanges
+import tribixbite.cleverkeys.toSliderRange
+import tribixbite.cleverkeys.ui.settings.CollapsibleSettingsSection
+import tribixbite.cleverkeys.ui.settings.SettingsDropdown
+import tribixbite.cleverkeys.ui.settings.SettingsSlider
+import tribixbite.cleverkeys.ui.settings.SettingsSwitch
+import tribixbite.cleverkeys.ui.settings.io.notifySanitizationRulesChanged
+import tribixbite.cleverkeys.ui.settings.saveSetting
+import kotlin.math.roundToInt
+
+@Composable
+internal fun SettingsActivity.ClipboardSection() {
+            // Clipboard Section (Collapsible)
+            CollapsibleSettingsSection(
+                title = stringResource(R.string.settings_section_clipboard),
+                expanded = clipboardSectionExpanded,
+                onExpandChange = { clipboardSectionExpanded = it }
+            ) {
+                // Enable/disable clipboard history
+                SettingsSwitch(
+                    title = stringResource(R.string.clipboard_history_title),
+                    description = stringResource(R.string.clipboard_history_desc),
+                    checked = clipboardHistoryEnabled,
+                    onCheckedChange = {
+                        clipboardHistoryEnabled = it
+                        saveSetting("clipboard_history_enabled", it)
+                    }
+                )
+
+                // Clipboard limit type dropdown
+                // Display labels only; the stored pref value stays "count"/"size" (index 0/1).
+                val limitTypeOptions = listOf(
+                    stringResource(R.string.clipboard_limit_type_by_count),
+                    stringResource(R.string.clipboard_limit_type_by_size)
+                )
+                val limitTypeIndex = if (clipboardLimitType == "count") 0 else 1
+                SettingsDropdown(
+                    title = stringResource(R.string.clipboard_limit_type_title),
+                    description = stringResource(R.string.clipboard_limit_type_desc),
+                    options = limitTypeOptions,
+                    selectedIndex = limitTypeIndex,
+                    onSelectionChange = { idx ->
+                        clipboardLimitType = if (idx == 0) "count" else "size"
+                        saveSetting("clipboard_limit_type", clipboardLimitType)
+                    }
+                )
+
+                // History limit (only shown if limit type is "count")
+                if (clipboardLimitType == "count") {
+                    SettingsSlider(
+                        title = stringResource(R.string.clipboard_history_limit_title),
+                        description = stringResource(R.string.clipboard_history_limit_desc),
+                        value = clipboardHistoryLimit.toFloat(),
+                        // G-5: shared with the import validator + Config clamp (SettingsRanges).
+                        valueRange = SettingsRanges.CLIPBOARD_HISTORY_LIMIT.first.toFloat()..
+                            SettingsRanges.CLIPBOARD_HISTORY_LIMIT.last.toFloat(),
+                        increment = 10f,
+                        onValueChange = {
+                            clipboardHistoryLimit = it.roundToInt()
+                            saveSetting("clipboard_history_limit", clipboardHistoryLimit)
+                        },
+                        displayValue = if (clipboardHistoryLimit == 0) {
+                            stringResource(R.string.clipboard_history_limit_unlimited)
+                        } else {
+                            pluralStringResource(R.plurals.settings_value_items, clipboardHistoryLimit, clipboardHistoryLimit)
+                        }
+                    )
+                }
+
+                // Entry Duration — discrete presets from 1 hour to Never
+                // Auto-links with History Limit: setting "Never expire" also sets count to Unlimited
+                run {
+                    val durationPresets = listOf(60, 360, 720, 1440, 4320, 10080, 20160, 43200, -1)
+                    val currentIndex = durationPresets.indexOf(clipboardHistoryDuration).let {
+                        if (it >= 0) it else durationPresets.indexOfLast { p -> p in 1..clipboardHistoryDuration }
+                            .coerceAtLeast(0)
+                    }
+                    // Contextual description based on limit+duration combination
+                    val durationDesc = when {
+                        clipboardHistoryDuration != -1 && clipboardHistoryLimit == 0 ->
+                            stringResource(R.string.clipboard_entry_duration_desc_unlimited_count)
+                        clipboardHistoryDuration == -1 && clipboardHistoryLimit > 0 ->
+                            pluralStringResource(
+                                R.plurals.clipboard_entry_duration_desc_never_capped,
+                                clipboardHistoryLimit,
+                                clipboardHistoryLimit
+                            )
+                        else -> stringResource(R.string.clipboard_entry_duration_desc_default)
+                    }
+                    SettingsSlider(
+                        title = stringResource(R.string.clipboard_entry_duration_title),
+                        description = durationDesc,
+                        value = currentIndex.toFloat(),
+                        valueRange = 0f..(durationPresets.size - 1).toFloat(),
+                        increment = 1f,
+                        onValueChange = {
+                            val idx = it.roundToInt().coerceIn(0, durationPresets.size - 1)
+                            clipboardHistoryDuration = durationPresets[idx]
+                            saveSetting("clipboard_history_duration", clipboardHistoryDuration.toString())
+                            // Auto-link: "Never expire" + capped count → set count to unlimited too
+                            if (clipboardHistoryDuration == -1 && clipboardHistoryLimit > 0) {
+                                clipboardHistoryLimit = 0
+                                saveSetting("clipboard_history_limit", 0)
+                            }
+                            // Trigger mid-session rescue for entries with stale expiry timestamps
+                            ClipboardHistoryService.onDurationSettingChanged()
+                        },
+                        // Duration is stored in minutes; whole days (all presets >= 1 day) read
+                        // as days, everything else as hours.
+                        displayValue = when {
+                            clipboardHistoryDuration == -1 ->
+                                stringResource(R.string.clipboard_entry_duration_never)
+                            clipboardHistoryDuration % MINUTES_PER_DAY == 0 -> {
+                                val days = clipboardHistoryDuration / MINUTES_PER_DAY
+                                pluralStringResource(R.plurals.settings_value_days, days, days)
+                            }
+                            else -> {
+                                val hours = clipboardHistoryDuration / MINUTES_PER_HOUR
+                                pluralStringResource(R.plurals.settings_value_hours, hours, hours)
+                            }
+                        }
+                    )
+                }
+
+                // Size limit (only shown if limit type is "size")
+                if (clipboardLimitType == "size") {
+                    SettingsSlider(
+                        title = stringResource(R.string.clipboard_size_limit_title),
+                        description = stringResource(R.string.clipboard_size_limit_desc),
+                        value = clipboardSizeLimitMb.toFloat(),
+                        valueRange = 1f..100f,
+                        increment = 1f,
+                        onValueChange = {
+                            clipboardSizeLimitMb = it.roundToInt()
+                            saveSetting("clipboard_size_limit_mb", clipboardSizeLimitMb)
+                        },
+                        displayValue = "$clipboardSizeLimitMb MB"
+                    )
+                }
+
+                // Pane height percentage
+                SettingsSlider(
+                    title = stringResource(R.string.clipboard_pane_height_title),
+                    description = stringResource(R.string.clipboard_pane_height_desc),
+                    value = clipboardPaneHeightPercent.toFloat(),
+                    valueRange = SettingsRanges.CLIPBOARD_PANE_HEIGHT_PERCENT.toSliderRange(),
+                    increment = 1f,
+                    onValueChange = {
+                        clipboardPaneHeightPercent = it.roundToInt()
+                        saveSetting("clipboard_pane_height_percent", clipboardPaneHeightPercent)
+                    },
+                    displayValue = "$clipboardPaneHeightPercent%"
+                )
+
+                // Max item size
+                SettingsSlider(
+                    title = stringResource(R.string.clipboard_max_item_size_title),
+                    description = stringResource(R.string.clipboard_max_item_size_desc),
+                    value = clipboardMaxItemSizeKb.toFloat(),
+                    // F-10: shared floor/ceiling with SettingsPersistence + Config (SettingsRanges).
+                    valueRange = SettingsRanges.CLIPBOARD_MAX_ITEM_SIZE_KB.first.toFloat()..
+                        SettingsRanges.CLIPBOARD_MAX_ITEM_SIZE_KB.last.toFloat(),
+                    increment = 64f,
+                    onValueChange = {
+                        clipboardMaxItemSizeKb = it.roundToInt()
+                        saveSetting("clipboard_max_item_size_kb", clipboardMaxItemSizeKb)
+                    },
+                    displayValue = "${clipboardMaxItemSizeKb}KB"
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Privacy: Exclude password managers
+                SettingsSwitch(
+                    title = stringResource(R.string.clipboard_exclude_password_managers_title),
+                    description = stringResource(R.string.clipboard_exclude_password_managers_desc),
+                    checked = clipboardExcludePasswordManagers,
+                    onCheckedChange = {
+                        clipboardExcludePasswordManagers = it
+                        saveSetting("clipboard_exclude_password_managers", clipboardExcludePasswordManagers)
+                    }
+                )
+
+                // #86: Privacy: Respect IS_SENSITIVE flag (Android 13+)
+                SettingsSwitch(
+                    title = stringResource(R.string.clipboard_respect_sensitive_title),
+                    description = stringResource(R.string.clipboard_respect_sensitive_desc),
+                    checked = clipboardRespectSensitiveFlag,
+                    onCheckedChange = {
+                        clipboardRespectSensitiveFlag = it
+                        saveSetting("clipboard_respect_sensitive_flag", clipboardRespectSensitiveFlag)
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // v4: Feature toggles
+                SettingsSwitch(
+                    title = stringResource(R.string.clipboard_text_only_title),
+                    description = stringResource(R.string.clipboard_text_only_desc),
+                    checked = clipboardTextOnly,
+                    onCheckedChange = {
+                        clipboardTextOnly = it
+                        saveSetting("clipboard_text_only", it)
+                    }
+                )
+
+                // F-8 (maintainer decision 2026-09-08: "surface all except error
+                // collection"): media capture had live readers
+                // (ClipboardHistoryService + Config) but no control — permanently
+                // at defaults unless a backup file was hand-edited. DISABLED (not
+                // hidden) while text-only display is on, which wins at the capture
+                // site (audit 2026-08-26 convention).
+                SettingsSwitch(
+                    title = stringResource(R.string.clipboard_media_enabled_title),
+                    description = stringResource(R.string.clipboard_media_enabled_desc),
+                    checked = clipboardMediaEnabled,
+                    enabled = !clipboardTextOnly,
+                    onCheckedChange = {
+                        clipboardMediaEnabled = it
+                        saveSetting("clipboard_media_enabled", it)
+                    }
+                )
+
+                SettingsSlider(
+                    title = stringResource(R.string.clipboard_max_media_size_title),
+                    description = stringResource(R.string.clipboard_max_media_size_desc),
+                    value = clipboardMaxMediaSizeMb.toFloat(),
+                    // F-8: shared with the import validator + Config clamp (SettingsRanges).
+                    valueRange = SettingsRanges.CLIPBOARD_MAX_MEDIA_SIZE_MB.first.toFloat()..
+                        SettingsRanges.CLIPBOARD_MAX_MEDIA_SIZE_MB.last.toFloat(),
+                    increment = 1f,
+                    enabled = clipboardMediaEnabled && !clipboardTextOnly,
+                    onValueChange = {
+                        clipboardMaxMediaSizeMb = it.roundToInt()
+                        saveSetting("clipboard_max_media_size_mb", clipboardMaxMediaSizeMb)
+                    },
+                    displayValue = "$clipboardMaxMediaSizeMb MB"
+                )
+
+                SettingsSwitch(
+                    title = stringResource(R.string.clipboard_pinned_tab_title),
+                    description = stringResource(R.string.clipboard_pinned_tab_desc),
+                    checked = clipboardPinnedEnabled,
+                    onCheckedChange = {
+                        clipboardPinnedEnabled = it
+                        saveSetting("clipboard_pinned_enabled", it)
+                    }
+                )
+
+                SettingsSwitch(
+                    title = stringResource(R.string.clipboard_todo_tab_title),
+                    description = stringResource(R.string.clipboard_todo_tab_desc),
+                    checked = clipboardTodoEnabled,
+                    onCheckedChange = {
+                        clipboardTodoEnabled = it
+                        saveSetting("clipboard_todo_enabled", it)
+                    }
+                )
+
+                // GH #175(2): swipe a row left or right to delete it from its tab (5 s Undo).
+                SettingsSwitch(
+                    title = stringResource(R.string.clipboard_swipe_delete_title),
+                    description = stringResource(
+                        R.string.clipboard_swipe_delete_desc,
+                        (ClipboardPendingDeletion.UNDO_WINDOW_MS / 1000L).toInt()
+                    ),
+                    checked = clipboardSwipeDeleteEnabled,
+                    onCheckedChange = {
+                        clipboardSwipeDeleteEnabled = it
+                        saveSetting("clipboard_swipe_delete_enabled", it)
+                    }
+                )
+
+                // ── #156 Private copy subsection ─────────────────────────────
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = stringResource(R.string.clipboard_private_copy_header),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+
+                // PROCESS_TEXT selection-toolbar opt-in. Flips the exported (but manifest-disabled)
+                // PrivateCopyProcessTextActivity component so it appears in other apps' text-selection
+                // menus. Default OFF (design §6.6) — enabling re-expands an exported surface, so this
+                // is the sole enabler and the pref is the single source of truth for the state.
+                SettingsSwitch(
+                    title = stringResource(R.string.clipboard_private_copy_other_apps_title),
+                    description = stringResource(R.string.clipboard_private_copy_other_apps_desc),
+                    checked = clipboardPrivateCopyToolbarEnabled,
+                    onCheckedChange = {
+                        clipboardPrivateCopyToolbarEnabled = it
+                        saveSetting(PrivateCopyProcessTextActivity.PREF_TOOLBAR_ENABLED, it)
+                        setPrivateCopyToolbarComponentEnabled(it)
+                    }
+                )
+
+                // ARC-037: sub-row of the toggle above — that toolbar entry is the only surface
+                // whose confirmation is a Toast, so this only has meaning while it is on.
+                // VISIBLE-but-disabled, not hidden (audit 2026-08-26 convention): hiding it would
+                // leave a stored value with no visible owner and make its search entry a dead end.
+                SettingsSwitch(
+                    title = stringResource(R.string.clipboard_private_copy_toast_title),
+                    description = stringResource(R.string.clipboard_private_copy_toast_desc),
+                    checked = clipboardPrivateCopyToastEnabled,
+                    onCheckedChange = {
+                        clipboardPrivateCopyToastEnabled = it
+                        saveSetting(PrivateCopyProcessTextActivity.PREF_TOAST_ENABLED, it)
+                    },
+                    enabled = clipboardPrivateCopyToolbarEnabled,
+                )
+
+                Text(
+                    text = stringResource(R.string.clipboard_private_copy_in_app_note),
+                    modifier = Modifier.padding(16.dp),
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                // ── URL handling subsection (Chunk 4) ───────────────────────
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = stringResource(R.string.clipboard_url_handling_header),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+
+                SettingsSwitch(
+                    title = stringResource(R.string.clipboard_sanitize_links_title),
+                    description = stringResource(R.string.clipboard_sanitize_links_desc),
+                    checked = clipboardSanitizeLinksEnabled,
+                    onCheckedChange = {
+                        clipboardSanitizeLinksEnabled = it
+                        saveSetting("clipboard_sanitize_links_enabled", it)
+                        notifySanitizationRulesChanged()
+                    }
+                )
+
+                SettingsSwitch(
+                    title = stringResource(R.string.clipboard_sanitize_system_title),
+                    description = stringResource(R.string.clipboard_sanitize_system_desc),
+                    checked = clipboardSanitizeSystemClipboard,
+                    onCheckedChange = {
+                        clipboardSanitizeSystemClipboard = it
+                        saveSetting("clipboard_sanitize_system_clipboard", it)
+                        notifySanitizationRulesChanged()
+                    }
+                )
+
+                SettingsSwitch(
+                    title = stringResource(R.string.clipboard_embed_enrich_title),
+                    description = stringResource(R.string.clipboard_embed_enrich_desc),
+                    checked = clipboardEmbedEnrichEnabled,
+                    onCheckedChange = {
+                        clipboardEmbedEnrichEnabled = it
+                        saveSetting("clipboard_embed_enrich_enabled", it)
+                        notifySanitizationRulesChanged()
+                    }
+                )
+
+                SettingsSwitch(
+                    title = stringResource(R.string.clipboard_custom_rules_title),
+                    description = stringResource(R.string.clipboard_custom_rules_desc),
+                    checked = clipboardCustomRulesEnabled,
+                    onCheckedChange = {
+                        clipboardCustomRulesEnabled = it
+                        saveSetting("clipboard_custom_rules_enabled", it)
+                        notifySanitizationRulesChanged()
+                    }
+                )
+
+                if (clipboardCustomRulesEnabled) {
+                    Button(
+                        onClick = { customRulesPickerLauncher.launch(arrayOf("application/json")) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                    ) {
+                        Text(
+                            text = if (clipboardCustomRulesUri == null)
+                                stringResource(R.string.clipboard_custom_rules_browse)
+                            else
+                                stringResource(R.string.clipboard_custom_rules_replace)
+                        )
+                    }
+                    if (clipboardCustomRulesStatus.isNotEmpty()) {
+                        Text(
+                            text = clipboardCustomRulesStatus,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                Text(
+                    text = stringResource(R.string.clipboard_url_handling_note),
+                    modifier = Modifier.padding(16.dp),
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+}
+
+/**
+ * #156: flip the exported (but manifest-disabled) [PrivateCopyProcessTextActivity] component so it
+ * appears in — or vanishes from — other apps' text-selection menus. The pref
+ * `clipboard_private_copy_toolbar_enabled` is the single source of truth; this derives the OS
+ * component state from it. [PackageManager.DONT_KILL_APP] keeps the running IME alive across the
+ * flip. Uses `COMPONENT_ENABLED_STATE_DISABLED` (not `_DEFAULT`) on the off-path so the manifest
+ * default can change later without surprising users (design §6.6). Should be re-applied on settings
+ * load so a fresh install / restore reconciles the OS state with the persisted pref.
+ */
+internal fun SettingsActivity.setPrivateCopyToolbarComponentEnabled(enabled: Boolean) {
+    // Delegate to the shared Context-based reconciler (single source of truth) so the Settings-load /
+    // toggle path and the backup/restore import path flip the component identically. #156 F5.
+    tribixbite.cleverkeys.reconcilePrivateCopyToolbarComponent(this, enabled)
+}
+
+/** Clipboard entry duration is persisted in minutes (`clipboard_history_duration`). */
+private const val MINUTES_PER_HOUR = 60
+private const val MINUTES_PER_DAY = 24 * MINUTES_PER_HOUR

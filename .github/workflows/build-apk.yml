@@ -1,0 +1,170 @@
+# Build installable debug APKs.
+#
+# This is the project's build system. The dev sandbox has no JDK, no Android SDK and no route to
+# Maven Central / dl.google.com, so APKs are produced here and installed from the Actions artifact
+# or the rolling `dev-builds` release.
+#
+# Deliberate choices, and why:
+#   * `assembleDebug` only -- NOT `test`. Upstream's drift tests assert on repository files this
+#     fork does not vendor (`docs/RELEASE_RECORD.md`, `.github/scripts/emulator-ci.sh`,
+#     `fastlane/`), so they would fail for reasons unrelated to code correctness.
+#     See docs/PROVENANCE.md.
+#   * No ImageMagick / icon-generation step. `res/mipmap-*` launcher icons are committed, and
+#     upstream's `scripts/generate_icons.sh` is a CI convenience, not a Gradle task.
+#   * No keystore secret. `debug.keystore` is committed (force-added past the `*.keystore`
+#     gitignore rule), so every build shares one signature and installs as an UPGRADE over the
+#     previous one instead of requiring an uninstall.
+#   * Python 3 is already on ubuntu-latest. `build.gradle` execs six stdlib-only generators at
+#     build time; no pip step is needed.
+
+name: Build APK
+
+on:
+  push:
+    branches:
+      - arena/23fde500-keyboard
+      - main
+    # A docs-only change cannot alter an APK, and each push costs a ~6 min build plus a ~9 min
+    # emulator run. workflow_dispatch still always runs, so nothing becomes unbuildable silently.
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      # The offline harness runs section 7d against a fake adb on a laptop; CI never invokes it, so
+      # a change there cannot alter an APK or a smoke verdict.
+      - 'scripts/ci/offline/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # Single-module project rooted at the repo: APKs land in build/outputs/apk/debug/.
+      # ABI splits are enabled in build.gradle (armeabi-v7a, arm64-v8a, x86_64; no universal).
+      - name: Build debug APKs
+        shell: bash
+        run: |
+          # tee keeps the full log for the annotation step below. pipefail matters: bash's default
+          # here is `bash -e` WITHOUT pipefail, so a piped tee would mask a failed Gradle exit and
+          # every build would look green.
+          set -o pipefail
+          ./gradlew assembleDebug --stacktrace 2>&1 | tee build-output.log
+
+      # A failed `assembleDebug` otherwise reports only "Process completed with exit code 1": the
+      # log lives on results-receiver.actions.githubusercontent.com and the report artifacts on
+      # blob storage, neither reachable outside the web UI. Annotations ARE reachable via
+      # api.github.com, so the compiler diagnostics go there. GitHub keeps roughly 20 annotations
+      # per run and errors survive where notices do not, so emit at most a few and prefer the
+      # actual diagnostic lines over Gradle's summary block.
+      - name: Surface build errors as annotations
+        if: failure()
+        shell: bash
+        run: |
+          [ -f build-output.log ] || exit 0
+          # `%` must be escaped or GitHub misparses the annotation; lines arrive one per read.
+          esc() { sed -e 's/%/%25/g' -e 's/\r/%0D/g'; }
+          # Kotlin `e: file:///…:L:C msg`, javac/aapt `path: error: msg`, failing task, Gradle header.
+          grep -E "^e: |: error: |: aapt2? error|^> Task .* FAILED|^FAILURE: " build-output.log \
+            | head -8 | esc | while IFS= read -r line; do echo "::error::${line}"; done
+          # No compiler diagnostic at all (a config/resource/script failure): give the Gradle
+          # "What went wrong" block instead, which names the failing task and its cause.
+          if ! grep -qE "^e: |: error: |: aapt2? error" build-output.log; then
+            sed -n '/What went wrong/,/^\* Try/p' build-output.log | head -12 | esc \
+              | while IFS= read -r line; do echo "::error::${line}"; done
+          fi
+
+      - name: Report APK sizes
+        run: |
+          cd build/outputs/apk/debug
+          ls -la
+          for f in *.apk; do
+            printf '%-52s %6s MB\n' "$f" "$(du -m "$f" | cut -f1)"
+          done
+
+      - name: Compute short SHA
+        id: meta
+        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Stable per-ABI filenames: the rolling release below overwrites the same asset names every
+      # run, giving one permanent download URL per ABI. The build number lives in the artifact name
+      # and the release body instead.
+      - name: Rename APKs
+        run: |
+          cd build/outputs/apk/debug
+          for apk in *.apk; do
+            case "$apk" in
+              *arm64-v8a*)   new="keyboard-arm64-v8a.apk"   ;;
+              *armeabi-v7a*) new="keyboard-armeabi-v7a.apk" ;;
+              *x86_64*)      new="keyboard-x86_64.apk"      ;;
+              *)             new="keyboard-$apk"             ;;
+            esac
+            [ "$apk" = "$new" ] || mv "$apk" "$new"
+          done
+          ls -la
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: keyboard-debug-${{ steps.meta.outputs.sha }}
+          path: build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      # Rolling prerelease. `arm64-v8a` is the one to install on any phone from 2017 onward.
+      - name: Publish rolling dev release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dev-builds
+          name: Dev builds (rolling)
+          prerelease: true
+          files: build/outputs/apk/debug/*.apk
+          body: |
+            Latest debug APKs. This release is overwritten on every successful build, so these
+            links are permanent.
+
+            | Field | Value |
+            |---|---|
+            | Branch | `${{ github.ref_name }}` |
+            | Commit | `${{ steps.meta.outputs.sha }}` |
+            | Built | ${{ github.event.head_commit.timestamp || 'manual dispatch' }} |
+
+            **Which file?** `keyboard-arm64-v8a.apk` for essentially any phone from 2017 onward.
+            `keyboard-armeabi-v7a.apk` for older 32-bit devices. `keyboard-x86_64.apk` for
+            emulators and Chromebooks.
+
+            Installs as an **upgrade** over the previous build — the debug keystore is stable, so
+            no uninstall is needed.
+
+            After installing: Settings → System → Languages & input → On-screen keyboard → enable it.
+
+      - name: Upload failure reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-reports-${{ steps.meta.outputs.sha }}
+          path: |
+            build/reports
+            build/outputs/logs
+            build-output.log
+          if-no-files-found: ignore
+          retention-days: 14

@@ -1,0 +1,1799 @@
+plugins {
+  id 'com.android.application' version '8.8.2'
+  id 'org.jetbrains.kotlin.android' version '2.0.0'
+  id 'org.jetbrains.kotlin.plugin.compose' version '2.0.0'
+}
+
+// Gradle dependency locking (CK-150-023).
+//
+// Every coordinate below is a fixed version, but the *resolved* graph is not: transitive
+// versions move under conflict resolution, and the Compose BOM re-pins a dozen artifacts on
+// every AGP/Kotlin bump. Without a lockfile the release `security-gate` Trivy `fs` scan sees
+// no Java manifest at all — it scans a repo whose only lockfiles belong to the docs site and
+// the web-demo test harness, so the shipped APK's dependency tree is invisible to it.
+// `gradle.lockfile` is a first-class Trivy input, so committing it is what makes that gate
+// non-vacuous; it also makes an unexpected transitive bump a reviewable diff.
+//
+// Regenerate after ANY dependency change (else resolution fails with "Did not resolve … which
+// is part of the lock state"):
+//   ./gradlew assembleDebug assembleDebugAndroidTest compileReleaseKotlin --write-locks
+//   (real tasks, not `dependencies` — it resolves configurations differently; add
+//    -Pandroid.aapt2FromMavenOverride=… on Termux. Afterwards re-check that
+//    kotlin-stdlib-common still carries debugAndroidTestRuntimeClasspath — that line only
+//    resolves with locks ACTIVE and must be re-added by hand if a regeneration drops it.)
+//
+// SCOPE (2026-08-29, first real blocking Trivy run): lock ONLY the configurations whose
+// contents can reach a user — app compile/runtime plus androidTest (the ew-cli lock saga,
+// 8e2dd63d). The original lockAllConfigurations() also locked AGP's internal UTP test-runner
+// configurations and the unit-test classpaths, which put netty/bouncycastle/protobuf BUILD
+// TOOLING coordinates into gradle.lockfile — and Trivy reads a Gradle lockfile as one flat
+// production tree, so the gate went red on ~48 CVEs in code that never ships. Trivy's view
+// of the lockfile IS the gate's scope; keep the lockfile to shipped-or-installed bytes.
+configurations.matching {
+  it.name in [
+    'debugCompileClasspath', 'debugRuntimeClasspath',
+    'releaseCompileClasspath', 'releaseRuntimeClasspath',
+    'debugAndroidTestCompileClasspath', 'debugAndroidTestRuntimeClasspath',
+  ]
+}.configureEach {
+  resolutionStrategy.activateDependencyLocking()
+}
+
+dependencies {
+  implementation "androidx.window:window-java:1.3.0"
+  implementation "androidx.core:core:1.13.1"
+  implementation "androidx.appcompat:appcompat:1.6.1"
+  // #181: the emoji picker asks EmojiCompat whether it can draw a sequence before hiding it.
+  // Already on the runtime classpath through appcompat (same version); now compiled against.
+  implementation "androidx.emoji2:emoji2:1.3.0"
+  implementation "androidx.multidex:multidex:2.0.1"
+  implementation "com.google.android.material:material:1.11.0"
+  implementation "androidx.viewpager2:viewpager2:1.0.0"
+  implementation "androidx.recyclerview:recyclerview:1.3.2"
+  implementation "androidx.preference:preference-ktx:1.2.1"
+  implementation "androidx.autofill:autofill:1.1.0"
+  // ExploreByTouchHelper (TalkBack virtual-view tree for the custom keyboard).
+  // Transitively present via other AndroidX libs, but pin it explicitly so the
+  // a11y helper never silently loses its dependency.
+  implementation "androidx.customview:customview:1.1.0"
+
+  implementation "org.jetbrains.kotlin:kotlin-stdlib:2.0.0"
+  implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1"
+
+  // REPRODUCIBILITY: Use Compose BOM for deterministic version resolution
+  implementation platform("androidx.compose:compose-bom:2024.06.00")
+  implementation "androidx.activity:activity-compose:1.9.0"
+  implementation "androidx.compose.ui:ui"
+  debugImplementation "androidx.compose.ui:ui-tooling-preview"
+  debugImplementation "androidx.compose.ui:ui-tooling"
+  implementation "androidx.compose.material3:material3"
+  implementation "androidx.compose.foundation:foundation"
+
+  implementation "androidx.lifecycle:lifecycle-runtime-ktx:2.6.2"
+  implementation "androidx.savedstate:savedstate-ktx:1.2.1"
+
+  implementation "org.burnoutcrew.composereorderable:reorderable:0.9.6"
+  // ARC-113 RESOLVED (2026-09-03): maintainer approved minSdk 21 → 24, which
+  // unblocked the 16 KB-page-alignment upgrade.
+  //
+  // Version choice: 1.21.1 is the FIRST release whose arm64 libs are BOTH
+  // 16 KB-aligned (PT_LOAD p_align 0x4000), verified by ELF program-header
+  // parse of the Maven Central AARs during the 2026-09-02 investigation
+  // (1.20.0 ❌ jni lib 0x1000, 1.21.0 ❌, 1.21.1 ✅, 1.22.0 ✅, 1.23.0 ✅; the
+  // fix came from the release build toolchain — no source commit in the
+  // v1.21.0...v1.21.1 range mentions it, github.com/microsoft/onnxruntime
+  // issues #24902/#25859 track the saga). We take the minimal analyzed bump
+  // (1.21.1), not the latest, to keep the CTC numerics delta as small as
+  // possible — the golden/parity fixtures pin bit-stability across this
+  // upgrade; a fixture delta means the runtime changed numerics and must be
+  // investigated, never regenerated.
+  //
+  // Why minSdk 24 was required: every release ≥ 1.21.0 declares AAR
+  // minSdkVersion 24 ("align with React Native 0.76", v1.21.0 release notes)
+  // and its .so imports `__register_atfork`/`stderr` (bionic API-23 symbols),
+  // so tools:overrideLibrary would have crash-looped the IME on API 21/22
+  // (OrtEnvironment.getEnvironment() is a constructor-time initializer in
+  // CtcEngineAdapter; the load latch catches Exception, not Error). Full
+  // history: docs/audit/2026-08-28-archive-verification.md ARC-113.
+  implementation "com.microsoft.onnxruntime:onnxruntime-android:1.21.1"
+  implementation "com.google.code.gson:gson:2.10.1"
+
+  // Coil: Kotlin-native image loader with animated WebP support
+  implementation "io.coil-kt:coil:2.6.0"
+
+
+  testImplementation "junit:junit:4.13.2"
+  testImplementation "org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3"
+  testImplementation "org.robolectric:robolectric:4.11.1"
+  testImplementation "androidx.test:core:1.5.0"
+  testImplementation "io.mockk:mockk:1.13.8"
+  testImplementation "com.google.truth:truth:1.1.5"
+  // Real pull parsing for layout/geometry regressions; Android Xml is a host stub.
+  testImplementation "net.sf.kxml:kxml2:2.3.0"
+  // Real org.json JSONObject for mock tests — android.jar provides only stubs
+  // that throw RuntimeException("Stub!") on construction. Tests that build a
+  // real JSON payload (BackupRestoreFullBackupTest) need this to shadow the
+  // stub on the unit-test classpath.
+  testImplementation "org.json:json:20231013"
+  // ONNX Runtime for JVM unit tests (Android runtime doesn't work on host JVM)
+  // Keep in lockstep with onnxruntime-android above (ARC-113): the pure-JVM
+  // runner loads the AAR's bionic natives under this jar's Java layer, and a
+  // JNI/Java version mismatch is undefined.
+  testImplementation "com.microsoft.onnxruntime:onnxruntime:1.21.1"
+
+  // androidx.test stack held at the matched 2025 stable set. Espresso < 3.7.0 injects events
+  // through the hidden InputManager.getInstance(), which Android 16 (API 36) removed: on API
+  // 36/37 every Espresso/Compose-rule interaction died with NoSuchMethodException (100 tests,
+  // 2026-10-17). 3.7.0 uses getSystemService; runner/rules/core/ext move with it.
+  androidTestImplementation "androidx.test:core:1.7.0"
+  androidTestImplementation "androidx.test.ext:junit:1.3.0"
+  androidTestImplementation "androidx.test:runner:1.7.0"
+  androidTestImplementation "androidx.test:rules:1.7.0"
+  androidTestImplementation "androidx.test.uiautomator:uiautomator:2.2.0"
+  androidTestImplementation "androidx.test.espresso:espresso-core:3.7.0"
+  androidTestImplementation "org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3"
+  androidTestImplementation "org.mockito:mockito-android:5.5.0"
+  androidTestImplementation "org.mockito:mockito-core:5.5.0"
+  androidTestImplementation platform("androidx.compose:compose-bom:2024.06.00")
+  androidTestImplementation "androidx.compose.ui:ui-test-junit4"
+  debugImplementation "androidx.compose.ui:ui-test-manifest"
+}
+
+// =============================================================================
+// VERSIONING - F-Droid compatible (checkupdates does not parse ext values)
+// =============================================================================
+// UPDATE ONLY THESE THREE VALUES FOR A NEW RELEASE:
+ext.VERSION_MAJOR = 2
+ext.VERSION_MINOR = 0
+ext.VERSION_PATCH = 0
+// =============================================================================
+// DERIVED VALUES (auto-calculated, do not edit):
+// - versionCode = MAJOR*10000 + MINOR*100 + PATCH
+// - versionNameStr = "MAJOR.MINOR.PATCH"
+// - ABI versionCode = base*10 + abiCode (1=armv7, 2=arm64, 3=x86_64)
+//
+// WORKFLOW:
+// 1. Update VERSION_MAJOR/MINOR/PATCH above
+// 2. Commit, tag with "vX.Y.Z", push tag
+// 3. GitHub Actions verifies tag matches version, builds, releases
+// 4. F-Droid auto-detects tag and builds
+// =============================================================================
+ext.versionCode = ext.VERSION_MAJOR * 10000 + ext.VERSION_MINOR * 100 + ext.VERSION_PATCH
+// Overflow guard: the MAJOR*10000 + MINOR*100 + PATCH packing only stays
+// collision-free (and F-Droid-monotonic) while MINOR and PATCH are each < 100.
+// e.g. 1.5.100 would collide with 1.6.0. Fail the build loudly rather than ship
+// a colliding versionCode. Do NOT widen the scheme — F-Droid monotonicity depends
+// on it (see versionCode formula comment above).
+if (ext.VERSION_MINOR >= 100 || ext.VERSION_PATCH >= 100) {
+    throw new GradleException("versionCode scheme collision: MINOR/PATCH must stay < 100 (see build.gradle versionCode formula)")
+}
+ext.versionNameStr = "${ext.VERSION_MAJOR}.${ext.VERSION_MINOR}.${ext.VERSION_PATCH}"
+
+// Per-ABI versionCode mapping for split APKs
+ext.abiCodes = ['armeabi-v7a': 1, 'arm64-v8a': 2, 'x86_64': 3]
+
+// APK DIET (2026-09-10): the locales CleverKeys actually translates.
+//
+// Without this filter aapt2 keeps every locale table its dependencies carry — the v2.0.0
+// arm64 APK held 85 locale configurations against 21 shipped ones, i.e. ~64 dead string
+// tables dragged in by AndroidX / Material / Compose. `resConfigs` (below) prunes them.
+//
+// THIS LIST MUST BE EXACTLY THE `res/values-<qualifier>` DIRECTORY SET, verbatim. Two
+// traps, both verified against this build's own aapt2 (2.19, aarch64) on 2026-09-10:
+//
+//   1. LEGACY ISO-639 CODES ARE NOT NORMALISED, in either direction. aapt2's
+//      LocaleValue::set_language only lowercases; the filter is then a raw byte compare of
+//      the packed language. So `-c in` keeps res/values-in while `-c id` DROPS it — with
+//      no warning, no error, exit 0. Indonesian is 'in'; Hebrew would be 'iw' and Yiddish
+//      'ji'. Writing the "modern" alias silently ships an English fallback.
+//   2. A LANGUAGE-ONLY ENTRY DROPS ITS OWN REGION VARIANTS: `-c zh` deletes
+//      res/values-zh-rCN. The region form has to be spelled out, as it is here.
+//
+// A misspelling that is not a valid config is a hard `error: invalid config '…' for -c
+// option`, so typos fail the build; only a *plausible* wrong alias is dangerous. That is
+// what ReleasePackagingDriftTest.shippedLocaleFilterMatchesTheResourceDirectoriesExactly
+// pins — it re-derives this list from the res/ tree on every run.
+//
+// Non-locale qualifiers are untouched by a locale-only filter (values-night, values-v29,
+// densities, -land, -ldrtl, sw600dp all survive), and the unqualified res/values table is
+// always kept.
+//
+// TODO(targetSdk 35): Android 15 stopped mapping Indonesian to the obsolete 'in' at the
+// Locale API, so a targetSdk 35+ build may have the runtime request 'id' while the
+// resource framework does no id<->in fallback. Raising targetSdk past 34 means adding a
+// res/values-id directory (and its entry here), not renaming this one.
+ext.shippedLocales = [
+  'cs', 'de', 'es', 'fa', 'fil', 'fr', 'hu', 'in', 'it', 'ja', 'ko',
+  'lv', 'nl', 'pl', 'pt', 'ro', 'ru', 'tr', 'uk', 'vi', 'zh-rCN',
+]
+
+// Force reproducibility by excluding profile-guided optimization tools
+configurations.all {
+    exclude group: 'androidx.profileinstaller', module: 'profileinstaller'
+}
+
+android {
+  namespace 'tribixbite.cleverkeys'
+  compileSdk 34
+  // REPRODUCIBILITY: Let AGP use its default build-tools (pinned per AGP version)
+  // Removed explicit buildToolsVersion - both GitHub and F-Droid use AGP 8.8.2 default
+
+  defaultConfig {
+    applicationId "tribixbite.cleverkeys"
+    // ARC-113 (2026-09-03): maintainer approved 21 → 24 to unblock the 16 KB-page-
+    // aligned onnxruntime upgrade (see the dependency-line note above). README /
+    // fastlane "Android 5.0+" claims become "Android 7.0+" — tracked as follow-up.
+    minSdk 24
+    targetSdkVersion 34
+    
+    // References ext values - see VERSION_MAJOR/MINOR/PATCH at top of file
+    versionCode rootProject.ext.versionCode
+    versionName rootProject.ext.versionNameStr
+    
+    testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    multiDexEnabled true
+
+    // APK DIET (2026-09-10): keep only the locale tables this app actually translates.
+    // See the ext.shippedLocales declaration above for the list and its two footguns.
+    //
+    // AGP 8.8.2 exposes BaseFlavor.resourceConfigurations as a getter-only Set (no
+    // setter), so resConfigs(Collection) — which is `resourceConfigurations.addAll(...)`
+    // inside AGP — is the Groovy entry point. Both are annotated @Deprecated in 8.8.2 in
+    // favour of `androidResources.localeFilters`, but that property is likewise getter-only
+    // here and carries the identical id/in trap, so it buys nothing yet; migrate when the
+    // AGP bump makes resConfigs a hard error (it is a Kotlin annotation, so a Groovy build
+    // script gets no warning today).
+    resConfigs rootProject.ext.shippedLocales
+  }
+
+  kotlinOptions {
+    // REPRODUCIBILITY: Use Java 11 target for deterministic bytecode
+    jvmTarget = "11"
+  }
+
+  aaptOptions {
+    // REPRODUCIBILITY: Disable PNG crunching for deterministic output
+    cruncherEnabled = false
+    // REPRODUCIBILITY: Force consistent platformBuildVersionCode/Name across environments
+    // This ensures GitHub Actions and F-Droid produce identical AndroidManifest.xml
+    additionalParameters "--no-auto-version",
+      "--compile-sdk-version-code", "34",
+      "--compile-sdk-version-name", "14"
+  }
+
+  packaging {
+    jniLibs {
+      // APK DIET (2026-09-10, maintainer-approved): DEFLATE the native libraries instead
+      // of STOREing them page-aligned.
+      //
+      // AGP has defaulted this to false since 4.2: with minSdk >= 23 it stores every .so
+      // uncompressed so the loader can mmap it straight out of the APK. That is the right
+      // default for an app whose natives are hot, and the wrong one here — CleverKeys'
+      // entire native payload is one ONNX runtime, opened once when the IME starts. The
+      // measured trade is ~11.5 MB smaller download against ~6.4 MB more installed
+      // footprint (the libs are extracted to /data at install) plus a one-off extraction
+      // cost. The maintainer took the download.
+      //
+      // Not a 16 KB-page-size regression: that requirement is about ELF segment alignment
+      // inside the .so (which ARC-113's onnxruntime upgrade delivered), not about how the
+      // APK stores the entry — an extracted library is mapped from /data with the same
+      // alignment. And the uncompressed-libs rule is a Google Play policy; CleverKeys
+      // ships through F-Droid and GitHub releases.
+      //
+      // Do NOT also write android:extractNativeLibs into AndroidManifest.xml: AGP derives
+      // that attribute from this flag and will not overwrite a hand-written value, so the
+      // two would silently disagree. Pinned by
+      // ReleasePackagingDriftTest.nativeLibrariesAreDeflatedForASmallerDownload.
+      useLegacyPackaging = true
+    }
+    resources {
+      // REPRODUCIBILITY: Exclude non-deterministic files
+      // Baseline profiles vary between build environments
+      excludes += "assets/dexopt/baseline.prof"
+      excludes += "assets/dexopt/baseline.profm"
+
+      // Build metadata that changes between environments (exact paths required)
+      excludes += "META-INF/version-control-info.textproto"
+      excludes += "META-INF/com/android/build/gradle/app-metadata.properties"
+
+      // Kotlin coroutines debug probes (non-deterministic)
+      excludes += "DebugProbesKt.bin"
+
+      // DO NOT ADD `META-INF/services/kotlinx.coroutines.**` EXCLUDES HERE.
+      //
+      // Two such excludes lived at this spot for the "non-deterministic order"
+      // reason and NEVER took effect (verified 2026-08-29, ARC-008: both service
+      // files were still present in the packaged APK, R8-off baseline and
+      // minified build alike). ARC-062 deleted the dead lines; this comment
+      // exists so nobody re-adds them in a working form, because the release
+      // build now DEPENDS on those files shipping:
+      //
+      //   proguard-rules.pro carries `-assumenosideeffects MainDispatcherLoader
+      //   { boolean FAST_SERVICE_LOADER_ENABLED return false; }`. With R8 on,
+      //   that folds the flag to false, and the shipped DEX (baksmali'd to
+      //   confirm) takes the `java.util.ServiceLoader.load(...)` branch — the
+      //   FastServiceLoader (Class.forName) path is gone from the bytecode.
+      //
+      //   That branch resolves Dispatchers.Main by READING
+      //   META-INF/services/kotlinx.coroutines.internal.MainDispatcherFactory
+      //   out of the APK (contents: kotlinx.coroutines.android.
+      //   AndroidDispatcherFactory, a name kept un-obfuscated by the
+      //   `-keep class kotlinx.coroutines.**` rule).
+      //
+      //   Exclude it and Dispatchers.Main initialises to
+      //   MissingMainCoroutineDispatcher — every withContext(Dispatchers.Main)
+      //   in the IME throws, in release only. The ew-cli suite would not catch
+      //   it: instrumented tests run against the unminified debug variant.
+      //
+      // To genuinely drop these files, first delete the -assumenosideeffects
+      // rule so the FastServiceLoader (Class.forName) path returns.
+
+      // License files and kotlin modules (reduce APK noise)
+      excludes += "META-INF/DEPENDENCIES"
+      excludes += "META-INF/LICENSE*"
+      excludes += "META-INF/NOTICE*"
+      excludes += "META-INF/AL2.0"
+      excludes += "META-INF/LGPL2.1"
+      excludes += "META-INF/*.kotlin_module"
+      excludes += "META-INF/*.version"
+      excludes += "META-INF/com.android.tools/**"
+    }
+  }
+
+  // REPRODUCIBILITY: Exclude dependency info from APK
+  dependenciesInfo {
+    includeInApk = false
+    includeInBundle = false
+  }
+
+  splits {
+    abi {
+      enable true
+      reset()
+      include 'armeabi-v7a', 'arm64-v8a', 'x86_64'
+      universalApk false
+    }
+  }
+
+  compileOptions {
+    // REPRODUCIBILITY: Use Java 11 target for deterministic bytecode
+    sourceCompatibility JavaVersion.VERSION_11
+    targetCompatibility JavaVersion.VERSION_11
+  }
+
+  buildFeatures {
+    compose true
+    buildConfig true  // Enable BuildConfig generation for ENABLE_VERBOSE_LOGGING
+  }
+
+  // REPRODUCIBILITY: Compose compiler configuration via native Kotlin 2.0 plugin
+  // (replaces composeOptions.kotlinCompilerExtensionVersion)
+  composeCompiler {
+    enableIntrinsicRemember = true
+    includeSourceInformation = false
+    // REPRODUCIBILITY: Disable strong skipping mode to avoid non-deterministic lambda generation
+    enableStrongSkippingMode = false
+    // REPRODUCIBILITY: Disable non-skippable group optimization
+    enableNonSkippingGroupOptimization = false
+  }
+
+  sourceSets {
+    main {
+      manifest.srcFile 'AndroidManifest.xml'
+      kotlin.srcDirs = ['src/main/kotlin', 'build/generated/search/kotlin']
+      java.srcDirs = ['src/main/java']
+      res.srcDirs = ['res', 'build/generated/layouts/res', 'build/generated/version/res']
+      assets.srcDirs = ['assets', 'src/main/assets']
+    }
+    test {
+      kotlin.srcDirs = ['src/test/kotlin']
+      java.srcDirs = ['src/test/java']
+      // Expose bundled assets to JVM tests so EmbedEnrichRulesTest (and any
+      // future test that loads url_rules/*.json) can resolve them via
+      // Class.getResourceAsStream("/url_rules/<name>.json").
+      resources.srcDirs += 'src/main/assets'
+    }
+    androidTest {
+      kotlin.srcDirs = ['src/androidTest/kotlin']
+      // B2 per-script latency: CtcScriptLatencyMeasurementTest decodes against the REAL
+      // shipped script packs. They are copied out of scripts/dictionaries at build time
+      // (copyScriptLatencyPacks) instead of duplicating ~2.9 MB of zips in the test tree.
+      assets.srcDirs = ['src/androidTest/assets', "${buildDir}/generated/scriptLatencyPacks"]
+    }
+  }
+
+  signingConfigs {
+    debug {
+      storeFile(System.env.DEBUG_KEYSTORE ? file(System.env.DEBUG_KEYSTORE) : file("debug.keystore"))
+      storePassword(System.env.DEBUG_KEYSTORE_PASSWORD ? "$System.env.DEBUG_KEYSTORE_PASSWORD" : "debug0")
+      keyAlias(System.env.DEBUG_KEY_ALIAS ? "$System.env.DEBUG_KEY_ALIAS" : "debug")
+      keyPassword(System.env.DEBUG_KEY_PASSWORD ? "$System.env.DEBUG_KEY_PASSWORD" : "debug0")
+    }
+    release {
+      // REPRODUCIBILITY: Check for non-empty keystore path (empty string is truthy in Groovy)
+      def keystorePath = System.env.RELEASE_KEYSTORE
+      if (keystorePath != null && keystorePath.trim().length() > 0) {
+        storeFile file(keystorePath)
+        storePassword "$System.env.RELEASE_KEYSTORE_PASSWORD"
+        keyAlias "$System.env.RELEASE_KEY_ALIAS"
+        keyPassword "$System.env.RELEASE_KEY_PASSWORD"
+      } else {
+        // No release keystore - use debug for local builds, CI will sign separately
+        storeFile file("debug.keystore")
+        storePassword "debug0"
+        keyAlias "debug"
+        keyPassword "debug0"
+      }
+    }
+  }
+
+  buildTypes {
+    // LOCAL_BUILD env var enables verbose logging for local development
+    // Set by build-on-termux.sh, not set by GitHub Actions
+    def isLocalBuild = System.env.LOCAL_BUILD == "true"
+
+    release {
+      // REPRODUCIBILITY: Disable VCS info to prevent version-control-info.textproto (AGP 8.3+)
+      vcsInfo.include = false
+      // R8 code+resource shrinking, ENABLED 2026-08-29 (ARC-008). This replaces
+      // a 2025 "REPRODUCIBILITY TEST: disable R8 to isolate non-deterministic
+      // DEX" comment that had long outlived its experiment — R8 was never
+      // re-tested and proguard-rules.pro sat dormant for a year.
+      //
+      // Re-enabled after a full reflection/keep audit (every Class.forName,
+      // Gson reflective bind, getIdentifier, XML-inflated View and JNI surface
+      // in src/main was enumerated against proguard-rules.pro) and a two-run
+      // clean-build DEX hash comparison that confirmed R8 output is byte-identical,
+      // so F-Droid reproducibility is preserved.
+      //
+      // GATE: no v2.0.0 tag until a maintainer sideloads a MINIFIED release APK
+      // and soaks it by hand. The ew-cli instrumented suite does NOT cover this
+      // — it runs against the debug variant, which stays unminified below.
+      minifyEnabled true
+      shrinkResources true
+      debuggable false
+      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+      // Verbose logging: enabled for local builds, disabled for CI/production
+      buildConfigField "boolean", "ENABLE_VERBOSE_LOGGING", isLocalBuild ? "true" : "false"
+      // REPRODUCIBILITY: Only sign during build if non-empty keystore provided
+      // When unset/empty, build unsigned APK for post-processing and manual signing
+      def keystorePath = System.env.RELEASE_KEYSTORE
+      if (keystorePath != null && keystorePath.trim().length() > 0) {
+        signingConfig signingConfigs.release
+      }
+      // Note: If no signingConfig, APK is unsigned (requires manual signing)
+    }
+    debug {
+      // Separate applicationId so debug builds coexist with the prod-signed app
+      // and never overwrite/wipe its data on install.
+      applicationIdSuffix '.debug'
+      minifyEnabled false
+      shrinkResources false
+      debuggable true
+      // Translation QA (2026-09-29): generate en-XA (accented, ~30% longer) and ar-XB (RTL)
+      // pseudolocales for visual long-text/RTL checks. DEBUG ONLY — release stays false.
+      pseudoLocalesEnabled true
+      // NO app_name resValue here on purpose. A build-type resValue OVERRIDES
+      // res/values/strings.xml at merge time, so the debug label used to read "CleverKeys
+      // (Debug)" no matter what strings.xml said -- which is why the rebrand looked like it
+      // had not taken. strings.xml is now the single source of truth for the app name;
+      // do not re-add an override here without changing it there too.
+      resValue "bool", "debug_logs", "true"
+      buildConfigField "boolean", "ENABLE_VERBOSE_LOGGING", "true"
+      signingConfig signingConfigs.debug
+    }
+  }
+
+  // ABI split versionCodes - must match F-Droid metadata exactly
+  android.applicationVariants.all { variant ->
+    variant.outputs.each { output ->
+      def abi = output.getFilter(com.android.build.OutputFile.ABI)
+      if (abi != null) {
+        def abiCode = rootProject.ext.abiCodes.get(abi, 0)
+        output.versionCodeOverride = variant.versionCode * 10 + abiCode
+        output.outputFileName = "CleverKeys-v${variant.versionName}-${abi}.apk"
+      } else {
+        output.outputFileName = "CleverKeys-v${variant.versionName}-universal.apk"
+      }
+    }
+  }
+
+  lint {
+    baseline = file("lint-baseline.xml")
+    // Lint gate phase 2 (2026-07-20): all 656 error/fatal issues fixed for real
+    // (unused-resource purge, NewApi guards, LongLogTag, backup rules, 21-locale
+    // translations). Corrected 2026-08-28: lint-baseline.xml is EMPTY — it suppresses
+    // ZERO issues (the earlier "~400 warnings + ~100 informational" claim was wrong).
+    // It is kept as a live gate anchor: any NEW error fails the build, and a
+    // regenerated non-empty baseline would be a visible diff rather than a silent one.
+    abortOnError = true
+    // ARC-096: release is the ONLY minified variant and the one users install, and until
+    // 2026-08-30 NOTHING linted it — ci.yml's bare `lint` resolves to the DEFAULT (debug)
+    // variant and release.yml runs `lintDebug`. This flag was `false`, which does two things:
+    // it drops the `lintVitalRelease` dependency from `assembleRelease`, AND it stops AGP
+    // REGISTERING the task at all (verified: `Task 'lintVitalRelease' not found`), so the
+    // release variant could not even be linted on demand.
+    //
+    // At `true`, `assembleRelease` runs lint-vital — fatal-severity issues only, not the full
+    // analysis — so the release path gates itself everywhere it is built (release.yml AND the
+    // F-Droid recipe, which invokes `assembleRelease` on their builders). ci.yml additionally
+    // calls `lintVitalRelease` directly so PRs get the same gate without assembling release.
+    checkReleaseBuilds = true
+  }
+
+  testOptions {
+    unitTests {
+      includeAndroidResources = true
+      returnDefaultValues = true
+    }
+  }
+}
+
+// REPRODUCIBILITY: Apply deterministic compilation settings
+// Note: sourceInformation is now set via composeCompiler {} block for Kotlin 2.0+
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+    compilerOptions {
+        freeCompilerArgs.addAll([
+            "-Xbackend-threads=1",
+            "-Xno-call-assertions",
+            "-Xno-receiver-assertions",
+            "-Xno-param-assertions"
+        ])
+    }
+}
+
+// REPRODUCIBILITY: Disable baseline profile compilation for deterministic APKs
+// The ART profile varies between build environments and causes reproducibility issues
+tasks.configureEach { task ->
+    if (task.name.contains("ArtProfile") || task.name.contains("BaselineProfile")) {
+        task.enabled = false
+    }
+}
+
+def isArm64 = System.getProperty("os.arch") in ["aarch64", "arm64"]
+if (isArm64) {
+  tasks.withType(Test).configureEach {
+    enabled = false
+  }
+}
+
+// The six routed script langpacks, staged into androidTest assets for the per-script
+// latency measurement (B2). Source of truth stays scripts/dictionaries — the zips are
+// deterministic, so this is a byte-identical copy, not a fork.
+tasks.register('copyScriptLatencyPacks', Copy) {
+  group = 'verification'
+  description = 'Stage the six script langpacks into androidTest assets for latency measurement'
+  from('scripts/dictionaries') {
+    include 'langpack-ru.zip', 'langpack-el.zip', 'langpack-uk.zip',
+            'langpack-bg.zip', 'langpack-mk.zip', 'langpack-he.zip'
+  }
+  into "${buildDir}/generated/scriptLatencyPacks/langpacks"
+}
+// Asset merging, lint model generation and lint analysis read the generated asset directory.
+// Declare its producer for combined assemble+lint runs as well as separate tasks.
+tasks.matching {
+  it.name ==~ /merge\w+AndroidTestAssets/ ||
+    it.name ==~ /generate\w+AndroidTestLintModel/ ||
+    it.name ==~ /lintAnalyze\w+AndroidTest/
+}.configureEach {
+  dependsOn 'copyScriptLatencyPacks'
+}
+
+// Pure JVM test runner — works on ARM64 where standard Test tasks are disabled.
+// Extract the BIONIC arm64 ONNX natives from the onnxruntime-android AAR so pure-JVM tests
+// can run the real encoder. See the systemProperty note in runPureTests for why the JAR's own
+// glibc-linked .so cannot be used on Termux.
+tasks.register('extractOrtNative', Copy) {
+  group = 'verification'
+  description = 'Unpack bionic arm64-v8a libonnxruntime*.so for pure-JVM ONNX tests'
+  def aar = configurations.debugRuntimeClasspath.find { it.name.startsWith('onnxruntime-android') }
+  onlyIf { aar != null }
+  if (aar != null) {
+    from(zipTree(aar)) { include 'jni/arm64-v8a/*.so' }
+    eachFile { it.path = it.name }
+    includeEmptyDirs = false
+    into "${buildDir}/ort-native/arm64-v8a"
+  }
+}
+
+// Runs JUnitCore directly via JavaExec, no proot or shell script needed.
+// Usage: ./gradlew runPureTests [-PtestClass=SwipeEngineRouterTest]
+tasks.register('runPureTests', JavaExec) {
+  dependsOn 'compileDebugUnitTestKotlin', 'processDebugUnitTestJavaRes', 'extractOrtNative'
+  group = 'verification'
+  description = 'Run pure JVM tests via JUnitCore (works on ARM64)'
+
+  def pureTestClasses = [
+    'tribixbite.cleverkeys.DictionaryLoadRequestsTest',
+    // 2026-10-15 Pixel: Ctrl+Z did nothing in the inline clipboard editor; its own undo history.
+    'tribixbite.cleverkeys.InlineEditHistoryTest',
+    // 2026-10-20: swipe typing into inline fields — spacing, bar replacement, backspace undo.
+    'tribixbite.cleverkeys.InlineSwipeSessionTest',
+    // 2026-10-17: word/line boundaries of the word_left … select_line and case-cycle commands.
+    'tribixbite.cleverkeys.EditorTextNavigationTest',
+    'tribixbite.cleverkeys.CaseCycleTest',
+    'tribixbite.cleverkeys.ProcessTextReturnTest',
+    'tribixbite.cleverkeys.SuggestionSpanPolicyTest',
+    'tribixbite.cleverkeys.AccentNormalizerTest',
+    'tribixbite.cleverkeys.DictionaryWordTest',
+    'tribixbite.cleverkeys.BeamSearchModelsTest',
+    'tribixbite.cleverkeys.ConfigDefaultsTest',
+    'tribixbite.cleverkeys.DictionaryBinFormatTest',
+    'tribixbite.cleverkeys.AutocorrectDefaultsDriftTest',
+    'tribixbite.cleverkeys.ShortSwipeIntentTest',
+    'tribixbite.cleverkeys.customization.ShortSwipeMappingTest',
+    // Subkey popover (2026-09-30, docs/specs/subkey-popover.md): neutral zone + sector
+    // hit-testing, grid clamping and arming; slot resolution mirrors the short-swipe path.
+    'tribixbite.cleverkeys.popover.SubkeyPopoverGeometryTest',
+    'tribixbite.cleverkeys.popover.SubkeyPopoverSlotsTest',
+    // Roadmap §4.1 (2026-10-08): theme-editor keyboard preview scene plan (trail effect
+    // fallback, sample words, static sample trail through the layout's letter keys).
+    'tribixbite.cleverkeys.theme.ThemePreviewSceneTest',
+    'tribixbite.cleverkeys.GestureTest',
+    // Licensing-audit follow-up (2026-09-29): which parts of a pack's manifest attribution the
+    // language-pack manager shows, and that only http(s) source tokens become tappable links.
+    'tribixbite.cleverkeys.langpack.PackAttributionDisplayTest',
+    // 2026-09-29 device finding: pack NOTICE dialog layout (rules as dividers, reflowed prose).
+    'tribixbite.cleverkeys.langpack.NoticeTextLayoutTest',
+    // 2026-09-29 device finding: installed language packs are only deleted after confirmation.
+    'tribixbite.cleverkeys.langpack.LanguagePackDeleteConfirmationTest',
+    // Todo item 11 (2026-10-12): crash-safe language-pack install swap and its recovery,
+    // with every rename/delete failed or interrupted through the PackFileOps seam.
+    'tribixbite.cleverkeys.langpack.LanguagePackSwapTest',
+    // RTL (fa): directional arrows must be Icons.AutoMirrored.*.
+    'tribixbite.cleverkeys.RtlMirroringDriftTest',
+    // ARC-112 (2026-09-02): the swipe key-registration filter's pure core. Pins the
+    // travel-since-last-registration distance basis (dense-sampled two-key swipes were
+    // silently dropped when the gate compared the per-sample step) and the boundary-
+    // chatter property MIN_KEY_DISTANCE exists to provide.
+    'tribixbite.cleverkeys.SwipeKeyRegistrarTest',
+    'tribixbite.cleverkeys.ModmapTest',
+    'tribixbite.cleverkeys.ComposeKeyPureTest',
+    'tribixbite.cleverkeys.KeyValueParserTest',
+    // Review 2026-10-07: own-write selection callbacks expire by consumption/time bound.
+    'tribixbite.cleverkeys.OwnedSelectionLedgerTest',
+    // Review 2026-10-07: continuous-swipe segmentation, serialized queue and selection gate
+    // on the host tier (previously native-only).
+    'tribixbite.cleverkeys.gesture.ContinuousSwipePureTest',
+    'tribixbite.cleverkeys.IssueRegressionTest',
+    'tribixbite.cleverkeys.AutoSpaceLogicTest',
+    'tribixbite.cleverkeys.SmartAutoSpaceLogicTest',
+    'tribixbite.cleverkeys.gif.GifTest',
+    // gh #149 (2026-09-06, wave U3): the pure decision matrix behind a GIF tap —
+    // local-media commitContent first, case-preserved URL text second, never a dead link.
+    'tribixbite.cleverkeys.gif.GifInsertPolicyTest',
+    'tribixbite.cleverkeys.gif.GifCategoryTest',
+    // Audit W2 (2026-09-07): E-6 — GIF category bar commits on UP-within-slop (pure detector);
+    // E-1 — repo-wide ban on SQLite upsert syntax (parse error on API 24-28);
+    // E-10 — Toast is banned from IME-context files (suggestion bar is the surface, #156).
+    'tribixbite.cleverkeys.gif.GifCategoryTapDetectorTest',
+    'tribixbite.cleverkeys.gif.GifSqlCompatDriftTest',
+    'tribixbite.cleverkeys.ImeToastBanDriftTest',
+    // ARC-075 (2026-08-30): the GIF import status is a typed value, so the settings section
+    // never classifies a failure by matching English message text.
+    'tribixbite.cleverkeys.ui.settings.io.GifImportStatusTest',
+    'tribixbite.cleverkeys.BackspaceUndoTest',
+    'tribixbite.cleverkeys.ClipboardPaginationTest',
+    'tribixbite.cleverkeys.ClipboardFixesJvmTest',
+    'tribixbite.cleverkeys.ClipboardEditJvmTest',
+    'tribixbite.cleverkeys.Issue78SuggestionReplaceTest',
+    'tribixbite.cleverkeys.Issue118EmojiOverflowTest',
+    // ARC-106 (2026-09-01): nameToEmoji literal has no silently-overwritten duplicate keys;
+    // emoji own bare names, displaced emoticons keep a qualified key containing the bare name.
+    'tribixbite.cleverkeys.EmojiNameMapDriftTest',
+    'tribixbite.cleverkeys.backup.SettingsImportPlanBuilderTest',
+    'tribixbite.cleverkeys.backup.SettingsDefaultsDriftTest',
+    // Audit W5 (2026-09-06), F-1..F-10 + G-5:
+    // F-1/F-2 — the reset policy (remove only settings keys; markers/dictionary
+    // survive) + the repo-wide ban on whole-file prefs clears (ratchet #7).
+    'tribixbite.cleverkeys.ui.settings.SettingsResetPolicyTest',
+    // Auto-Correction "Ranking & Tuning" settings (2026-10-18): slider grid, λ display,
+    // γ always-keep position, group reset key set, backup typing/validation from Keys.
+    'tribixbite.cleverkeys.ui.settings.AutocorrectTuningSlidersTest',
+    // F-3/F-4/F-10/G-5 — SettingsRanges is the one source of truth per drifted
+    // key; validator behavior at the previously-lost values + consumer-site pins.
+    'tribixbite.cleverkeys.SettingsRangeDriftTest',
+    'tribixbite.cleverkeys.SliderStepsTest',
+    // Audit M3/M4/M5/M10/L12 (2026-10-20): Config field initialisers and SettingsActivity
+    // initial states reference the Defaults constant their refresh/loader reads.
+    'tribixbite.cleverkeys.DefaultsSingleDefinitionDriftTest',
+    // F-5..F-9 — settings-surface drift: trail-effect dropdown coverage,
+    // pin-entry wiring, SETTINGS_DEFAULTS reader/writer scans, nav-helper callers.
+    'tribixbite.cleverkeys.SettingsSurfaceDriftTest',
+    // Privacy & Data surface (maintainer report 2026-09-09): the swipe-collection
+    // toggle voided by a developer debug flag at the capture site, and the absent
+    // context/bigram/trigram surface in the section that can already erase them.
+    'tribixbite.cleverkeys.PrivacyDataSurfaceDriftTest',
+    'tribixbite.cleverkeys.SettingsSearchCoverageTest',
+    // Settings search in the UI language; scroll targets keyed by stable setting ids.
+    'tribixbite.cleverkeys.SettingsSearchLocalizationTest',
+    'tribixbite.cleverkeys.GesturePrefAccessDriftTest',
+    // ARC-084/085/097 (2026-08-29): pins the deletions of the dead CGR chain and the dead
+    // swipe_correction_preset control, and that both routed-engine dispatches derive their
+    // suggestion origin from SuggestionOrigin.forRoutedEngine rather than an enum literal.
+    'tribixbite.cleverkeys.DeadPlumbingDriftTest',
+    // ARC-088 (2026-08-30): pins the KeyModifier.modify memo — identity stability on repeat
+    // lookups, invalidation at the modmap hook, and the entry ceiling.
+    'tribixbite.cleverkeys.KeyModifierMemoTest',
+    // ARC-048 R6 (2026-08-29): drives the prediction contract through a FakePredictor
+    // instead of the real 2,600-line WordPredictor — the milestone the plan asked for.
+    'tribixbite.cleverkeys.PredictorContractTest',
+    'tribixbite.cleverkeys.backup.DictImportPlanBuilderTest',
+    'tribixbite.cleverkeys.backup.SettingsExporterTest',
+    'tribixbite.cleverkeys.BackupRestoreResultMessagesTest',
+    // Audit M2 (2026-10-20): learned-data restore counts what the stores merged.
+    'tribixbite.cleverkeys.backup.LearnedDataImportTest',
+    // Audit M6 (2026-10-20): Layout Manager XML import/export failures are surfaced.
+    'tribixbite.cleverkeys.LayoutXmlTransferTest',
+    'tribixbite.cleverkeys.BackupRestorePreviewRenderTest',
+    // ARC-035 (2026-08-28): the `.ckenc` export-naming rule + its picker-MIME invariants.
+    'tribixbite.cleverkeys.backup.BackupExportNamingTest',
+    // ARC-033 (2026-08-28): the json_base64 inline-payload size ceilings. Pure because the
+    // caps are ~64 MB — exercising them through the Activity would OOM the test process.
+    'tribixbite.cleverkeys.backup.HeadlessPayloadLimitsTest',
+    'tribixbite.cleverkeys.backup.ShortSwipeDiffTest',
+    'tribixbite.cleverkeys.autocorrect.KeyAdjacencyTest',
+    // 2026-09-26: keyboard-weighted fuzzy PREFIX matcher behind the typo-tolerant bar.
+    'tribixbite.cleverkeys.autocorrect.FuzzyPrefixMatcherTest',
+    // 2026-10-18: noisy-channel autocorrect ranking (edit cost DP, ranker ties, tuning keys).
+    'tribixbite.cleverkeys.autocorrect.ChannelRankingTest',
+    'tribixbite.cleverkeys.autocorrect.MorphologyTest',
+    'tribixbite.cleverkeys.autocorrect.FrequencyFloorTest',
+    'tribixbite.cleverkeys.autocorrect.AutocorrectContextGuardTest',
+    'tribixbite.cleverkeys.LanguagePreferenceKeysReverseLookupTest',
+    'tribixbite.cleverkeys.BucketBSourceContractTest',
+    // #134 residual (2026-09-05): the customization screen's IME entry path must use
+    // showSoftInput like the reopen button — toggleSoftInput(SHOW_FORCED) hid an
+    // already-visible IME at entry and leaked a forced-shown keyboard past the activity.
+    'tribixbite.cleverkeys.Issue134ImeEntryContractTest',
+    'tribixbite.cleverkeys.clipboard.sanitize.RulesetParserTest',
+    'tribixbite.cleverkeys.clipboard.sanitize.UrlSanitizerTest',
+    'tribixbite.cleverkeys.clipboard.sanitize.EmbedEnrichRulesTest',
+    // Audit W4 (2026-09-07): H-9 — every clipboardEntryButton in the entry row carries a
+    // contentDescription resolving to a string present in all 22 locale files.
+    'tribixbite.cleverkeys.clipboard.ClipboardEntryButtonA11yDriftTest',
+    'tribixbite.cleverkeys.HapticsBehaviorDriftTest',
+    // #139 option A (2026-10-20): "Enter always inserts a new line" — the pure Enter/action
+    // swap decision (multi-line fields only; single-line and blind fields keep their action).
+    'tribixbite.cleverkeys.EditorInfoHelperEnterSwapTest',
+    // #161 (2026-09-03): oriented keyboard height — the settings-side portrait stomp of
+    // Config.keyboardHeightPercent (same shape as the #154 vibrate_custom stomp above).
+    'tribixbite.cleverkeys.KeyboardHeightOrientationDriftTest',
+    // 2026-10-20: foldable inner-screen height follows the outer screen until set.
+    'tribixbite.cleverkeys.KeyboardHeightPrefsTest',
+    // Audit remediation (2026-07-17) — new pure JVM tests
+    'tribixbite.cleverkeys.ClipboardSearchRegexTest',
+    'tribixbite.cleverkeys.ConfigNullSafetyTest',
+    // ARC-072 (2026-08-29): the ConfigSnapshot read-model. The ratchet pins migrated
+    // hot-path files off the mutable global + the structural refresh-rebuild coherence
+    // (Config needs Android bits, so it cannot be exercised behaviourally in pure JVM);
+    // the behaviour test drives Gesture + GestureClassifier from a hand-built snapshot
+    // with NO Config.initGlobalConfig at all.
+    'tribixbite.cleverkeys.ConfigSnapshotRatchetTest',
+    'tribixbite.cleverkeys.ConfigSnapshotBehaviorTest',
+    // ARC-072 slice 3 (2026-09-01): the six *Initializer factory files collapsed into
+    // wiring/KeyboardComponentGraph; this pins the end state (no Initializer files, the
+    // graph exists, the service wires through graph reads not Initializer.create calls).
+    'tribixbite.cleverkeys.WiringCompositionRootDriftTest',
+    'tribixbite.cleverkeys.CoreImeHygieneDriftTest',
+    // Issue #179 (2026-09-03): imported-langpack dictionary loads stay off the main thread —
+    // the async loader probes the pack before bundled assets, and the coordinator never
+    // calls the blocking secondary load on the IME-create / pref-change path.
+    'tribixbite.cleverkeys.LangpackStartupOffMainDriftTest',
+    'tribixbite.cleverkeys.ReleaseMetadataDriftTest',
+    // Append-only release record book (docs/RELEASE_RECORD.md): anchors resolve, every
+    // published fastlane changelog has a section, released sections are hash-pinned.
+    'tribixbite.cleverkeys.ReleaseRecordDriftTest',
+    // ARC-090: every packaged .onnx must carry a NOTICE provenance line, and vice versa.
+    'tribixbite.cleverkeys.NoticeModelAttributionDriftTest',
+    'tribixbite.cleverkeys.SourceTextHygieneTest',
+    // Pins the curated instrumented gate in .github/scripts/emulator-ci.sh (CK-150-028):
+    // a renamed/deleted curated class used to false-green the release device gate.
+    'tribixbite.cleverkeys.CuratedInstrumentationListTest',
+    'tribixbite.cleverkeys.TranslationCoverageDriftTest',
+    // 2026-09-29 translation verification: glossary terminology + constrained-length checks.
+    'tribixbite.cleverkeys.TranslationGlossaryTest',
+    'tribixbite.cleverkeys.TranslationLengthTest',
+    // 2026-09-29 device findings (fa/hu): no hardcoded user-visible literals in Kotlin UI
+    // or manifest labels.
+    'tribixbite.cleverkeys.HardcodedUiStringTest',
+    // The in-app FAQ names only settings/screens that exist (neural-era settings removed).
+    'tribixbite.cleverkeys.FaqContentDriftTest',
+    // Import/export/backup failures show a localized reason, never the raw exception text.
+    'tribixbite.cleverkeys.IoFailureLocalizationTest',
+    // Command palette catalog: resources keyed by stable command id, in every locale.
+    'tribixbite.cleverkeys.customization.CommandCatalogLocalizationTest',
+    // Locale-aware language names (replaced the English-only tables; fa/hu device finding).
+    'tribixbite.cleverkeys.LanguageDisplayNamesTest',
+    // GH #186/#61: per-layout language binding — code validation, entry precedence, active-language
+    // resolution, and the single diff-based language-change path (ActiveLanguageSync).
+    'tribixbite.cleverkeys.LayoutLanguageBindingTest',
+    'tribixbite.cleverkeys.ActiveLanguageSyncTest',
+    // Per-layout theme binding: id validation, entry precedence, effective-theme resolution
+    // (bound / unbound / missing theme) and the layout-XML `theme` attribute read/write.
+    'tribixbite.cleverkeys.LayoutThemeBindingTest',
+    'tribixbite.cleverkeys.PredictionTaskRunnerTest',
+    'tribixbite.cleverkeys.TestRunnerListDriftTest',
+    'tribixbite.cleverkeys.onnx.ModelLoaderReadBytesTest',
+    // Backup encryption (2026-07-17) — pure crypto substrate
+    'tribixbite.cleverkeys.backup.crypto.Pbkdf2Sha256VectorTest',
+    'tribixbite.cleverkeys.backup.crypto.BackupCryptoRoundTripTest',
+    'tribixbite.cleverkeys.backup.crypto.BackupCryptoTamperTest',
+    'tribixbite.cleverkeys.backup.crypto.EncryptedBackupFormatTest',
+    // Private copy/paste (#156) — pure helpers
+    'tribixbite.cleverkeys.clipboard.PrivateCopyIntentParserTest',
+    'tribixbite.cleverkeys.clipboard.PrivateCopyRateLimiterTest',
+    'tribixbite.cleverkeys.clipboard.PrivateClipMergeRuleTest',
+    'tribixbite.cleverkeys.clipboard.ClipboardProvenanceTest',
+    // #130 residual (2026-09-05): the pure color-resolution + pane-rebuild decisions —
+    // runtime theme color beats the base-style ?attr, and a theme signature change
+    // (including a color EDIT with unchanged name) drops the cached pane.
+    'tribixbite.cleverkeys.clipboard.ClipboardPaneThemePolicyTest',
+    // 2026-10-07: the selection's Clean action — trailing whitespace and inserted line
+    // breaks removed; lists, blank lines, short lines, URLs and code keep their breaks.
+    'tribixbite.cleverkeys.clipboard.ClipboardTextCleanerTest',
+    // GH #175(2), 2026-10-21: swipe-to-delete on clipboard rows — the gesture policy
+    // (slop, 2:1 ratio, 35 % / fling commit) and the deferred-delete state machine.
+    'tribixbite.cleverkeys.clipboard.ClipboardSwipePolicyTest',
+    'tribixbite.cleverkeys.clipboard.ClipboardPendingDeletionTest',
+    'tribixbite.cleverkeys.customization.PrivateCopyCommandTest',
+    // TalkBack accessibility (a11y) — pure geometry + labeller
+    'tribixbite.cleverkeys.a11y.KeyboardGeometryTest',
+    'tribixbite.cleverkeys.a11y.KeyLabelsTest',
+    // SuggestionBar rework (WP6-R3) — de-stringified suggestion protocol
+    'tribixbite.cleverkeys.SuggestionModelTest',
+    // WP9 pipeline-unification characterization oracle (R-1 step 2) — pure JVM twin
+    'tribixbite.cleverkeys.PipelineOracleJvmTest',
+    // Render-perf + lifecycle hygiene (2026-07-20) — WP5 (R-6) scope cancel + WP6 (R2) render index
+    'tribixbite.cleverkeys.customization.ShortSwipeByKeyIndexTest',
+    'tribixbite.cleverkeys.EmojiKeywordIndexLifecycleTest',
+    'tribixbite.cleverkeys.CoroutineScopeLifecycleTest',
+    // Geometric swipe engine — pure JVM
+    'tribixbite.cleverkeys.swipe.geometric.GeoLayoutFixtureTest',
+    'tribixbite.cleverkeys.swipe.geometric.LayoutGeometryTest',
+    // WP9 R-1 step 9: layout-routed engine selection (steps 7-8 wiring)
+    'tribixbite.cleverkeys.swipe.SwipeEngineRouterTest',
+    // ARC-086 (2026-08-30): the swipe-engine fallback card's predicate on BOTH axes. A
+    // layout-caused CTC→geometric fallback (non-routed script, a–z-incomplete board,
+    // letters only in corners) was completely invisible; the card only knew about languages.
+    'tribixbite.cleverkeys.swipe.SwipeEngineFallbackTest',
+    // ARC-083 (2026-08-29): the CTC decode/dispatch seam. A TRANSIENT decode failure must
+    // reach the geometric engine; only a SUPERSEDED decode is silent, and neither latches.
+    'tribixbite.cleverkeys.swipe.CtcDecodeDeliveryTest',
+    // ARC-081/082 (2026-08-29): the platform UserDictionary provider must reach BOTH swipe
+    // engines (it previously reached only tap), must be in the lexicon memo fingerprint, and a
+    // dictionary mutation must re-warm in the background instead of stalling the next swipe.
+    'tribixbite.cleverkeys.swipe.UserDictionaryReachesSwipeTest',
+    // ARC-102 (2026-08-30): the epoch-gated cache in front of that provider read — one query
+    // per epoch per language while the observer is live, no caching at all while it is not.
+    'tribixbite.cleverkeys.UserDictionarySnapshotCacheTest',
+    // script="latin" is gate 1 of 3 in swipe routing and is a hand-written XML attribute.
+    // grek_qwerty.xml shipped declaring latin; the fix landed in srcs/layouts/, which no build
+    // task reads (PHASE_O §3.3 makes this a prerequisite for multi-script work).
+    'tribixbite.cleverkeys.swipe.LayoutScriptDeclarationTest',
+    'tribixbite.cleverkeys.swipe.ContractionOverlayTest',
+    // 2026-09-26: geometric <-> CTC promotion parity (same en_enhanced.json base frequencies).
+    'tribixbite.cleverkeys.swipe.PairingBaseFrequenciesTest',
+    // 2026-10-07: EVALUATED, NOT SHIPPED — a static-LM previous-word chooser between two display
+    // forms of one swiped surface (its/it's), its decision tests, and the opt-in (geoFull) eval
+    // behind docs/eval/2026-10-07-apostrophe-context.md.
+    'tribixbite.cleverkeys.swipe.ContractionContextChooserTest',
+    'tribixbite.cleverkeys.swipe.ApostropheContextEvalTest',
+    // ARC-005: the finger-occlusion shift both swipe adapters apply at ingest — one
+    // slider position must be one correction whichever engine serves the swipe.
+    'tribixbite.cleverkeys.swipe.FingerOcclusionTest',
+    // Contraction language isolation (2026-08-16): English morphology must not leak into
+    // a non-English swipe slate (the fr "franco" → "franco's" regression). Runs the real
+    // ContractionOverlay over the shipped contraction assets + CKDT frequency ordinals.
+    'tribixbite.cleverkeys.swipe.SwipeContractionLanguageIsolationTest',
+    // Per-language contraction DATA quality (2026-08-16): every shipped mapping must key on
+    // a word the beam can emit, values may differ from their key by apostrophes/hyphens
+    // only, and the empty files (es/pt/sv) are pinned as linguistically correct.
+    'tribixbite.cleverkeys.swipe.BundledContractionDataTest',
+    // ARC-013 / UT-7 (2026-08-29): which PAIRED variants the TAP path may inject. Pins the
+    // `id -> i'd` relaxation to exactly one shipped base, and pins the two English paired
+    // sources' overlap (the doubled `I'll` at bar ranks 0+1) as deduped after the merge.
+    'tribixbite.cleverkeys.ContractionInjectionPolicyTest',
+    'tribixbite.cleverkeys.swipe.geometric.GeoPurityDriftTest',
+    'tribixbite.cleverkeys.swipe.geometric.CkdtReaderTest',
+    'tribixbite.cleverkeys.swipe.geometric.GeoProjectionTest',
+    'tribixbite.cleverkeys.swipe.geometric.TemplateGeneratorTest',
+    'tribixbite.cleverkeys.swipe.geometric.CandidatePrunerTest',
+    'tribixbite.cleverkeys.swipe.geometric.GeoDecoderCoreTest',
+    // Step-0 SLOPPY prune-recall decomposition (geoFull-gated measurement)
+    'tribixbite.cleverkeys.swipe.geometric.GeoSloppyPruneRecallTest',
+    // Wave-G OQ-9/10/11 sweep instrument (geoSweep-gated measurement, ARC-027/028/029)
+    'tribixbite.cleverkeys.swipe.geometric.GeoOqSweepTest',
+    // Real-corpus REPLAY (FUTO swipe-1/test) — non-circular A/B validation (geoFull + local-cache gated)
+    'tribixbite.cleverkeys.swipe.geometric.GeoRealCorpusReplayTest',
+    'tribixbite.cleverkeys.swipe.geometric.GeoFutoTrain100kReplayTest',
+    // Real-corpus REPLAY on NON-QWERTY layouts (FUTO swipe-5/train dvorak/azerty/qwertz/german/spanish)
+    'tribixbite.cleverkeys.swipe.geometric.GeoRealCorpusMultiLayoutTest',
+    // Real-corpus REPLAY on the (removed) transformer model's held-out combined-corpus test set
+    // — kept as an evidence corpus (local-only, geoFull-gated)
+    'tribixbite.cleverkeys.swipe.geometric.GeoLocalCorpusReplayTest',
+    // ARC-019 measurement — CTC vs geometric same-inputs head-to-head on the local corpus,
+    // CTC on the synthetic degradation tiers, UT-5 alias ranks (geoFull + cache + ORT gated)
+    'tribixbite.cleverkeys.swipe.geometric.CtcVsGeoLocalCorpusTest',
+    // Phase 5 — synthetic traces + accuracy harness (PROVISIONAL floors)
+    'tribixbite.cleverkeys.swipe.geometric.GeoTraceSynthesizerTest',
+    'tribixbite.cleverkeys.swipe.geometric.GeoAccuracyQwertyEnTest',
+    'tribixbite.cleverkeys.swipe.geometric.GeoAccuracyJcukenRuTest',
+    'tribixbite.cleverkeys.swipe.geometric.GeoAccuracyAzertyFrTest',
+    'tribixbite.cleverkeys.swipe.geometric.GeoAccuracyQwertzDeTest',
+    'tribixbite.cleverkeys.swipe.geometric.GeoAccuracyDvorakEnTest',
+    'tribixbite.cleverkeys.swipe.geometric.GeoAccuracyWeirdLayoutTest',
+    // Phase 6 — tuning, final thresholds, adversarial + perf
+    'tribixbite.cleverkeys.swipe.geometric.GeoConfusablesTest',
+    'tribixbite.cleverkeys.swipe.geometric.GeoDoubleLetterTest',
+    'tribixbite.cleverkeys.swipe.geometric.GeoShortWordTest',
+    'tribixbite.cleverkeys.swipe.geometric.GeoAblationTest',
+    'tribixbite.cleverkeys.swipe.geometric.GeoBenchmarkTest',
+    // FUTO-style CTC swipe module (wired as the `ctc` engine mode, G5) — pure JVM
+    // golden-trace parity vs the Python port (scripts/futo_decoder_{eval,ceiling}.py)
+    // + module unit tests + the adapter's merge/ordinal + contraction-display oracles
+    // (CTC integration audit H1/L3, 2026-08-14).
+    'tribixbite.cleverkeys.swipe.ctc.CtcParityTest',
+    // NFR-1 purity: swipe/ctc/ must stay android-free or every pure CTC test below
+    // dies at once with NoClassDefFoundError (ARC-024). Geometric's NFR-3 twin.
+    'tribixbite.cleverkeys.swipe.ctc.CtcPurityDriftTest',
+    'tribixbite.cleverkeys.swipe.ctc.CtcModuleTest',
+    'tribixbite.cleverkeys.swipe.ctc.CtcLexiconMergeTest',
+    'tribixbite.cleverkeys.swipe.ctc.CtcContractionDisplayTest',
+    // Contraction-alias injection into the lexicon trie: what makes the mapping table
+    // reachable by the beam at all, and the floor frequency that keeps it safe (2026-08-17).
+    'tribixbite.cleverkeys.swipe.ctc.CtcContractionKeysTest',
+    'tribixbite.cleverkeys.swipe.ctc.CtcFuzzyRescueTest',
+    'tribixbite.cleverkeys.swipe.ctc.CtcRankMergerTest',
+    // Greek final-sigma repair — PHASE_O §3.3 prerequisite. sigma/final-sigma are distinct KEYS
+    // in different rows, so an unrepaired word-final sigma is undecodable for 25.7% of the pack.
+    'tribixbite.cleverkeys.swipe.ctc.CtcGreekOrthographyTest',
+    // The 32-frame emission budget and the duplicate-letter blank rule — a word past it can sit
+    // in the lexicon and be silently unswipeable, which is invisible without this pin.
+    'tribixbite.cleverkeys.swipe.ctc.CtcDecodableLengthTest',
+    // F6: contraction ranking through the REAL beam on the REAL fr assets — proves a
+    // floor-injected alias key can actually SURFACE, and that it never displaces a real word.
+    'tribixbite.cleverkeys.swipe.ctc.CtcContractionRankingTest',
+    // Per-language CTC enablement (fr/de/es, 2026-08-16): the λ-by-lexicon-scale preset
+    // table (docs/eval/2026-08-15-ctc-per-language-lambda.md) + the CKDT→a-z projection
+    // and accent-display map, verified against the REAL bundled dictionaries.
+    'tribixbite.cleverkeys.swipe.ctc.CtcLanguagePresetTest',
+    'tribixbite.cleverkeys.swipe.ctc.CtcCkdtLexiconTest',
+    // Multi-script wiring (2026-08-29): the per-script table's own invariants — codepoint-sorted
+    // alphabets pinned against each shipped golden fixture's `layout.letters` (a permuted
+    // alphabet does not throw, it silently permutes every decode), rule 4's all-three check, and
+    // the two-table consistency between CtcScriptSupport.Status and CtcLanguageSupport.SUPPORTED.
+    'tribixbite.cleverkeys.swipe.ctc.CtcScriptSupportTest',
+    // The per-script projection rules (PHASE_O §3.4): ru/bg/mk character folds and NO NFD (it
+    // decomposes й and destroys the alphabet), el mark-stripping + word-final sigma repair —
+    // both halves or neither — uk's ї/ґ rejection, he niqqud stripping.
+    'tribixbite.cleverkeys.swipe.ctc.CtcScriptProjectionTest',
+    // APK diet (2026-09-10): the six script encoders travel in their language packs instead of
+    // the APK, so the bytes reaching ORT come from a user-supplied file. The pinned-sha256 gate
+    // is what keeps that at ZERO new attack surface — only byte-identity with what the APK used
+    // to ship is loadable; anything else is model-absent and falls through to geometric.
+    'tribixbite.cleverkeys.swipe.ctc.CtcPackModelTest',
+    // Imported Latin language packs (2026-08-29): the DYNAMIC half of CTC membership. Lookup
+    // order (the static table always wins), the en/scripted-language refusals, the λ-by-scale
+    // precedent made executable, the a-z-projectability thresholds on synthetic boundaries AND on
+    // every real langpack in scripts/dictionaries/ (nl/id/ms/sw/tl 100%, tr 73%), and the
+    // reimport-invalidates-everything fingerprint.
+    'tribixbite.cleverkeys.swipe.ctc.CtcImportedPackSupportTest',
+    // ARC-057 (2026-08-29): the 32-frame emission budget swept over every BUNDLED lexicon —
+    // en's JSON under the strip policy, the six CKDT bins under the a-z projection, ru's pack
+    // under the Cyrillic projection, plus the injected contraction alias keys. A word needing
+    // more frames than the encoder emits is undecodable with NO error. Carries its own negative
+    // control, so a green sweep is evidence rather than a tautology.
+    'tribixbite.cleverkeys.swipe.ctc.CtcBundledLexiconEmitBudgetTest',
+    // Context-LM persistence fix (audit 2026-08-06) — debounced write-back substrate,
+    // language-keyed singleton BigramStore, UserVocabulary save-storm fix
+    'tribixbite.cleverkeys.persist.DebouncedPersisterTest',
+    'tribixbite.cleverkeys.contextaware.BigramStorePersistenceTest',
+    'tribixbite.cleverkeys.contextaware.ContextModelLanguageTest',
+    'tribixbite.cleverkeys.personalization.UserVocabularyPersistenceTest',
+    // User-configurable learned-vocabulary cap (personalization_max_words, 2026-08-08)
+    'tribixbite.cleverkeys.personalization.UserVocabularyCapTest',
+    // Opt-in next-word prediction (audit 2026-08-06 §4) — pure gating + generation
+    'tribixbite.cleverkeys.NextWordPredictorTest',
+    // Task A (2026-08-06): MASTER on-device-learning privacy gate — pure gate logic
+    // + write-layer enforcement over the real stores (nothing recorded/persisted when off)
+    'tribixbite.cleverkeys.LearningGateTest',
+    'tribixbite.cleverkeys.OnDeviceLearningPrivacyTest',
+    // Learning-system audit 2026-09-26 (Resolution): swipe-correction offer — the correction
+    // state machine (bar replace / backspace-undo + next word), the plausibility rule that
+    // filters changed-mind retypes, the bounded per-language store, and the contraction case
+    // (a personal-dictionary base kills a paired-variant promotion).
+    'tribixbite.cleverkeys.SwipeCorrectionTrackerTest',
+    'tribixbite.cleverkeys.SwipeCorrectionPolicyTest',
+    'tribixbite.cleverkeys.SwipeCorrectionStoreTest',
+    // 2026-09-26: the two-tap undo state behind the tappable "Added “x” to dictionary".
+    'tribixbite.cleverkeys.UndoableBarMessageTest',
+    // 2026-09-26: why the swipe "Prefer" offer excludes apostrophe/hyphen words (EN CTC files
+    // them under the a-z surface and the overlay keeps the base first).
+    'tribixbite.cleverkeys.swipe.SwipePreferJoinerWordTest',
+    'tribixbite.cleverkeys.swipe.ContractionPromotionUserWordTest',
+    // Task B (2026-08-06): pipeline transparency — UnifiedScore combiner + provenance model
+    'tribixbite.cleverkeys.SuggestionProvenanceTest',
+    // 2026-09-26: origin markers are announced by TalkBack (word + localized origin label).
+    'tribixbite.cleverkeys.SuggestionOriginA11yTest',
+    // Task C (2026-08-06): TrigramStore activation — same persistence discipline as BigramStore
+    'tribixbite.cleverkeys.contextaware.TrigramStorePersistenceTest',
+    'tribixbite.cleverkeys.contextaware.ContextModelTrigramTest',
+    // Review fixes 2026-08-06 (H1/H3/M1/M3/M4/M5/M7 + LOWs): learn-window boundaries,
+    // forget-vs-flush races, selection-history retention, wiring drift guards
+    'tribixbite.cleverkeys.ContextLearningBoundaryTest',
+    'tribixbite.cleverkeys.contextaware.LearnedStoreForgetRaceTest',
+    'tribixbite.cleverkeys.SelectionHistoryTest',
+    'tribixbite.cleverkeys.LearningWiringDriftTest',
+    // TODO-sweep 2026-08-06: autocorrect-undo learning rollback (inverse of recordCommit)
+    // + language-slot eviction coverage drift guard (formerly a DictionaryManager TODO)
+    'tribixbite.cleverkeys.contextaware.NgramRollbackTest',
+    'tribixbite.cleverkeys.LanguageSlotCoverageDriftTest',
+    // W3 (learning-system audit 2026-09-26): a full context must still learn new
+    // continuations — grace slots + recency-aged eviction instead of truncating the newcomer
+    'tribixbite.cleverkeys.contextaware.NgramContinuationLearnabilityTest',
+    'tribixbite.cleverkeys.contextaware.ContinuationBudgetTest',
+    // Typo hygiene (2026-09-26): LearnableWordPolicy write gate + low-frequency purge
+    'tribixbite.cleverkeys.LearnedTypoHygieneTest',
+    // Rejected-word rollback reaches the vocabulary tally and the context tracker too
+    'tribixbite.cleverkeys.RejectedWordRollbackTest',
+    // Review of 59bd4159: the typo purge waits for every configured lexicon source (bilingual
+    // secondary) and judges a frozen copy of the lexicon, not the live map
+    'tribixbite.cleverkeys.LearnedTypoPurgeSchedulerTest',
+    // ARC-080 (2026-08-29): the persisted n-gram DENOMINATOR. The per-context caps
+    // drop continuations that the observed total still counts, so reconstructing the
+    // denominator as the sum of survivors inflated every survivor after a restart.
+    // Pins the versioned blob format and the v1 (bare-array) backward-compat path.
+    'tribixbite.cleverkeys.contextaware.NgramDenominatorPersistenceTest',
+    // WP9 implementation-audit remediation 2026-08-11 (docs/history/audits/remediation/3-core-ime.md):
+    // n-2 ML-trace provenance (layout + decoder engine) incl. legacy-row compatibility
+    'tribixbite.cleverkeys.ml.SwipeMLDataProvenanceTest',
+    'tribixbite.cleverkeys.ml.SwipeMLDataEnrichmentTest',
+    // Swipe-correction resolution, Feature B (2026-09-26): a corrected swipe's ML row is
+    // relabelled with the word the user chose; the original label is kept as corrected_from.
+    'tribixbite.cleverkeys.ml.SwipeMLDataRelabelTest',
+    'tribixbite.cleverkeys.ml.PlaygroundPayloadTest',
+    // Release-record burn-down (2026-09-03): claims pinned by waves UA-UD
+    'tribixbite.cleverkeys.customization.ReleaseClaimCommandCatalogueTest',
+    // Every catalogue command reaches a path that performs it (2026-10-01).
+    'tribixbite.cleverkeys.customization.CommandRoutingTest',
+    // gh #175 minimize-to-bar/FAB view state (2026-10-01).
+    'tribixbite.cleverkeys.minimize.KeyboardMinimizerTest',
+    // Quick Settings tile toggles show/minimize/restore instead of only the picker (2026-10-20).
+    'tribixbite.cleverkeys.KeyboardTileActionTest',
+    // Subkey popover assign request <-> intent extras round trip (audit 2026-10-08).
+    'tribixbite.cleverkeys.popover.SubkeyAssignExtrasTest',
+    'tribixbite.cleverkeys.ReleaseClaimTextActionsTest',
+    'tribixbite.cleverkeys.ReleaseClaimNavBarTest',
+    'tribixbite.cleverkeys.LayoutCatalogueTest',
+    'tribixbite.cleverkeys.SecondaryPredictionWeightTest',
+    'tribixbite.cleverkeys.CustomSubLabelRenderingTest',
+    'tribixbite.cleverkeys.SubLabelSizingTest',
+    'tribixbite.cleverkeys.DictionarySortOrderTest',
+    // #96 (2026-09-05): Dictionary Manager search context survives recreation — the fragment
+    // self-saves query/sort/scroll, and the initial load routes through the cancellable
+    // filter() so an unfiltered load can never land last and clobber the filtered list.
+    'tribixbite.cleverkeys.DictionarySearchStatePersistenceTest',
+    // #94 (2026-09-05): long-press copy on the Version Information card — payload assembly
+    // runs for real; the Compose gesture wiring is source-pinned (on-device half is
+    // androidTest Issue94VersionCopyComposeTest).
+    'tribixbite.cleverkeys.ui.settings.VersionCopyPayloadTest',
+    'tribixbite.cleverkeys.ReleasePackagingDriftTest',
+    // 2026-09-09 hygiene: ModelLoader's dead .ort optimized-model write (written on every
+    // load, read back by nothing) is gone; the loader now purges what old builds left in
+    // cacheDir. Source-scan pin + purge behaviour.
+    'tribixbite.cleverkeys.onnx.ModelLoaderOrtCacheTest',
+    'tribixbite.cleverkeys.LauncherSetupFlowTest',
+    // MinSdkApiUsageDriftTest DELETED (ARC-113, 2026-09-03): it guarded the
+    // API-24 Map/Set idioms that crash on Android 5.0–6.0 and self-asserted
+    // minSdk < 24 with the instruction "If minSdk is ever raised to 24+, this
+    // whole test class can be deleted". minSdk is now 24, so those idioms are
+    // legal; keeping the class registered would red the suite on its own
+    // assertion, and unregistered it would red TestRunnerListDriftTest.
+    // Cross-language contraction collision guard (2026-08-20): a REPLACE key of one active
+    // language that is a real word of the OTHER active language must be demoted to PAIRED,
+    // or the real word is destroyed in its own slot (fr+en `dont`, de+en `im`/`hats`).
+    'tribixbite.cleverkeys.ContractionCollisionDemotionTest',
+    // Context rescoring step 1 (docs/specs/ctc-context-rescoring-and-tunables.md): the
+    // log-linear math, the identity property at empty stores, and the rank-1 guard that
+    // protects auto-commit. Default-OFF feature, not yet wired — these ARE the evidence.
+    'tribixbite.cleverkeys.swipe.SwipeContextRescorerTest',
+    // Step 2: the evidence lookup and its NON-LOADING store peeks — the main-thread swipe
+    // path must never trigger a persisted-blob load (the first-swipe jank hazard).
+    'tribixbite.cleverkeys.contextaware.ContextEvidenceLookupTest',
+    // Step 5 measurement core: the PAIRED fixed/broken classification that gates the
+    // default flip. Corpus-independent — pinned before the corpus is chosen because the
+    // last hand-written A/B metric in this repo classified by change SHAPE and got it wrong.
+    'tribixbite.cleverkeys.swipe.RescoringMetricsTest',
+    // Step 5 stage A: loading real learned bigrams out of an app dictionary export, and
+    // reporting the USABLE fraction — 90% of a real export is hapax and contributes nothing.
+    'tribixbite.cleverkeys.swipe.LearnedBigramCorpusTest',
+    // Stages B-D: the actual A/B replay. Skips unless the local corpora exist (never
+    // committed). Geometric engine only — ONNX cannot load in pure JVM on Termux.
+    'tribixbite.cleverkeys.swipe.ContextRescoringReplayTest',
+    'tribixbite.cleverkeys.swipe.CtcReplayEngineSmokeTest',
+    // Issue-#162 replay instrument (swiped "gorgeous" never surfaces): synthesized traces on
+    // the golden geometry through the shipped encoder + beam, with forced-decode diagnostics.
+    // Self-contained (no local corpus); skips only when the ORT natives are absent.
+    'tribixbite.cleverkeys.swipe.CtcDecodeReplayTest',
+    // Wave U2 custom-word calibration replay: measures + pins the merge-time mapping of
+    // stored custom frequencies onto the base lexicon's byte scale (the "custom words are
+    // harder to swipe than they should be" fix). Skips only when the ORT natives are absent.
+    'tribixbite.cleverkeys.swipe.CtcCustomWordCalibrationReplayTest',
+    // Final-letter replay (2026-10-07, `adb` -> `an`, `somethings` -> `something`): lexicon
+    // coverage, custom-word reach, the personal-dictionary remedy and plural controls.
+    // Eval: docs/eval/2026-10-07-final-letter-drops.md. Skips only when ORT natives are absent.
+    'tribixbite.cleverkeys.swipe.CtcFinalLetterReplayTest',
+    // User swipe priority (2026-10-08): per-word final-score bonus sweep on the shipped CTC
+    // stack — target wins, rival-trace collateral, and the level pins.
+    // Eval: docs/eval/2026-10-08-user-swipe-priority.md. Skips only when ORT natives are absent.
+    'tribixbite.cleverkeys.swipe.UserSwipePriorityReplayTest',
+    // Learned-unigram swipe prior (learning-system audit 2026-09-26, `git` → `got`): Stage-0
+    // headroom + Stage-1 profile replay (geoFull + local corpora + ORT gated), and the pure
+    // policy pins for CtcLearnedPrior. Eval: docs/eval/2026-09-26-learned-unigram-swipe-replay.md
+    'tribixbite.cleverkeys.swipe.LearnedUnigramReplayTest',
+    'tribixbite.cleverkeys.swipe.ctc.CtcLearnedPriorTest',
+    // User swipe priority (2026-10-08, docs/eval/2026-10-08-user-swipe-priority.md): the stored
+    // levels, the engine tables and memo version, the CTC final-score seam, and the geometric
+    // merge/engine seam (its level sweep runs only with -PgeoFull=true).
+    'tribixbite.cleverkeys.SwipePriorityTest',
+    'tribixbite.cleverkeys.swipe.UserSwipePriorityBonusTest',
+    'tribixbite.cleverkeys.swipe.ctc.CtcPriorityBonusTest',
+    'tribixbite.cleverkeys.swipe.geometric.GeoUserSwipePriorityTest',
+    // Legacy default-frequency offer + priority-driven frequency lift in the Add/Edit dialog
+    // (maintainer decisions A/B, 2026-10-10; the device `adb` stored at the old default 100).
+    'tribixbite.cleverkeys.LegacyCustomWordFrequencyTest',
+    // Correction-driven swipe prior (second attempt at the `git` → `got` report): phase-A
+    // corrections on one half lift phase-B decodes on the other; pin: git flips within ≤ 3
+    // corrections. Eval: docs/eval/2026-09-26-correction-driven-swipe-prior-replay.md
+    'tribixbite.cleverkeys.swipe.CorrectionPriorReplayTest',
+    // Issue-#75 replay instrument (Swiss French QWERTZ decoded as if QWERTY): the shipped
+    // decode stack re-bound to the Swiss board's real key centers (decoderFor) — pins that
+    // the engine follows the DISPLAYED geometry (y-e-s → "yes", not a z- word), plus the
+    // catalogue/gate pins that keep the board served and CTC-eligible.
+    'tribixbite.cleverkeys.swipe.CtcSwissFrenchLayoutReplayTest',
+    'tribixbite.cleverkeys.swipe.ContractionCollisionDataTest',
+    // ARC-010 (2026-08-28): the six shipped assets/bigrams/*.json tables were read by
+    // NOTHING for nine months — the only loader referencing them had zero callers AND
+    // parsed a different format. Pins their schema against the real files plus the
+    // asset-wins/hardcoded-fills-gaps merge that makes them the seed's source of truth.
+    'tribixbite.cleverkeys.StaticBigramSeedTest',
+    // Static context LM (2026-09-26): the CKLM v1 loader contract on hand-built models, the
+    // BigramModel adapter over it, drift pins for the shipped assets/lm/en.cklm (sidecar sha256,
+    // vocab ⊆ lexicon, caps, heap budget, NOTICE/contributors), and the S1 tap eval
+    // (geoFull + local corpora gated; prints only aggregates).
+    'tribixbite.cleverkeys.StaticContextLmTest',
+    'tribixbite.cleverkeys.BigramModelStaticLmTest',
+    'tribixbite.cleverkeys.StaticLmAssetDriftTest',
+    'tribixbite.cleverkeys.StaticLmTapEvalTest',
+  ]
+
+  mainClass = 'org.junit.runner.JUnitCore'
+
+  // Build classpath from test + main compiled classes + all dependencies
+  // The java-res output dir holds processed test resources (incl. files exposed
+  // from src/main/assets via the test sourceSet's resources.srcDirs additions).
+  classpath = files(
+    "${buildDir}/intermediates/javac/debugUnitTest/classes",
+    "${buildDir}/tmp/kotlin-classes/debugUnitTest",
+    "${buildDir}/intermediates/javac/debug/classes",
+    "${buildDir}/tmp/kotlin-classes/debug",
+    "${buildDir}/intermediates/java_res/debugUnitTest/processDebugUnitTestJavaRes/out",
+  ) + configurations.debugUnitTestRuntimeClasspath + configurations.debugRuntimeClasspath
+
+  // Forward the geometric-swipe full-grid flag into the forked JVM. Gradle `-P`
+  // properties do NOT reach a forked JavaExec, so the geometric accuracy/benchmark
+  // tests read System.getProperty("geoFull") — this line bridges `-PgeoFull=true`
+  // into that system property (default "false"). See spec Phase-6 item m27.
+  systemProperty 'geoFull', (project.findProperty('geoFull') ?: 'false')
+  // Wave-G OQ sweep instrument (GeoOqSweepTest) — same bridge pattern; double-heavy
+  // measurement runs stay opt-in and skip in milliseconds otherwise.
+  systemProperty 'geoSweep', (project.findProperty('geoSweep') ?: 'false')
+  systemProperty 'oqOnly', (project.findProperty('oqOnly') ?: '')
+  // Sampling knobs for ContextRescoringReplayTest, same -P-to-system-property bridge. Only set
+  // when supplied, so the defaults stay in the Kotlin where they are documented. Lets a
+  // measurement run be scaled (`-PreplayPairs=800 -PreplayDecoys=6`) without editing the test,
+  // and the replay prints whichever values it ran with.
+  ['replayPairs', 'replayDecoys', 'replayTraces', 'replayMaxCtx', 'replayCorpus', 'replayStaticCtx'].each { knob ->
+    if (project.hasProperty(knob)) systemProperty knob, project.property(knob)
+  }
+  // ONNX in PURE JVM tests on Termux.
+  //
+  // The `onnxruntime` JAR bundles a GLIBC-linked libonnxruntime.so, which cannot load in a
+  // bionic JVM — it fails with `dlopen failed: library "libdl.so.2" not found`. That is a
+  // property of the bundled .so, NOT of ONNX: the `onnxruntime-android` AAR this project already
+  // depends on ships BIONIC arm64-v8a natives. ORT Java reads `onnxruntime.native.path`, so
+  // pointing it at those makes the real encoder run in `runPureTests`.
+  //
+  // Auto-resolved from the AAR in the Gradle cache; override with -PortNative=<dir> if needed.
+  def ortNativeDir = project.findProperty('ortNative') ?: "${buildDir}/ort-native/arm64-v8a"
+  systemProperty 'onnxruntime.native.path', ortNativeDir
+
+  // Allow single test via -PtestClass=ClassName
+  if (project.hasProperty('testClass')) {
+    def cls = project.property('testClass')
+    args = ["tribixbite.cleverkeys.${cls}"]
+  } else {
+    args = pureTestClasses
+  }
+}
+
+// MockK test runner — like runPureTests but with android.jar on classpath.
+// Allows MockK to mock Android framework classes (Log, PointF, Context, etc.)
+// without Robolectric. The android.jar stubs provide class definitions; MockK
+// intercepts all calls before the stubs' "Stub!" exceptions are hit.
+// Usage: ./gradlew runMockTests [-PtestClass=AutocapitalisationTest]
+tasks.register('runMockTests', JavaExec) {
+  dependsOn 'compileDebugUnitTestKotlin'
+  group = 'verification'
+  description = 'Run MockK-based tests with android.jar stubs (works on ARM64)'
+  jvmArgs '-XX:+EnableDynamicAgentLoading'
+
+  def mockTestClasses = [
+    // B-1 (2026-09-06 audit, P1): the recognizer/detector letter gate was hard-coded a-z,
+    // so swipe typing could never trigger on any non-Latin board. Drives the REAL
+    // ImprovedSwipeGestureRecognizer touch-stream path (startSwipe/addPoint/endSwipe) with
+    // Cyrillic/Greek/Hebrew KeyValue keys — possible off-device because the test classpath
+    // shadows the android.jar PointF stub (src/test/kotlin/android/graphics/PointF.kt).
+    'tribixbite.cleverkeys.SwipeNonLatinSwipeTypingTest',
+    // Short-word CTC fix (2026-10-07): CTC featurizes the recognizer's unsmoothed samples
+    // plus one finger-lift sample (a final stop on `d` reaches the encoder at `d`); the
+    // geometric engine keeps the smoothed path.
+    'tribixbite.cleverkeys.SwipeCtcRawTraceTest',
+    // Behavioural engine-input routing + ML raw-trace capture (audit 2026-10-08).
+    'tribixbite.cleverkeys.InputCoordinatorEngineInputTest',
+    // Release-record burn-down (2026-09-03): claims pinned by waves UA-UD
+    'tribixbite.cleverkeys.ReleaseClaimGestureModesTest',
+    // GH #190 (2026-10-20): backspace swipe+hold "Follow finger" selection — proportional
+    // growth, shrink on moving back, unchanged speed-by-distance default, same release DEL.
+    'tribixbite.cleverkeys.PointersFollowFingerSelectionTest',
+    // #171/#145/#83 (2026-09-03): custom short-swipe dispatch — a custom mapping shadows
+    // the default at every fuzzed direction bin; cold-load independence from swipe typing;
+    // the short/long boundary is authoritative (BY-DESIGN pin for #83).
+    'tribixbite.cleverkeys.PointersShortSwipeCustomOverrideTest',
+    // #147/#87 (2026-10-20): "short swipes only" — past the minimum distance every gesture is
+    // its direction's subkey, never a word swipe or a tap of the start key; OFF unchanged.
+    'tribixbite.cleverkeys.PointersShortSwipesOnlyTest',
+    'tribixbite.cleverkeys.PointersSwipeStartKeyTest',
+    'tribixbite.cleverkeys.ReleaseClaimKeyModifierTest',
+    // gh #187: macron-below / ring-below dead keys through the real compose data.
+    'tribixbite.cleverkeys.DeadKeyMarksBelowTest',
+    'tribixbite.cleverkeys.WindowLayoutUtilsTest',
+    'tribixbite.cleverkeys.MarginPercentPolicyTest',
+    'tribixbite.cleverkeys.theme.MonetDynamicColorGateTest',
+    'tribixbite.cleverkeys.langpack.LanguagePackImportTest',
+    // 2026-10-08 audit: per-process dictionary-availability cache, invalidated by pack import/delete.
+    'tribixbite.cleverkeys.LanguageAvailabilityCacheTest',
+    'tribixbite.cleverkeys.UserDictionaryLocaleFilterTest',
+    'tribixbite.cleverkeys.MLDataCollectionToggleTest',
+    // v2.0 learning-consent migration (2026-09-24): fresh installs default learning OFF,
+    // upgrades are seeded ON; selection history (the one store whose pre-2.0 writes
+    // ignored the gate) is reset once on upgrade via a pending flag.
+    'tribixbite.cleverkeys.LearningMigrationTest',
+    // Subkey popover (2026-09-30): v5 migration seeds it OFF for upgrades (mocked prefs), and
+    // Pointers routes hold / release / dwell through it (Unsafe-built Pointers, real manager).
+    'tribixbite.cleverkeys.SubkeyPopoverMigrationTest',
+    'tribixbite.cleverkeys.PointersSubkeyPopoverTest',
+    // Learning-system audit 2026-09-26 (W4/W6): selection history persists via debounced
+    // write-back and ages by halving instead of a 30-day wholesale wipe.
+    'tribixbite.cleverkeys.UserAdaptationManagerPersistenceTest',
+    'tribixbite.cleverkeys.clipboard.ClipboardLockedStartupTest',
+    'tribixbite.cleverkeys.clipboard.ClipboardCatchUpTest',
+    'tribixbite.cleverkeys.clipboard.ClipboardCaptureExclusionTest',
+    'tribixbite.cleverkeys.SuggestionTapAddAndIWordTest',
+    // Learning-system audit 2026-09-26 (W1/W2/W5/W7/W8): learn-funnel bookkeeping — only
+    // manual selections are recorded, replaced/undone words are rolled back, the typed word
+    // before Enter/field-switch is flushed, contractions learn whole, password fields never
+    // learn. Real SuggestionHandler + WordPredictor learn funnel over in-memory n-gram stores.
+    'tribixbite.cleverkeys.LearningFunnelBookkeepingTest',
+    // Next-word tiers (maintainer decision 2026-09-26): the shipped static tier shows with
+    // on-device learning OFF (and in incognito fields); the learned tier is never read unless
+    // master + context-aware + field allow it; accepting a next-word learns nothing with the
+    // gate off. Real SuggestionHandler + WordPredictor over the shipped en.cklm.
+    'tribixbite.cleverkeys.NextWordStaticTierTest',
+    // 2026-09-29: contraction continuations admitted through their apostrophe-free key.
+    'tribixbite.cleverkeys.NextWordContractionAllowTest',
+    // Same audit, KeyEventHandler side: Enter / IME action report a word boundary, the #110
+    // backspace undos report the rejected word (KeyEventHandler.LearningHooks).
+    'tribixbite.cleverkeys.KeyEventHandlerLearningHooksTest',
+    // Swipe-correction resolution, Feature B: the collector reports the stored row's trace id
+    // and SwipeMLDataStore.relabelRow rewrites that row (mocked SQLite).
+    'tribixbite.cleverkeys.ml.SwipeMLRelabelStoreTest',
+    // Swipe-correction resolution, Feature A+B end to end through the real SuggestionHandler:
+    // bar-replace / undo+retype recording, changed-mind + cursor-moved filtering, the three
+    // gates, the offer at 2 corrections, accept -> personal dictionary, decline remembered,
+    // the contraction case, and the ML-row relabel.
+    'tribixbite.cleverkeys.SwipeCorrectionOfferTest',
+    // 2026-09-26: every dictionary add's bar confirmation is undoable (only a true insert).
+    'tribixbite.cleverkeys.DictionaryAddUndoTest',
+    'tribixbite.cleverkeys.clipboard.ClipboardTabsAndPaneCloseTest',
+    // Maintainer-reported (2026-09-06, no GH issue): media clipboard rows had no UI path to
+    // deletion (delete was edit-mode-only; media rows can't edit). Affordance test drives the
+    // real getView; cleanup test pins that the store deletes the on-disk media file iff no
+    // other tab's COPY still references it.
+    'tribixbite.cleverkeys.clipboard.ClipboardMediaDeleteAffordanceTest',
+    'tribixbite.cleverkeys.clipboard.ClipboardMediaDeletionCleanupTest',
+    // Audit W4 (2026-09-07): D-3/D-7/D-10 — ClipboardHistoryView state guards (status-filter
+    // tint truth, failed save keeps the edit session, bounds-guarded row handlers); D-4/D-5 —
+    // service hygiene (primary-clip-keyed OS-clipboard clearing, count-prune media cleanup).
+    'tribixbite.cleverkeys.clipboard.ClipboardHistoryViewStateGuardsTest',
+    // 2026-10-07: persistent clipboard selection — row-identity model that survives search,
+    // size and page changes and only ever resolves unchanged rows for confirmed deletion.
+    'tribixbite.cleverkeys.clipboard.ClipboardSelectionTest',
+    // 2026-10-07 (Saga/Chrome device report): IME dialogs never take window focus.
+    'tribixbite.cleverkeys.ImeDialogWindowTest',
+    // 2026-10-07: the selection outlives views/panes/input-view teardown in a service-scoped
+    // holder that also runs confirmed bulk actions to completion; Merge/Clean/Add-to planning
+    // and service execution.
+    'tribixbite.cleverkeys.clipboard.ClipboardSelectionHolderTest',
+    'tribixbite.cleverkeys.clipboard.ClipboardBulkPlansTest',
+    'tribixbite.cleverkeys.clipboard.ClipboardBulkServiceTest',
+    'tribixbite.cleverkeys.clipboard.ClipboardServiceHygieneTest',
+    // #130 residual (2026-09-05): setConfig drops the cached pane when the theme
+    // signature changes (switch OR color edit), preserving close callback + tab choice.
+    'tribixbite.cleverkeys.clipboard.ClipboardPaneThemeInvalidationTest',
+    // GH #175(2), 2026-10-21: swipe-to-delete wiring — hidden rows, Undo, the per-tab
+    // service delete and every view/manager commit trigger.
+    'tribixbite.cleverkeys.clipboard.ClipboardSwipeDeleteViewTest',
+    'tribixbite.cleverkeys.clipboard.ClipboardSwipeDeleteManagerTest',
+    'tribixbite.cleverkeys.prefs.AndroidXPreferenceMigrationTest',
+    // #169 (2026-09-03): the layout-switch keys were baked non-loc into the bottom row, so
+    // unticking their extra-key checkboxes removed nothing. Mock-tier: loads
+    // ExtraKeysPreference (androidx.preference supertype) and mocks SharedPreferences.
+    'tribixbite.cleverkeys.prefs.ExtraKeysSwitchRemovalTest',
+    // #77 (2026-09-05): the numeric pane's Greek/Math toggle was baked non-loc into
+    // numeric.xml and modify_numpad never stripped loc keys, so the Extra Keys checkbox
+    // (and the v1.2.8 release claim) controlled only the Fn rewrite. Mock-tier: loads
+    // ExtraKeysPreference (androidx.preference supertype).
+    'tribixbite.cleverkeys.NumericPaneGreekmathRemovalTest',
+    'tribixbite.cleverkeys.ImeDefaultDetectionTest',
+    'tribixbite.cleverkeys.KeyboardTileServiceTest',
+    'tribixbite.cleverkeys.SwipeDataExportSafTest',
+    'tribixbite.cleverkeys.SwipeDebugActionsTest',
+    // W6 (2026-09-06 audit): I-1/I-5 playground recording scope — the recorder's
+    // foreign-editor fence, the activity's onStart/onStop visibility binding, and the
+    // streaming File export pin.
+    'tribixbite.cleverkeys.ml.PlaygroundRecordingScopeTest',
+    // W6 I-4: first_stat_timestamp is seeded by the one live stat writer.
+    'tribixbite.cleverkeys.SwipePerformanceStatsTest',
+    // W6 G-2: short-swipe preview/apply agreement through the REAL manager — flat-section
+    // normalization end-to-end + the 0-mapping-REPLACE-must-not-clear guard.
+    'tribixbite.cleverkeys.customization.ShortSwipeImportSemanticsTest',
+    'tribixbite.cleverkeys.customization.ShortSwipeChangeListenerTest',
+    'tribixbite.cleverkeys.TestKeyboardSectionTest',
+    // B-2 (2026-09-06 audit): SwipePrunerTest deleted with the ADR-011-orphan SwipePruner.
+    'tribixbite.cleverkeys.PrivacyManagerTest',
+    'tribixbite.cleverkeys.DebugLoggingManagerTest',
+    'tribixbite.cleverkeys.AutocapitalisationTest',
+    'tribixbite.cleverkeys.DirectBootManagerTest',
+    'tribixbite.cleverkeys.DirectBootAwarePreferencesTest',
+    'tribixbite.cleverkeys.DictionaryManagerTest',
+    // 2026-10-10 device report ("adb ranked first only from the SECOND swipe after the edit"):
+    // the Dictionary Manager Edit/raise writers -> the CTC lexicon inputs and memo version.
+    'tribixbite.cleverkeys.swipe.CustomWordEditLexiconInputTest',
+    'tribixbite.cleverkeys.VibratorCompatTest',
+    'tribixbite.cleverkeys.TerminalUtilsTest',
+    'tribixbite.cleverkeys.KeyRepeatLogicTest',
+    'tribixbite.cleverkeys.backup.SettingsImportPlanApplyTest',
+    'tribixbite.cleverkeys.backup.DictImportPlanApplyTest',
+    'tribixbite.cleverkeys.backup.BackupRestoreManagerHeadlessTest',
+    'tribixbite.cleverkeys.BackupRestoreFullBackupTest',
+    'tribixbite.cleverkeys.clipboard.sanitize.SanitizationConfigBuildTest',
+    'tribixbite.cleverkeys.customization.CustomShortSwipeExecutorTest',
+    'tribixbite.cleverkeys.autocorrect.AutoCorrectEndToEndTest',
+    // 2026-10-11 Pixel report: the bar highlighted `Hello` for `Helo`, space committed `Help`.
+    // Real 98k dictionary: the highlighted bar entry is exactly what space commits.
+    'tribixbite.cleverkeys.autocorrect.SpaceCommitPreviewTest',
+    // 2026-10-12: tap harnesses ran on en_enhanced.json (the CTC swipe scale), not the .bin the
+    // device's tap predictor loads. Pins ShippedTapDictionary == the production asset load.
+    'tribixbite.cleverkeys.ShippedTapDictionaryDriftTest',
+    // 2026-10-08 Saga report: Hebrew neighbour-key typos were not corrected — KeyAdjacency
+    // positioned only Latin letters. Real he pack + real hebr_1_il grid, shipped defaults.
+    'tribixbite.cleverkeys.autocorrect.HebrewLayoutAutoCorrectTest',
+    // 2026-10-11 fresh-install Saga: the Custom tab label counted the "+ Add" row.
+    'tribixbite.cleverkeys.WordEditableAdapterCountTest',
+    // 2026-09-26 user report: typo-tolerant tap-typing bar (pka/pkay → play) over the
+    // real 98k dictionary — ranking guards, provenance, secondary language, latency bound.
+    'tribixbite.cleverkeys.WordPredictorFuzzyTypingTest',
+    // Audit remediation (2026-07-17) — new MockK tests
+    'tribixbite.cleverkeys.InputCoordinatorReplayGuardTest',
+    'tribixbite.cleverkeys.CleanupHandlerTeardownTest',
+    // ARC-016 (2026-08-28): CleanupHandlerTeardownTest above proves cleanup() CALLS
+    // shutdown() on MOCK coordinators; this proves the REAL shutdown() bodies stop the
+    // prediction executor and release both swipe-adapter threads.
+    'tribixbite.cleverkeys.ImeTeardownExecutorShutdownTest',
+    // ARC-017 (2026-08-28): the selection slider's d==0 guard. Without it a zero-repeat
+    // slider spins the IME main thread forever on an empty selection.
+    'tribixbite.cleverkeys.KeyEventHandlerSliderTest',
+    'tribixbite.cleverkeys.AutocapitalisationCallbackDedupeTest',
+    // gh #160 (2026-09-03): subtype/language switch → the resolved layout follows. Pins the
+    // layouts-pref shadowing fix in LayoutManager.setLocaleTextLayout, the identity-first
+    // subtype match, and the changedTo threading from onCurrentInputMethodSubtypeChanged.
+    'tribixbite.cleverkeys.SubtypeLayoutFollowTest',
+    // Sentence-start autocap on swipe commits (2026-09-03): when no shift state was latched
+    // at swipe start, the commit consults the same getCursorCapsMode decision tap typing uses.
+    'tribixbite.cleverkeys.SwipeAutocapCommitTest',
+    // gh #151 (2026-09-03): suggestion tap replaces the typed partial in editors without
+    // composing/sync support (URL bars, #78 class). Pins the 736e4eee fix, which shipped
+    // without coverage; red re-captured against the pre-fix conditions.
+    'tribixbite.cleverkeys.SuggestionTapPartialReplaceTest',
+    // Termux stale suggestions (2026-10-07): terminals expose no buffer, so a non-text key
+    // (Enter, Ctrl chord, arrows, Tab, Esc, IME action, editing command, cursor slider) ends
+    // the tracked word; no autocorrect rewrite in terminals; stale predictions never repaint.
+    'tribixbite.cleverkeys.TerminalTypedWordTrackingTest',
+    // 2026-10-15 Saga/Termux: a terminal tap appends the remainder, never deletes.
+    'tribixbite.cleverkeys.TerminalSuggestionPolicyTest',
+    // Blind text fields (2026-10-13): RustDesk / TYPE_NULL editors get terminal-style input —
+    // no in-place rewrites, key-event deletion, clip-text paste — asserted on a model of
+    // RustDesk's length-diff forwarding (what the REMOTE receives).
+    'tribixbite.cleverkeys.BlindFieldPolicyTest',
+    // 2026-10-11: the typed-word bar highlights what space commits (handler end to end).
+    'tribixbite.cleverkeys.TypedBarHighlightHandlerTest',
+    // gh #151 residual (2026-09-05): composing-less editors drop the TRAILING space of the
+    // committed "word " app-side. Pins the trailing-space watch (arm at commit, resolve on
+    // the stamp−1 cursor signature, owed-space repair on the next alphanumeric keystroke).
+    'tribixbite.cleverkeys.SuggestionTrailingSpaceRepairTest',
+    'tribixbite.cleverkeys.ClipboardMediaManagerZipSlipTest',
+    'tribixbite.cleverkeys.BackupRestoreArchiveLimitsTest',
+    // Audit remediation (2026-08-25) — CK-150-019/020/022 import rollback
+    'tribixbite.cleverkeys.BackupRestoreDbFailureTest',
+    // Backup encryption (2026-07-17) — Android-touching tests (need android.jar)
+    'tribixbite.cleverkeys.backup.crypto.BackupPassphraseStoreTest',
+    'tribixbite.cleverkeys.BackupRestoreManagerEncryptionTest',
+    // Private copy/paste (#156)
+    'tribixbite.cleverkeys.PrivateCopyServiceTest',
+    // ARC-038 (2026-08-28): the GIF-pack thumbnail precondition (#149 blank tiles).
+    // Mock-tier, not pure: real File IO but an Android-typed enclosing class.
+    'tribixbite.cleverkeys.gif.GifPackThumbnailValidationTest',
+    // gh #148 + #149 (2026-09-06, wave U3): content panes are hosted IN the container and
+    // never replace the input view (the setInputView fallbacks are gone); the GIF tap path
+    // commits the case-preserved URL / local media, never the legacy dead link.
+    'tribixbite.cleverkeys.KeyboardReceiverPaneHostTest',
+    // Audit W2 (2026-09-07): A-2 — the keyboard view is late-bound behind a provider on
+    // every wiring/coordinator seam (structural + provider-consultation pins); A-1 — the
+    // bridge overrides EVERY IReceiver method (delegation-gap ratchet, 3rd instance);
+    // A-5 — double-space-to-period verifies a space precedes the cursor at use;
+    // E-7 — the FTS sanitizer neutralizes FTS4 syntax; E-11 — partial thumbnail imports
+    // surface their failures and roll back.
+    'tribixbite.cleverkeys.KeyboardViewLateBindingDriftTest',
+    'tribixbite.cleverkeys.KeyEventReceiverBridgeDelegationTest',
+    'tribixbite.cleverkeys.DoubleSpacePeriodTest',
+    'tribixbite.cleverkeys.gif.GifFtsSanitizerTest',
+    'tribixbite.cleverkeys.gif.GifAssetManagerPartialImportTest',
+    // ARC-079 (2026-08-29): with DictionaryManager's duplicate predictor cache deleted, the
+    // coordinator's flush/shutdown are the ONLY learned-data checkpoints left in the process.
+    'tribixbite.cleverkeys.PredictionCoordinatorLifecycleTest',
+    // Audit 2026-09-06 W3 (C-1/C-2/C-3/C-9): reload signal consumed once; observer-delivered
+    // words calibrated via UserWordFrequency.scaleOnto + joined to customAndUserWords;
+    // removing a shadowing custom word restores the BASE entry; proper-noun case map
+    // cleared on full loads. Mock-tier (Objenesis + android.jar stubs), real private bodies.
+    'tribixbite.cleverkeys.WordPredictorDictionaryUpdateTest',
+    // Contractions guard #4 (2026-08-29): the REPLACE-mode user-word guard is now CASE-TOTAL
+    // via a read-side fold. Mock-tier because both SuggestionHandler and DictionaryManager
+    // reach android.jar (Handler / SharedPreferences) even when allocated without constructors.
+    'tribixbite.cleverkeys.ContractionUserWordGuardTest',
+    // Audit 2026-09-06 W7 (H-2): ThemeProvider.getTheme is TOTAL — dangling custom_/
+    // decorative_ theme ids fall back to the default palette instead of throwing into
+    // Keyboard2View's constructor (the IME crash-loop after deleting the active theme).
+    'tribixbite.cleverkeys.theme.ThemeProviderFallbackTest',
+    // Audit 2026-09-06 W7 (H-2 activity layer + H-4 mechanical half): deleting the ACTIVE
+    // custom theme resets the theme pref BEFORE the store delete; saving the ACTIVE theme
+    // re-syncs swipe_trail_color (previously synced only at select time).
+    'tribixbite.cleverkeys.theme.CustomThemePrefPolicyTest',
+    // Audit 2026-09-06 W7 (H-1 + H-7): onCustomShortSwipe dispatch is exclusive —
+    // switch_forward/backward execute exactly once (Event branch no longer falls through
+    // into the legacy AvailableCommand block) — and the five custom text-action commands
+    // reach the success haptic instead of returning past it.
+    'tribixbite.cleverkeys.Keyboard2ViewCustomSwipeDispatchTest',
+    // Todo 12 (2026-10-12): every Editing command has one implementation — layout key and
+    // custom mapping produce identical editor/receiver effects.
+    'tribixbite.cleverkeys.EditingCommandParityTest',
+    // 2026-10-13 Saga: Ctrl+V with the clipboard editor open pasted into the app behind it.
+    'tribixbite.cleverkeys.InlineFieldShortcutTest',
+    // 2026-10-20: swipes with the clipboard editor open landed in the app behind the panel.
+    'tribixbite.cleverkeys.InlineSwipeRoutingTest',
+    // 2026-10-17: new editor commands against a fake editor (readback, refusals, inline routing).
+    'tribixbite.cleverkeys.EditorTextCommandsTest',
+    // 2026-10-17: swipe/autocorrect commits carry their alternatives as a SuggestionSpan.
+    'tribixbite.cleverkeys.SuggestionSpanCommitTest',
+    // Review 2026-10-07: late own-write selection callbacks (suffix ledger lifetime, two-write
+    // commits).
+    'tribixbite.cleverkeys.SuggestionHandlerOwnedCallbackTest',
+    // Review 2026-10-07: continuous-swipe session lifecycle (lost final segment, cancel scope,
+    // touch-down cost).
+    'tribixbite.cleverkeys.Keyboard2ViewContinuousLifecycleTest',
+    // Audit 2026-09-06 W7 (H-5): modify_layout's cache is keyed on layout IDENTITY, not
+    // the nullable name — two same-named/unnamed custom layouts can no longer be served
+    // each other's modified boards. Runs on the android.util.LruCache test-source shadow.
+    'tribixbite.cleverkeys.LayoutModifierCacheKeyTest',
+    'tribixbite.cleverkeys.ThemeStyleMapTest',
+    // Audit 2026-09-06 W7 (H-6): the key border paint honours keyOpacity — setColor runs
+    // BEFORE the alpha assignment (setColor writes the full ARGB). Runs on the functional
+    // android.graphics.Paint test-source shadow, which models real colour semantics.
+    // GH #90: real XML parsing and Theme geometry require Android API types.
+    'tribixbite.cleverkeys.NumpadKeySizeTest',
+    // GH #186/#61: layout switch -> active language through the real Config, the layouts
+    // serializer (backup round trip, invalid-code sanitising) and the XML `language` attribute.
+    'tribixbite.cleverkeys.LayoutLanguageBindingConfigTest',
+    // iOS-/Gboard-/SwiftKey-style predefined layouts through the real layout parser.
+    'tribixbite.cleverkeys.StyleLayoutsTest',
+    // Per-layout theme binding through the real Config, ConfigurationManager (re-inflate only on an
+    // effective-theme change), the layouts serializer (backup blob) and the XML `theme` attribute.
+    'tribixbite.cleverkeys.LayoutThemeBindingConfigTest',
+    'tribixbite.cleverkeys.ThemeBorderPaintOpacityTest',
+    // 2026-10-17 Pixel: suggestion-bar text colour vs the bar, every role, every built-in theme
+    // (mock tier: the decorative schemes need Compose's Color on the classpath).
+    'tribixbite.cleverkeys.SuggestionBarPaletteTest',
+    'tribixbite.cleverkeys.PreferenceUIUpdateHandlerViewsTest',
+    // Audit 2026-09-06 W7 (H-8, #77 residual): all-null loc-stripped pane cells render as
+    // empty space — onDraw consults Keyboard2View.keyCellIsEmpty before drawKeyFrame.
+    'tribixbite.cleverkeys.EmptyPaneCellRenderTest',
+    // Audit 2026-09-06 R8-C (H-4, maintainer fork: WIRE): the nine Theme-Creator fields
+    // (keyLocked/Modifier/Special, keyBorderActivated, ripple, suggestionText/Background/
+    // HighConfidence, keyboardSurface) persist, round-trip, and surface in Theme /
+    // Theme.Computed paints and the SuggestionBar/Keyboard2View consumers.
+    'tribixbite.cleverkeys.theme.ThemeCreatorFieldWiringTest',
+    // Roadmap §4.1 (2026-10-08): every one of the 17 editable theme-creator colours reaches
+    // exactly its renderer field (or the trail colour) in the theme-editor preview.
+    'tribixbite.cleverkeys.theme.ThemeEditorPreviewMappingTest',
+  ]
+
+  mainClass = 'org.junit.runner.JUnitCore'
+
+  // android.jar MUST come AFTER MockK on classpath so MockK intercepts first
+  // Resolve SDK location: ANDROID_HOME (CI), ANDROID_SDK_ROOT, or ~/android-sdk (Termux)
+  def sdkDir = System.getenv('ANDROID_HOME') ?: System.getenv('ANDROID_SDK_ROOT') ?: "${System.getProperty('user.home')}/android-sdk"
+  def androidJar = file("${sdkDir}/platforms/android-34/android.jar")
+  def androidDependencyClasses = configurations.debugRuntimeClasspath.incoming.artifactView {
+    attributes.attribute(
+      org.gradle.api.attributes.Attribute.of('artifactType', String),
+      'android-classes-jar'
+    )
+  }.files
+  classpath = files(
+    "${buildDir}/intermediates/javac/debugUnitTest/classes",
+    "${buildDir}/tmp/kotlin-classes/debugUnitTest",
+    "${buildDir}/intermediates/javac/debug/classes",
+    "${buildDir}/tmp/kotlin-classes/debug",
+  ) + configurations.debugUnitTestRuntimeClasspath + androidDependencyClasses + files(androidJar)
+
+  if (project.hasProperty('testClass')) {
+    def cls = project.property('testClass')
+    args = ["tribixbite.cleverkeys.${cls}"]
+  } else {
+    args = mockTestClasses
+  }
+}
+
+// Run all tests: pure + mock
+tasks.register('runAllTests') {
+  dependsOn 'runPureTests', 'runMockTests'
+  group = 'verification'
+  description = 'Run all tests (pure JVM + MockK-based)'
+}
+
+// Rebuilds assets/special_font.ttf (the key-icon font, glyphs U+E000+NNN) from the SVG
+// sources in src/main/special_font with fontforge: `scripts/gradle-guard.sh buildKeyboardFont`.
+// Explicit-only — nothing depends on it, and the committed TTF is what ships. It used to
+// read the upstream `srcs/special_font` path (absent here) and ran its exec at
+// configuration time, so it could never rebuild the font.
+tasks.register('buildKeyboardFont', Exec) {
+  def srcDir = file("src/main/special_font")
+  def builtFont = file("$buildDir/special_font.ttf")
+  inputs.dir(srcDir)
+  outputs.file(builtFont)
+  workingDir srcDir
+  doFirst {
+    def svgFiles = srcDir.listFiles().findAll { it.isFile() && it.name.endsWith(".svg") }.sort { it.name }
+    commandLine("fontforge", "-lang=ff", "-script", "build.pe", builtFont.path, *svgFiles)
+  }
+  doLast {
+    copy { from builtFont into "assets" }
+  }
+}
+
+tasks.register('genEmojis') {
+  def outFile = file("res/raw/emojis.txt")
+  if (outFile.exists() && outFile.length() > 1000) return
+  exec { workingDir = projectDir; commandLine "python3", "gen_emoji.py"; ignoreExitValue = true }
+}
+
+tasks.withType(Test).configureEach {
+  dependsOn 'genLayoutsList', 'checkKeyboardLayouts', 'generateComposeData'
+}
+
+tasks.register('genLayoutsList') {
+  def outFile = file("res/values/layouts.xml")
+  if (outFile.exists() && outFile.length() > 100) return
+  exec { workingDir = projectDir; commandLine "python3", "gen_layouts.py"; ignoreExitValue = true }
+}
+
+tasks.register('checkKeyboardLayouts') {
+  if (!file("res/values/layouts.xml").exists()) return
+  exec { workingDir = projectDir; commandLine "python3", "tools/check_layout.py"; ignoreExitValue = true }
+}
+
+tasks.register('generateBinaryDictionaries') {
+  doLast {
+    def dictDir = file("src/main/assets/dictionaries")
+    dictDir.listFiles().findAll { it.name.endsWith(".json") && !it.name.contains("contraction") }.each { jsonFile ->
+      def binFile = new File(dictDir, jsonFile.name.replace(".json", ".bin"))
+      if (!binFile.exists() || jsonFile.lastModified() > binFile.lastModified()) {
+        // DICT-1 guard: generate_binary_dict.py emits the V1 'DICT' format (no
+        // accent map). The English dictionary ships as V2 'CKDT' (built by
+        // build_wordlist.py) and is the only bundled dict with a .json in
+        // assets. A stray json mtime bump (formatter, partial checkout/stash,
+        // CI) would otherwise silently DOWNGRADE it to V1, losing accent-folding.
+        // Never overwrite an existing CKDT bin with a DICT one.
+        if (binFile.exists()) {
+          def magic = binFile.withInputStream { it.readNBytes(4) }
+          if (new String(magic, "US-ASCII") == "CKDT") {
+            logger.lifecycle("Skipping ${binFile.name}: existing bin is V2 (CKDT); " +
+              "regenerate it with build_wordlist.py --write, not generate_binary_dict.py (V1).")
+            return  // continue to next json
+          }
+        }
+        exec { workingDir = projectDir; commandLine "python3", "scripts/generate_binary_dict.py", jsonFile.absolutePath, binFile.absolutePath }
+      }
+    }
+  }
+}
+
+tasks.register('generateBinaryContractions') {
+  doLast {
+    def dictDir = file("src/main/assets/dictionaries")
+    def binFile = new File(dictDir, "contractions.bin")
+    if (!binFile.exists()) {
+      exec {
+        workingDir = projectDir
+        commandLine "python3", "scripts/generate_binary_contractions.py",
+                    new File(dictDir, "contractions_non_paired.json").absolutePath,
+                    new File(dictDir, "contraction_pairings.json").absolutePath,
+                    binFile.absolutePath
+      }
+    }
+  }
+}
+
+// REPRODUCIBILITY: Generate version info with deterministic values only
+// Removes commit_date as it changes with each commit and breaks reproducibility
+tasks.register('generateVersionInfo') {
+  def outDir = file("${buildDir}/generated/version/res/raw")
+  outputs.dir(outDir)
+
+  doLast {
+    // Use only the version string - no git info that could vary between builds
+    // Commit info is removed entirely to ensure byte-identical APKs
+    outDir.mkdirs()
+    def versionFile = new File(outDir, "version_info.txt")
+    versionFile.text = """\
+version=${project.ext.versionNameStr}
+"""
+    println "Generated version_info.txt in ${versionFile.absolutePath}: version=${project.ext.versionNameStr}"
+  }
+}
+
+tasks.named("preBuild") {
+  dependsOn "initDebugKeystore", "copyLayoutDefinitions", "generateBinaryDictionaries", "generateBinaryContractions", "generateComposeData", "generateVersionInfo", "generateSettingsSearchIndex"
+}
+
+// Auto-derive the settings search index from the SettingsActivity controls so it never
+// has to be hand-maintained (see scripts/generate_settings_search_index.py). Inputs/outputs
+// are declared so Gradle skips regeneration when nothing relevant changed.
+tasks.register('generateSettingsSearchIndex') {
+  def src = file("src/main/kotlin/tribixbite/cleverkeys/activities/SettingsActivity.kt")
+  def sectionsDir = fileTree("src/main/kotlin/tribixbite/cleverkeys/ui/settings/sections") { include "*.kt" }
+  def strings = file("res/values/strings.xml")
+  def script = file("scripts/generate_settings_search_index.py")
+  def outKt = file("build/generated/search/kotlin/tribixbite/cleverkeys/SettingsSearchIndex.kt")
+  inputs.files(src, strings, script)
+  inputs.files(sectionsDir)
+  outputs.file(outKt)
+  doLast {
+    exec { workingDir = projectDir; commandLine "python3", script.absolutePath, outKt.absolutePath }
+  }
+}
+
+tasks.register('generateComposeData') {
+  doLast {
+    def composeDir = file("srcs/compose")
+    def outputBin = file("src/main/assets/compose_data.bin")
+    def outputKt = file("src/main/kotlin/tribixbite/cleverkeys/ComposeKeyData.kt")
+    def script = file("scripts/generate_compose_bin.py")
+    // compose_data.bin is git-ignored, ComposeKeyData.kt (its state offsets) is tracked. A
+    // bin that merely EXISTS can be stale: after a new accent file (gh #187) the pulled .kt
+    // carries the new offsets while an old local bin keeps the old ones, which silently
+    // breaks every compose/fn/shift state after the insertion point. Regenerate whenever any
+    // source is newer than the bin. No outputs are declared on purpose: the .kt is a tracked
+    // source that the Kotlin compile reads.
+    def newestInput = (fileTree(composeDir).files + [script]).collect { it.lastModified() }.max()
+    if (outputBin.exists() && outputKt.exists() && outputBin.lastModified() >= newestInput) return
+    def jsonFiles = fileTree("srcs/compose").matching { include "*.json" }.files.collect { it.absolutePath }
+    exec { workingDir = projectDir; commandLine(["python3", "scripts/generate_compose_bin.py"] + jsonFiles + [file("srcs/compose/compose").absolutePath]) }
+  }
+}
+
+tasks.register('initDebugKeystore') {
+  if (!file("debug.keystore").exists()) {
+    exec { commandLine "keytool", "-genkeypair", "-dname", "cn=d, ou=e, o=b, c=ug", "-alias", "debug", "-keypass", "debug0", "-keystore", "debug.keystore", "-keyalg", "rsa", "-storepass", "debug0", "-validity", "10000" }
+  }
+}
+
+// copyLayoutDefinitions copies ALL layout XMLs from src/main/layouts/ (including latn_qwerty_us.xml)
+// into build/generated/layouts/res/raw/ — no separate copyRawQwertyUS needed.
+tasks.register('copyLayoutDefinitions', Copy) { from "src/main/layouts"; include "*.xml"; into "build/generated/layouts/res/raw" }
+
+tasks.register("printR8Version") {
+    doLast {
+        try {
+            def r8Class = Class.forName("com.android.tools.r8.Version")
+            println "R8 Version: ${r8Class.getVersionString()}"
+        } catch (Exception e) {
+            println "R8 Version not found in classpath"
+        }
+    }
+}
+
+// REPRODUCIBILITY: Normalize APK resource paths by removing -v4 suffixes
+// This fixes AAPT2 adding non-deterministic version qualifiers to resource paths
+tasks.register("normalizeApkPaths") {
+    description = "Normalize APK resource paths for reproducibility"
+    group = "build"
+
+    // Only run after release builds
+    mustRunAfter tasks.matching { it.name.startsWith("assemble") && it.name.contains("Release") }
+
+    doLast {
+        def apkDir = file("${buildDir}/outputs/apk/release")
+        if (!apkDir.exists()) {
+            println "No release APKs found to normalize"
+            return
+        }
+
+        def scriptPath = file("${projectDir}/scripts/normalize_apk.py")
+        if (!scriptPath.exists()) {
+            println "Warning: normalize_apk.py not found at ${scriptPath}"
+            return
+        }
+
+        // Get signing config
+        def keystorePath = System.env.RELEASE_KEYSTORE ?: file("debug.keystore").absolutePath
+        def keyAlias = System.env.RELEASE_KEY_ALIAS ?: "debug"
+        def storePass = System.env.RELEASE_KEYSTORE_PASSWORD ?: "debug0"
+        def keyPass = System.env.RELEASE_KEY_PASSWORD ?: "debug0"
+
+        apkDir.listFiles()?.findAll { it.name.endsWith(".apk") }?.each { apkFile ->
+            println "Normalizing: ${apkFile.name}"
+            def normalizedApk = new File(apkFile.parentFile, apkFile.name.replace(".apk", "_normalized.apk"))
+
+            try {
+                exec {
+                    commandLine "python3", scriptPath.absolutePath,
+                        apkFile.absolutePath,
+                        normalizedApk.absolutePath,
+                        "--sign",
+                        "--keystore", keystorePath,
+                        "--key-alias", keyAlias,
+                        "--store-pass", storePass,
+                        "--key-pass", keyPass
+                }
+
+                // Replace original with normalized
+                if (normalizedApk.exists()) {
+                    apkFile.delete()
+                    normalizedApk.renameTo(apkFile)
+                    println "Normalized: ${apkFile.name}"
+                }
+            } catch (Exception e) {
+                println "Warning: Failed to normalize ${apkFile.name}: ${e.message}"
+            }
+        }
+    }
+}
+
+// Hook normalization into release builds
+tasks.configureEach { task ->
+    if (task.name == "assembleRelease") {
+        task.finalizedBy("normalizeApkPaths")
+    }
+}

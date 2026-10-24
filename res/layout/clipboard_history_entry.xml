@@ -1,0 +1,282 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Clipboard entry: horizontal layout with text + stacked button column on right -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:orientation="horizontal"
+    android:layout_width="fill_parent"
+    android:layout_height="wrap_content">
+
+  <!-- Selection mode (2026-10-07): GONE outside selection mode. 48dp touch target; the
+       contentDescription (set per row) names the clipping, so TalkBack announces
+       "<clipping>, checkbox, checked/not checked". Tapping the row text toggles it too. -->
+  <CheckBox
+      android:id="@+id/clipboard_entry_select"
+      android:layout_width="48dp"
+      android:layout_height="48dp"
+      android:layout_gravity="center_vertical"
+      android:layout_marginStart="4dp"
+      android:buttonTint="?attr/colorLabel"
+      android:visibility="gone"/>
+
+  <!-- Media thumbnail container: GONE for text entries, VISIBLE for media -->
+  <FrameLayout
+      android:id="@+id/clipboard_entry_thumbnail_container"
+      android:layout_width="48dp"
+      android:layout_height="48dp"
+      android:layout_gravity="center_vertical"
+      android:layout_marginStart="8dp"
+      android:layout_marginEnd="4dp"
+      android:visibility="gone">
+
+    <!-- Thumbnail image (decoded from BLOB) or MIME-type fallback icon -->
+    <ImageView
+        android:id="@+id/clipboard_entry_thumbnail"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:scaleType="centerCrop"
+        android:contentDescription="@string/clipboard_media_thumbnail" />
+
+    <!-- Play badge overlay for animated GIF/WebP (bottom-right corner) -->
+    <ImageView
+        android:id="@+id/clipboard_entry_play_badge"
+        android:layout_width="16dp"
+        android:layout_height="16dp"
+        android:layout_gravity="bottom|end"
+        android:src="@drawable/ic_media_play_badge"
+        android:visibility="gone"
+        android:contentDescription="@string/clipboard_animated" />
+
+  </FrameLayout>
+
+  <!-- #156 Private-copy badge: VISIBLE only for is_private entries. Signals the text was captured
+       into CleverKeys only and never placed on the OS clipboard. -->
+  <TextView
+      android:id="@+id/clipboard_entry_private_badge"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_gravity="center_vertical"
+      android:layout_marginStart="8dp"
+      android:text="@string/glyph_private_badge"
+      android:textSize="14sp"
+      android:visibility="gone"
+      android:contentDescription="@string/clipboard_private_entry" />
+
+  <!-- Text column: the entry body, its inline editor, and (expanded only) the #156
+       provenance line. These three are mutually exclusive/stacked, so they share one
+       weighted column instead of competing for width as root-level siblings. -->
+  <LinearLayout
+      android:id="@+id/clipboard_entry_text_column"
+      android:orientation="vertical"
+      android:layout_width="fill_parent"
+      android:layout_height="wrap_content"
+      android:layout_weight="1">
+
+  <!-- Normal text display (hidden during edit) -->
+  <TextView
+      android:id="@+id/clipboard_entry_text"
+      style="@style/clipboardEntry"
+      android:layout_weight="0"
+      android:maxLines="1"
+      android:ellipsize="end"/>
+
+  <!-- #156 provenance line — VISIBLE only when the row is expanded AND the entry carries a
+       source_package. Design §8: "entry expanded/detail view adds the provenance line".
+       Attribution for privately-copied entries; absent for pre-V5 rows and ordinary captures. -->
+  <TextView
+      android:id="@+id/clipboard_entry_provenance"
+      android:layout_width="fill_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginStart="14dp"
+      android:layout_marginEnd="14dp"
+      android:layout_marginBottom="12dp"
+      android:textSize="12sp"
+      android:textColor="?attr/colorSubLabel"
+      android:maxLines="2"
+      android:ellipsize="end"
+      android:visibility="gone"/>
+
+  <!-- Inline edit field: overlays TextView when editing. Uses inputType="none"
+       (TYPE_NULL) per IME best practice — prevents framework from calling restartInput()
+       on setText(), which breaks key routing after newline insertion.
+       Cursor tracking is handled by editingCursorPosition in ClipboardHistoryView.
+       Multiline display is controlled by minLines/maxLines, not inputType. -->
+  <!-- Inline overlay editor for the clipboard entry's own text. Not autofillable
+       (edits arbitrary clipboard content) → importantForAutofill="no". LabelFor is
+       suppressed: this field overlays the visible clipboard_entry_text above it, which
+       is the accessible label; a hint/contentDescription would add a hardcoded string or
+       shadow the edited value for TalkBack. -->
+  <EditText
+      android:id="@+id/clipboard_entry_edit_field"
+      style="@style/clipboardEntry"
+      android:layout_weight="0"
+      android:visibility="gone"
+      android:inputType="none"
+      android:importantForAutofill="no"
+      android:minLines="2"
+      android:maxLines="50"
+      android:background="@drawable/clipboard_edit_bg"
+      android:cursorVisible="true"
+      android:focusable="true"
+      android:focusableInTouchMode="true"
+      android:textColor="#FFFFFFFF"
+      android:textColorHint="#99FFFFFF"
+      tools:ignore="LabelFor"/>
+
+  <!-- D-7: inline save_edit failure (duplicate/invalid/db error). Toasts render behind the
+       IME window (ime-visual-feedback.md), so edit-save errors surface here and the edit
+       session stays open instead of silently discarding the user's changes. -->
+  <TextView
+      android:id="@+id/clipboard_entry_edit_error"
+      android:layout_width="fill_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginStart="14dp"
+      android:layout_marginEnd="14dp"
+      android:layout_marginBottom="4dp"
+      android:textSize="12sp"
+      android:textColor="#FFEF5350"
+      android:visibility="gone"/>
+
+  </LinearLayout>
+
+  <!-- ─── Button column: stacked vertically on the right side ─── -->
+  <LinearLayout
+      android:id="@+id/clipboard_entry_button_column"
+      android:orientation="vertical"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_gravity="top"
+      android:layout_marginTop="7dp"
+      android:layout_marginEnd="12dp"
+      android:gravity="end">
+
+    <!-- Row 1: Primary buttons (always visible in normal mode) -->
+    <LinearLayout
+        android:id="@+id/clipboard_entry_primary_buttons"
+        android:orientation="horizontal"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content">
+
+      <View
+          android:id="@+id/clipboard_entry_expand"
+          android:contentDescription="@string/clipboard_entry_expand_descr"
+          style="@style/clipboardEntryButton"
+          android:background="@drawable/ic_expand_more"
+          android:visibility="gone"
+          android:layout_marginEnd="4dp"/>
+
+      <View
+          android:id="@+id/clipboard_entry_edit"
+          android:contentDescription="@string/clipboard_entry_edit_descr"
+          style="@style/clipboardEntryButton"
+          android:background="@drawable/ic_clipboard_edit"
+          android:visibility="gone"
+          android:layout_marginEnd="4dp"/>
+
+      <View
+          android:id="@+id/clipboard_entry_paste"
+          android:contentDescription="@string/key_descr_paste"
+          style="@style/clipboardEntryButton"
+          android:background="@drawable/ic_clipboard_paste"/>
+
+    </LinearLayout>
+
+    <!-- Row 2: Secondary buttons (shown on tap-expand, tab-specific actions) -->
+    <LinearLayout
+        android:id="@+id/clipboard_entry_secondary_buttons"
+        android:orientation="horizontal"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:visibility="gone">
+
+      <!-- Pin / Save to pinned (history tab) -->
+      <View
+          android:id="@+id/clipboard_entry_addpin"
+          android:contentDescription="@string/clipboard_entry_pin_descr"
+          style="@style/clipboardEntryButton"
+          android:background="@drawable/ic_clipboard_save"/>
+
+      <!-- Unpin (pinned tab only) -->
+      <View
+          android:id="@+id/clipboard_entry_unpin"
+          android:contentDescription="@string/clipboard_entry_unpin_descr"
+          style="@style/clipboardEntryButton"
+          android:background="@drawable/ic_unpin"
+          android:visibility="gone"/>
+
+      <!-- Add to Todo (history + pinned tabs) -->
+      <View
+          android:id="@+id/clipboard_entry_addtodo"
+          android:contentDescription="@string/clipboard_entry_todo_descr"
+          style="@style/clipboardEntryButton"
+          android:background="@drawable/ic_clipboard_todo"/>
+
+      <!-- Done/check button — marks todo as completed (todos tab only) -->
+      <View
+          android:id="@+id/clipboard_entry_done"
+          android:contentDescription="@string/clipboard_entry_done_descr"
+          style="@style/clipboardEntryButton"
+          android:background="@drawable/ic_clipboard_save_edit"
+          android:visibility="gone"/>
+
+      <!-- Status cycle (todos tab only) -->
+      <View
+          android:id="@+id/clipboard_entry_status"
+          android:contentDescription="@string/clipboard_entry_status_descr"
+          style="@style/clipboardEntryButton"
+          android:background="@drawable/ic_status_cycle"
+          android:visibility="gone"/>
+
+      <!-- Tags (pinned + todos tabs) -->
+      <View
+          android:id="@+id/clipboard_entry_tags"
+          android:contentDescription="@string/clipboard_entry_tags_descr"
+          style="@style/clipboardEntryButton"
+          android:background="@drawable/ic_tag"
+          android:visibility="gone"/>
+
+    </LinearLayout>
+
+    <!-- Row 3: Edit mode buttons — save + cancel (shown only during edit) -->
+    <LinearLayout
+        android:id="@+id/clipboard_entry_edit_buttons"
+        android:orientation="horizontal"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:visibility="gone">
+
+      <View
+          android:id="@+id/clipboard_entry_save"
+          android:contentDescription="@string/common_save"
+          style="@style/clipboardEntryButton"
+          android:background="@drawable/ic_clipboard_save_edit"
+          android:layout_marginEnd="4dp"/>
+
+      <View
+          android:id="@+id/clipboard_entry_cancel"
+          android:contentDescription="@string/common_cancel"
+          style="@style/clipboardEntryButton"
+          android:background="@drawable/ic_clipboard_cancel"/>
+
+    </LinearLayout>
+
+    <!-- Row 4: Delete — own line below save/cancel to prevent accidental presses -->
+    <LinearLayout
+        android:id="@+id/clipboard_entry_delete_row"
+        android:orientation="horizontal"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:visibility="gone">
+
+      <View
+          android:id="@+id/clipboard_entry_delete"
+          android:contentDescription="@string/common_delete"
+          style="@style/clipboardEntryButton"
+          android:background="@drawable/ic_delete"/>
+
+    </LinearLayout>
+
+  </LinearLayout>
+
+</LinearLayout>

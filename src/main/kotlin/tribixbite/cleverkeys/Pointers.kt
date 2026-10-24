@@ -1,0 +1,2483 @@
+package tribixbite.cleverkeys
+
+import android.content.Context
+import android.graphics.PointF
+import android.os.Handler
+import android.os.Message
+import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import tribixbite.cleverkeys.customization.CommandRouting
+import tribixbite.cleverkeys.customization.ShortSwipeCustomizationManager
+import tribixbite.cleverkeys.customization.ShortSwipeMapping
+import tribixbite.cleverkeys.customization.SwipeDirection
+import tribixbite.cleverkeys.popover.PopoverSlot
+import tribixbite.cleverkeys.popover.SubkeyAssignRequest
+import tribixbite.cleverkeys.popover.SubkeyPopoverGeometry
+import tribixbite.cleverkeys.popover.SubkeyPopoverMetrics
+import tribixbite.cleverkeys.popover.SubkeyPopoverSlots
+import tribixbite.cleverkeys.popover.SubkeyPopoverState
+import tribixbite.cleverkeys.prefs.ConfigSnapshot
+import tribixbite.cleverkeys.swipe.KeyLetter
+import java.util.NoSuchElementException
+import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.min
+import kotlin.math.sqrt
+
+/**
+ * Manage pointers (fingers) on the screen and long presses.
+ * Call back to IPointerEventHandler.
+ *
+ * ## Gesture-scoped configuration (ARC-072)
+ *
+ * `Config.refresh()` rewrites 157 fields **in place**, one assignment at a time, on
+ * whatever thread asked for the change — a settings edit, a fold, a rotation, a theme
+ * broadcast. A gesture already in flight does not stop for that, so reading the live
+ * config from `onTouchMove`/`onTouchUp` can decide the second half of a swipe against a
+ * configuration the first half never saw (a min-distance from the old settings, a
+ * max-distance from the new). Nothing crashes; the gesture is simply classified against a
+ * state that never existed.
+ *
+ * So each [Pointer] captures the published [ConfigSnapshot] **once, when it is created**,
+ * and every decision for that pointer — thresholds, key-repeat, long-press timing, short
+ * gesture bounds, slide/swipe distances, selection-delete speed — reads that captured
+ * copy. A refresh landing mid-gesture therefore applies from the NEXT pointer-down.
+ *
+ * **Multi-touch:** a second finger landing while another is down captures its OWN
+ * snapshot rather than inheriting the first pointer's. Two reasons. Every
+ * configuration-driven decision in this class is scoped to a single pointer's lifecycle,
+ * so per-pointer capture already gives each gesture one internally consistent
+ * configuration — there is no decision that mixes two pointers' config values. And
+ * inheritance would have no bound: a latched modifier is a `Pointer` with `pointerId == -1`
+ * that survives arbitrarily many config changes, so a Shift latched before a settings
+ * change would freeze that setting for every key pressed afterwards until it was released.
+ *
+ * The live [_config] survives for exactly one purpose — taking the snapshot at capture
+ * time. `ConfigSnapshotRatchetTest` pins that: `snapshot` is the only member of it this
+ * file may touch.
+ */
+class Pointers(
+    private val _handler: IPointerEventHandler,
+    private val _config: Config,
+    context: Context
+) : Handler.Callback {
+
+    private val _longpress_handler: Handler = Handler(this)
+    private val _ptrs = ArrayList<Pointer>()
+    private val _gestureClassifier = GestureClassifier()
+    val _swipeRecognizer = EnhancedSwipeGestureRecognizer()
+
+    /** Custom short swipe manager for user-defined gesture mappings */
+    private val _customSwipeManager = ShortSwipeCustomizationManager.getInstance(context)
+
+    /**
+     * Owned coroutine scope for this Pointers instance. A [SupervisorJob] child of
+     * [Dispatchers.IO] so the one-shot startup load (below) can be cancelled when the
+     * owning [Keyboard2View] is detached/recreated (theme change). Replaces the former
+     * ad-hoc `CoroutineScope(Dispatchers.IO).launch{}` in `init`, which leaked a fresh
+     * (never-cancelled) scope on every keyboard-view rebuild. See R-6 (core-ime audit).
+     */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    init {
+        // Load custom short swipe mappings on keyboard startup
+        // This ensures user-defined per-key actions work immediately without
+        // needing to open the customization activity first
+        scope.launch {
+            _customSwipeManager.loadMappings()
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "Custom short swipe mappings loaded on startup")
+        }
+    }
+
+    /**
+     * Cancel this instance's [scope]. Idempotent. Called by [Keyboard2View] when the
+     * view is detached / replaced (e.g. theme change) so the startup-load coroutine
+     * scope is not leaked. Safe to call even if the load already completed — the
+     * launch is a short one-shot and cancelling a finished job is a no-op.
+     */
+    fun close() {
+        scope.cancel()
+    }
+
+    /** Verbose-only debug log; message lambda is not evaluated unless verbose logging is enabled. */
+    private inline fun vlog(message: () -> String) { if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", message()) }
+
+    /** Return the list of modifiers currently activated. */
+    fun getModifiers(): Modifiers {
+        return getModifiers(false)
+    }
+
+    /** When [skip_latched] is true, don't take flags of latched keys into account. */
+    private fun getModifiers(skip_latched: Boolean): Modifiers {
+        val n_ptrs = _ptrs.size
+        val mods = Array<KeyValue?>(n_ptrs) { null }
+        var n_mods = 0
+        for (i in 0 until n_ptrs) {
+            val p = _ptrs[i]
+            if (p.value != null &&
+                !(skip_latched && p.hasFlagsAny(FLAG_P_LATCHED) &&
+                    (p.flags and FLAG_P_LOCKED) == 0)) {
+                // v1.2.2 FIX: Don't include non-latched latchable keys (e.g., shift being swiped over)
+                // A modifier should only be "active" if it's LATCHED or LOCKED, not just touched.
+                // This prevents short swipes over shift from showing uppercase keyboard.
+                val isLatchable = (p.flags and FLAG_P_LATCHABLE) != 0
+                val isLatched = p.hasFlagsAny(FLAG_P_LATCHED)
+                val isLocked = (p.flags and FLAG_P_LOCKED) != 0
+                if (isLatchable && !isLatched && !isLocked) {
+                    // Skip non-latched latchable keys - they're just being touched/swiped
+                    continue
+                }
+                mods[n_mods++] = p.value
+            }
+        }
+        return Modifiers.ofArray(mods, n_mods)
+    }
+
+    fun clear() {
+        var hadPopover = false
+        for (p in _ptrs) {
+            stopLongPress(p)
+            p.popover?.let { _longpress_handler.removeMessages(it.dwellWhat); hadPopover = true }
+        }
+        _ptrs.clear()
+        if (hadPopover) _handler.onSubkeyPopoverDismiss()
+    }
+
+    fun isKeyDown(k: KeyboardData.Key): Boolean {
+        for (p in _ptrs) {
+            if (p.key == k) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /** See [FLAG_P_*] flags. Returns [-1] if the key is not pressed. */
+    fun getKeyFlags(kv: KeyValue): Int {
+        for (p in _ptrs) {
+            if (p.value != null && p.value == kv) {
+                return p.flags
+            }
+        }
+        return -1
+    }
+
+    /** The key must not be already latched. */
+    internal fun add_fake_pointer(key: KeyboardData.Key, kv: KeyValue, locked: Boolean) {
+        // Not part of any gesture (auto-capitalisation synthesises this), so it captures the
+        // configuration current at the moment it is added.
+        val snap = _config.snapshot
+        var flags = pointer_flags_of_kv(kv, snap) or FLAG_P_FAKE or FLAG_P_LATCHED
+        if (locked) {
+            flags = flags or FLAG_P_LOCKED
+        }
+        val ptr = Pointer(-1, key, kv, 0f, 0f, Modifiers.EMPTY, flags, snap)
+        _ptrs.add(ptr)
+        _handler.onPointerFlagsChanged(null)
+    }
+
+    /**
+     * Set whether a key is latched or locked by adding a "fake" pointer, a
+     * pointer that is not due to user interaction.
+     * This is used by auto-capitalisation.
+     *
+     * When [lock] is true, [latched] control whether the modifier is locked or disabled.
+     * When [lock] is false, an existing locked pointer is not affected.
+     */
+    fun set_fake_pointer_state(
+        key: KeyboardData.Key,
+        kv: KeyValue,
+        latched: Boolean,
+        lock: Boolean
+    ) {
+        val ptr = getLatched(key, kv)
+        if (ptr == null) {
+            // No existing pointer, latch the key.
+            if (latched) {
+                add_fake_pointer(key, kv, lock)
+                _handler.onPointerFlagsChanged(null)
+            }
+        } else if ((ptr.flags and FLAG_P_FAKE) == 0) {
+            // Key already latched but not by a fake ptr, do nothing.
+        } else if (lock) {
+            // Acting on locked modifiers, replace the pointer each time.
+            removePtr(ptr)
+            if (latched) {
+                add_fake_pointer(key, kv, lock)
+            }
+            _handler.onPointerFlagsChanged(null)
+        } else if ((ptr.flags and FLAG_P_LOCKED) != 0) {
+            // Existing ptr is locked but [lock] is false, do not continue.
+        } else if (!latched) {
+            // Key is latched by a fake ptr. Unlatch if requested.
+            removePtr(ptr)
+            _handler.onPointerFlagsChanged(null)
+        }
+    }
+
+    // Receiving events
+
+    /**
+     * @param liftX ACTION_UP x of this pointer; NaN (e.g. an accessibility tap, which has no
+     *   motion event) falls back to the pointer's last MOVE position.
+     * @param liftY ACTION_UP y, same fallback.
+     */
+    fun onTouchUp(pointerId: Int, liftX: Float = Float.NaN, liftY: Float = Float.NaN) {
+        val ptr = getPtr(pointerId) ?: return
+        // Every word-swipe end below goes through this, so the CTC trace gets exactly one
+        // sample at the moment THIS pointer lifted (short-word fix, 2026-10-07). It is recorded
+        // only where the swipe actually ends, never for another finger's release.
+        fun endWordSwipe() {
+            _swipeRecognizer.recordLift(
+                if (liftX.isFinite()) liftX else ptr.lastX,
+                if (liftY.isFinite()) liftY else ptr.lastY,
+            )
+            _handler.onSwipeEnd(_swipeRecognizer)
+        }
+
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "=== onTouchUp START: ptr_value=${ptr.value}, flags=0x${ptr.flags.toString(16)}, pointerId=$pointerId ===")
+
+        // ARC-072: the configuration this gesture began under, captured at its pointer-down.
+        val snap = ptr.snap
+
+        // Handle swipe typing completion
+        if (snap.swipe_typing_enabled && ptr.hasFlagsAny(FLAG_P_SWIPE_TYPING)) {
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "Path: SWIPE_TYPING completion")
+            endWordSwipe()
+            _swipeRecognizer.reset()
+            removePtr(ptr)
+            return
+        }
+
+        // Subkey popover: the release resolves whatever slot is selected (or nothing).
+        if (ptr.hasFlagsAny(FLAG_P_POPOVER_MODE)) {
+            finishSubkeyPopover(ptr, snap)
+            return
+        }
+
+        // Handle TrackPoint mode completion
+        if (ptr.hasFlagsAny(FLAG_P_TRACKPOINT_MODE)) {
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "Path: TRACKPOINT completion")
+            stopTrackPointRepeat(ptr)
+            removePtr(ptr)
+            // Clear visual highlight
+            _handler.onPointerFlagsChanged(null)
+            return
+        }
+
+        // Handle selection-delete mode completion - delete selected text
+        if (ptr.hasFlagsAny(FLAG_P_SELECTION_DELETE_MODE)) {
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "Path: SELECTION_DELETE completion - deleting selected text")
+            stopSelectionDeleteRepeat(ptr)
+            // Send DELETE key to delete the selected text
+            val deleteKey = KeyValue.keyeventKey(0xE003, android.view.KeyEvent.KEYCODE_DEL, 0)
+            _handler.onPointerDown(deleteKey, false)
+            _handler.onPointerUp(deleteKey, ptr.modifiers)
+            removePtr(ptr)
+            // Clear visual highlight
+            _handler.onPointerFlagsChanged(null)
+            return
+        }
+
+        // Handle deferred nav-subkey key - check if it was a tap or a short swipe
+        if (ptr.hasFlagsAny(FLAG_P_DEFERRED_DOWN) && hasNavigationSubkeys(ptr)) {
+            // Check if user has moved enough for a short swipe
+            val dx = ptr.lastX - ptr.downX
+            val dy = ptr.lastY - ptr.downY
+            val movementDist = sqrt(dx * dx + dy * dy)
+
+            // If barely moved (tap), output the primary key
+            // If moved significantly, fall through to gesture classification for short swipe
+            // (short_gesture_min_distance is % of key diagonal — convert, don't compare raw)
+            if (movementDist < shortGestureMinDistancePx(ptr.key, snap)) {
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "Path: Deferred nav-subkey key TAP, outputting primary key")
+                _handler.onPointerDown(ptr.value, false)
+                ptr.flags = ptr.flags and FLAG_P_DEFERRED_DOWN.inv()
+                // GH #188: Compose shares this key with navigation arrows. Its pending
+                // prefix must use the common latch lifecycle below; emitting key-up and
+                // clearing modifiers here immediately cancels the new compose state.
+            } else {
+                // User moved - clear deferred flag and classify the navigation gesture.
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "Path: Deferred nav-subkey key SWIPE, distance=$movementDist")
+                ptr.flags = ptr.flags and FLAG_P_DEFERRED_DOWN.inv()
+
+                // FIX #104: A locale may remove key0, so gesture classification cannot
+                // handle this pointer. Resolve its navigation subkey directly instead.
+                if (ptr.value == null) {
+                    val angle = atan2(dy.toDouble(), dx.toDouble()) + Math.PI
+                    val direction = ((angle * 8 / Math.PI).toInt() + 12) % 16
+                    val navKey = getNearestKeyAtDirection(ptr, direction)
+                    if (navKey != null) {
+                        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "Path: Null-key0 nav swipe, direction=$direction, key=$navKey")
+                        _handler.onPointerDown(navKey, true)
+                        clearLatched()
+                        removePtr(ptr)
+                        _handler.onPointerUp(navKey, ptr.modifiers)
+                        return
+                    }
+                }
+            }
+            // Non-null key0: let gesture classification handle it (existing path)
+        }
+
+        // Handle deferred backspace key - check if it was a tap or a short swipe
+        // This ensures quick backspace taps work while allowing short swipe + release for subkeys
+        if (ptr.hasFlagsAny(FLAG_P_DEFERRED_DOWN) && isBackspaceKey(ptr.value)) {
+            val dx = ptr.lastX - ptr.downX
+            val dy = ptr.lastY - ptr.downY
+            val movementDist = sqrt(dx * dx + dy * dy)
+
+            // If barely moved (tap), output the backspace key
+            // If moved significantly, fall through to gesture classification for short swipe (e.g., delete_last_word)
+            // (short_gesture_min_distance is % of key diagonal — convert, don't compare raw)
+            if (movementDist < shortGestureMinDistancePx(ptr.key, snap)) {
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "Path: Deferred backspace TAP, outputting backspace")
+                _handler.onPointerDown(ptr.value, false)
+                ptr.flags = ptr.flags and FLAG_P_DEFERRED_DOWN.inv()
+                clearLatched()
+                removePtr(ptr)
+                _handler.onPointerUp(ptr.value, ptr.modifiers)
+                return
+            }
+            // User moved - clear deferred flag and let gesture classification handle it (for delete_last_word etc.)
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "Path: Deferred backspace SWIPE, distance=$movementDist, falling through to gesture classification")
+            ptr.flags = ptr.flags and FLAG_P_DEFERRED_DOWN.inv()
+        }
+
+        if (ptr.hasFlagsAny(FLAG_P_SLIDING)) {
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "Path: SLIDING")
+            clearLatched()
+            ptr.sliding?.onTouchUp(ptr)
+            return
+        }
+        stopLongPress(ptr)
+        val ptr_value = ptr.value
+
+        // UNIFIED GESTURE CLASSIFICATION: Use GestureClassifier to decide TAP vs SWIPE
+        // This eliminates race conditions between multiple prediction systems
+        // Allow entry if either Swipe Typing (Char keys) OR Short Gestures (Any key) is enabled
+        val isCharKey = ptr_value != null && ptr_value.getKind() == KeyValue.Kind.Char
+        // Word swipes START on a letter key (Seeker 2026-10-07: a swipe from Backspace across
+        // m/n/b typed "mb"), or are promoted from a sloppy space/digit/punctuation start — see
+        // mayBeWordSwipe. isCharKey alone is not the rule.
+        // GH #147/#87: "short swipes only" excludes word swipes outright. Config.refresh already
+        // folds the mode into swipe_typing_enabled; the explicit guard keeps this route closed
+        // for any snapshot built without that fold.
+        val canSwipeType = snap.swipe_typing_enabled && !snap.short_swipes_only && isCharKey &&
+            mayBeWordSwipe(ptr)
+        val canShortGesture = snap.short_gestures_enabled && ptr_value != null
+        // Entry into the classification block keeps its historical Char-key rule so a
+        // Space/punctuation gesture with short gestures OFF still reaches the TAP branch
+        // (which emits its deferred key-down); only the word-swipe ROUTES need canSwipeType.
+        val canClassify = (snap.swipe_typing_enabled && isCharKey) || canShortGesture
+
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "Gesture check: isCharKey=$isCharKey, canSwipeType=$canSwipeType, canShortGesture=$canShortGesture, " +
+            "gesture=${ptr.gesture}, hasExcludedFlags=${ptr.hasFlagsAny(FLAG_P_SLIDING or FLAG_P_SWIPE_TYPING or FLAG_P_LATCHED)}, hasKey=${ptr.key != null}")
+
+        if (canClassify && ptr.gesture == null &&
+            !ptr.hasFlagsAny(FLAG_P_SLIDING or FLAG_P_SWIPE_TYPING or FLAG_P_LATCHED) &&
+            ptr.key != null
+        ) {
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "ENTERING gesture classification block")
+        } else {
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "SKIPPING gesture block: canSwipe=$canSwipeType canShort=$canShortGesture " +
+                "gesture=${ptr.gesture} excluded=${ptr.hasFlagsAny(FLAG_P_SLIDING or FLAG_P_SWIPE_TYPING or FLAG_P_LATCHED)} hasKey=${ptr.key != null}")
+        }
+        if (canClassify && ptr.gesture == null &&
+            !ptr.hasFlagsAny(FLAG_P_SLIDING or FLAG_P_SWIPE_TYPING or FLAG_P_LATCHED) &&
+            ptr.key != null
+        ) {
+            // Collect gesture data for classification
+            val swipePath = _swipeRecognizer.getSwipePath()
+            var totalDistance = 0.0f
+
+            if (swipePath != null && swipePath.size > 1) {
+                // Calculate total path distance
+                for (i in 1 until swipePath.size) {
+                    val p1 = swipePath[i - 1]
+                    val p2 = swipePath[i]
+                    val dx = p2.x - p1.x
+                    val dy = p2.y - p1.y
+                    totalDistance += sqrt(dx * dx + dy * dy)
+                }
+            }
+
+            val timeElapsed = System.currentTimeMillis() - ptr.downTime
+            val keyWidth = _handler.getKeyWidth(ptr.key)
+
+            val gestureData = GestureClassifier.GestureData(
+                ptr.hasLeftStartingKey,
+                totalDistance,
+                timeElapsed,
+                keyWidth
+            )
+
+            // The classifier takes its thresholds from the snapshot this gesture captured
+            // at pointer-DOWN, so a Config.refresh() mid-swipe cannot change the verdict for
+            // a gesture that is already under way.
+            val gestureType = _gestureClassifier.classify(gestureData, snap)
+
+            // Only swipe-typing-eligible gestures may route to the swipe decoder:
+            // - non-Char keys (like Backspace): a long gesture must still be treated as a
+            //   TAP/Short Gesture to allow directional actions (e.g. Delete Word)
+            // - swipe typing disabled: SWIPE must degrade to TAP so the gesture commits the
+            //   starting key instead of hitting onSwipeEnd (a no-op without word candidacy)
+            //   and silently dropping the letter.
+            // - a Char key that is not a letter (space, digit, punctuation): swipe typing
+            //   only starts on letters, so the gesture stays that key's tap/short swipe.
+            // canSwipeType = swipe_typing_enabled && isCharKey && letter start covers all three.
+            val effectiveGestureType = if (!canSwipeType && gestureType == GestureClassifier.GestureType.SWIPE) {
+                GestureClassifier.GestureType.TAP
+            } else {
+                gestureType
+            }
+
+            vlog {
+                "Gesture classified as: $gestureType (effective=$effectiveGestureType) " +
+                    "(hasLeftKey=${ptr.hasLeftStartingKey} " +
+                    "distance=$totalDistance " +
+                    "time=${timeElapsed}ms)"
+            }
+
+            if (effectiveGestureType == GestureClassifier.GestureType.SWIPE) {
+                // This is a swipe gesture - send to the swipe decoder
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "Sending to swipe decoder")
+                endWordSwipe()
+                clearLatched() // Clear shift after swipe word completes
+                _swipeRecognizer.reset()
+                removePtr(ptr)
+                return
+            } else {
+                // This is a TAP - check for short gesture (within-key directional swipe)
+                vlog {
+                    "TAP path: short_gestures=${snap.short_gestures_enabled} " +
+                        "hasLeftKey=${ptr.hasLeftStartingKey} " +
+                        "pathSize=${swipePath?.size ?: 0} " +
+                        "modifiers=${ptr.modifiers.size()}"
+                }
+
+                // CRITICAL FIX v1.32.923: Changed from swipePath.size > 1 to >= 1
+                // Some gestures only collect 1 point (downX,downY) before UP fires
+                // We can still calculate direction from ptr.downX/downY to the last point
+                //
+                // v1.32.927: Short gestures now work with shift active
+                // - Sublabels trigger regardless of shift state
+                // - If sublabel is a word (letters/apostrophe only), capitalize first char when shift active
+                // - Non-word sublabels (punctuation, symbols) output as-is
+
+                // CRITICAL FIX: Allow leaving the key bounds for non-Char keys (like Backspace)
+                // This allows "Short Swipe over Backspace" (which often leaves the key) to trigger delete_last_word
+                val allowLeftKey = !isCharKey
+
+                // Use tracked last position instead of relying on swipePath (which might be filtered/smoothed)
+                val dx = ptr.lastX - ptr.downX
+                val dy = ptr.lastY - ptr.downY
+                val distance = sqrt(dx * dx + dy * dy)
+
+                // UPDATED v1.32.926: Check custom mappings BEFORE blocking check
+                // Custom user-defined mappings should ALWAYS work, even with shift active
+                // Only built-in sublabel gestures are blocked when modifiers are active on char keys
+                // GH #147/#87 "short swipes only": leaving the starting key no longer disqualifies
+                // a short swipe, so every gesture of at least the minimum distance gets here.
+                val shortSwipesOnly = snap.short_swipes_only
+                if (snap.short_gestures_enabled &&
+                    (!ptr.hasLeftStartingKey || allowLeftKey || shortSwipesOnly) &&
+                    distance > 0 // Basic check that we moved
+                ) {
+                    
+                    val keyHypotenuse = _handler.getKeyHypotenuse(ptr.key)
+
+                    // MIN threshold: percent-of-diagonal with the wide-key absolute cap —
+                    // single source of truth shared with the deferred nav/backspace and
+                    // selection-delete pre-checks.
+                    val minDistance = shortGestureMinDistancePx(ptr.key, snap)
+
+                    // v1.2.3 FIX: Restore max distance check that was removed in 7c2131f7
+                    // The hasLeftStartingKey flag alone creates a gap where medium swipes (e.g., 140px)
+                    // that don't exceed max_distance still trigger short gestures instead of a word swipe.
+                    // By checking max explicitly here, swipes exceeding max fall through to word prediction.
+                    val maxDistance = snap.shortGestureMaxDistancePx(keyHypotenuse)
+
+                    vlog {
+                        "Short gesture check: distance=$distance " +
+                            "minDistance=$minDistance maxDistance=$maxDistance " +
+                            "(min=${snap.short_gesture_min_distance} max=${snap.short_gesture_max_distance} of $keyHypotenuse) " +
+                            "hasLeftKey=${ptr.hasLeftStartingKey}"
+                    }
+
+                    // The max boundary only separates short from long swipes; with short swipes
+                    // only there is no long swipe, so any length at or past the minimum counts.
+                    if (distance >= minDistance && (shortSwipesOnly || distance <= maxDistance)) {
+                        // Trigger short gesture - calculate direction (same as original repo)
+                        val a = atan2(dy, dx) + Math.PI
+                        // a is between 0 and 2pi, 0 is pointing to the left
+                        // add 12 to align 0 to the top
+                        val direction = ((a * 8 / Math.PI).toInt() + 12) % 16
+
+                        // Detailed logging for direction debugging
+                        val angleDeg = Math.toDegrees(a)
+                        val keyIndex = DIRECTION_TO_INDEX[direction]
+                        val posNames = arrayOf("c", "nw", "ne", "sw", "se", "w", "e", "n", "s")
+                        val posName = if (keyIndex in posNames.indices) posNames[keyIndex] else "?"
+
+                        vlog {
+                            String.format(
+                                java.util.Locale.ROOT,
+                                "SHORT_SWIPE: key=%s dx=%.1f dy=%.1f dist=%.1f angle=%.1f° dir=%d→idx=%d(%s)",
+                                ptr.key.keys[0], dx, dy, distance, angleDeg, direction, keyIndex, posName
+                            )
+                        }
+
+                        // CUSTOM MAPPING CHECK: Check user-defined mappings first
+                        // Convert 16-direction to 8-direction SwipeDirection
+                        val swipeDir = directionToSwipeDirection(direction)
+                        val keyCode = ptr.key.keys[0]?.getString() ?: ""
+                        val customMapping = _customSwipeManager.getMapping(keyCode, swipeDir)
+
+                        if (customMapping != null) {
+                            // Custom mappings work even with shift active - this is intentional
+                            executeCustomShortSwipe(ptr, customMapping)
+                            return
+                        }
+
+                        // WORD-CANDIDATE vs FUZZ RESOLUTION: getNearestKeyAtDirection scans
+                        // +/-1 of 16 directions so deliberate short swipes are forgiving of
+                        // angle. But default layouts populate CORNERS densely (ne=digits,
+                        // nw=symbols), so for a word-shaped gesture the fuzz almost always
+                        // finds *something*: a "we" swipe tilted <22.5 degrees up reached
+                        // ne="2", and a "the"-shaped gesture (end vector W) reached nw="%".
+                        // Resolution: a word candidate (recognizer saw >=2 keys + min path)
+                        // only accepts the EXACT-direction subkey (i=0). A deliberate corner
+                        // flick computes the corner's own direction and still hits exactly;
+                        // fuzz-only matches lose to the word fallback below. Non-candidates
+                        // (single-key flicks, non-char keys e.g. backspace nw=delete_last_word)
+                        // keep the full +/-1 forgiveness.
+                        val isWordCandidate = canSwipeType && _swipeRecognizer.promoteWordCandidacy()
+                        var gestureValue = if (isWordCandidate) {
+                            _handler.modifyKey(getKeyAtDirection(ptr.key, direction), ptr.modifiers)
+                        } else {
+                            // #171: the ±1 fuzz must consult the user's CUSTOM mapping at each
+                            // scanned bin BEFORE that bin's default subkey. The exact-bin custom
+                            // check above misses a flick whose angle noise lands one bin over
+                            // (e.g. a NW flick read as W/N), and the default-only fuzz then
+                            // resurrected the very default the user overrode — nondeterministic
+                            // "~ or !" decided by a few degrees. Nearest bin still wins overall.
+                            when (val resolved = resolveNearestShortSwipe(ptr, keyCode, direction)) {
+                                is ShortSwipeResolution.Custom -> {
+                                    executeCustomShortSwipe(ptr, resolved.mapping)
+                                    return
+                                }
+                                is ShortSwipeResolution.Default -> resolved.value
+                                null -> null
+                            }
+                        }
+
+                        vlog {
+                            String.format(
+                                java.util.Locale.ROOT,
+                                "SHORT_SWIPE_RESULT: dir=%d found=%s wordCandidate=%b",
+                                direction, gestureValue?.toString() ?: "null", isWordCandidate
+                            )
+                        }
+
+                        if (gestureValue != null) {
+                            emitSubkeyValue(ptr, gestureValue, snap)
+                            return
+                        } else {
+                            // No subkey accepted for the swipe direction (none assigned, or only a
+                            // +/-1-fuzzed corner match which word candidates reject above). Fall
+                            // back to a word swipe instead of dropping to a first-letter
+                            // tap. This rescues compact words (e.g. "we", tilted "we", "the"-shaped
+                            // gestures) swiped where no exact-direction sublabel exists. It cannot
+                            // reintroduce the overshoot bug: an overshoot toward an exactly-aimed
+                            // subkey takes the gestureValue != null branch above and emits the
+                            // subkey. The fallback is bounded to the sub-boundary short zone
+                            // because it lives inside distance <= maxDistance, and maxDistance is
+                            // computed from the same short_gesture_max_distance that gates
+                            // hasLeftStartingKey.
+                            if (isWordCandidate) {
+                                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "SHORT_GESTURE->WORD: no subkey in direction $direction, committing word swipe")
+                                endWordSwipe()
+                                clearLatched()
+                                _swipeRecognizer.reset()
+                                removePtr(ptr)
+                                return
+                            }
+                            // GH #147/#87: with short swipes only, a deliberate swipe toward an
+                            // empty direction of a key that HAS short swipes types nothing —
+                            // typing the starting key there is exactly the "long swipe becomes
+                            // a tap" complaint. A key with no short swipe at all keeps its tap,
+                            // so a sloppy press on Enter or Shift is not dropped.
+                            if (shortSwipesOnly && keyHasAnyShortSwipe(ptr, keyCode)) {
+                                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "SHORT_SWIPES_ONLY: no subkey near direction $direction, gesture ignored")
+                                _swipeRecognizer.reset()
+                                removePtr(ptr)
+                                _handler.onPointerFlagsChanged(null)
+                                return
+                            }
+                            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "SHORT_GESTURE FAILED: getNearestKeyAtDirection returned null for direction $direction")
+                        }
+                    } else {
+                        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "SHORT_GESTURE SKIP: distance $distance < minDistance $minDistance")
+                    }
+                } else {
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "SHORT_GESTURE BLOCKED: short_gestures_enabled=${snap.short_gestures_enabled} " +
+                        "hasLeftStartingKey=${ptr.hasLeftStartingKey} allowLeftKey=$allowLeftKey " +
+                        "distance=$distance")
+                }
+
+                // RETURN-TRIP WORD RESCUE: a word whose path returns near its start ("pop",
+                // "lol") ends with displacement below the short-swipe minimum, so it reaches
+                // this plain-tap fallthrough even though the recognizer saw a full word path.
+                // Rescue it as a word when the gesture is a word candidate, lasted longer
+                // than a tap, and the end displacement is small relative to the traced path.
+                // Straight gestures (taps, overshoots, flicks) have displacement ~= path and
+                // can never satisfy the ratio; fast grazes fail the duration check. This
+                // restores the pre-boundary-gate behavior for exactly this gesture class.
+                if (canSwipeType && _swipeRecognizer.promoteWordCandidacy() &&
+                    timeElapsed > snap.tap_duration_threshold &&
+                    distance < totalDistance / 2
+                ) {
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "RETURN_TRIP_WORD: disp=$distance path=$totalDistance time=${timeElapsed}ms -> word")
+                    endWordSwipe()
+                    clearLatched()
+                    _swipeRecognizer.reset()
+                    removePtr(ptr)
+                    return
+                }
+
+                // Regular TAP - output the key character only if it was deferred
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "TAP path: deferred=${ptr.hasFlagsAny(FLAG_P_DEFERRED_DOWN)}")
+                if (ptr.hasFlagsAny(FLAG_P_DEFERRED_DOWN)) {
+                    _handler.onPointerDown(ptr_value, false)
+                }
+                _swipeRecognizer.reset()
+            }
+        }
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "After gesture block, proceeding to latched logic")
+        // Log all current pointers to understand state
+        val latchedPtrs = _ptrs.filter { it.hasFlagsAny(FLAG_P_LATCHED) }
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "Current latched pointers: ${latchedPtrs.map { "${it.value}(flags=0x${it.flags.toString(16)})" }}")
+        // REMOVED: Legacy gesture.pointer_up() call - curved gestures obsolete
+        val latched = getLatched(ptr)
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "onTouchUp path: latched=$latched, ptr.flags=0x${ptr.flags.toString(16)}, isLatchable=${(ptr.flags and FLAG_P_LATCHABLE) != 0}")
+        if (latched != null) { // Already latched
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "Path: Already latched, latched.flags=0x${latched.flags.toString(16)}")
+            removePtr(ptr) // Remove duplicate
+            // Toggle lockable key, except if it's a fake pointer
+            if ((latched.flags and (FLAG_P_FAKE or FLAG_P_DOUBLE_TAP_LOCK)) == FLAG_P_DOUBLE_TAP_LOCK) {
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "Path: Locking pointer (double-tap)")
+                lockPointer(latched)
+            } else { // Otherwise, unlatch
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "Path: Unlatching")
+                removePtr(latched)
+                _handler.onPointerUp(ptr_value, ptr.modifiers)
+            }
+        } else if ((ptr.flags and FLAG_P_LATCHABLE) != 0) {
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "Path: Latchable key - will latch")
+            // Latchable but non-special keys must clear latched.
+            if ((ptr.flags and FLAG_P_CLEAR_LATCHED) != 0) {
+                clearLatched()
+            }
+            ptr.flags = ptr.flags or FLAG_P_LATCHED
+            ptr.pointerId = -1
+            _handler.onPointerFlagsChanged(null)
+        } else {
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "Regular key up: clearing latched, value=$ptr_value, ptrs_before=${_ptrs.size}")
+            clearLatched()
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "After clearLatched: ptrs_after=${_ptrs.size}")
+            removePtr(ptr)
+            _handler.onPointerUp(ptr_value, ptr.modifiers)
+        }
+    }
+
+    fun onTouchCancel() {
+        _handler.onSwipeCancel()
+        clear()
+        _handler.onPointerFlagsChanged(null)  // No haptic on cancel
+    }
+
+    /** Whether an other pointer is down on a non-special key. */
+    private fun isOtherPointerDown(): Boolean {
+        for (p in _ptrs) {
+            val value = p.value
+            if (!p.hasFlagsAny(FLAG_P_LATCHED) &&
+                (value == null || !value.hasFlagsAny(KeyValue.FLAG_SPECIAL))
+            ) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /**
+     * Whether [ptr]'s gesture may be a word swipe, given the key it STARTED on.
+     *
+     * - A letter start always may ([Pointer.startsOnLetter], [KeyLetter.startsWordSwipe]).
+     * - A non-letter CHARACTER start (space, digit, punctuation) is promoted only once the
+     *   finger has left that key by more than `short_gesture_max_distance`
+     *   ([Pointer.hasLeftStartingKey]) AND the recognizer has registered at least two letters
+     *   ([ImprovedSwipeGestureRecognizer.isSwipeTyping]): the user aimed at the first letter
+     *   and landed on its neighbour, so typing the space or digit instead of the word was the
+     *   wrong answer (typing audit, 2026-10-08). A short flick on that key stays its subkey.
+     * - Any other start never may: Backspace (the original "mb" bug), Shift and the other
+     *   modifiers, Enter, Tab — they keep their own short swipes and taps.
+     */
+    private fun mayBeWordSwipe(ptr: Pointer): Boolean {
+        if (ptr.startsOnLetter) return true
+        if (ptr.key.keys[0]?.getKind() != KeyValue.Kind.Char) return false
+        return ptr.hasLeftStartingKey && _swipeRecognizer.isSwipeTyping()
+    }
+
+    /** Count active (non-latched) pointers for swipe detection. */
+    private fun countActivePointers(): Int {
+        var count = 0
+        for (p in _ptrs) {
+            if (!p.hasFlagsAny(FLAG_P_LATCHED)) {
+                count++
+            }
+        }
+        return count
+    }
+
+    fun onTouchDown(x: Float, y: Float, pointerId: Int, key: KeyboardData.Key) {
+        // Ignore new presses while a sliding key is active. On some devices, ghost
+        // touch events can happen while the pointer travels on top of other keys.
+        if (isSliding()) {
+            return
+        }
+
+        // A second finger closes an open subkey popover, as mainstream keyboards do (audit
+        // 2026-10-08). Its pointer keeps FLAG_P_POPOVER_MODE with no state, so its moves select
+        // nothing and its release is inert (finishSubkeyPopover with no slot: nothing typed,
+        // no latch cleared). The new finger then behaves as a normal second pointer.
+        for (p in _ptrs) if (p.popover != null) closeSubkeyPopover(p)
+
+        // ARC-072 CAPTURE POINT. This is the one place a gesture reads the live config:
+        // every later decision for this pointer — here, in onTouchMove, in onTouchUp and in
+        // the long-press/repeat timers — reads this immutable copy, so a Config.refresh()
+        // that lands mid-gesture applies from the next pointer-down instead of rewriting
+        // the thresholds under a swipe already in progress. See the class KDoc for the
+        // multi-touch rule (each finger captures at its own down).
+        val snap = _config.snapshot
+        if (countActivePointers() > 0) _handler.onSwipeCancel()
+
+        // Initialize swipe recognizer if swipe typing OR short gestures enabled
+        // Short gestures (e.g. arrow key SW/NW for home/end) also need path tracking
+        // Use countActivePointers() == 0 instead of _ptrs.isEmpty() to handle latched Shift
+        if ((snap.swipe_typing_enabled || snap.short_gestures_enabled) &&
+            countActivePointers() == 0 && key != null) {
+            // v1.2.8: Capture shift state at swipe START for proper autocap after period
+            // This must happen BEFORE the swipe, when autocap shift is still active
+            val currentMods = getModifiers(isOtherPointerDown())
+            val shiftActive = currentMods.has(KeyValue.Modifier.SHIFT)
+            val shiftLocked = _handler.isShiftLocked()
+            _swipeRecognizer.startSwipe(x, y, key, shiftActive, shiftLocked)
+            _handler.onSwipeStart(x, y, key, snap, _swipeRecognizer)
+        }
+
+        // Don't take latched modifiers into account if an other key is pressed.
+        // The other key already "own" the latched modifiers and will clear them.
+        val mods = getModifiers(isOtherPointerDown())
+        val value = _handler.modifyKey(key.keys[0], mods)
+        val ptr = make_pointer(pointerId, key, value, x, y, mods, snap)
+        _ptrs.add(ptr)
+
+        // CRITICAL FIX: Detect if this might be the start of a swipe gesture
+        // Don't output character immediately, but DO start long press timer for key repeat
+        // This allows holding space/letters to repeat while still supporting swipe typing
+        // Use countActivePointers() instead of _ptrs.size to handle latched modifiers (Shift)
+        val firstKey = key?.keys?.get(0)
+        val mightBeSwipe = snap.swipe_typing_enabled && countActivePointers() == 1 &&
+            key != null && firstKey != null &&
+            firstKey.getKind() == KeyValue.Kind.Char
+
+        // Also check if this key has nav subkeys for potential TrackPoint mode
+        val hasNavSubkeys = snap.keyrepeat_enabled && hasNavigationSubkeys(ptr)
+
+        // Check if this is a backspace key for potential selection-delete mode
+        val isBackspace = snap.keyrepeat_enabled && isBackspaceKey(value)
+
+        if (mightBeSwipe || hasNavSubkeys || isBackspace) {
+            ptr.flags = ptr.flags or FLAG_P_DEFERRED_DOWN
+        }
+
+        // Start long press timer for key repeat - even for potential swipe keys
+        // The handleLongPress will check if swipe typing has been activated and skip repeat if so
+        // This allows holding space/letters to trigger key repeat when not moving
+        if (!(snap.swipe_typing_enabled && _swipeRecognizer.isSwipeTyping())) {
+            startLongPress(ptr)
+        }
+
+        // Don't output character immediately when swipe typing might start,
+        // when this key has nav subkeys (might enter TrackPoint mode),
+        // or when this is a backspace key (might enter selection-delete mode)
+        // The character/key will be output in onTouchUp if it turns out not to be a swipe/TrackPoint/selection
+        // OR in handleLongPress if key repeat triggers
+        if (!mightBeSwipe && !hasNavSubkeys && !isBackspace) {
+            _handler.onPointerDown(value, false)
+        }
+    }
+
+    /**
+     * Minimum displacement (px) for a short swipe on [key] under the gesture's captured
+     * [snap]. Resolves the key's actual diagonal through [_handler] and defers the
+     * threshold arithmetic to [ConfigSnapshot.shortGestureMinDistancePx], which is the
+     * single source of truth for every "did the finger move enough for a short swipe"
+     * pre-check — three call sites previously compared px displacement against the raw
+     * percent value (28 treated as 28px, ~half the intended threshold).
+     */
+    private fun shortGestureMinDistancePx(key: KeyboardData.Key, snap: ConfigSnapshot): Float =
+        snap.shortGestureMinDistancePx(_handler.getKeyHypotenuse(key))
+
+    /**
+     * [direction] is an int between [0] and [15] that represent 16 sections of a
+     * circle, clockwise, starting at the top.
+     */
+    private fun getKeyAtDirection(k: KeyboardData.Key, direction: Int): KeyValue? {
+        return k.keys[DIRECTION_TO_INDEX[direction]]
+    }
+
+    /**
+     * Get the key nearest to [direction] that is not key0. Take care
+     * of applying [_handler.modifyKey] to the selected key in the same
+     * operation to be sure to treat removed keys correctly.
+     * Return [null] if no key could be found in the given direction or
+     * if the selected key didn't change.
+     */
+    private fun getNearestKeyAtDirection(ptr: Pointer, direction: Int): KeyValue? {
+        // v1.2.2 FIX: Reduced from +/-3 to +/-1 (was scanning 43%, now 19% = ~67°)
+        // This prevents horizontal swipes from accidentally triggering diagonal subkeys
+        // when the exact direction doesn't have a key defined.
+        // With ±2, direction 4 (E) - 2 = direction 2 (NE), causing 'we' swipe to trigger '2'
+        // [i] is [0, -1, +1], scanning ~19% of the circle's area (3 directions = 67.5°)
+        var i = 0
+        while (i > -2) {  // Changed from -3 to -2 (±1 range)
+            val d = (direction + i + 16) % 16
+            // Don't make the difference between a key that doesn't exist and a key
+            // that is removed by [_handler]. Triggers side effects.
+            val k = _handler.modifyKey(getKeyAtDirection(ptr.key, d), ptr.modifiers)
+            if (k != null) {
+                // When the nearest key is a slider, it is only selected if it's placed
+                // within 18% of the original swipe direction.
+                // This reduces accidental swipes on the slider and allow typing circle
+                // gestures without being interrupted by the slider.
+                if (k.getKind() == KeyValue.Kind.Slider && abs(i) >= 2) {
+                    i = (i.inv() shr 31) - i
+                    continue
+                }
+                return k
+            }
+            i = (i.inv() shr 31) - i
+        }
+        return null
+    }
+
+    /**
+     * Whether [ptr]'s key has a short swipe in ANY direction: a layout subkey in one of the
+     * eight direction slots (after [IPointerEventHandler.modifyKey], so a subkey the handler
+     * removes does not count) or a user custom mapping for [keyCode]. Used only by the
+     * "short swipes only" mode (GH #147/#87) to decide between ignoring a swipe toward an
+     * empty direction and keeping the tap of a key that has no short swipes at all.
+     */
+    private fun keyHasAnyShortSwipe(ptr: Pointer, keyCode: String): Boolean {
+        for (i in 1 until ptr.key.keys.size) {
+            if (_handler.modifyKey(ptr.key.keys[i], ptr.modifiers) != null) return true
+        }
+        return keyCode.isNotEmpty() && _customSwipeManager.getMappingsForKey(keyCode).isNotEmpty()
+    }
+
+    /**
+     * Result of the fuzzed short-swipe resolution ([resolveNearestShortSwipe]): either a
+     * user-defined custom mapping or a layout default subkey, whichever is nearest.
+     */
+    private sealed interface ShortSwipeResolution {
+        class Custom(val mapping: ShortSwipeMapping) : ShortSwipeResolution
+        class Default(val value: KeyValue) : ShortSwipeResolution
+    }
+
+    /**
+     * Resolve a short swipe against BOTH sources with ONE scan (#171): at each of the
+     * fuzzed 16-bins — exact first, then ±1, the same forgiveness and order as
+     * [getNearestKeyAtDirection] — the user's custom mapping for that bin's
+     * [SwipeDirection] is consulted BEFORE the layout's default subkey. Consequences:
+     *  - a custom mapping always shadows the default occupying the same slot, even when
+     *    angle noise put the release vector one bin over (the #171 nondeterminism);
+     *  - an exact-bin default still beats a neighbor-bin custom mapping (nearest wins).
+     *
+     * Only used on the non-word-candidate path; word candidates keep their stricter
+     * exact-bin-only resolution (see the call site).
+     */
+    private fun resolveNearestShortSwipe(
+        ptr: Pointer,
+        keyCode: String,
+        direction: Int
+    ): ShortSwipeResolution? {
+        // Offset order 0, -1, +1 — identical to getNearestKeyAtDirection's scan.
+        var i = 0
+        while (i > -2) {
+            val d = (direction + i + 16) % 16
+            if (keyCode.isNotEmpty()) {
+                val m = _customSwipeManager.getMapping(keyCode, directionToSwipeDirection(d))
+                if (m != null) {
+                    return ShortSwipeResolution.Custom(m)
+                }
+            }
+            val k = _handler.modifyKey(getKeyAtDirection(ptr.key, d), ptr.modifiers)
+            if (k != null) {
+                // Slider distance guard kept in parity with getNearestKeyAtDirection —
+                // vacuous at ±1 (abs(i) <= 1) but preserved so the two scans cannot drift
+                // if the fuzz is ever widened.
+                if (!(k.getKind() == KeyValue.Kind.Slider && abs(i) >= 2)) {
+                    return ShortSwipeResolution.Default(k)
+                }
+            }
+            i = (i.inv() shr 31) - i
+        }
+        return null
+    }
+
+    /**
+     * Emit a matched custom short-swipe mapping and retire the gesture's pointer.
+     * Shared by the exact-bin custom check and [resolveNearestShortSwipe]'s fuzzed match.
+     */
+    private fun executeCustomShortSwipe(ptr: Pointer, mapping: ShortSwipeMapping) {
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+            Log.d(
+                "Pointers",
+                "CUSTOM_SHORT_SWIPE: Found custom mapping for " +
+                    "${mapping.keyCode}:${mapping.direction} -> ${mapping.actionType}:${mapping.actionValue}"
+            )
+        }
+        // Modifiers, dead keys, compose, timestamp/macro/slider keys only work when pressed
+        // through the key pipeline (CommandRouting): emit them like a layout subkey.
+        val pipelineValue = CommandRouting.keyPipelineValue(mapping)
+        if (pipelineValue != null) {
+            emitSubkeyValue(ptr, pipelineValue, ptr.snap)
+            return
+        }
+        // Delegate to handler for custom mapping execution
+        _handler.onCustomShortSwipe(mapping)
+        clearLatched()
+        _swipeRecognizer.reset()
+        removePtr(ptr)
+    }
+
+    fun onTouchMove(x: Float, y: Float, pointerId: Int) {
+        val ptr = getPtr(pointerId) ?: return
+
+        // Update last known position
+        ptr.lastX = x
+        ptr.lastY = y
+
+        vlog {
+            "onTouchMove: id=$pointerId pos=($x,$y) " +
+                "hasLeftKey=${ptr.hasLeftStartingKey} " +
+                "flags=${ptr.flags}"
+        }
+
+        // ARC-072: every decision below belongs to the gesture this pointer started, so it
+        // reads the snapshot captured at that pointer's down event, never the live config.
+        val snap = ptr.snap
+
+        if (ptr.hasFlagsAny(FLAG_P_SLIDING)) {
+            ptr.sliding?.onTouchMove(ptr, x, y)
+            return
+        }
+
+        // Skip normal gesture processing if already confirmed as swipe typing
+        if (ptr.hasFlagsAny(FLAG_P_SWIPE_TYPING)) {
+            _handler.onSwipeMove(x, y, _swipeRecognizer)
+            return
+        }
+
+        // Subkey popover: movement only moves the selection — no swipe path, slider or gesture.
+        if (ptr.hasFlagsAny(FLAG_P_POPOVER_MODE)) {
+            updateSubkeyPopover(ptr, x, y)
+            return
+        }
+
+        // Handle TrackPoint mode: joystick-style - position tracked, timer handles repeating
+        // Just update position, the handleTrackPointRepeat timer will use lastX/lastY
+        if (ptr.hasFlagsAny(FLAG_P_TRACKPOINT_MODE)) {
+            // Position already updated at start of onTouchMove (ptr.lastX/lastY)
+            // The joystick timer continuously checks finger distance from key center
+            return // Don't process other gesture logic in TrackPoint mode
+        }
+
+        // GH #190: follow-finger selection-delete — the selection is a function of where the
+        // finger is, so it is recomputed here on every move. The speed-by-distance mode keeps
+        // its historical path (its repeat timer reads lastX/lastY; the move falls through).
+        if (ptr.hasFlagsAny(FLAG_P_SELECTION_DELETE_MODE) && snap.selection_delete_follow_finger) {
+            updateFollowFingerSelection(ptr)
+            return
+        }
+
+        // Track if pointer has left the starting key (for short gesture detection on UP)
+        // Use short_gesture_max_distance to define the boundary (as % of key diagonal)
+        // Higher values = more lenient, allows swipes further from key center
+        if (ptr.key != null && !ptr.hasLeftStartingKey) {
+            val keyHypotenuse = _handler.getKeyHypotenuse(ptr.key)
+            val maxAllowedDistance = snap.shortGestureMaxDistancePx(keyHypotenuse)
+
+            // Calculate distance from key center
+            val keyCenterX = ptr.downX  // Approximation: touch down point is roughly key center
+            val keyCenterY = ptr.downY
+            val distanceFromStart = sqrt((x - keyCenterX) * (x - keyCenterX) + (y - keyCenterY) * (y - keyCenterY))
+
+            if (distanceFromStart > maxAllowedDistance) {
+                ptr.hasLeftStartingKey = true
+            }
+        }
+
+        // SUBKEY CHECK: Must happen BEFORE swipe typing path collection
+        // If user is swiping toward a slider or event key (e.g., cursor_left/right, switch_forward/backward),
+        // handle it immediately instead of entering swipe typing mode.
+        // The position in IME windows is clamped to view - adjust for edge swipes
+        var adjustedY = y
+        if (y == 0.0f) adjustedY = -400f
+        val dx = x - ptr.downX
+        val dy = adjustedY - ptr.downY
+        val dist = abs(dx) + abs(dy)
+
+        if (dist >= snap.swipe_dist_px && ptr.gesture == null) {
+            // Pointer moved significantly - check for special key activation FIRST
+            val a = atan2(dy, dx) + Math.PI
+            val direction = ((a * 8 / Math.PI).toInt() + 12) % 16
+
+            val subkeyValue = getNearestKeyAtDirection(ptr, direction)
+            if (subkeyValue != null) {
+                when (subkeyValue.getKind()) {
+                    KeyValue.Kind.Slider -> {
+                        // Slider key detected - enter sliding mode instead of swipe typing
+                        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "Slider detected at direction $direction, starting sliding mode")
+                        ptr.gesture = Gesture(direction, snap)
+                        ptr.value = subkeyValue
+                        ptr.flags = pointer_flags_of_kv(subkeyValue, snap)
+                        startSliding(ptr, x, adjustedY, dx, dy, subkeyValue)
+                        _handler.onPointerDown(subkeyValue, true)
+                        return
+                    }
+                    KeyValue.Kind.Event -> {
+                        // Event key detected (e.g., switch_forward, switch_backward)
+                        // Trigger immediately and prevent swipe typing from intercepting
+                        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "Event key detected at direction $direction: ${subkeyValue.getEvent()}")
+                        ptr.gesture = Gesture(direction, snap)
+                        ptr.value = subkeyValue
+                        ptr.flags = pointer_flags_of_kv(subkeyValue, snap)
+                        _handler.onPointerDown(subkeyValue, true)
+                        return
+                    }
+                    else -> {
+                        // Other key types (including Keyevent nav keys) - let short gesture handling in onTouchUp handle them
+                    }
+                }
+            }
+        }
+
+        // CRITICAL: For potential swipe typing, ALWAYS track path during movement
+        // Short gesture detection should only happen on touch UP, not during MOVE
+        // Also collect path for short gestures on non-Char keys (backspace, ctrl, etc.)
+        // Use countActivePointers() to handle latched modifiers (Shift) correctly
+        // NOTE: Keys with nav subkeys CAN have short gestures (e.g., SE for page_down)
+        // TrackPoint mode only activates on HOLD, not short swipe
+        val ptrValue = ptr.value
+        val activePointers = countActivePointers()
+        // Path collection follows the historical Char-key rule (space, digits and punctuation
+        // included): the recognizer must see a sloppy non-letter start's path for it to be
+        // promoted. The LATCH below applies the start-key rule (mayBeWordSwipe).
+        val isSwipeTypingKey = snap.swipe_typing_enabled && activePointers == 1 &&
+            ptrValue != null && ptrValue.getKind() == KeyValue.Kind.Char
+        val isShortGestureKey = snap.short_gestures_enabled && activePointers == 1 && ptrValue != null
+        val shouldCollectPath = isSwipeTypingKey || isShortGestureKey
+
+        vlog {
+            "Path collection check: " +
+                "swipeEnabled=${snap.swipe_typing_enabled} " +
+                "shortGesturesEnabled=${snap.short_gestures_enabled} " +
+                "ptrsSize=${_ptrs.size} " +
+                "hasValue=${ptrValue != null} " +
+                "isChar=${ptrValue != null && ptrValue.getKind() == KeyValue.Kind.Char} " +
+                "shouldCollect=$shouldCollectPath"
+        }
+
+        if (shouldCollectPath) {
+            // Track swipe movement for path collection
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "onTouchMove: collecting point ($x, $y) for potential swipe")
+            _handler.onSwipeMove(x, y, _swipeRecognizer)
+
+            // Check if this has become a confirmed multi-key swipe typing gesture.
+            // The recognizer's isSwipeTyping() only requires >=2 keys + swipe_min_distance
+            // of PATH, which a short directional swipe that merely overshoots into an
+            // adjacent letter can satisfy at ~half a key-width of displacement. Committing
+            // to a word there bypassed the short/long boundary entirely (the overshoot bug).
+            // Gate the commit on hasLeftStartingKey so Path A honors the SAME single
+            // displacement threshold (short_gesture_max_distance, % of key diagonal) that
+            // Path B's GestureClassifier uses. Sub-threshold overshoots fall through to the
+            // touch-up short-gesture decision instead of latching a word mid-gesture.
+            // swipe_typing_enabled must gate the latch too: the recognizer tracks paths
+            // whenever short gestures are enabled, so without this check a letters gesture
+            // could latch FLAG_P_SWIPE_TYPING with swipe typing OFF and then be excluded
+            // from BOTH the completion path (:163 requires the setting) and the touch-up
+            // gesture block (flag exclusion).
+            // isSwipeTypingKey + mayBeWordSwipe gate it on the START key (Seeker 2026-10-07): a
+            // short-gesture key such as Backspace also collects its path here, and the
+            // recognizer reports isSwipeTyping() once the finger has crossed two letters —
+            // without this check a swipe-left from Backspace over m/n/b typed "mb".
+            if (isSwipeTypingKey && !snap.short_swipes_only && _swipeRecognizer.isSwipeTyping() &&
+                ptr.hasLeftStartingKey && mayBeWordSwipe(ptr)
+            ) {
+                ptr.flags = ptr.flags or FLAG_P_SWIPE_TYPING
+                stopLongPress(ptr)
+            }
+
+            // Skip normal gesture processing while tracking potential swipe
+            return
+        }
+
+        // SIMPLIFIED: Legacy curved gesture system removed.
+        // Swipe-to-corner gestures now handled in onTouchUp for unified logic.
+        // Slider mode handled earlier (before swipe typing path collection).
+    }
+
+    // Pointers management
+
+    private fun getPtr(pointerId: Int): Pointer? {
+        for (p in _ptrs) {
+            if (p.pointerId == pointerId) {
+                return p
+            }
+        }
+        return null
+    }
+
+    private fun removePtr(ptr: Pointer) {
+        _ptrs.remove(ptr)
+    }
+
+    private fun getLatched(target: Pointer): Pointer? {
+        return getLatched(target.key, target.value)
+    }
+
+    private fun getLatched(k: KeyboardData.Key, v: KeyValue?): Pointer? {
+        if (v == null) {
+            return null
+        }
+        for (p in _ptrs) {
+            if (p.key == k && p.hasFlagsAny(FLAG_P_LATCHED) &&
+                p.value != null && p.value == v
+            ) {
+                return p
+            }
+        }
+        return null
+    }
+
+    /**
+     * Clears all latched (but not locked) modifier pointers.
+     * Called after swipe word insertion to clear shift state.
+     * Internal visibility allows Keyboard2View to expose it.
+     */
+    internal fun clearLatched() {
+        var clearedCount = 0
+        for (i in _ptrs.size - 1 downTo 0) {
+            val ptr = _ptrs[i]
+            // Latched and not locked, remove
+            if (ptr.hasFlagsAny(FLAG_P_LATCHED) && (ptr.flags and FLAG_P_LOCKED) == 0) {
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "clearLatched: removing latched key ${ptr.value} (flags=0x${ptr.flags.toString(16)})")
+                _ptrs.removeAt(i)
+                clearedCount++
+            } else if ((ptr.flags and FLAG_P_LATCHABLE) != 0) {
+                // Not latched but pressed, don't latch once released and stop long press.
+                ptr.flags = ptr.flags and FLAG_P_LATCHABLE.inv()
+            }
+        }
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "clearLatched: cleared $clearedCount pointers, remaining=${_ptrs.size}")
+        // Notify handler to update keyboard view when modifiers change
+        if (clearedCount > 0) {
+            _handler.onPointerFlagsChanged(null)
+        }
+    }
+
+    /** Make a pointer into the locked state. */
+    private fun lockPointer(ptr: Pointer, hapticEvent: HapticEvent? = null) {
+        ptr.flags = (ptr.flags and FLAG_P_DOUBLE_TAP_LOCK.inv()) or FLAG_P_LOCKED
+        _handler.onPointerFlagsChanged(hapticEvent)
+    }
+
+    internal fun isSliding(): Boolean {
+        for (ptr in _ptrs) {
+            if (ptr.hasFlagsAny(FLAG_P_SLIDING)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    // Key repeat
+
+    /** Message from [_longpress_handler]. */
+    override fun handleMessage(msg: Message): Boolean {
+        for (ptr in _ptrs) {
+            if (ptr.timeoutWhat == msg.what) {
+                handleLongPress(ptr)
+                return true
+            }
+            // Handle TrackPoint joystick repeat
+            if (ptr.trackpointWhat == msg.what) {
+                handleTrackPointRepeat(ptr)
+                return true
+            }
+            // Handle selection-delete repeat (Shift+Arrow for text selection)
+            if (ptr.selectionDeleteWhat == msg.what) {
+                handleSelectionDeleteRepeat(ptr)
+                return true
+            }
+            // Subkey popover: the finger rested on one assigned slot for the dwell time
+            val popover = ptr.popover
+            if (popover != null && popover.dwellWhat == msg.what) {
+                onSubkeyPopoverDwell(ptr, popover)
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun startLongPress(ptr: Pointer) {
+        val what = uniqueTimeoutWhat++
+        ptr.timeoutWhat = what
+        _longpress_handler.sendEmptyMessageDelayed(what, ptr.snap.longPressTimeout.toLong())
+    }
+
+    private fun stopLongPress(ptr: Pointer) {
+        _longpress_handler.removeMessages(ptr.timeoutWhat)
+    }
+
+    private fun restartLongPress(ptr: Pointer) {
+        stopLongPress(ptr)
+        startLongPress(ptr)
+    }
+
+    // TrackPoint joystick repeat handling
+
+    private fun startTrackPointRepeat(ptr: Pointer) {
+        val what = uniqueTimeoutWhat++
+        ptr.trackpointWhat = what
+        // Start with a short initial delay
+        _longpress_handler.sendEmptyMessageDelayed(what, TRACKPOINT_INITIAL_DELAY)
+    }
+
+    private fun stopTrackPointRepeat(ptr: Pointer) {
+        _longpress_handler.removeMessages(ptr.trackpointWhat)
+    }
+
+    // Selection-delete mode timing functions
+
+    private fun startSelectionDeleteRepeat(ptr: Pointer) {
+        val what = uniqueTimeoutWhat++
+        ptr.selectionDeleteWhat = what
+        // Use same initial delay as TrackPoint for consistency
+        _longpress_handler.sendEmptyMessageDelayed(what, TRACKPOINT_INITIAL_DELAY)
+    }
+
+    private fun stopSelectionDeleteRepeat(ptr: Pointer) {
+        _longpress_handler.removeMessages(ptr.selectionDeleteWhat)
+    }
+
+    /** Handle selection-delete repeat - send Shift+Arrow keys to extend selection.
+     *  Works like TrackPoint joystick: X and Y axes tracked independently.
+     *  Supports diagonal selection (both horizontal and vertical in same cycle).
+     *  Vertical movement has larger dead zone and slower speed (configurable).
+     */
+    private fun handleSelectionDeleteRepeat(ptr: Pointer) {
+        if (!ptr.hasFlagsAny(FLAG_P_SELECTION_DELETE_MODE)) {
+            return
+        }
+
+        // Calculate X and Y distances from activation center (like TrackPoint)
+        val dx = ptr.lastX - ptr.keyCenterX
+        val dy = ptr.lastY - ptr.keyCenterY
+        val absDx = abs(dx)
+        val absDy = abs(dy)
+
+        // Get key dimensions for thresholds
+        val keyHypotenuse = _handler.getKeyHypotenuse(ptr.key)
+        // Approximate key height from hypotenuse (typical keyboard keys are wider than tall)
+        val keyHeight = keyHypotenuse * 0.7f
+        val maxDistance = keyHypotenuse * 0.5f
+
+        // Vertical dead zone is configurable (% of key height)
+        val verticalDeadZone = keyHeight * (ptr.snap.selection_delete_vertical_threshold / 100.0f)
+
+        // Create modifiers with SHIFT for selection
+        val shiftMod = KeyValue.makeInternalModifier(KeyValue.Modifier.SHIFT)
+        val shiftedMods = ptr.modifiers.with_extra_mod(shiftMod)
+
+        // Track movement for delay calculation
+        var movedHorizontal = false
+        var movedVertical = false
+        var maxHorizNormalizedDist = 0f
+        var maxVertNormalizedDist = 0f
+
+        // Check horizontal movement (X axis) - select left/right
+        // Uses standard TrackPoint dead zone for responsive horizontal selection
+        if (absDx > TRACKPOINT_DEAD_ZONE) {
+            val arrowKeyCode = if (dx > 0) {
+                android.view.KeyEvent.KEYCODE_DPAD_RIGHT
+            } else {
+                android.view.KeyEvent.KEYCODE_DPAD_LEFT
+            }
+            // Symbol codes from KeyValue.kt: left=0xE008, right=0xE006
+            val symbolCode = if (dx > 0) 0xE006 else 0xE008
+            val arrowKey = KeyValue.keyeventKey(symbolCode, arrowKeyCode, 0)
+
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "SELECTION_DELETE: X axis Shift+${if (dx > 0) "Right" else "Left"}, dx=$dx")
+
+            _handler.onPointerDown(arrowKey, false)
+            _handler.onPointerUp(arrowKey, shiftedMods)
+            movedHorizontal = true
+            maxHorizNormalizedDist = min(absDx / maxDistance, 1.0f)
+        }
+
+        // Check vertical movement (Y axis) - select up/down (line-by-line)
+        // Uses larger configurable dead zone to prevent accidental line selection
+        if (absDy > verticalDeadZone) {
+            val arrowKeyCode = if (dy > 0) {
+                android.view.KeyEvent.KEYCODE_DPAD_DOWN
+            } else {
+                android.view.KeyEvent.KEYCODE_DPAD_UP
+            }
+            // Symbol codes from KeyValue.kt: up=0xE005, down=0xE007
+            val symbolCode = if (dy > 0) 0xE007 else 0xE005
+            val arrowKey = KeyValue.keyeventKey(symbolCode, arrowKeyCode, 0)
+
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "SELECTION_DELETE: Y axis Shift+${if (dy > 0) "Down" else "Up"}, dy=$dy (threshold=$verticalDeadZone)")
+
+            _handler.onPointerDown(arrowKey, false)
+            _handler.onPointerUp(arrowKey, shiftedMods)
+            movedVertical = true
+            maxVertNormalizedDist = min((absDy - verticalDeadZone) / (maxDistance - verticalDeadZone), 1.0f)
+        }
+
+        // Calculate repeat delay
+        // Horizontal: standard speed based on distance
+        // Vertical: slower speed using configurable multiplier
+        val repeatDelay = when {
+            movedHorizontal && movedVertical -> {
+                // Both axes moved - use faster of the two (horizontal dominates)
+                val horizDelay = TRACKPOINT_MAX_DELAY - (maxHorizNormalizedDist * (TRACKPOINT_MAX_DELAY - TRACKPOINT_MIN_DELAY))
+                val vertDelay = (TRACKPOINT_MAX_DELAY - (maxVertNormalizedDist * (TRACKPOINT_MAX_DELAY - TRACKPOINT_MIN_DELAY))) / ptr.snap.selection_delete_vertical_speed
+                minOf(horizDelay, vertDelay).toLong()
+            }
+            movedHorizontal -> {
+                // Horizontal only - standard speed
+                (TRACKPOINT_MAX_DELAY - (maxHorizNormalizedDist * (TRACKPOINT_MAX_DELAY - TRACKPOINT_MIN_DELAY))).toLong()
+            }
+            movedVertical -> {
+                // Vertical only - slower speed using multiplier (lower multiplier = slower)
+                ((TRACKPOINT_MAX_DELAY - (maxVertNormalizedDist * (TRACKPOINT_MAX_DELAY - TRACKPOINT_MIN_DELAY))) / ptr.snap.selection_delete_vertical_speed).toLong()
+            }
+            else -> {
+                // Finger is in dead zone - check again after a short delay
+                TRACKPOINT_MAX_DELAY
+            }
+        }
+
+        // Schedule next repeat
+        val what = uniqueTimeoutWhat++
+        ptr.selectionDeleteWhat = what
+        _longpress_handler.sendEmptyMessageDelayed(what, repeatDelay)
+    }
+
+    /**
+     * GH #190: follow-finger (position-proportional) selection for backspace swipe+hold.
+     *
+     * The selection's extent is a pure function of the finger's offset from the activation
+     * point ([Pointer.keyCenterX]/[Pointer.keyCenterY], set when selection mode began):
+     *  - horizontal: `trunc(dx / step)` characters, signed (right positive), where `step` is
+     *    [ConfigSnapshot.selection_delete_step_px];
+     *  - vertical: zero inside the vertical dead zone (the same
+     *    `selection_delete_vertical_threshold` % of key height the speed mode uses), then one
+     *    line as soon as the finger leaves it and one more per further key height.
+     *
+     * The pointer remembers how many Shift+arrow steps it has already sent on each axis, so
+     * only the difference to the new target is sent: moving further extends the selection,
+     * moving back sends the opposite Shift+arrow and shrinks it. Release is unchanged from
+     * the speed mode — [onTouchUp] sends one DEL, which deletes the selection.
+     */
+    private fun updateFollowFingerSelection(ptr: Pointer) {
+        val snap = ptr.snap
+        val keyHypotenuse = _handler.getKeyHypotenuse(ptr.key)
+        // Same key-height approximation as handleSelectionDeleteRepeat.
+        val keyHeight = keyHypotenuse * 0.7f
+        val verticalDeadZone = keyHeight * (snap.selection_delete_vertical_threshold / 100.0f)
+
+        val targetX = followFingerSteps(ptr.lastX - ptr.keyCenterX, snap.selection_delete_step_px)
+        val dy = ptr.lastY - ptr.keyCenterY
+        val targetY = followFingerLines(dy, verticalDeadZone, keyHeight)
+
+        val shiftedMods = ptr.modifiers.with_extra_mod(
+            KeyValue.makeInternalModifier(KeyValue.Modifier.SHIFT)
+        )
+        // Horizontal first: within one line the character steps are what the user watches.
+        ptr.selectionStepsX = sendSelectionSteps(
+            ptr.selectionStepsX, targetX, shiftedMods,
+            positive = SELECTION_ARROW_RIGHT, negative = SELECTION_ARROW_LEFT
+        )
+        ptr.selectionStepsY = sendSelectionSteps(
+            ptr.selectionStepsY, targetY, shiftedMods,
+            positive = SELECTION_ARROW_DOWN, negative = SELECTION_ARROW_UP
+        )
+    }
+
+    /**
+     * Send `target - current` Shift+arrow presses (the [positive] arrow when the difference is
+     * positive, [negative] otherwise) and return the new sent-step count, i.e. [target].
+     */
+    private fun sendSelectionSteps(
+        current: Int,
+        target: Int,
+        shiftedMods: Modifiers,
+        positive: KeyValue,
+        negative: KeyValue
+    ): Int {
+        val delta = target - current
+        if (delta == 0) return current
+        val arrow = if (delta > 0) positive else negative
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "SELECTION_DELETE follow-finger: ${abs(delta)}x ${arrow.getKeyevent()} ($current -> $target)")
+        repeat(abs(delta)) {
+            _handler.onPointerDown(arrow, false)
+            _handler.onPointerUp(arrow, shiftedMods)
+        }
+        return target
+    }
+
+    /** Handle TrackPoint joystick repeat - send nav keys based on X and Y distance from key center independently.
+     *  Supports diagonal movement: if finger is in NE, both up AND right keys fire.
+     *  Speed on each axis is proportional to distance on that axis.
+     */
+    private fun handleTrackPointRepeat(ptr: Pointer) {
+        if (!ptr.hasFlagsAny(FLAG_P_TRACKPOINT_MODE)) {
+            return
+        }
+
+        // Calculate X and Y distances from key center independently
+        val dx = ptr.lastX - ptr.keyCenterX
+        val dy = ptr.lastY - ptr.keyCenterY
+        val absDx = abs(dx)
+        val absDy = abs(dy)
+
+        // Get key size for normalization
+        val keyHypotenuse = _handler.getKeyHypotenuse(ptr.key)
+        val maxDistance = keyHypotenuse * 0.5f  // Half of diagonal is edge from center
+
+        // Track if any movement happened
+        var moved = false
+        var maxNormalizedDist = 0f
+
+        // Check horizontal movement (X axis)
+        if (absDx > TRACKPOINT_DEAD_ZONE) {
+            // Get left or right nav key from subkeys
+            val key = ptr.key
+            val horizKey = if (dx > 0) {
+                // Moving right - key[6] is East
+                _handler.modifyKey(key.keys[6], ptr.modifiers)
+            } else {
+                // Moving left - key[5] is West
+                _handler.modifyKey(key.keys[5], ptr.modifiers)
+            }
+
+            if (horizKey != null && isNavigationKey(horizKey)) {
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "TRACKPOINT: X move ${if (dx > 0) "right" else "left"}, dx=$dx")
+                _handler.onPointerDown(horizKey, false)
+                _handler.onPointerUp(horizKey, ptr.modifiers)
+                moved = true
+                maxNormalizedDist = maxOf(maxNormalizedDist, min(absDx / maxDistance, 1.0f))
+            }
+        }
+
+        // Check vertical movement (Y axis)
+        if (absDy > TRACKPOINT_DEAD_ZONE) {
+            // Get up or down nav key from subkeys
+            val key = ptr.key
+            val vertKey = if (dy > 0) {
+                // Moving down - key[8] is South
+                _handler.modifyKey(key.keys[8], ptr.modifiers)
+            } else {
+                // Moving up - key[7] is North
+                _handler.modifyKey(key.keys[7], ptr.modifiers)
+            }
+
+            if (vertKey != null && isNavigationKey(vertKey)) {
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "TRACKPOINT: Y move ${if (dy > 0) "down" else "up"}, dy=$dy")
+                _handler.onPointerDown(vertKey, false)
+                _handler.onPointerUp(vertKey, ptr.modifiers)
+                moved = true
+                maxNormalizedDist = maxOf(maxNormalizedDist, min(absDy / maxDistance, 1.0f))
+            }
+        }
+
+        // Calculate repeat delay based on maximum displacement on either axis
+        val repeatDelay = if (moved) {
+            // Delay ranges from TRACKPOINT_MAX_DELAY (at dead zone) to TRACKPOINT_MIN_DELAY (at edge)
+            (TRACKPOINT_MAX_DELAY - (maxNormalizedDist * (TRACKPOINT_MAX_DELAY - TRACKPOINT_MIN_DELAY))).toLong()
+        } else {
+            // Finger is in dead zone - check again after a short delay
+            TRACKPOINT_MAX_DELAY
+        }
+
+        // Schedule next repeat
+        val what = uniqueTimeoutWhat++
+        ptr.trackpointWhat = what
+        _longpress_handler.sendEmptyMessageDelayed(what, repeatDelay)
+    }
+
+    /** A pointer is long pressing. */
+    private fun handleLongPress(ptr: Pointer) {
+        // Skip if already in TrackPoint mode (movement handled in onTouchMove)
+        if (ptr.hasFlagsAny(FLAG_P_TRACKPOINT_MODE)) {
+            return
+        }
+
+        // Skip if pointer entered swipe typing mode (moved significantly)
+        if (ptr.hasFlagsAny(FLAG_P_SWIPE_TYPING)) {
+            return
+        }
+
+        // For deferred keys (potential swipes), check if user has moved beyond small threshold
+        val dx = ptr.lastX - ptr.downX
+        val dy = ptr.lastY - ptr.downY
+        val movementDist = kotlin.math.sqrt(dx * dx + dy * dy)
+
+        // The repeat/TrackPoint/selection decisions belong to the press that is already in
+        // flight, so they read the configuration captured when that press began.
+        val snap = ptr.snap
+
+        if (ptr.hasFlagsAny(FLAG_P_DEFERRED_DOWN)) {
+            val hasNavSubkeys = hasNavigationSubkeys(ptr)
+
+            // TrackPoint mode: If key has nav subkeys and long press fires, ALWAYS enter TrackPoint
+            // This allows: quick swipe+release = short gesture, hold past longPressTimeout = TrackPoint
+            // Movement doesn't prevent TrackPoint - user can move finger then hold to activate
+            if (snap.keyrepeat_enabled && hasNavSubkeys) {
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "TRACKPOINT: Entering TrackPoint mode for key with nav subkeys ${ptr.value}, movement=$movementDist")
+                ptr.flags = (ptr.flags and FLAG_P_DEFERRED_DOWN.inv()) or FLAG_P_TRACKPOINT_MODE
+                // Store CURRENT finger position as joystick center (not initial touch point)
+                // This allows user to move finger to comfortable position before TrackPoint activates
+                ptr.keyCenterX = ptr.lastX
+                ptr.keyCenterY = ptr.lastY
+                // Vibrate to indicate TrackPoint mode activation
+                _handler.onPointerFlagsChanged(HapticEvent.TRACKPOINT_ACTIVATE)
+                // Start joystick repeat timer - will continuously check finger position
+                startTrackPointRepeat(ptr)
+                return
+            }
+
+            // Selection-delete mode: For backspace, check if user did a short swipe + hold
+            // Short swipe + hold → selection mode (Shift+arrows)
+            // No movement + hold → normal key repeat
+            val isBackspace = isBackspaceKey(ptr.value)
+            if (snap.keyrepeat_enabled && isBackspace) {
+                // (short_gesture_min_distance is % of key diagonal — convert, don't compare raw)
+                if (movementDist >= shortGestureMinDistancePx(ptr.key, snap)) {
+                    // User did a short swipe then held - enter selection-delete mode
+                    // Determine direction based on horizontal movement (left/right selection)
+                    val direction = if (dx > 0) 1 else -1  // 1 = right, -1 = left
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "SELECTION_DELETE: Entering selection mode, direction=${if (direction > 0) "right" else "left"}, movement=$movementDist")
+                    ptr.flags = (ptr.flags and FLAG_P_DEFERRED_DOWN.inv()) or FLAG_P_SELECTION_DELETE_MODE
+                    ptr.selectionDirection = direction
+                    // Store current position as reference for speed calculation
+                    ptr.keyCenterX = ptr.lastX
+                    ptr.keyCenterY = ptr.lastY
+                    // Vibrate to indicate selection mode activation
+                    _handler.onPointerFlagsChanged(HapticEvent.TRACKPOINT_ACTIVATE)
+                    if (snap.selection_delete_follow_finger) {
+                        // GH #190: follow-finger mode has no timer — every MOVE recomputes the
+                        // selection from the finger's travel ([updateFollowFingerSelection]).
+                        ptr.selectionStepsX = 0
+                        ptr.selectionStepsY = 0
+                    } else {
+                        // Start selection repeat timer (speed-by-distance joystick)
+                        startSelectionDeleteRepeat(ptr)
+                    }
+                    return
+                }
+                // No significant movement - fall through to normal key repeat handling below
+            }
+
+            // For regular deferred keys (swipe typing), check movement threshold
+            if (movementDist > HOLD_STILLNESS_PX && !isBackspace) {
+                // User has moved - don't trigger key repeat, let swipe typing take over
+                // (Backspace is handled above - either selection mode or key repeat)
+                return
+            }
+        }
+
+        // GH #147/#87: with short swipes only, a finger that has travelled a short-swipe
+        // distance is a short swipe in progress, resolved at release — holding it must not
+        // lock, remap or key-repeat the starting key meanwhile.
+        if (snap.short_swipes_only && movementDist >= shortGestureMinDistancePx(ptr.key, snap)) {
+            return
+        }
+
+        // Hold-then-select subkey popover: replaces key repeat on the keys it applies to.
+        if (snap.subkey_popover_enabled && movementDist <= HOLD_STILLNESS_PX && tryOpenSubkeyPopover(ptr, snap)) {
+            return
+        }
+
+        // Long press toggle lock on modifiers
+        if ((ptr.flags and FLAG_P_LATCHABLE) != 0) {
+            if (!ptr.hasFlagsAny(FLAG_P_CANT_LOCK)) {
+                lockPointer(ptr, HapticEvent.LONG_PRESS)
+            }
+            return
+        }
+        // Latched key, no key
+        val value = ptr.value
+        if (ptr.hasFlagsAny(FLAG_P_LATCHED) || value == null) {
+            return
+        }
+        // Key is long-pressable
+        val kv = KeyModifier.modify_long_press(value)
+        if (kv != value) {
+            ptr.value = kv
+            _handler.onPointerDown(kv, true)
+            return
+        }
+        // Special keys
+        if (kv.hasFlagsAny(KeyValue.FLAG_SPECIAL)) {
+            return
+        }
+        // For every other keys, key-repeat
+        // #81: If keyrepeat_backspace_only is enabled, skip repeat for non-backspace/nav keys
+        val isBackspaceOrNav = isBackspaceKey(kv) || hasNavigationSubkeys(ptr)
+        if (snap.keyrepeat_enabled && (!snap.keyrepeat_backspace_only || isBackspaceOrNav)) {
+            // If this was a deferred down (potential swipe), output the initial character first
+            // This handles holding space/letters without moving - outputs initial char then repeats
+            if (ptr.hasFlagsAny(FLAG_P_DEFERRED_DOWN)) {
+                ptr.flags = ptr.flags and FLAG_P_DEFERRED_DOWN.inv()  // Clear deferred flag
+                _handler.onPointerDown(kv, false)  // Output initial character
+            }
+            _handler.onPointerHold(kv, ptr.modifiers)
+            _longpress_handler.sendEmptyMessageDelayed(
+                ptr.timeoutWhat,
+                snap.longPressInterval.toLong()
+            )
+        }
+    }
+
+    // Subkey popover (docs/specs/subkey-popover.md)
+
+    /**
+     * Whether holding [ptr]'s key may open the popover. Keys that already own the hold keep it:
+     * modifiers (latch/lock), backspace (repeat/selection), keys with navigation subkeys
+     * (TrackPoint), keys `modify_long_press` remaps (voice/IME switch), and anything that is not
+     * text (Char/String).
+     */
+    private fun isSubkeyPopoverKey(ptr: Pointer): Boolean {
+        val value = ptr.value ?: return false
+        if (ptr.hasFlagsAny(FLAG_P_LATCHABLE or FLAG_P_LATCHED)) return false
+        if (value.hasFlagsAny(KeyValue.FLAG_SPECIAL)) return false
+        if (value.getKind() != KeyValue.Kind.Char && value.getKind() != KeyValue.Kind.String) return false
+        if (value.getString().isBlank()) return false
+        if (isBackspaceKey(value) || hasNavigationSubkeys(ptr)) return false
+        return KeyModifier.modify_long_press(value) == value
+    }
+
+    /** Open the popover for [ptr] if it applies; false leaves the hold to the other behaviours. */
+    private fun tryOpenSubkeyPopover(ptr: Pointer, snap: ConfigSnapshot): Boolean {
+        // TalkBack / touch exploration: the popover is drawn only, with no accessibility nodes,
+        // so a blind user would get a silent hold that types nothing. Keep the old hold
+        // (key repeat) there (docs/specs/subkey-popover.md "Scope").
+        if (_handler.isTouchExplorationEnabled()) return false
+        if (!isSubkeyPopoverKey(ptr)) return false
+        val metrics = _handler.subkeyPopoverMetrics(ptr.key) ?: return false
+
+        val rawCode = ptr.key.keys[0]?.getString()?.lowercase() ?: ""
+        val keyCode = rawCode.takeIf { ShortSwipeCustomizationManager.isMappableKeyCode(it) }
+        val slots = SubkeyPopoverSlots.resolve(
+            defaultAt = { dir -> _handler.modifyKey(ptr.key.keys[dir.subLabelIndex], ptr.modifiers) },
+            customAt = { dir -> keyCode?.let { _customSwipeManager.getMapping(it, dir) } },
+        )
+        // A key with nothing to show and nothing assignable keeps its old hold (repeat).
+        if (keyCode == null && slots.all { it is PopoverSlot.Empty }) return false
+
+        val value = ptr.value ?: return false
+        val state = SubkeyPopoverState(
+            keyCode = keyCode,
+            keyLabel = value.getString(),
+            keyLabelUsesKeyFont = value.hasFlagsAny(KeyValue.FLAG_KEY_FONT),
+            slots = slots,
+            restX = ptr.lastX,
+            restY = ptr.lastY,
+            centreX = SubkeyPopoverGeometry.gridCentre(ptr.lastX, metrics.cellWidth, metrics.viewWidth),
+            centreY = SubkeyPopoverGeometry.gridCentre(ptr.lastY, metrics.cellHeight, metrics.viewHeight),
+            cellWidth = metrics.cellWidth,
+            cellHeight = metrics.cellHeight,
+            neutralWidthFraction = snap.subkey_popover_neutral_width / 100f,
+            neutralHeightFraction = snap.subkey_popover_neutral_height / 100f,
+            openedAt = SubkeyPopoverState.now(),
+        )
+        vlog { "SUBKEY_POPOVER: open key=${ptr.key.keys[0]} code=$keyCode slots=${slots.map { it::class.simpleName }}" }
+
+        // The press is now a popover: never a tap, swipe word, or repeat.
+        ptr.flags = (ptr.flags and FLAG_P_DEFERRED_DOWN.inv()) or FLAG_P_POPOVER_MODE
+        ptr.popover = state
+        if (snap.swipe_typing_enabled) _swipeRecognizer.reset()
+        _handler.onSubkeyPopoverShow(state)
+        _handler.onPointerFlagsChanged(HapticEvent.LONG_PRESS)
+        return true
+    }
+
+    private fun updateSubkeyPopover(ptr: Pointer, x: Float, y: Float) {
+        val state = ptr.popover ?: return
+        if (!state.track(x, y, SubkeyPopoverState.now())) return
+        _longpress_handler.removeMessages(state.dwellWhat)
+        state.dwellWhat = -1
+        val slot = state.slot(state.active)
+        if (slot != null && SubkeyPopoverSlots.isEditable(slot)) {
+            state.dwellWhat = uniqueTimeoutWhat++
+            _longpress_handler.sendEmptyMessageDelayed(state.dwellWhat, SubkeyPopoverState.DWELL_EDIT_MS)
+        }
+        _handler.onSubkeyPopoverUpdate(state)
+        // A light tick per slot change (the key-press haptic toggle governs it).
+        if (state.active != null) _handler.onPointerFlagsChanged(HapticEvent.KEY_PRESS)
+    }
+
+    /** The dwell timer fired on an assigned slot: close the popover and open its edit screen. */
+    private fun onSubkeyPopoverDwell(ptr: Pointer, state: SubkeyPopoverState) {
+        state.dwellWhat = -1
+        val slot = state.slot(state.active) ?: return
+        val keyCode = state.keyCode
+        // The finger is still down. The pointer KEEPS FLAG_P_POPOVER_MODE with no state, so its
+        // moves are ignored and its release lands in finishSubkeyPopover with no slot: nothing
+        // is typed, and the ordinary up path (short swipe, tap) never sees this press.
+        closeSubkeyPopover(ptr)
+        if (keyCode == null) return  // default subkey on a key that cannot carry mappings
+        _handler.onPointerFlagsChanged(HapticEvent.LONG_PRESS)
+        _handler.onSubkeyAssignRequested(assignRequest(keyCode, slot, SubkeyAssignRequest.Mode.EDIT))
+    }
+
+    /** Release in popover mode: emit, execute, or ask for an assignment — or nothing. */
+    private fun finishSubkeyPopover(ptr: Pointer, snap: ConfigSnapshot) {
+        val state = ptr.popover
+        closeSubkeyPopover(ptr)
+        val slot = state?.slot(state.active)
+        vlog { "SUBKEY_POPOVER: release slot=$slot" }
+        when (slot) {
+            null -> removePtr(ptr)  // neutral zone: nothing
+            is PopoverSlot.Default -> emitSubkeyValue(ptr, slot.value, snap)
+            is PopoverSlot.Custom -> executeCustomShortSwipe(ptr, slot.mapping)
+            is PopoverSlot.Empty -> {
+                removePtr(ptr)
+                val keyCode = state.keyCode ?: return
+                _handler.onSubkeyAssignRequested(assignRequest(keyCode, slot, SubkeyAssignRequest.Mode.ASSIGN))
+            }
+        }
+        _handler.onPointerFlagsChanged(null)
+    }
+
+    /** Hide the popover and stop its dwell timer. [FLAG_P_POPOVER_MODE] stays until release. */
+    private fun closeSubkeyPopover(ptr: Pointer) {
+        val state = ptr.popover ?: return
+        _longpress_handler.removeMessages(state.dwellWhat)
+        ptr.popover = null
+        _handler.onSubkeyPopoverDismiss()
+    }
+
+    private fun assignRequest(keyCode: String, slot: PopoverSlot, mode: SubkeyAssignRequest.Mode): SubkeyAssignRequest {
+        val label = SubkeyPopoverSlots.labelOf(slot)
+        return SubkeyAssignRequest(
+            keyCode = keyCode,
+            direction = slot.direction,
+            mode = mode,
+            hasDefault = when (slot) {
+                is PopoverSlot.Default -> true
+                is PopoverSlot.Custom -> slot.hidesDefault
+                is PopoverSlot.Empty -> slot.hiddenDefault
+            },
+            isCustom = slot is PopoverSlot.Custom,
+            currentLabel = label.text,
+            labelUsesKeyFont = label.useKeyFont,
+        )
+    }
+
+    /**
+     * Emit a subkey [value] chosen by a short swipe or the popover, then retire [ptr].
+     * Shift capitalises word sublabels (v1.32.927); latchable values (dead keys, modifiers)
+     * latch instead of typing (v1.1.88).
+     */
+    private fun emitSubkeyValue(ptr: Pointer, value: KeyValue, snap: ConfigSnapshot) {
+        var gestureValue = value
+        // v1.32.927: Apply shift capitalization to word sublabels
+        // If shift is active and sublabel is a word (letters/apostrophe only),
+        // capitalize the first character
+        val hasShift = ptr.modifiers.has(KeyValue.Modifier.SHIFT)
+        if (hasShift && gestureValue.getKind() == KeyValue.Kind.Char) {
+            val str = gestureValue.getString()
+            if (str.isNotEmpty() && str.all { it.isLetter() || it == '\'' }) {
+                // It's a word - capitalize first letter
+                val capitalized = str.replaceFirstChar { it.uppercaseChar() }
+                if (capitalized != str) {
+                    gestureValue = if (capitalized.length == 1) {
+                        KeyValue.makeCharKey(capitalized[0])
+                    } else {
+                        KeyValue.makeStringKey(capitalized)
+                    }
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "SHORT_GESTURE: Shift active, capitalized word '$str' -> '$capitalized'")
+                }
+            }
+        }
+
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "SHORT_GESTURE SUCCESS: triggering ${gestureValue}")
+
+        // v1.1.88: Handle latchable keys (modifiers/dead keys) correctly
+        // Dead keys like accent_aigu should LATCH, not output immediately
+        val gestureFlags = pointer_flags_of_kv(gestureValue, snap)
+        if ((gestureFlags and FLAG_P_LATCHABLE) != 0) {
+            // This is a latchable key (dead key/modifier) - create a latched pointer
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d("Pointers", "SHORT_GESTURE: Latchable key detected, creating latched pointer")
+            // Clear existing latched modifiers if this is a non-special latchable key
+            if ((gestureFlags and FLAG_P_CLEAR_LATCHED) != 0) {
+                clearLatched()
+            }
+            // Create a new latched pointer for this modifier
+            val latchedFlags = gestureFlags or FLAG_P_LATCHED
+            // Synthesised BY this gesture: it carries the same snapshot,
+            // so the flags above and the pointer that holds them agree.
+            val latchedPtr = Pointer(-1, ptr.key, gestureValue, ptr.downX, ptr.downY, Modifiers.EMPTY, latchedFlags, snap)
+            _ptrs.add(latchedPtr)
+            _handler.onPointerFlagsChanged(null)
+            _swipeRecognizer.reset()
+            removePtr(ptr)
+            return
+        }
+
+        // Non-latchable key - trigger normally
+        // Note: Navigation keys are handled during onTouchMove (hold-to-repeat mode)
+        _handler.onPointerDown(gestureValue, false)
+        _handler.onPointerUp(gestureValue, ptr.modifiers)
+        clearLatched() // Clear shift after gesture completes
+        _swipeRecognizer.reset()
+        removePtr(ptr)
+    }
+
+    // Sliding
+
+    /**
+     * When sliding is ongoing, key events are handled by the [Slider] class.
+     * [kv] must be of kind [Slider].
+     */
+    private fun startSliding(ptr: Pointer, x: Float, y: Float, dx: Float, dy: Float, kv: KeyValue) {
+        val r = kv.getSliderRepeat()
+        val dirx = if (dx < 0) -r else r
+        val diry = if (dy < 0) -r else r
+        stopLongPress(ptr)
+        ptr.flags = ptr.flags or FLAG_P_SLIDING
+        ptr.sliding = Sliding(x, y, dirx, diry, kv.getSlider(), ptr.snap)
+    }
+
+    /**
+     * Return the [FLAG_P_*] flags that correspond to pressing [kv] under the captured
+     * [snap]. Taking the snapshot as a parameter (rather than reading the live config)
+     * keeps a pointer's flags consistent with every other decision made for it.
+     */
+    internal fun pointer_flags_of_kv(kv: KeyValue, snap: ConfigSnapshot): Int {
+        var flags = 0
+        if (kv.hasFlagsAny(KeyValue.FLAG_LATCH)) {
+            // Non-special latchable key must clear modifiers and can't be locked
+            if (!kv.hasFlagsAny(KeyValue.FLAG_SPECIAL)) {
+                flags = flags or FLAG_P_CLEAR_LATCHED or FLAG_P_CANT_LOCK
+            }
+            flags = flags or FLAG_P_LATCHABLE
+        }
+        if (snap.double_tap_lock_shift &&
+            kv.hasFlagsAny(KeyValue.FLAG_DOUBLE_TAP_LOCK)
+        ) {
+            flags = flags or FLAG_P_DOUBLE_TAP_LOCK
+        }
+        return flags
+    }
+
+    /** Check if a KeyValue is a navigation key (arrow keys). */
+    private fun isNavigationKey(kv: KeyValue?): Boolean {
+        if (kv == null) return false
+        if (kv.getKind() != KeyValue.Kind.Keyevent) return false
+        return when (kv.getKeyevent()) {
+            android.view.KeyEvent.KEYCODE_DPAD_UP,
+            android.view.KeyEvent.KEYCODE_DPAD_DOWN,
+            android.view.KeyEvent.KEYCODE_DPAD_LEFT,
+            android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> true
+            else -> false
+        }
+    }
+
+    /** Check if a KeyValue is a backspace/delete key. */
+    private fun isBackspaceKey(kv: KeyValue?): Boolean {
+        if (kv == null) return false
+        if (kv.getKind() != KeyValue.Kind.Keyevent) return false
+        return kv.getKeyevent() == android.view.KeyEvent.KEYCODE_DEL
+    }
+
+    /** Check if the pressed key is a navigation key (for TrackPoint mode). */
+    private fun isNavKeyPressed(ptr: Pointer): Boolean {
+        // Check if the primary key value is a navigation key
+        return isNavigationKey(ptr.value)
+    }
+
+    /**
+     * Check if the pressed key HAS navigation subkeys (arrow keys in positions 5-8).
+     * This is used for TrackPoint mode - the key itself might be "compose" or other,
+     * but if it has arrow subkeys, TrackPoint mode can be activated.
+     * Subkey positions: 5=left(W), 6=right(E), 7=up(N), 8=down(S)
+     */
+    private fun hasNavigationSubkeys(ptr: Pointer): Boolean {
+        val key = ptr.key ?: return false
+        // Check subkeys at positions 5, 6, 7, 8 for navigation keys
+        return isNavigationKey(key.keys[5]) ||  // West (left)
+               isNavigationKey(key.keys[6]) ||  // East (right)
+               isNavigationKey(key.keys[7]) ||  // North (up)
+               isNavigationKey(key.keys[8])     // South (down)
+    }
+
+    /** Get any navigation key in the given direction - check subkeys first, then nearby keys. */
+    private fun getNavKeyForDirection(ptr: Pointer, direction: Int): KeyValue? {
+        // First check if there's a nav subkey in this direction
+        val subkey = getNearestKeyAtDirection(ptr, direction)
+        if (subkey != null && isNavigationKey(subkey)) {
+            return subkey
+        }
+        // Map direction to a standard nav key if the pressed key itself is nav
+        if (isNavigationKey(ptr.value)) {
+            // Return the appropriate nav key based on direction
+            // Directions: 0=N, 4=E, 8=S, 12=W
+            // Uses symbol codes from KeyValue.kt: up=0xE005, right=0xE006, down=0xE007, left=0xE008
+            return when {
+                direction in 14..15 || direction in 0..2 ->
+                    KeyValue.keyeventKey(0xE005, android.view.KeyEvent.KEYCODE_DPAD_UP, 0)  // N region
+                direction in 2..6 ->
+                    KeyValue.keyeventKey(0xE006, android.view.KeyEvent.KEYCODE_DPAD_RIGHT, 0)  // E region
+                direction in 6..10 ->
+                    KeyValue.keyeventKey(0xE007, android.view.KeyEvent.KEYCODE_DPAD_DOWN, 0)  // S region
+                direction in 10..14 ->
+                    KeyValue.keyeventKey(0xE008, android.view.KeyEvent.KEYCODE_DPAD_LEFT, 0)  // W region
+                else -> null
+            }
+        }
+        return null
+    }
+
+    // Gestures
+    // REMOVED: apply_gesture() and modify_key_with_extra_modifier()
+    // These methods supported curved gestures (Roundtrip, Circle, Anticircle)
+    // which are now obsolete with the new swipe typing system.
+
+    // Pointers
+
+    private fun make_pointer(
+        p: Int,
+        k: KeyboardData.Key,
+        v: KeyValue?,
+        x: Float,
+        y: Float,
+        m: Modifiers,
+        snap: ConfigSnapshot
+    ): Pointer {
+        val flags = if (v == null) 0 else pointer_flags_of_kv(v, snap)
+        return Pointer(p, k, v, x, y, m, flags, snap)
+    }
+
+    internal class Pointer(
+        /** -1 when latched. */
+        var pointerId: Int,
+        /** The Key pressed by this Pointer */
+        val key: KeyboardData.Key,
+        /** Selected value with [modifiers] applied. */
+        var value: KeyValue?,
+        var downX: Float,
+        var downY: Float,
+        /** Modifier flags at the time the key was pressed. */
+        val modifiers: Modifiers,
+        /** See [FLAG_P_*] flags. */
+        var flags: Int,
+        /**
+         * The configuration this pointer was created under (ARC-072). Immutable and never
+         * re-read from `Config`, so every decision from this pointer's down to its up sees
+         * one coherent configuration even if `Config.refresh()` runs in between.
+         */
+        val snap: ConfigSnapshot
+    ) {
+        /** Last known X position. */
+        var lastX: Float = downX
+        /** Last known Y position. */
+        var lastY: Float = downY
+
+        /** Gesture state, see [Gesture]. [null] means the pointer has not moved out of the center region. */
+        var gesture: Gesture? = null
+
+        /** Time when touch began (for gesture classification). */
+        val downTime: Long = System.currentTimeMillis()
+
+        /** Identify timeout messages. */
+        var timeoutWhat: Int = -1
+
+        /** Identify TrackPoint repeat messages. */
+        var trackpointWhat: Int = -1
+
+        /** Key center X for TrackPoint joystick reference. */
+        var keyCenterX: Float = downX
+
+        /** Key center Y for TrackPoint joystick reference. */
+        var keyCenterY: Float = downY
+
+        /** Selection direction for selection-delete mode: -1 = left, 1 = right, 0 = undetermined. */
+        var selectionDirection: Int = 0
+
+        /** Timeout identifier for selection-delete repeat messages. */
+        var selectionDeleteWhat: Int = -1
+
+        /**
+         * GH #190 follow-finger mode: net Shift+Right (positive) / Shift+Left (negative) presses
+         * sent so far, i.e. the horizontal selection extent the editor currently holds.
+         */
+        var selectionStepsX: Int = 0
+
+        /** GH #190 follow-finger mode: net Shift+Down (positive) / Shift+Up (negative) presses. */
+        var selectionStepsY: Int = 0
+
+        /** [null] when not in sliding mode. */
+        var sliding: Sliding? = null
+
+        /** Track if swipe has ever left the starting key's bounds (for short gesture detection). */
+        var hasLeftStartingKey: Boolean = false
+
+        /**
+         * [KeyLetter.startsWordSwipe] for [key], resolved once at touch-down: the move path
+         * consults it on every MOVE, and the predicate allocates (string + case fold).
+         */
+        @JvmField val startsOnLetter: Boolean = KeyLetter.startsWordSwipe(key)
+
+        /**
+         * The open subkey popover. Null with [FLAG_P_POPOVER_MODE] still set after the dwell
+         * opened the edit screen: the press is spent and its release does nothing.
+         */
+        var popover: SubkeyPopoverState? = null
+
+        fun hasFlagsAny(has: Int): Boolean {
+            return (flags and has) != 0
+        }
+    }
+
+    inner class Sliding(
+        x: Float,
+        y: Float,
+        /** Direction of the initial movement, positive if sliding to the right and
+         * negative if sliding to the left. */
+        val direction_x: Int,
+        val direction_y: Int,
+        /** The property which is being slided. */
+        val slider: KeyValue.Slider,
+        /** The owning pointer's captured configuration — a slide is one gesture. */
+        val snap: ConfigSnapshot
+    ) {
+        /** Accumulated distance since last event. */
+        var d = 0f
+
+        /** The slider speed changes depending on the pointer speed. */
+        var speed = 1.0f  // Start at full speed for responsive cursor movement
+
+        /** Coordinate of the last move. */
+        var last_x = x
+        var last_y = y
+
+        /**
+         * [System.currentTimeMillis()] at the time of the last move. Equals to
+         * [-1] when the sliding hasn't started yet.
+         */
+        var last_move_ms: Long = -1
+
+        internal fun onTouchMove(ptr: Pointer, x: Float, y: Float) {
+            // Start sliding after minimal travel distance for responsive cursor control.
+            // Using just slide_step_px (not swipe_dist_px + slide_step_px) makes it
+            // much easier to initiate cursor movement.
+            val travelled = abs(x - last_x) + abs(y - last_y)
+            if (last_move_ms == -1L) {
+                if (travelled < snap.slide_step_px) {
+                    return
+                }
+                last_move_ms = System.currentTimeMillis()
+            }
+            d += ((x - last_x) * speed * direction_x +
+                (y - last_y) * speed * SLIDING_SPEED_VERTICAL_MULT * direction_y) /
+                snap.slide_step_px
+            update_speed(travelled, x, y)
+            // Send an event when [abs(d)] exceeds [1].
+            val d_ = d.toInt()
+            if (d_ != 0) {
+                d -= d_
+                _handler.onPointerHold(KeyValue.sliderKey(slider, d_), ptr.modifiers)
+            }
+        }
+
+        /**
+         * Handle a sliding pointer going up. Latched modifiers are not
+         * cleared to allow easy adjustments to the cursors. The pointer is
+         * cancelled.
+         */
+        internal fun onTouchUp(ptr: Pointer) {
+            removePtr(ptr)
+            _handler.onPointerFlagsChanged(null)
+        }
+
+        /**
+         * [speed] is computed from the elapsed time and distance traveled
+         * between two move events. Exponential smoothing is used to smooth out
+         * the noise. Sets [last_move_ms] and [last_pos].
+         */
+        private fun update_speed(travelled: Float, x: Float, y: Float) {
+            val now = System.currentTimeMillis()
+            val instant_speed = min(snap.slider_speed_max, travelled / (now - last_move_ms) + 1f)
+            speed = speed + (instant_speed - speed) * snap.slider_speed_smoothing
+            last_move_ms = now
+            last_x = x
+            last_y = y
+        }
+    }
+
+    /**
+     * Represent modifiers currently activated.
+     * Sorted in the order they should be evaluated.
+     */
+    class Modifiers private constructor(
+        private val _mods: Array<KeyValue?>,
+        private val _size: Int
+    ) {
+        operator fun get(i: Int): KeyValue? = _mods[_size - 1 - i]
+        fun size(): Int = _size
+
+        fun has(m: KeyValue.Modifier): Boolean {
+            for (i in 0 until _size) {
+                val kv = _mods[i]
+                when (kv?.getKind()) {
+                    KeyValue.Kind.Modifier -> {
+                        if (kv.getModifier() == m) {
+                            return true
+                        }
+                    }
+                    else -> {}
+                }
+            }
+            return false
+        }
+
+        /** Return a copy of this object with an extra modifier added. */
+        fun with_extra_mod(m: KeyValue): Modifiers {
+            val newmods = _mods.copyOf(_size + 1)
+            newmods[_size] = m
+            return ofArray(newmods, newmods.size)
+        }
+
+        /** Returns the activated modifiers that are not in [m2]. */
+        fun diff(m2: Modifiers): Iterator<KeyValue> {
+            return ModifiersDiffIterator(this, m2)
+        }
+
+        override fun hashCode(): Int = _mods.contentHashCode()
+
+        override fun equals(other: Any?): Boolean {
+            if (other !is Modifiers) return false
+            return _mods.contentEquals(other._mods)
+        }
+
+        companion object {
+            @JvmField
+            val EMPTY = Modifiers(emptyArray(), 0)
+
+            @JvmStatic
+            fun ofArray(mods: Array<KeyValue?>, size: Int): Modifiers {
+                var actualSize = size
+                // Sort and remove duplicates and nulls.
+                if (actualSize > 1) {
+                    mods.sortWith(nullsLast(naturalOrder()), 0, actualSize)
+                    var j = 0
+                    for (i in 0 until actualSize) {
+                        val m = mods[i]
+                        if (m != null && (i + 1 >= actualSize || m != mods[i + 1])) {
+                            mods[j] = m
+                            j++
+                        }
+                    }
+                    actualSize = j
+                }
+                return Modifiers(mods, actualSize)
+            }
+        }
+
+        /** Returns modifiers that are in [m1_] but not in [m2_]. */
+        private class ModifiersDiffIterator(
+            private val m1: Modifiers,
+            private val m2: Modifiers
+        ) : Iterator<KeyValue> {
+            private var i1 = 0
+            private var i2 = 0
+
+            init {
+                advance()
+            }
+
+            override fun hasNext(): Boolean {
+                return i1 < m1._size
+            }
+
+            override fun next(): KeyValue {
+                if (i1 >= m1._size) {
+                    throw NoSuchElementException()
+                }
+                val m = m1._mods[i1]!!
+                i1++
+                advance()
+                return m
+            }
+
+            /**
+             * Advance to the next element if [i1] is not a valid element. The end
+             * is reached when [i1 = m1.size()].
+             */
+            private fun advance() {
+                while (i1 < m1.size()) {
+                    val m = m1._mods[i1]!!
+                    while (true) {
+                        if (i2 >= m2._size) {
+                            return
+                        }
+                        val d = m.compareTo(m2._mods[i2]!!)
+                        if (d < 0) {
+                            return
+                        }
+                        i2++
+                        if (d == 0) {
+                            break
+                        }
+                    }
+                    i1++
+                }
+            }
+        }
+    }
+
+    interface IPointerEventHandler {
+        /** Key can be modified or removed by returning [null]. */
+        fun modifyKey(k: KeyValue?, mods: Modifiers): KeyValue?
+
+        /**
+         * A key is pressed. [getModifiers()] is uptodate. Might be called after a
+         * press or a swipe to a different value. Down events are not paired with
+         * up events.
+         */
+        fun onPointerDown(k: KeyValue?, isSwipe: Boolean)
+
+        /**
+         * Key is released. [k] is the key that was returned by
+         * [modifySelectedKey] or [modifySelectedKey].
+         */
+        fun onPointerUp(k: KeyValue?, mods: Modifiers)
+
+        /** Flags changed because latched or locked keys or cancelled pointers.
+         *  @param hapticEvent The haptic event to trigger, or null for no haptic feedback. */
+        fun onPointerFlagsChanged(hapticEvent: HapticEvent?)
+
+        /** Key is repeating. */
+        fun onPointerHold(k: KeyValue, mods: Modifiers)
+
+        fun onSwipeStart(x: Float, y: Float, key: KeyboardData.Key, snapshot: ConfigSnapshot, recognizer: ImprovedSwipeGestureRecognizer) {}
+        fun onSwipeCancel() {}
+
+        /** Track swipe movement for swipe typing. */
+        fun onSwipeMove(x: Float, y: Float, recognizer: ImprovedSwipeGestureRecognizer)
+
+        /** Swipe typing gesture completed. */
+        fun onSwipeEnd(recognizer: ImprovedSwipeGestureRecognizer)
+
+        /** v1.2.8: Check if shift is currently locked (caps lock mode) */
+        fun isShiftLocked(): Boolean
+
+        /** Check if a point is within a key's bounding box. */
+        fun isPointWithinKey(x: Float, y: Float, key: KeyboardData.Key): Boolean
+
+        /** Check if point is within key bounds with tolerance (as fraction of key size) */
+        fun isPointWithinKeyWithTolerance(
+            x: Float,
+            y: Float,
+            key: KeyboardData.Key,
+            tolerance: Float
+        ): Boolean
+
+        /** Get the hypotenuse (diagonal length) of a key in pixels. */
+        fun getKeyHypotenuse(key: KeyboardData.Key): Float
+
+        /** Get the width of a key in pixels. */
+        fun getKeyWidth(key: KeyboardData.Key): Float
+
+        /** Execute a custom short swipe mapping defined by the user. */
+        fun onCustomShortSwipe(mapping: ShortSwipeMapping)
+
+        // ---- Subkey popover (docs/specs/subkey-popover.md). Defaults keep test fakes and any
+        // host without a popover surface working: no metrics = the popover never opens. ----
+
+        /** Cell and view sizes for a popover on [key], or null when it cannot be shown. */
+        fun subkeyPopoverMetrics(key: KeyboardData.Key): SubkeyPopoverMetrics? = null
+
+        /** A popover opened; draw [state] until [onSubkeyPopoverDismiss]. */
+        fun onSubkeyPopoverShow(state: SubkeyPopoverState) {}
+
+        /** The popover's selection changed; redraw. */
+        fun onSubkeyPopoverUpdate(state: SubkeyPopoverState) {}
+
+        /** The popover closed. */
+        fun onSubkeyPopoverDismiss() {}
+
+        /** Open the assign or edit screen for a popover slot. */
+        fun onSubkeyAssignRequested(request: SubkeyAssignRequest) {}
+
+        /**
+         * Whether an accessibility service explores by touch (TalkBack). The popover has no
+         * accessibility surface, so it never opens then. Default false for test fakes.
+         */
+        fun isTouchExplorationEnabled(): Boolean = false
+    }
+
+    companion object {
+        const val FLAG_P_LATCHABLE = 1
+        const val FLAG_P_LATCHED = 1 shl 1
+        const val FLAG_P_FAKE = 1 shl 2
+        const val FLAG_P_DOUBLE_TAP_LOCK = 1 shl 3
+        const val FLAG_P_LOCKED = 1 shl 4
+        const val FLAG_P_SLIDING = 1 shl 5
+
+        /** Clear latched (only if also FLAG_P_LATCHABLE set). */
+        const val FLAG_P_CLEAR_LATCHED = 1 shl 6
+
+        /** Can't be locked, even when long pressing. */
+        const val FLAG_P_CANT_LOCK = 1 shl 7
+
+        /** Pointer is part of a swipe typing gesture. */
+        const val FLAG_P_SWIPE_TYPING = 1 shl 8
+
+        /** Key down event was deferred (waiting for gesture classification). */
+        const val FLAG_P_DEFERRED_DOWN = 1 shl 9
+
+        /** TrackPoint mode - hold on key with nav subkeys, then move finger to move cursor. */
+        const val FLAG_P_TRACKPOINT_MODE = 1 shl 10
+
+        /** Selection-delete mode - short swipe + hold on backspace to select text, delete on release. */
+        const val FLAG_P_SELECTION_DELETE_MODE = 1 shl 11
+
+        /** Hold-then-select subkey popover is open for this pointer (docs/specs/subkey-popover.md). */
+        const val FLAG_P_POPOVER_MODE = 1 shl 12
+
+        /** Movement (px) past which a hold is a swipe, not a hold — shared by repeat and popover. */
+        private const val HOLD_STILLNESS_PX = 15f
+
+        /** Minimum movement (px) to trigger nav event in TrackPoint mode. */
+        const val TRACKPOINT_MOVEMENT_THRESHOLD = 15f
+
+        /** Dead zone radius (px) for TrackPoint joystick - no movement if finger within this distance. */
+        const val TRACKPOINT_DEAD_ZONE = 15f
+
+        /** Initial delay (ms) before first TrackPoint repeat. */
+        const val TRACKPOINT_INITIAL_DELAY = 50L
+
+        /** Minimum repeat delay (ms) when finger at edge of key (fastest movement). */
+        const val TRACKPOINT_MIN_DELAY = 30L
+
+        /** Maximum repeat delay (ms) when finger just outside dead zone (slowest movement). */
+        const val TRACKPOINT_MAX_DELAY = 200L
+
+        // GH #190: Shift+arrow keys used by follow-finger selection (symbol codes from KeyValue.kt,
+        // identical to the ones handleSelectionDeleteRepeat builds per repeat).
+        private val SELECTION_ARROW_LEFT = KeyValue.keyeventKey(0xE008, android.view.KeyEvent.KEYCODE_DPAD_LEFT, 0)
+        private val SELECTION_ARROW_RIGHT = KeyValue.keyeventKey(0xE006, android.view.KeyEvent.KEYCODE_DPAD_RIGHT, 0)
+        private val SELECTION_ARROW_UP = KeyValue.keyeventKey(0xE005, android.view.KeyEvent.KEYCODE_DPAD_UP, 0)
+        private val SELECTION_ARROW_DOWN = KeyValue.keyeventKey(0xE007, android.view.KeyEvent.KEYCODE_DPAD_DOWN, 0)
+
+        /**
+         * GH #190: characters selected for a horizontal finger offset [dx] at [stepPx] per
+         * character. Truncates toward zero, so the selection is symmetric about the activation
+         * point and any return to within one step of it selects nothing. A non-positive or
+         * non-finite step selects nothing rather than dividing by it.
+         */
+        @JvmStatic
+        fun followFingerSteps(dx: Float, stepPx: Float): Int {
+            if (!(stepPx > 0f) || !dx.isFinite()) return 0
+            return (dx / stepPx).toInt()
+        }
+
+        /**
+         * GH #190: lines selected for a vertical finger offset [dy]: 0 within [deadZonePx],
+         * then 1 on leaving it plus one per further [linePx]. Signed like [dy] (down positive).
+         */
+        @JvmStatic
+        fun followFingerLines(dy: Float, deadZonePx: Float, linePx: Float): Int {
+            val absDy = abs(dy)
+            if (!dy.isFinite() || absDy <= deadZonePx || !(linePx > 0f)) return 0
+            val lines = 1 + ((absDy - deadZonePx) / linePx).toInt()
+            return if (dy > 0) lines else -lines
+        }
+
+        private var uniqueTimeoutWhat = 0
+
+        // Maps 16 directions (0-15) to 9 key positions (c=0, nw=1, ne=2, sw=3, se=4, w=5, e=6, n=7, s=8)
+        // Direction wheel: 0=N, 4=E, 8=S, 12=W (each step is 22.5°)
+        // v1.2.2 FIX: Restored dir 4 to E (was SE, causing horizontal swipes to trigger NE subkey)
+        @JvmField
+        val DIRECTION_TO_INDEX = intArrayOf(
+            7, 2, 2, 6, 6, 4, 4, 8, 8, 3, 3, 5, 5, 1, 1, 7
+        //  n ne ne  e  e se se  s  s sw sw  w  w nw nw  n
+        //  0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15
+        )
+
+        // ARC-072: slider_speed_smoothing / slider_speed_max used to be read here straight
+        // off the global on every move event. They now travel with the sliding pointer's
+        // captured ConfigSnapshot (see Sliding.snap), so a settings change cannot alter a
+        // slide's acceleration curve halfway through it.
+        const val SLIDING_SPEED_VERTICAL_MULT = 0.5f
+
+        /**
+         * Maps 16-direction index to 8-direction SwipeDirection.
+         * The 16-direction system divides circle into 22.5° slices starting from top (N).
+         * Direction 0 = top/north, direction 4 = right/east, etc.
+         */
+        @JvmField
+        // v1.2.2 FIX: Aligned with DIRECTION_TO_INDEX - dir 4 is E not SE
+        val DIRECTION_TO_SWIPE_DIRECTION = arrayOf(
+            SwipeDirection.N,   // 0 - top
+            SwipeDirection.NE,  // 1 - top-right (upper)
+            SwipeDirection.NE,  // 2 - top-right (lower)
+            SwipeDirection.E,   // 3 - right (upper)
+            SwipeDirection.E,   // 4 - right (lower) - was SE, now E for consistency
+            SwipeDirection.SE,  // 5 - bottom-right (upper)
+            SwipeDirection.SE,  // 6 - bottom-right (lower)
+            SwipeDirection.S,   // 7 - bottom (right)
+            SwipeDirection.S,   // 8 - bottom (left)
+            SwipeDirection.SW,  // 9 - bottom-left (upper)
+            SwipeDirection.SW,  // 10 - bottom-left (lower)
+            SwipeDirection.W,   // 11 - left (lower)
+            SwipeDirection.W,   // 12 - left (upper)
+            SwipeDirection.NW,  // 13 - top-left (lower)
+            SwipeDirection.NW,  // 14 - top-left (upper)
+            SwipeDirection.N    // 15 - top (left side)
+        )
+
+        /**
+         * Convert 16-direction to SwipeDirection enum.
+         */
+        @JvmStatic
+        fun directionToSwipeDirection(direction: Int): SwipeDirection {
+            return DIRECTION_TO_SWIPE_DIRECTION[direction and 0x0F]
+        }
+    }
+}

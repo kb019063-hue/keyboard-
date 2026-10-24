@@ -1,0 +1,188 @@
+# Boot a real Android emulator, install the keyboard, and prove it works.
+#
+# This is the "test it before I test it on my phone" gate. It produces screenshots and framework
+# dumps as evidence, so a green run means somebody has actually SEEN the keyboard render and
+# commit text -- not merely that it compiled.
+#
+# ── Why the diagnostics step exists ──────────────────────────────────────────────────────────
+# The first attempt failed with "Timeout waiting for emulator to boot" after burning the whole
+# 900 s allowance, even though the `Enable KVM` step passed (so /dev/kvm exists). A KVM-accelerated
+# API 34 image boots in 1-3 minutes, so a 15-minute timeout points at the emulator having silently
+# fallen back to software emulation -- the device node can exist while the KVM ioctls still fail,
+# and `-accel off` produces a boot that never completes rather than an error.
+#
+# CI logs cannot be read from the dev sandbox (they are served from
+# results-receiver.actions.githubusercontent.com, which is outside its allowed hosts; only
+# api.github.com annotations get through). So the runner has to report for itself: the diagnostics
+# step writes /dev/kvm permissions, group membership, CPU virtualisation flags and the verdict of
+# `emulator -accel-check` into artifacts/ BEFORE the emulator launches. That file is uploaded even
+# when the boot times out, which is the only way to see the cause from here.
+#
+# Mitigations applied in this revision:
+#   * `sudo chmod 777 /dev/kvm` alongside the udev rule -- belt and braces, because the rule only
+#     helps if udev actually re-triggers the node.
+#   * `target: default` (AOSP) instead of `google_apis`: a materially smaller system image, so less
+#     download and a faster boot. Nothing in this app needs Play Services.
+#   * boot timeout 900 -> 1800 s, job timeout 60 -> 90 min, and cores/ram raised so the guest is
+#     not starved on a 4 vCPU / 16 GB runner.
+#
+# The build runs BEFORE the emulator launches so Gradle and the guest do not compete for vCPUs.
+# No AVD snapshot cache yet -- cold boot costs minutes per run. Worth adding once boot is reliable.
+
+name: Emulator smoke test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - arena/23fde500-keyboard
+      - main
+    # A docs-only change cannot alter an APK, and each push costs a ~6 min build plus a ~9 min
+    # emulator run. workflow_dispatch still always runs, so nothing becomes unbuildable silently.
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      # The offline harness runs section 7d against a fake adb on a laptop; CI never invokes it, so
+      # a change there cannot alter an APK or a smoke verdict.
+      - 'scripts/ci/offline/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: emulator-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    # Pinned, not latest: runs 39753071748 and 39755499504 both wedged with the emulator's own
+    # Quickstep launcher ANRing twenty-one times while seven earlier smokes on the 24.04-era image
+    # were green. The ubuntu-latest label began migrating to Ubuntu 26 on 2026-10-19, mid-history
+    # for this workflow, and a KVM/emulator regression in the new image is the one variable that
+    # changed without any change of ours. Pinning keeps the gate on the image that provably boots
+    # and runs this emulator; revisit once ubuntu-26's virtualisation stack is known good.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # x86_64 split specifically: the emulator is x86_64 and cannot load the ARM splits.
+      - name: Build debug APKs
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Confirm an x86_64 APK exists
+        run: |
+          find build/outputs/apk/debug -name '*.apk' -printf '%p  %s bytes\n'
+          test -n "$(find build/outputs/apk/debug -name '*x86_64*.apk' | head -1)"
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          # The udev rule only takes effect if the node is actually re-triggered; this is the
+          # fallback that works unconditionally.
+          sudo chmod 777 /dev/kvm || echo "chmod /dev/kvm failed (device may not exist)"
+
+      # Writes evidence that survives an emulator-boot timeout. Must run before the emulator step.
+      - name: Acceleration diagnostics (survives boot failure)
+        run: |
+          mkdir -p artifacts
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          {
+            echo "=== date / runner ==="
+            date -u; nproc; free -h; lsb_release -a 2>/dev/null || cat /etc/os-release
+            echo; echo "=== /dev/kvm ==="
+            ls -l /dev/kvm 2>&1
+            echo; echo "=== identity and groups ==="
+            id
+            echo; echo "=== CPU virtualisation flags (vmx=Intel, svm=AMD) ==="
+            grep -oE 'vmx|svm' /proc/cpuinfo | sort | uniq -c || echo "  NONE -- no nested virtualisation"
+            echo; echo "=== ANDROID_HOME ==="
+            echo "ANDROID_HOME=${ANDROID_HOME:-unset}  ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-unset}"
+            SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+            ls -d "$SDK"/* 2>&1 | head
+            echo; echo "=== emulator -accel-check (the decisive verdict) ==="
+            "$SDK/emulator/emulator" -accel-check 2>&1 || echo "  accel-check exited $?"
+            echo; echo "=== installed system images ==="
+            "$SDK/cmdline-tools/latest/bin/sdkmanager" --list_installed 2>/dev/null | head -20 || true
+          } | tee artifacts/00-diagnostics.txt
+          # Annotations are the ONLY CI output the dev sandbox can read -- logs come from
+          # results-receiver.actions.githubusercontent.com and artifacts from
+          # *.blob.core.windows.net, both outside its allowlist. GitHub stores ~20 per check run
+          # and silently drops the rest, so this step emits ONE consolidated line rather than four.
+          # `emulator -accel-check` is deliberately NOT here: the emulator binary does not exist
+          # yet at this point, which is why it reported "No such file or directory" on every run so
+          # far. It lives in scripts/ci/pre-emulator-diag.sh, which the action runs after it has
+          # provisioned the SDK.
+          VIRT=$(grep -oE 'vmx|svm' /proc/cpuinfo | sort -u | tr '\n' ' ')
+          DIAG="diag: runner=$(nproc)vCPU/$(free -h | awk '/^Mem:/{print $2}') ubuntu$(. /etc/os-release && echo "$VERSION_ID") virt='${VIRT:-NONE}' /dev/kvm=$(stat -c '%A %U:%G' /dev/kvm 2>&1) ANDROID_HOME=$SDK emulator_present=$([ -x "$SDK/emulator/emulator" ] && echo yes || echo no)"
+          if [ -n "$VIRT" ]; then
+            # stdout only: the healthy-path diagnostics were consuming the annotation budget that
+            # the smoke test's own PASS/FAIL results need (see pre-emulator-diag.sh).
+            echo "  ---- $DIAG"
+          else
+            echo "::error::$DIAG -- NO vmx/svm: nested virtualisation unavailable, the emulator cannot be accelerated"
+          fi
+
+      # API 34 matches compileSdk. `default` = AOSP image: smaller and faster to boot than
+      # google_apis, and this app uses no Play Services.
+      # disable-spellchecker avoids the framework spell-checker popup, a known source of flakiness
+      # when asserting on text fields.
+      - name: Run smoke test on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: default
+          # A real device profile matters: without one the action creates a 320x640 AVD, and
+          # LauncherActivity stacks three SetupCards above its test field
+          # (activities/LauncherActivity.kt ~470-505), so the OutlinedTextField falls below the
+          # fold and never reaches the a11y tree. Run 39588742284 failed on exactly that.
+          profile: pixel_7
+          # Sized to the actual runner. Diagnostics reported 2 vCPU / 7.7 GB, not the 4 vCPU /
+          # 16 GB assumed earlier -- cores: 4 with ram-size: 4096M oversubscribes a 2 vCPU host.
+          cores: 2
+          ram-size: 2048M
+          disable-animations: true
+          disable-spellchecker: true
+          emulator-boot-timeout: 1800
+          # Fires after SDK provisioning but before launch -- the only point where the emulator
+          # binary exists, so the only place `accel-check` can give a real verdict.
+          pre-emulator-launch-script: bash scripts/ci/pre-emulator-diag.sh
+          script: bash scripts/ci/emulator-smoke.sh
+
+      # Artifact CONTENTS are unreadable from the dev sandbox (*.blob.core.windows.net is outside
+      # its allowlist) but artifact NAMES are readable from api.github.com. Annotations turned out
+      # to be both capped -- run 39608945187 kept 12 notices and dropped everything after section 5
+      # -- and occasionally lost entirely, when run 39610690353 stored zero despite every step
+      # succeeding. So the verdict travels in the artifact name as well, which is the one channel
+      # that has never failed.
+      - name: Derive artifact name from the smoke summary
+        if: always()
+        run: |
+          S=$(tr -cd 'A-Za-z0-9._=-' < artifacts/summary.txt 2>/dev/null | cut -c1-90)
+          [ -n "$S" ] || S="no-summary"
+          echo "SMOKE_NAME=smoke-run-${{ github.run_number }}-$S" >> "$GITHUB_ENV"
+          echo "  ---- artifact will be named: smoke-run-${{ github.run_number }}-$S"
+
+      - name: Upload evidence (diagnostics, screenshots, dumps, logcat)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.SMOKE_NAME }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30

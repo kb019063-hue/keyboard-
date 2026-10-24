@@ -1,0 +1,339 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- IMPORTANT: this dialog is inflated by ClipboardManager.showFilterDialog with a
+     ContextThemeWrapper(imeService, android.R.style.Theme_DeviceDefault_Dialog) — a FRAMEWORK
+     theme with no AppCompat attrs. Toggles here MUST be framework <Switch>, not SwitchCompat:
+     without appcompat's ?attr/switchStyle, SwitchCompat falls back to showText=true with null
+     textOn/textOff and crashes at first measure (StaticLayout NPE in makeLayout(null) — seen
+     as an IME-process FATAL when the filter button is pressed), and its thumb/track drawables
+     resolve to null (invisible switch). Framework Switch is fully styled by Theme.DeviceDefault. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+  <!-- Scrollable filter sections -->
+  <ScrollView
+      android:layout_width="match_parent"
+      android:layout_height="0dp"
+      android:layout_weight="1"
+      android:fillViewport="true">
+
+    <LinearLayout
+        android:orientation="vertical"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="16dp">
+
+      <!-- Size uses presets so the IME never needs to type into its own dialog fields. -->
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+          android:text="@string/clipboard_filter_size" android:textStyle="bold"
+          android:textSize="16sp" android:textColor="?android:attr/textColorPrimary"/>
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+          android:text="@string/clipboard_filter_size_hint" android:textSize="12sp"
+          android:textColor="?android:attr/textColorSecondary" android:layout_marginBottom="8dp"/>
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+          android:text="@string/clipboard_filter_size_min" android:textColor="?android:attr/textColorPrimary"/>
+      <!-- spinnerMode="dialog": no dropdown popup or touch-forwarding listener. In dropdown
+           mode a long press / press-and-drag opened a FOCUSABLE popup window, the host app hid
+           the keyboard and this dialog was torn down (2026-10-07). ImeDialogSpinner also forces
+           the mode in code and bypasses touch forwarding; keep this attribute regardless. -->
+      <tribixbite.cleverkeys.ImeDialogSpinner android:id="@+id/clipboard_size_min" android:layout_width="match_parent"
+          android:spinnerMode="dialog"
+          android:layout_height="48dp" android:contentDescription="@string/clipboard_filter_size_min"/>
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+          android:text="@string/clipboard_filter_size_max" android:textColor="?android:attr/textColorPrimary"/>
+      <tribixbite.cleverkeys.ImeDialogSpinner android:id="@+id/clipboard_size_max" android:layout_width="match_parent"
+          android:spinnerMode="dialog"
+          android:layout_height="48dp" android:contentDescription="@string/clipboard_filter_size_max"/>
+      <TextView android:id="@+id/clipboard_size_error" android:layout_width="match_parent"
+          android:layout_height="wrap_content" android:text="@string/clipboard_filter_size_invalid"
+          android:textColor="?android:attr/textColorPrimary" android:visibility="gone"/>
+
+      <!-- ═══ Private-only Section (#156 — available on ALL tabs) ═══ -->
+      <LinearLayout
+          android:orientation="horizontal"
+          android:layout_width="match_parent"
+          android:layout_height="wrap_content"
+          android:layout_marginBottom="4dp"
+          android:gravity="center_vertical">
+        <TextView
+            android:text="@string/clipboard_filter_private_only"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textSize="16sp"
+            android:textColor="?android:attr/textColorPrimary"/>
+        <Switch
+            android:id="@+id/filter_private_only"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="false"
+            tools:ignore="UseSwitchCompatOrMaterialXml"/>
+      </LinearLayout>
+      <TextView
+          android:text="@string/clipboard_filter_private_only_hint"
+          android:layout_width="match_parent"
+          android:layout_height="wrap_content"
+          android:textSize="12sp"
+          android:textColor="?android:attr/textColorSecondary"
+          android:layout_marginBottom="16dp"/>
+
+      <!-- Divider below the private-only section -->
+      <View
+          android:layout_width="match_parent"
+          android:layout_height="1dp"
+          android:layout_marginBottom="16dp"
+          android:background="?android:attr/listDivider"/>
+
+      <!-- ═══ Date Section (existing, unchanged) ═══ -->
+
+      <!-- Date Filter Enabled Toggle -->
+      <LinearLayout
+          android:orientation="horizontal"
+          android:layout_width="match_parent"
+          android:layout_height="wrap_content"
+          android:layout_marginBottom="16dp"
+          android:gravity="center_vertical">
+        <TextView
+            android:text="@string/clipboard_filter_date_enable"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textSize="16sp"
+            android:textColor="?android:attr/textColorPrimary"/>
+        <Switch
+            android:id="@+id/date_filter_enabled"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="false"
+            tools:ignore="UseSwitchCompatOrMaterialXml"/>
+      </LinearLayout>
+
+      <!-- Before/After Toggle -->
+      <LinearLayout
+          android:id="@+id/date_filter_mode_container"
+          android:orientation="horizontal"
+          android:layout_width="match_parent"
+          android:layout_height="wrap_content"
+          android:layout_marginBottom="16dp"
+          android:gravity="center_vertical">
+        <TextView
+            android:text="@string/clipboard_filter_show_entries"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="16sp"
+            android:textColor="?android:attr/textColorPrimary"
+            android:layout_marginEnd="8dp"/>
+        <RadioGroup
+            android:id="@+id/date_filter_mode"
+            android:orientation="horizontal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content">
+          <RadioButton
+              android:id="@+id/date_filter_before"
+              android:text="@string/clipboard_filter_before"
+              android:layout_width="wrap_content"
+              android:layout_height="wrap_content"
+              android:textColor="?android:attr/textColorPrimary"
+              android:layout_marginEnd="8dp"/>
+          <RadioButton
+              android:id="@+id/date_filter_after"
+              android:text="@string/clipboard_filter_after"
+              android:layout_width="wrap_content"
+              android:layout_height="wrap_content"
+              android:textColor="?android:attr/textColorPrimary"
+              android:checked="true"/>
+        </RadioGroup>
+      </LinearLayout>
+
+      <!-- Date Picker -->
+      <LinearLayout
+          android:id="@+id/date_picker_container"
+          android:orientation="vertical"
+          android:layout_width="match_parent"
+          android:layout_height="wrap_content">
+        <TextView
+            android:text="@string/clipboard_filter_select_date"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="16sp"
+            android:textColor="?android:attr/textColorPrimary"
+            android:layout_marginBottom="8dp"/>
+        <DatePicker
+            android:id="@+id/date_picker"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:calendarViewShown="false"
+            android:datePickerMode="spinner"
+            android:theme="@android:style/Theme.DeviceDefault.Dialog"/>
+      </LinearLayout>
+
+      <!-- ═══ Divider (hidden on HISTORY tab) ═══ -->
+      <View
+          android:id="@+id/filter_divider_status"
+          android:layout_width="match_parent"
+          android:layout_height="1dp"
+          android:layout_marginTop="16dp"
+          android:layout_marginBottom="16dp"
+          android:background="?android:attr/listDivider"
+          android:visibility="gone"/>
+
+      <!-- ═══ Status Section (TODOS tab only) ═══ -->
+      <LinearLayout
+          android:id="@+id/filter_status_section"
+          android:orientation="vertical"
+          android:layout_width="match_parent"
+          android:layout_height="wrap_content"
+          android:visibility="gone">
+
+        <TextView
+            android:text="@string/clipboard_filter_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="?android:attr/textColorPrimary"
+            android:layout_marginBottom="8dp"/>
+
+        <CheckBox
+            android:id="@+id/filter_status_active"
+            android:text="@string/clipboard_filter_status_active"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="?android:attr/textColorPrimary"
+            android:checked="true"/>
+
+        <CheckBox
+            android:id="@+id/filter_status_planned"
+            android:text="@string/clipboard_filter_status_planned"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="?android:attr/textColorPrimary"
+            android:checked="false"/>
+
+        <CheckBox
+            android:id="@+id/filter_status_completed"
+            android:text="@string/clipboard_filter_status_completed"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="?android:attr/textColorPrimary"
+            android:checked="false"/>
+
+        <!-- Warning when all unchecked -->
+        <TextView
+            android:id="@+id/filter_status_hint"
+            android:text="@string/clipboard_filter_status_hint"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="12sp"
+            android:textColor="#FFFF5252"
+            android:layout_marginTop="4dp"
+            android:visibility="gone"/>
+      </LinearLayout>
+
+      <!-- ═══ Divider (hidden on HISTORY tab) ═══ -->
+      <View
+          android:id="@+id/filter_divider_tags"
+          android:layout_width="match_parent"
+          android:layout_height="1dp"
+          android:layout_marginTop="16dp"
+          android:layout_marginBottom="16dp"
+          android:background="?android:attr/listDivider"
+          android:visibility="gone"/>
+
+      <!-- ═══ Tags Section (PINNED + TODOS tabs) ═══ -->
+      <LinearLayout
+          android:id="@+id/filter_tags_section"
+          android:orientation="vertical"
+          android:layout_width="match_parent"
+          android:layout_height="wrap_content"
+          android:visibility="gone">
+
+        <!-- Tags header -->
+        <TextView
+            android:text="@string/clipboard_filter_tags"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="?android:attr/textColorPrimary"
+            android:layout_marginBottom="12dp"/>
+
+        <!-- Match mode toggle — plain Switch, label updated dynamically -->
+        <LinearLayout
+            android:orientation="horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:gravity="center_vertical">
+          <TextView
+              android:id="@+id/filter_tags_match_label"
+              tools:text="Match: Any"
+              android:layout_width="0dp"
+              android:layout_height="wrap_content"
+              android:layout_weight="1"
+              android:textSize="14sp"
+              android:textColor="?android:attr/textColorPrimary"/>
+          <Switch
+              android:id="@+id/filter_tags_match_all"
+              android:layout_width="wrap_content"
+              android:layout_height="wrap_content"
+              android:checked="false"
+              tools:ignore="UseSwitchCompatOrMaterialXml"/>
+        </LinearLayout>
+
+        <!-- Tag checkboxes container (populated programmatically) -->
+        <LinearLayout
+            android:id="@+id/filter_tags_container"
+            android:orientation="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"/>
+
+        <!-- Hint when no tags exist yet -->
+        <TextView
+            android:id="@+id/filter_tags_empty_hint"
+            android:text="@string/clipboard_filter_no_tags"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="13sp"
+            android:textColor="?android:attr/textColorSecondary"
+            android:fontFamily="sans-serif-light"
+            android:visibility="gone"/>
+      </LinearLayout>
+
+    </LinearLayout>
+  </ScrollView>
+
+  <!-- ═══ Fixed bottom action buttons ═══ -->
+  <LinearLayout
+      android:orientation="horizontal"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:paddingLeft="16dp"
+      android:paddingRight="16dp"
+      android:paddingBottom="8dp"
+      android:gravity="end">
+    <Button
+        android:id="@+id/date_filter_cancel"
+        android:text="@android:string/cancel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginEnd="8dp"
+        style="?android:attr/buttonBarButtonStyle"/>
+    <Button
+        android:id="@+id/date_filter_clear"
+        android:text="@string/clipboard_filter_clear"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginEnd="8dp"
+        style="?android:attr/buttonBarButtonStyle"/>
+    <Button
+        android:id="@+id/date_filter_apply"
+        android:text="@string/clipboard_filter_apply"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        style="?android:attr/buttonBarButtonStyle"/>
+  </LinearLayout>
+
+</LinearLayout>

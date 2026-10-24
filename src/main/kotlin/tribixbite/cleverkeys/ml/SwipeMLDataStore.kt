@@ -1,0 +1,735 @@
+package tribixbite.cleverkeys.ml
+
+import android.annotation.SuppressLint
+import android.content.ContentValues
+import android.content.Context
+import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteOpenHelper
+import android.util.Log
+import tribixbite.cleverkeys.BuildConfig
+import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
+import java.io.OutputStream
+import java.io.OutputStreamWriter
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.concurrent.Executors
+
+/**
+ * Persistent storage manager for ML swipe data.
+ * Uses SQLite for efficient storage and querying, with JSON export capability.
+ */
+class SwipeMLDataStore private constructor(context: Context) :
+    SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
+
+    private val _context: Context = context
+    private val _executor = Executors.newSingleThreadExecutor()
+
+    override fun onCreate(db: SQLiteDatabase) {
+        // Create main data table
+        val createTable = """CREATE TABLE $TABLE_SWIPES (
+            $COL_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+            $COL_TRACE_ID TEXT UNIQUE NOT NULL,
+            $COL_TARGET_WORD TEXT NOT NULL,
+            $COL_TIMESTAMP INTEGER NOT NULL,
+            $COL_SOURCE TEXT NOT NULL,
+            $COL_JSON_DATA TEXT NOT NULL,
+            $COL_IS_EXPORTED INTEGER DEFAULT 0
+        )"""
+        db.execSQL(createTable)
+
+        // Create indexes separately
+        db.execSQL("CREATE INDEX idx_word ON $TABLE_SWIPES ($COL_TARGET_WORD)")
+        db.execSQL("CREATE INDEX idx_source ON $TABLE_SWIPES ($COL_SOURCE)")
+        db.execSQL("CREATE INDEX idx_timestamp ON $TABLE_SWIPES ($COL_TIMESTAMP)")
+
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+            Log.d(TAG, "Database created with version $DATABASE_VERSION")
+        }
+    }
+
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        // Handle future schema upgrades
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+            Log.w(TAG, "Upgrading database from version $oldVersion to $newVersion")
+        }
+    }
+
+    /**
+     * Store swipe data asynchronously
+     */
+    fun storeSwipeData(data: SwipeMLData) {
+        if (!data.isValid()) {
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                Log.w(TAG, "Invalid swipe data, not storing")
+            }
+            return
+        }
+
+        _executor.execute {
+            try {
+                val db = writableDatabase
+
+                // Check if trace_id already exists
+                val cursor = db.query(
+                    TABLE_SWIPES, arrayOf(COL_ID),
+                    "$COL_TRACE_ID=?", arrayOf(data.traceId),
+                    null, null, null
+                )
+
+                if (cursor.count > 0) {
+                    cursor.close()
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                        Log.w(TAG, "Trace ID already exists: ${data.traceId}")
+                    }
+                    return@execute
+                }
+                cursor.close()
+
+                // Store the data
+                val values = ContentValues().apply {
+                    put(COL_TRACE_ID, data.traceId)
+                    put(COL_TARGET_WORD, data.targetWord)
+                    put(COL_TIMESTAMP, data.timestampUtc)
+                    put(COL_SOURCE, data.collectionSource)
+                    put(COL_JSON_DATA, data.toJSON().toString())
+                    put(COL_IS_EXPORTED, 0)
+                }
+
+                val rowId = db.insert(TABLE_SWIPES, null, values)
+
+                if (rowId != -1L) {
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                        Log.d(TAG, "Stored swipe data: ${data.targetWord} (${data.collectionSource})")
+                    }
+                    updateStatistics(data.collectionSource)
+                } else {
+                    Log.e(TAG, "Failed to store swipe data")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error storing swipe data", e)
+            }
+        }
+    }
+
+    /**
+     * Store multiple swipe data entries (batch operation)
+     */
+    fun storeSwipeDataBatch(dataList: List<SwipeMLData>) {
+        _executor.execute {
+            val db = writableDatabase
+            db.beginTransaction()
+            try {
+                for (data in dataList) {
+                    if (!data.isValid()) continue
+
+                    val values = ContentValues().apply {
+                        put(COL_TRACE_ID, data.traceId)
+                        put(COL_TARGET_WORD, data.targetWord)
+                        put(COL_TIMESTAMP, data.timestampUtc)
+                        put(COL_SOURCE, data.collectionSource)
+                        put(COL_JSON_DATA, data.toJSON().toString())
+                        put(COL_IS_EXPORTED, 0)
+                    }
+
+                    db.insertWithOnConflict(TABLE_SWIPES, null, values, SQLiteDatabase.CONFLICT_IGNORE)
+                }
+                db.setTransactionSuccessful()
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                    Log.d(TAG, "Stored batch of ${dataList.size} swipe entries")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error storing batch data", e)
+            } finally {
+                db.endTransaction()
+            }
+        }
+    }
+
+    /**
+     * Load all swipe data (for export or training)
+     */
+    fun loadAllData(): List<SwipeMLData> {
+        val dataList = mutableListOf<SwipeMLData>()
+        val db = readableDatabase
+
+        val cursor = db.query(
+            TABLE_SWIPES, arrayOf(COL_JSON_DATA),
+            null, null, null, null, "$COL_TIMESTAMP ASC"
+        )
+
+        while (cursor.moveToNext()) {
+            try {
+                val jsonStr = cursor.getString(0)
+                val json = JSONObject(jsonStr)
+                dataList.add(SwipeMLData(json))
+            } catch (e: Exception) {
+                Log.e(TAG, "Error parsing stored JSON", e)
+            }
+        }
+        cursor.close()
+
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+            Log.d(TAG, "Loaded ${dataList.size} swipe entries")
+        }
+        return dataList
+    }
+
+    /**
+     * Load data by collection source
+     */
+    fun loadDataBySource(source: String): List<SwipeMLData> {
+        val dataList = mutableListOf<SwipeMLData>()
+        val db = readableDatabase
+
+        val cursor = db.query(
+            TABLE_SWIPES, arrayOf(COL_JSON_DATA),
+            "$COL_SOURCE=?", arrayOf(source),
+            null, null, "$COL_TIMESTAMP ASC"
+        )
+
+        while (cursor.moveToNext()) {
+            try {
+                val jsonStr = cursor.getString(0)
+                val json = JSONObject(jsonStr)
+                dataList.add(SwipeMLData(json))
+            } catch (e: Exception) {
+                Log.e(TAG, "Error parsing stored JSON", e)
+            }
+        }
+        cursor.close()
+
+        return dataList
+    }
+
+    /**
+     * Load recent data for incremental training
+     */
+    fun loadRecentData(limit: Int): List<SwipeMLData> {
+        val dataList = mutableListOf<SwipeMLData>()
+        val db = readableDatabase
+
+        val cursor = db.query(
+            TABLE_SWIPES, arrayOf(COL_JSON_DATA),
+            null, null, null, null,
+            "$COL_TIMESTAMP DESC", limit.toString()
+        )
+
+        while (cursor.moveToNext()) {
+            try {
+                val jsonStr = cursor.getString(0)
+                val json = JSONObject(jsonStr)
+                dataList.add(SwipeMLData(json))
+            } catch (e: Exception) {
+                Log.e(TAG, "Error parsing stored JSON", e)
+            }
+        }
+        cursor.close()
+
+        return dataList
+    }
+
+    /**
+     * Search data by word with pagination
+     * @param query Search query (matches word containing this string)
+     * @param limit Max results per page
+     * @param offset Offset for pagination
+     * @return List of matching SwipeMLData
+     */
+    fun searchByWord(query: String, limit: Int, offset: Int): List<SwipeMLData> {
+        val dataList = mutableListOf<SwipeMLData>()
+        val db = readableDatabase
+
+        val cursor = db.query(
+            TABLE_SWIPES, arrayOf(COL_JSON_DATA),
+            "$COL_TARGET_WORD LIKE ?", arrayOf("%$query%"),
+            null, null,
+            "$COL_TIMESTAMP DESC", "$offset, $limit"
+        )
+
+        while (cursor.moveToNext()) {
+            try {
+                val jsonStr = cursor.getString(0)
+                val json = JSONObject(jsonStr)
+                dataList.add(SwipeMLData(json))
+            } catch (e: Exception) {
+                Log.e(TAG, "Error parsing stored JSON", e)
+            }
+        }
+        cursor.close()
+
+        return dataList
+    }
+
+    /**
+     * Count total results for a search query
+     */
+    fun countSearchResults(query: String): Int {
+        val db = readableDatabase
+        val cursor = if (query.isEmpty()) {
+            db.rawQuery("SELECT COUNT(*) FROM $TABLE_SWIPES", null)
+        } else {
+            db.rawQuery("SELECT COUNT(*) FROM $TABLE_SWIPES WHERE $COL_TARGET_WORD LIKE ?", arrayOf("%$query%"))
+        }
+
+        var count = 0
+        if (cursor.moveToFirst()) {
+            count = cursor.getInt(0)
+        }
+        cursor.close()
+        return count
+    }
+
+    /**
+     * Load paginated data (no search filter)
+     */
+    fun loadPaginatedData(limit: Int, offset: Int): List<SwipeMLData> {
+        val dataList = mutableListOf<SwipeMLData>()
+        val db = readableDatabase
+
+        val cursor = db.query(
+            TABLE_SWIPES, arrayOf(COL_JSON_DATA),
+            null, null, null, null,
+            "$COL_TIMESTAMP DESC", "$offset, $limit"
+        )
+
+        while (cursor.moveToNext()) {
+            try {
+                val jsonStr = cursor.getString(0)
+                val json = JSONObject(jsonStr)
+                dataList.add(SwipeMLData(json))
+            } catch (e: Exception) {
+                Log.e(TAG, "Error parsing stored JSON", e)
+            }
+        }
+        cursor.close()
+
+        return dataList
+    }
+
+    /**
+     * Relabel the row stored for [traceId] with [newWord] after the user corrected the word the
+     * swipe auto-inserted (learning-system audit 2026-09-26, Resolution, Feature B). Without this
+     * a corrected swipe stayed labelled with the WRONG word, so an on-device export could not be
+     * used as a per-user replay pool.
+     *
+     * Runs on the store's single-threaded executor, i.e. strictly after the insert queued for the
+     * same swipe. A trace id with no row (collection off, invalid trace, already deleted) is a
+     * no-op. See [relabelRow] for what changes.
+     */
+    fun relabelSwipe(traceId: String, newWord: String) {
+        _executor.execute {
+            try {
+                relabelRow(writableDatabase, traceId, newWord)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error relabelling swipe data", e)
+            }
+        }
+    }
+
+    /**
+     * Delete a specific swipe entry from the database
+     */
+    fun deleteEntry(data: SwipeMLData?) {
+        if (data == null) return
+
+        val db = writableDatabase
+
+        // Delete by matching the word and approximate timestamp
+        val word = data.targetWord
+        val timestamp = data.timestampUtc
+
+        // Allow 1 second tolerance for timestamp matching
+        val minTime = timestamp - 1000
+        val maxTime = timestamp + 1000
+
+        val deleted = db.delete(
+            TABLE_SWIPES,
+            "$COL_TARGET_WORD=? AND $COL_TIMESTAMP BETWEEN ? AND ?",
+            arrayOf(word, minTime.toString(), maxTime.toString())
+        )
+
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+            Log.d(TAG, "Deleted $deleted entries for word: $word")
+        }
+    }
+
+    /**
+     * Export all data to a JSON file (the Swipe Playground's Export button).
+     *
+     * I-5 (comprehensive audit 2026-09-06): delegates to the streaming
+     * [exportToJSON] OutputStream overload — the previous body materialized the whole
+     * table three times over (`loadAllData()` object list → JSONArray → `toString(2)`
+     * string), which is exactly the OOM the streaming path was written to avoid on
+     * 256 MB-heap devices. Same JSON schema (export_version/data/statistics), streamed.
+     */
+    fun exportToJSON(): File {
+        // Create export directory
+        val exportDir = File(_context.getExternalFilesDir(null), "swipe_ml_export")
+        if (!exportDir.exists()) {
+            exportDir.mkdirs()
+        }
+
+        // Create filename with timestamp
+        val sdf = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
+        val filename = "swipe_data_${sdf.format(Date())}.json"
+        val exportFile = File(exportDir, filename)
+
+        val count = FileOutputStream(exportFile).use { fos -> exportToJSON(fos) }
+
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+            Log.i(TAG, "Exported $count entries to ${exportFile.absolutePath}")
+        }
+        return exportFile
+    }
+
+    /**
+     * Export all data to JSON via OutputStream (for SAF file picker)
+     * Uses streaming to avoid OOM with large datasets
+     */
+    fun exportToJSON(outputStream: OutputStream): Int {
+        val db = readableDatabase
+        var count = 0
+
+        OutputStreamWriter(outputStream, Charsets.UTF_8).use { writer ->
+            // Write opening - metadata will be at the end to include accurate count
+            writer.write("{\n")
+            writer.write("  \"export_version\": \"1.0\",\n")
+            writer.write("  \"export_timestamp\": ${System.currentTimeMillis()},\n")
+            writer.write("  \"database_version\": $DATABASE_VERSION,\n")
+            writer.write("  \"data\": [\n")
+
+            // Stream data entries directly from database cursor
+            db.rawQuery("SELECT $COL_JSON_DATA FROM $TABLE_SWIPES ORDER BY $COL_TIMESTAMP DESC", null).use { cursor ->
+                var first = true
+                while (cursor.moveToNext()) {
+                    if (!first) {
+                        writer.write(",\n")
+                    }
+                    first = false
+
+                    val jsonData = cursor.getString(0)
+                    // Indent each entry
+                    writer.write("    ")
+                    writer.write(jsonData)
+                    count++
+                }
+            }
+
+            // Close data array and add statistics
+            writer.write("\n  ],\n")
+            writer.write("  \"total_samples\": $count,\n")
+
+            val prefs = _context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            writer.write("  \"statistics\": {\n")
+            writer.write("    \"total_swipes\": ${prefs.getInt(PREF_TOTAL_COUNT, 0)},\n")
+            writer.write("    \"calibration_swipes\": ${prefs.getInt(PREF_CALIBRATION_COUNT, 0)},\n")
+            writer.write("    \"user_swipes\": ${prefs.getInt(PREF_USER_COUNT, 0)}\n")
+            writer.write("  }\n")
+            writer.write("}\n")
+        }
+
+        // Mark all as exported
+        markAllAsExported()
+
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+            Log.i(TAG, "Exported $count entries to JSON stream (streamed)")
+        }
+        return count
+    }
+
+    // A `exportToNDJSON(): File` sibling lived here until 2026-09-10. Its only caller in the
+    // tree was SwipeMLTrainer.exportForExternalTraining(), and SwipeMLTrainer was itself a
+    // zero-caller orphan whose "training" was Thread.sleep progress theatre — both deleted in
+    // the same sweep. That overload also carried the pre-I-5 whole-table materialisation the
+    // streaming overload below exists to avoid. Nothing needs a File-returning NDJSON path:
+    // the Settings export goes through the SAF picker's OutputStream. Pinned by
+    // DeadPlumbingDriftTest.
+
+    /**
+     * Export to NDJSON via OutputStream (for SAF file picker)
+     * Uses streaming to avoid OOM with large datasets
+     */
+    fun exportToNDJSON(outputStream: OutputStream): Int {
+        val db = readableDatabase
+        var count = 0
+
+        OutputStreamWriter(outputStream, Charsets.UTF_8).use { writer ->
+            // Stream directly from database cursor
+            db.rawQuery("SELECT $COL_JSON_DATA FROM $TABLE_SWIPES ORDER BY $COL_TIMESTAMP DESC", null).use { cursor ->
+                while (cursor.moveToNext()) {
+                    val jsonData = cursor.getString(0)
+                    writer.write(jsonData)
+                    writer.write("\n")
+                    count++
+                }
+            }
+        }
+
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+            Log.i(TAG, "Exported $count entries to NDJSON stream (streamed)")
+        }
+        return count
+    }
+
+    /**
+     * Get statistics about stored data
+     */
+    fun getStatistics(): DataStatistics {
+        val db = readableDatabase
+        val stats = DataStatistics()
+
+        // Total count
+        db.rawQuery("SELECT COUNT(*) FROM $TABLE_SWIPES", null).use { cursor ->
+            if (cursor.moveToFirst()) {
+                stats.totalCount = cursor.getInt(0)
+            }
+        }
+
+        // Count by source
+        db.rawQuery(
+            "SELECT $COL_SOURCE, COUNT(*) FROM $TABLE_SWIPES GROUP BY $COL_SOURCE",
+            null
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                val source = cursor.getString(0)
+                val count = cursor.getInt(1)
+                when (source) {
+                    "calibration", "neural_calibration" -> stats.calibrationCount += count
+                    "user_selection" -> stats.userSelectionCount = count
+                }
+            }
+        }
+
+        // Unique words
+        db.rawQuery("SELECT COUNT(DISTINCT $COL_TARGET_WORD) FROM $TABLE_SWIPES", null).use { cursor ->
+            if (cursor.moveToFirst()) {
+                stats.uniqueWords = cursor.getInt(0)
+            }
+        }
+
+        return stats
+    }
+
+    /**
+     * Count rows recorded under one collection source (e.g. the Swipe Playground's
+     * `"playground"`). Cheap COUNT(*) over the indexed source column.
+     */
+    fun countBySource(source: String): Int {
+        val db = readableDatabase
+        db.rawQuery(
+            "SELECT COUNT(*) FROM $TABLE_SWIPES WHERE $COL_SOURCE=?", arrayOf(source)
+        ).use { cursor ->
+            return if (cursor.moveToFirst()) cursor.getInt(0) else 0
+        }
+    }
+
+    /**
+     * Delete all rows recorded under one collection source. Used by the Swipe
+     * Playground's "clear recorded traces" action so a playground wipe cannot touch
+     * traces collected by the (separately gated) global ML collection.
+     *
+     * @return number of rows deleted
+     */
+    fun deleteBySource(source: String): Int {
+        val db = writableDatabase
+        val deleted = db.delete(TABLE_SWIPES, "$COL_SOURCE=?", arrayOf(source))
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+            Log.d(TAG, "Deleted $deleted entries with source=$source")
+        }
+        return deleted
+    }
+
+    /**
+     * Retention cleanup (I-2, comprehensive audit 2026-09-06): delete rows older than
+     * [cutoffUtcMs] and enforce a hard row cap of [maxRows] newest-kept rows. Runs on the
+     * store's single-threaded executor (off the caller's thread, serialized with writes).
+     *
+     * Called by `MLDataCollector` after a successful store when
+     * `PrivacyManager.shouldPerformCleanup()` says a daily-throttled cleanup is due —
+     * the wiring that makes the privacy layer's `auto_delete_enabled` (default ON,
+     * 90-day retention) an enforced promise instead of dead code.
+     */
+    fun performRetentionCleanup(cutoffUtcMs: Long, maxRows: Int) {
+        _executor.execute {
+            try {
+                val db = writableDatabase
+                val expired = db.delete(
+                    TABLE_SWIPES, "$COL_TIMESTAMP < ?", arrayOf(cutoffUtcMs.toString())
+                )
+                // Row cap as a backstop against pathological growth inside the retention
+                // window: keep only the newest maxRows rows.
+                db.execSQL(
+                    "DELETE FROM $TABLE_SWIPES WHERE $COL_ID NOT IN " +
+                        "(SELECT $COL_ID FROM $TABLE_SWIPES ORDER BY $COL_TIMESTAMP DESC LIMIT ?)",
+                    arrayOf(maxRows.toString())
+                )
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                    Log.i(TAG, "Retention cleanup: deleted $expired expired rows (cutoff=$cutoffUtcMs, cap=$maxRows)")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Retention cleanup failed", e)
+            }
+        }
+    }
+
+    /**
+     * Clear all data (with confirmation)
+     */
+    fun clearAllData() {
+        val db = writableDatabase
+        db.delete(TABLE_SWIPES, null, null)
+
+        // Reset statistics
+        val prefs = _context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        prefs.edit().clear().apply()
+
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+            Log.w(TAG, "All swipe data cleared")
+        }
+    }
+
+    // importFromJSON(File) DELETED (I-3, comprehensive audit 2026-09-06): it required a
+    // top-level "swipes" array with flat timestamp_utc/source fields — a schema NO exporter
+    // in this class ever wrote (exports carry a "data" array with those fields nested under
+    // "metadata"), so it threw JSONException on this app's own exports. It also had zero
+    // callers. If an import path is ever wanted, write it against the real export schema
+    // (SwipeMLData.toJSON) and wire an SAF handler next to the export ones.
+
+    /**
+     * Mark all entries as exported
+     */
+    private fun markAllAsExported() {
+        val db = writableDatabase
+        val values = ContentValues().apply {
+            put(COL_IS_EXPORTED, 1)
+        }
+        db.update(TABLE_SWIPES, values, null, null)
+    }
+
+    /**
+     * Update statistics
+     */
+    private fun updateStatistics(source: String) {
+        val prefs = _context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val editor = prefs.edit()
+
+        // Increment total count
+        val total = prefs.getInt(PREF_TOTAL_COUNT, 0)
+        editor.putInt(PREF_TOTAL_COUNT, total + 1)
+
+        // Increment source-specific count
+        // Note: "neural_calibration" is the source used by SwipeCalibrationActivity
+        when (source) {
+            "calibration", "neural_calibration" -> {
+                val count = prefs.getInt(PREF_CALIBRATION_COUNT, 0)
+                editor.putInt(PREF_CALIBRATION_COUNT, count + 1)
+            }
+            "user_selection" -> {
+                val count = prefs.getInt(PREF_USER_COUNT, 0)
+                editor.putInt(PREF_USER_COUNT, count + 1)
+            }
+        }
+
+        editor.apply()
+    }
+
+    /**
+     * Statistics class
+     */
+    data class DataStatistics(
+        @JvmField var totalCount: Int = 0,
+        @JvmField var calibrationCount: Int = 0,
+        @JvmField var userSelectionCount: Int = 0,
+        @JvmField var uniqueWords: Int = 0
+    ) {
+        override fun toString(): String {
+            return String.format(
+                Locale.US,
+                "Total: %d, Calibration: %d, User: %d, Unique words: %d",
+                totalCount, calibrationCount, userSelectionCount, uniqueWords
+            )
+        }
+    }
+
+    companion object {
+        private const val TAG = "SwipeMLDataStore"
+
+        // Database configuration
+        // VERSION 1 deliberately unchanged by the 2026-09-03 playground enrichment
+        // (key_geometry / candidates / decode_latency_ms): the entire trace payload lives
+        // in COL_JSON_DATA, and SwipeMLData's JSON reader treats the new keys as optional,
+        // so old rows and new rows coexist in the same schema with no SQL migration.
+        /**
+         * Relabel one row in [db] (the body of [relabelSwipe]; a separate function so the SQL is
+         * testable against a mocked database).
+         *
+         * Updates BOTH the `target_word` column (search, per-word counts, deleteEntry's match)
+         * and the JSON blob via [SwipeMLData.relabelJson], which records the original label under
+         * `metadata.corrected_from`. The row's `is_exported` flag is cleared so the next export
+         * carries the corrected label. `collection_source` is unchanged — the trace was still
+         * collected by the user-selection path, and the per-source statistics must not move.
+         *
+         * @param newValues ContentValues factory — a seam for the mock-tier test, where the
+         *   android.jar stub constructor throws
+         * @return true when a row was rewritten
+         */
+        internal fun relabelRow(
+            db: SQLiteDatabase,
+            traceId: String,
+            newWord: String,
+            newValues: () -> ContentValues = { ContentValues() },
+        ): Boolean {
+            val json = db.query(
+                TABLE_SWIPES, arrayOf(COL_JSON_DATA),
+                "$COL_TRACE_ID=?", arrayOf(traceId),
+                null, null, null
+            ).use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null } ?: return false
+            val relabelled = SwipeMLData.relabelJson(JSONObject(json), newWord)
+            val label = relabelled.getString("target_word")
+            val values = newValues().apply {
+                put(COL_TARGET_WORD, label)
+                put(COL_JSON_DATA, relabelled.toString())
+                put(COL_IS_EXPORTED, 0)
+            }
+            return db.update(TABLE_SWIPES, values, "$COL_TRACE_ID=?", arrayOf(traceId)) > 0
+        }
+
+        private const val DATABASE_NAME = "swipe_ml_data.db"
+        private const val DATABASE_VERSION = 1
+
+        // Table and column names
+        private const val TABLE_SWIPES = "swipe_data"
+        private const val COL_ID = "id"
+        private const val COL_TRACE_ID = "trace_id"
+        private const val COL_TARGET_WORD = "target_word"
+        private const val COL_TIMESTAMP = "timestamp_utc"
+        private const val COL_SOURCE = "collection_source"
+        private const val COL_JSON_DATA = "json_data"
+        private const val COL_IS_EXPORTED = "is_exported"
+
+        // Statistics tracking
+        private const val PREF_NAME = "swipe_ml_stats"
+        private const val PREF_TOTAL_COUNT = "total_swipes"
+        private const val PREF_CALIBRATION_COUNT = "calibration_swipes"
+        private const val PREF_USER_COUNT = "user_swipes"
+
+        // Process-lifetime singleton holding only the applicationContext (see getInstance),
+        // so it never leaks an Activity/Service. The reference lives as long as the process.
+        @SuppressLint("StaticFieldLeak")
+        @Volatile
+        private var _instance: SwipeMLDataStore? = null
+
+        /**
+         * Get singleton instance
+         */
+        @JvmStatic
+        fun getInstance(context: Context): SwipeMLDataStore {
+            return _instance ?: synchronized(this) {
+                _instance ?: SwipeMLDataStore(context.applicationContext).also { _instance = it }
+            }
+        }
+    }
+}

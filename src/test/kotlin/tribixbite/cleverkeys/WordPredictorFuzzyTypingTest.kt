@@ -1,0 +1,401 @@
+package tribixbite.cleverkeys
+
+import android.os.Trace
+import android.util.Log
+import io.mockk.every
+import io.mockk.just
+import io.mockk.mockkStatic
+import io.mockk.runs
+import io.mockk.unmockkStatic
+import org.junit.AfterClass
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.BeforeClass
+import org.junit.Test
+import tribixbite.cleverkeys.autocorrect.FrequencyFloor
+import tribixbite.cleverkeys.autocorrect.KeyAdjacency
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
+
+/**
+ * User report (2026-09-26): "touch typing suggestion bar entries should include autocorrect
+ * results — typing 'play', if a user misses the l and taps k there are no suggestions upon
+ * reaching 'a'. 'pka' or 'pkay' should suggest 'play'."
+ *
+ * Drives the REAL `WordPredictor.predictWordsWithContext` (the tap-typing bar's source)
+ * over the REAL bundled 98k English dictionary as the device loads it (`en_enhanced.bin`
+ * via [ShippedTapDictionary]), harnessed
+ * exactly like `AutoCorrectEndToEndTest` (Objenesis instance + reflection-injected
+ * fields; MockK runner because the predictor touches `android.util.Log` and
+ * `android.os.Trace`).
+ *
+ * Pins: typo-tolerant prefix completions (pka → play), whole-word corrections in the bar
+ * (pkay → play, and the space-bar autocorrect's own pick is listed), exact prefixes keep
+ * priority (pla), no fuzzy noise on 2-letter prefixes, disabled words stay out, user words
+ * are reachable, the secondary-language dictionary participates, provenance tags the new
+ * entries with their own TYPO_CORRECTION origin (never AUTOCORRECT, which means a committed
+ * correction), and a per-keystroke latency bound.
+ */
+class WordPredictorFuzzyTypingTest {
+
+    companion object {
+        private lateinit var predictor: WordPredictor
+        private lateinit var config: Config
+        private lateinit var baseDict: HashMap<String, Int>
+
+        @JvmStatic
+        @BeforeClass
+        fun setUpClass() {
+            mockkStatic(Log::class)
+            every { Log.d(any(), any()) } returns 0
+            every { Log.d(any(), any(), any()) } returns 0
+            every { Log.i(any(), any()) } returns 0
+            every { Log.w(any(), any<String>()) } returns 0
+            every { Log.e(any(), any()) } returns 0
+            every { Log.e(any(), any(), any()) } returns 0
+            mockkStatic(Trace::class)
+            every { Trace.beginSection(any()) } just runs
+            every { Trace.endSection() } just runs
+
+            // QWERTY geometry — what Keyboard2View pushes for the default layout.
+            KeyAdjacency.resetLayout()
+
+            // The device's tap dictionary: en_enhanced.bin through the production parser.
+            baseDict = ShippedTapDictionary.frequencies()
+
+            config = org.objenesis.ObjenesisStd().newInstance(Config::class.java)
+            predictor = org.objenesis.ObjenesisStd().newInstance(WordPredictor::class.java)
+        }
+
+        @JvmStatic
+        @AfterClass
+        fun tearDownClass() {
+            unmockkStatic(Log::class)
+            unmockkStatic(Trace::class)
+        }
+
+        private fun setField(name: String, value: Any?) {
+            val field = WordPredictor::class.java.getDeclaredField(name)
+            field.isAccessible = true
+            field.set(predictor, value)
+        }
+
+        /** Same shape as WordPredictor.buildPrefixIndex: every word under its 1..3-letter prefixes. */
+        private fun prefixIndexOf(words: Collection<String>): MutableMap<String, MutableSet<String>> {
+            val index = HashMap<String, MutableSet<String>>()
+            for (w in words) {
+                for (len in 1..minOf(3, w.length)) index.getOrPut(w.substring(0, len)) { HashSet() }.add(w)
+            }
+            return index
+        }
+    }
+
+    @Before
+    fun resetState() {
+        // Fresh copies per test: some tests add/disable words.
+        val dict = HashMap(baseDict)
+        setField("dictionary", AtomicReference<MutableMap<String, Int>>(dict))
+        setField("prefixIndex", AtomicReference(prefixIndexOf(dict.keys)))
+        setField("contractionAliases", emptyMap<String, String>())
+        setField("customAndUserWords", emptySet<String>())
+        setField("disabledWords", mutableSetOf<String>())
+        setField("userWordOriginalCase", ConcurrentHashMap<String, String>())
+        setField("config", config)
+        setField("cachedMaxFreqForSize", -1)
+        setField("secondaryIndex", null)
+        setField("secondaryLanguageCode", "none")
+
+        // Scoring knobs at their shipped defaults (Objenesis skipped Config's initializers).
+        config.prediction_frequency_scale = Defaults.PREDICTION_FREQUENCY_SCALE
+        config.prediction_context_boost = Defaults.PREDICTION_CONTEXT_BOOST
+        config.context_source = Defaults.CONTEXT_SOURCE
+        config.personalization_weight = Defaults.PERSONALIZATION_WEIGHT
+        config.secondary_prediction_weight = Defaults.SECONDARY_PREDICTION_WEIGHT
+        // Autocorrect knobs as the end-to-end autocorrect harness locks them.
+        config.autocorrect_enabled = true
+        config.autocorrect_min_word_length = 2
+        config.autocorrect_char_match_threshold = 0.65f
+        config.autocorrect_max_length_diff = 2
+        config.autocorrect_confidence_min_frequency = FrequencyFloor.SLIDER_MIN
+        config.autocorrect_prefix_length = 0
+        config.swipe_debug_detailed_logging = false
+    }
+
+    private fun bar(typed: String, context: List<String> = emptyList()): WordPredictor.PredictionResult =
+        predictor.predictWordsWithContext(typed, context)
+
+    // ── The report ────────────────────────────────────────────────────────
+
+    @Test
+    fun pka_missedLForNeighbourK_offersPlay() {
+        val result = bar("pka")
+        assertTrue("'pka' must not leave the bar empty (got ${result.words})", result.words.isNotEmpty())
+        assertTrue("'pka' must offer 'play' (got ${result.words})", "play" in result.words)
+    }
+
+    @Test
+    fun pkay_wholeWordTypo_offersPlayFirst() {
+        val result = bar("pkay")
+        assertEquals("'pkay' must lead with 'play' (got ${result.words})", "play", result.words.firstOrNull())
+    }
+
+    @Test
+    fun pkay_theSpaceBarAutocorrectPick_isAlsoInTheBar() {
+        val corrected = predictor.autoCorrect("pkay")
+        assertEquals("precondition: space-bar autocorrect fixes pkay", "play", corrected)
+        assertTrue("autocorrect's pick must be offered while typing", corrected in bar("pkay").words)
+    }
+
+    // ── Ranking guards ────────────────────────────────────────────────────
+
+    @Test
+    fun pla_strongExactPrefix_isNotDilutedByFuzzyCandidates() {
+        val words = bar("pla").words
+        assertTrue("'play' must be offered for 'pla' (got $words)", "play" in words)
+        for (w in words) assertTrue("'$w' is not an exact 'pla' completion", w.startsWith("pla"))
+        bar("pla").metas!!.forEach {
+            assertEquals(SuggestionOrigin.DICTIONARY_PREFIX, it.origin)
+        }
+    }
+
+    /**
+     * `thw` (only rare exact completions) offers both the exact `thwart` and the slip
+     * correction `the`. On the device dictionary `the` LEADS on raw score: `thwart` is 176
+     * ranks rarer, i.e. "materially rarer" in [WordPredictor.FUZZY_PENALTY_PER_EDIT]'s terms.
+     * Until 2026-10-12 this test asserted `thwart` kept first place; that held only on the
+     * JSON-derived harness scale (`thwart` 88 bytes below `the`), never on a phone.
+     */
+    @Test
+    fun thw_weakExactPrefix_offersExactCompletionAndTheCorrection() {
+        val words = bar("thw").words
+        assertTrue("the exact completion 'thwart' is offered (got $words)", "thwart" in words)
+        assertTrue("'the' (w↔e neighbour slip) must be offered (got $words)", "the" in words)
+        assertEquals("device scale: the far more common correction leads (got $words)", "the", words.firstOrNull())
+    }
+
+    @Test
+    fun exactCompletion_outranksFuzzyCandidateOfSimilarFrequency() {
+        // Two synthetic words at the SAME frequency and length: typed "zqvlm" is an exact
+        // prefix of one and a one-neighbour-slip (z↔x) prefix of the other.
+        val dict = dictField()
+        dict["zqvlmar"] = 900_000
+        dict["xqvlmar"] = 900_000
+        rebuildIndex()
+        val result = bar("zqvlm")
+        assertEquals(listOf("zqvlmar", "xqvlmar"), result.words)
+        assertTrue("the exact entry must score strictly higher", result.scores[0] > result.scores[1])
+    }
+
+    /**
+     * The reservation itself: five weak exact completions that each outscore every fuzzy
+     * candidate still leave [WordPredictor.FUZZY_RESERVED_SLOTS] places to the best
+     * corrections, which take the lowest exact places, never the lead. Synthetic words keep
+     * this independent of the bundled frequencies (the old `thw` version stopped exercising
+     * the reservation on the device dictionary, where `the` wins on raw score).
+     */
+    @Test
+    fun weakFullBar_reservesSlotsForTheBestCorrections_withoutTakingTheLead() {
+        val dict = dictField()
+        // Exact: zqv… completions below the strong-exact top-5% rank (fuzzy search runs).
+        for ((i, suffix) in listOf("ara", "arb", "arc", "ard", "are").withIndex()) dict["zqv$suffix"] = 120_000 - i * 1_000
+        // Fuzzy: z↔x neighbour slips, rarer than every exact entry.
+        dict["xqvara"] = 60_000
+        dict["xqvarb"] = 59_000
+        rebuildIndex()
+        val result = bar("zqv")
+        val fuzzy = result.metas!!.count { it.origin == SuggestionOrigin.TYPO_CORRECTION }
+        assertEquals("reserved fuzzy slots (got ${result.words})", WordPredictor.FUZZY_RESERVED_SLOTS, fuzzy)
+        assertEquals("the lead stays exact (got ${result.words})", "zqvara", result.words.first())
+        assertEquals(SuggestionOrigin.DICTIONARY_PREFIX, result.metas!![0].origin)
+        assertEquals("bar stays in score order", result.scores.sortedDescending(), result.scores)
+
+        // On the real dictionary, `thw` also gets at least the reserved corrections.
+        val thw = bar("thw")
+        assertTrue("thw: ≥ ${WordPredictor.FUZZY_RESERVED_SLOTS} corrections (got ${thw.words})",
+            thw.metas!!.count { it.origin == SuggestionOrigin.TYPO_CORRECTION } >= WordPredictor.FUZZY_RESERVED_SLOTS)
+    }
+
+    @Test
+    fun twoLetterPrefix_getsNoFuzzyNoise() {
+        val result = bar("pk")
+        for (w in result.words) assertTrue("'$w' is fuzzy noise on a 2-letter prefix", w.startsWith("pk"))
+        result.metas?.forEach { assertEquals(SuggestionOrigin.DICTIONARY_PREFIX, it.origin) }
+    }
+
+    @Test
+    fun nonLetterInput_getsNoFuzzyCandidates() {
+        assertTrue(bar("123").words.isEmpty())
+        assertTrue(bar("a".repeat(100)).words.isEmpty())
+    }
+
+    // ── Provenance ────────────────────────────────────────────────────────
+
+    @Test
+    fun fuzzyEntries_areTaggedTypoCorrection_withTheTypedWordAndABreakdown() {
+        val result = bar("pka")
+        val i = result.words.indexOf("play")
+        assertTrue(i >= 0)
+        val meta = result.metas!![i]
+        assertEquals(SuggestionOrigin.TYPO_CORRECTION, meta.origin)
+        assertEquals(ProvenanceNote.TypoCorrectionOf("pka"), meta.note)
+        val breakdown = meta.breakdown!!
+        assertEquals("displayed breakdown must match the ranking score", result.scores[i], breakdown.finalScore)
+        assertTrue(
+            "fuzzy prefix score must sit below the exact-prefix score for the same word (got ${breakdown.prefixScore})",
+            breakdown.prefixScore < predictor.explainScore("play", "pla", emptyList())!!.prefixScore
+        )
+    }
+
+    /**
+     * The whole-word correction ("pkay" → "play") is the same mechanism as the prefix one —
+     * FuzzyPrefixMatcher cost, penalised prefix score — so it carries the same origin. The
+     * breakdown distinguishes the shape: a whole-word correction starts from the direct-match
+     * score, a prefix correction from the completion score.
+     */
+    @Test
+    fun wholeWordCorrection_isAlsoTypoCorrection_withADirectMatchBasedBreakdown() {
+        val result = bar("pkay")
+        val i = result.words.indexOf("play")
+        assertEquals("precondition: 'play' leads for 'pkay' (got ${result.words})", 0, i)
+        val meta = result.metas!![i]
+        assertEquals(SuggestionOrigin.TYPO_CORRECTION, meta.origin)
+        assertEquals(ProvenanceNote.TypoCorrectionOf("pkay"), meta.note)
+        // k↔l is a QWERTY neighbour slip (cost 0.5): the direct-match score, penalised once.
+        assertEquals(
+            "whole-word correction scores from the direct match",
+            WordPredictor.fuzzyPrefixScore(WordPredictor.DIRECT_MATCH_PREFIX_SCORE, 0.5f),
+            meta.breakdown!!.prefixScore
+        )
+    }
+
+    /** No typed-path bar entry may claim an autocorrect that never happened. */
+    @Test
+    fun typingBar_neverTagsAnEntryAutocorrect() {
+        for (typed in listOf("pka", "pkay", "thw", "wuestion", "pla")) {
+            bar(typed).metas?.forEach {
+                assertFalse("'$typed' produced an AUTOCORRECT-tagged bar entry", it.origin == SuggestionOrigin.AUTOCORRECT)
+            }
+        }
+    }
+
+    // ── Vocabulary gates ──────────────────────────────────────────────────
+
+    @Test
+    fun disabledWord_isNeverOfferedAsAFuzzyCandidate() {
+        setField("disabledWords", mutableSetOf("play"))
+        assertFalse("play" in bar("pka").words)
+        assertFalse("play" in bar("pkay").words)
+    }
+
+    @Test
+    fun userWord_isReachableThroughATypo() {
+        val dict = dictField()
+        dict["zorblax"] = 1_000_000
+        setField("customAndUserWords", setOf("zorblax"))
+        rebuildIndex()
+        // z↔x are neighbours: the user fat-fingers their own word's first letter.
+        assertTrue("user word must be offered for 'xorb' (got ${bar("xorb").words})", "zorblax" in bar("xorb").words)
+    }
+
+    @Test
+    fun secondaryLanguage_typoIsCorrectedFromTheSecondaryDictionary() {
+        val secondary = NormalizedPrefixIndex()
+        secondary.addWord("schmetterling", 40)
+        secondary.addWord("übermorgen", 60)
+        setField("secondaryIndex", secondary)
+        setField("secondaryLanguageCode", "de")
+        // w↔e neighbour slip inside a German-only word.
+        val words = bar("schmettw").words
+        assertTrue("secondary word must be offered for 'schmettw' (got $words)", "schmetterling" in words)
+        // Accent-free typing with a slip on the secondary's normalized form.
+        val uber = bar("ubwrmo").words
+        assertTrue("'übermorgen' must be offered for 'ubwrmo' (got $uber)", "übermorgen" in uber)
+    }
+
+    // ── Latency ───────────────────────────────────────────────────────────
+
+    @Test
+    fun perKeystrokeLatency_staysWithinBudget() {
+        // Every prefix of a few typo'd words, i.e. what the bar runs keystroke by keystroke.
+        val typedWords = listOf("pkay", "wuestion", "thw", "becauae", "somethimg", "xorblaxx", "qqqqzzzz")
+        val inputs = typedWords.flatMap { w -> (1..w.length).map { w.substring(0, it) } }
+        repeat(3) { inputs.forEach { bar(it) } } // JIT warm-up
+        // Measurement design (Open now 13, 2026-10-14). The mock suite runs on the shared 4-core
+        // dev phone, often at load 10–15. The old form — wall-clock MEAN of 10 rounds — failed once
+        // when a single ~170 ms descheduling/GC stall landed on one round of 'be'/'bec' (normally
+        // ~0.2 ms): 'bec' averaged 17.4 ms against the 15 ms bound, while every other prefix was
+        // normal. At a synthetic load of ~18 it failed 2 runs in 3 with the code unchanged. So:
+        //  - each call is timed in this thread's CPU time, which excludes time spent descheduled
+        //    and stop-the-world collector work done on the VM thread. bar() is synchronous,
+        //    in-memory computation on the calling thread, so its CPU time IS its cost; a
+        //    regression in that computation (the thing this guards) still shows in full;
+        //  - the per-input MEDIAN of an odd number of rounds is asserted, so a stall on fewer than
+        //    half the rounds cannot fail it, while a real regression slows every round.
+        // Bounds are unchanged. Not covered: a regression that BLOCKS (I/O, lock wait) without
+        // using CPU; wall-clock medians are printed beside the CPU ones to spot that.
+        val threadCpuNanos = currentThreadCpuClock()
+        val rounds = 11
+        val cpuSamples = Array(inputs.size) { LongArray(rounds) }
+        val wallSamples = Array(inputs.size) { LongArray(rounds) }
+        for (r in 0 until rounds) {
+            inputs.forEachIndexed { i, s ->
+                val c0 = threadCpuNanos()
+                val t0 = System.nanoTime()
+                bar(s)
+                wallSamples[i][r] = System.nanoTime() - t0
+                cpuSamples[i][r] = threadCpuNanos() - c0
+            }
+        }
+        fun LongArray.medianUs() = sorted()[size / 2] / 1000
+        val medianUs = cpuSamples.map { it.medianUs() }
+        val wallMedianUs = wallSamples.map { it.medianUs() }
+        val wallMaxUs = wallSamples.map { it.max() / 1000 }
+        inputs.indices.forEach { i ->
+            println(
+                "[fuzzy-latency]   %-10s cpu median %6dµs  wall median %6dµs  wall max %6dµs"
+                    .format(inputs[i], medianUs[i], wallMedianUs[i], wallMaxUs[i])
+            )
+        }
+        // Only 3+ letter prefixes can take the fuzzy path; 1–2 letter prefixes are the
+        // pre-existing exact path (e.g. "s" scores ~10k exact completions) and are reported
+        // above but not bounded here.
+        val fuzzyEligible = inputs.zip(medianUs).filter { it.first.length >= 3 }
+        val worst = fuzzyEligible.maxByOrNull { it.second }!!
+        val mean = fuzzyEligible.map { it.second }.average()
+        println("[fuzzy-latency] 3+ letters: mean of cpu medians=${"%.0f".format(mean)}µs worst cpu median=${worst.second}µs ('${worst.first}') over ${fuzzyEligible.size} prefixes × $rounds rounds")
+        // Generous ceilings (shared, loaded 4-core dev phone JVM): a typing frame is 16ms.
+        assertTrue("mean of per-keystroke median prediction CPU times ${mean}µs exceeds 5ms", mean < 5_000)
+        assertTrue("worst per-keystroke median prediction CPU time ${worst.second}µs ('${worst.first}') exceeds 15ms", worst.second < 15_000)
+    }
+
+    // ── helpers ───────────────────────────────────────────────────────────
+
+    /**
+     * The host JVM's per-thread CPU clock (ns). Reached reflectively because unit tests compile
+     * against android.jar, which has no `java.lang.management`; the runner is a desktop JDK,
+     * which does. The reflective call costs ~1µs, negligible against the millisecond bounds.
+     */
+    private fun currentThreadCpuClock(): () -> Long {
+        val bean = Class.forName("java.lang.management.ManagementFactory")
+            .getMethod("getThreadMXBean").invoke(null)
+        val beanType = Class.forName("java.lang.management.ThreadMXBean")
+        val supported = beanType.getMethod("isCurrentThreadCpuTimeSupported").invoke(bean) as Boolean
+        assertTrue("thread CPU time must be measurable on the test JVM", supported)
+        val read = beanType.getMethod("getCurrentThreadCpuTime")
+        return { read.invoke(bean) as Long }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun dictField(): MutableMap<String, Int> {
+        val f = WordPredictor::class.java.getDeclaredField("dictionary")
+        f.isAccessible = true
+        return (f.get(predictor) as AtomicReference<MutableMap<String, Int>>).get()
+    }
+
+    private fun rebuildIndex() {
+        setField("prefixIndex", AtomicReference(prefixIndexOf(dictField().keys)))
+        setField("cachedMaxFreqForSize", -1)
+    }
+}

@@ -1,0 +1,335 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Overdraw suppressed: inflated into the IME window (CleverKeysIMETheme) whose
+     windowBackground is TRANSPARENT, so this root MUST paint ?attr/colorKeyboard or the
+     clipboard pane would be see-through. Lint cannot detect the transparent IME window.
+
+     UseAppTint suppressed ON PURPOSE: this pane is inflated by ClipboardManager via
+     View.inflate(ContextThemeWrapper(imeService, config.theme), …) — a FRAMEWORK LayoutInflater
+     with no AppCompat factory, so <ImageView>/<ImageButton> inflate as framework widgets that
+     IGNORE app:tint entirely (only AppCompatImageView reads it). android:tint is applied natively
+     (setImageTintList on API 21+) and keeps every icon on ?attr/colorLabel, matching the
+     programmatic tints (updateFilterIconTint / applyRuntimeThemeColors) that resolve the same attr. -->
+<tribixbite.cleverkeys.ClipboardPaneLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:orientation="vertical"
+    android:background="?attr/colorKeyboard"
+    android:hardwareAccelerated="false"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:ignore="Overdraw">
+
+  <!-- Wide panes put search and results side by side; narrow panes retain two rows. -->
+  <LinearLayout android:id="@+id/clipboard_controls"
+      android:layout_width="match_parent" android:layout_height="wrap_content"
+      android:orientation="vertical" android:gravity="center_vertical">
+    <!-- Combined row: Tabs + Search + Close -->
+    <LinearLayout
+        android:id="@+id/clipboard_search_bar"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp"
+        android:background="?attr/colorKey">
+
+      <!-- History tab (default, highlighted) — vector icon replaces emoji -->
+      <ImageView
+          android:id="@+id/tab_history"
+          android:layout_width="36dp"
+          android:layout_height="36dp"
+          android:src="@drawable/ic_tab_history"
+          android:tint="?attr/colorLabel"
+          tools:ignore="UseAppTint"
+          android:scaleType="centerInside"
+          android:padding="6dp"
+          android:clickable="true"
+          android:focusable="true"
+          android:background="?android:attr/selectableItemBackgroundBorderless"
+          android:contentDescription="@string/clipboard_tab_history"/>
+
+      <!-- Pinned tab -->
+      <ImageView
+          android:id="@+id/tab_pinned"
+          android:layout_width="36dp"
+          android:layout_height="36dp"
+          android:src="@drawable/ic_tab_pinned"
+          android:tint="?attr/colorLabel"
+          tools:ignore="UseAppTint"
+          android:scaleType="centerInside"
+          android:padding="6dp"
+          android:alpha="0.5"
+          android:clickable="true"
+          android:focusable="true"
+          android:background="?android:attr/selectableItemBackgroundBorderless"
+          android:contentDescription="@string/clipboard_tab_pinned"/>
+
+      <!-- Todos tab -->
+      <ImageView
+          android:id="@+id/tab_todos"
+          android:layout_width="36dp"
+          android:layout_height="36dp"
+          android:src="@drawable/ic_tab_todos"
+          android:tint="?attr/colorLabel"
+          tools:ignore="UseAppTint"
+          android:scaleType="centerInside"
+          android:padding="6dp"
+          android:alpha="0.5"
+          android:clickable="true"
+          android:focusable="true"
+          android:background="?android:attr/selectableItemBackgroundBorderless"
+          android:contentDescription="@string/clipboard_tab_todos"/>
+
+      <!-- Search field (fills remaining space) -->
+      <TextView
+          android:id="@+id/clipboard_search"
+          android:hint="@string/clipboard_search_hint"
+          android:layout_width="0dp"
+          android:layout_height="32dp"
+          android:layout_weight="1"
+          android:layout_marginStart="4dp"
+          android:layout_marginEnd="4dp"
+          android:gravity="center_vertical"
+          android:textSize="14sp"
+          android:textColor="?attr/colorLabel"
+          android:textColorHint="?attr/colorSubLabel"
+          android:paddingStart="8dp"
+          android:paddingEnd="8dp"
+          android:singleLine="true"
+          android:ellipsize="end"
+          android:clickable="true"
+          android:focusable="true"/>
+
+      <!-- Search clear button (hidden until user types) -->
+      <ImageButton
+          android:id="@+id/clipboard_search_clear"
+          android:layout_width="28dp"
+          android:layout_height="28dp"
+          android:src="@android:drawable/ic_menu_close_clear_cancel"
+          android:tint="?attr/colorLabel"
+          tools:ignore="UseAppTint"
+          android:background="?android:attr/selectableItemBackgroundBorderless"
+          android:contentDescription="@string/clipboard_clear_search"
+          android:scaleType="centerInside"
+          android:padding="4dp"
+          android:visibility="gone"/>
+
+      <!-- Regex toggle button (VSCode-style .* toggle, shown when search is active) -->
+      <TextView
+          android:id="@+id/clipboard_regex_toggle"
+          android:text="@string/glyph_regex_toggle"
+          android:layout_width="28dp"
+          android:layout_height="28dp"
+          android:gravity="center"
+          android:textSize="12sp"
+          android:typeface="monospace"
+          android:textColor="?attr/colorLabel"
+          android:alpha="0.4"
+          android:clickable="true"
+          android:focusable="true"
+          android:background="?android:attr/selectableItemBackgroundBorderless"
+          android:contentDescription="@string/clipboard_toggle_regex"
+          android:visibility="gone"/>
+
+      <!-- Date filter icon -->
+      <ImageButton
+          android:id="@+id/clipboard_date_filter"
+          android:layout_width="32dp"
+          android:layout_height="32dp"
+          android:src="@android:drawable/ic_menu_sort_by_size"
+          android:tint="?attr/colorLabel"
+          tools:ignore="UseAppTint"
+          android:background="?android:attr/selectableItemBackgroundBorderless"
+          android:contentDescription="@string/clipboard_date_filter"
+          android:scaleType="centerInside"
+          android:padding="4dp"/>
+
+      <!-- Close/dismiss clipboard pane button -->
+      <ImageButton
+          android:id="@+id/clipboard_close_button"
+          android:layout_width="32dp"
+          android:layout_height="32dp"
+          android:src="@android:drawable/arrow_down_float"
+          android:tint="?attr/colorLabel"
+          tools:ignore="UseAppTint"
+          android:background="?android:attr/selectableItemBackgroundBorderless"
+          android:contentDescription="@string/clipboard_close"
+          android:scaleType="centerInside"
+          android:padding="4dp"/>
+
+    </LinearLayout>
+
+    <!-- Result scope always describes the full filtered list, not the current page. -->
+    <LinearLayout android:id="@+id/clipboard_result_controls"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="center_vertical" android:paddingStart="8dp"
+        android:paddingEnd="8dp" android:background="?attr/colorKeyboard">
+      <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+          android:layout_weight="1" android:orientation="vertical">
+        <!-- Selection mode only: the live selected count, first so it is never ellipsized away. -->
+        <TextView android:id="@+id/clipboard_selection_count" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:textSize="12sp" android:textStyle="bold"
+            android:maxLines="1" android:ellipsize="end" android:visibility="gone"
+            android:textColor="?attr/colorLabel" android:accessibilityLiveRegion="polite"/>
+        <TextView android:id="@+id/clipboard_result_summary" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:textSize="12sp"
+            android:maxLines="1" android:ellipsize="end"
+            android:textColor="?attr/colorSubLabel" android:accessibilityLiveRegion="polite"/>
+        <TextView android:id="@+id/clipboard_bulk_feedback" android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:maxLines="2" android:ellipsize="end"
+            android:textSize="12sp" android:textColor="?attr/colorLabel" android:visibility="gone"
+            android:accessibilityLiveRegion="polite"/>
+      </LinearLayout>
+      <!-- Share the result row so pagination does not consume the landscape list. -->
+      <!-- Pagination bar (hidden when ≤100 items) -->
+      <LinearLayout
+          android:id="@+id/clipboard_pagination_bar"
+          android:layout_width="wrap_content"
+          android:layout_height="48dp"
+          android:orientation="horizontal"
+          android:gravity="center"
+          android:background="?attr/colorKey"
+          android:visibility="gone">
+
+        <TextView
+            android:id="@+id/clipboard_page_prev"
+            android:text="@string/glyph_page_prev"
+            android:layout_width="48dp"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:textSize="16sp"
+            android:textColor="?attr/colorLabel"
+            android:clickable="true"
+            android:focusable="true"
+            android:background="?android:attr/selectableItemBackground"/>
+
+        <TextView
+            android:id="@+id/clipboard_page_info"
+            tools:text="1 / 1"
+            android:layout_width="wrap_content"
+            android:minWidth="48dp"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:textSize="12sp"
+            android:textColor="?attr/colorSubLabel"/>
+
+        <TextView
+            android:id="@+id/clipboard_page_next"
+            android:text="@string/glyph_page_next"
+            android:layout_width="48dp"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:textSize="16sp"
+            android:textColor="?attr/colorLabel"
+            android:clickable="true"
+            android:focusable="true"
+            android:background="?android:attr/selectableItemBackground"/>
+
+      </LinearLayout>
+      <!-- GH #175(2): Undo for a swiped-away row, GONE except during the 5 s window. The
+           "Deleted" line beside it is clipboard_bulk_feedback (a polite live region). -->
+      <Button android:id="@+id/clipboard_swipe_undo" android:layout_width="wrap_content"
+          android:layout_height="48dp" android:minWidth="48dp" android:text="@string/clipboard_swipe_undo"
+          android:backgroundTint="?attr/colorKey" android:textColor="?attr/colorLabel"
+          android:visibility="gone"/>
+      <!-- Enters selection mode; batch deletion of results goes through the selection. -->
+      <Button android:id="@+id/clipboard_select" android:layout_width="wrap_content"
+          android:layout_height="48dp" android:minWidth="48dp" android:text="@string/clipboard_select"
+          android:enabled="false" android:backgroundTint="?attr/colorKey"
+          android:textColor="?attr/colorLabel"/>
+    </LinearLayout>
+
+    <!-- Selection actions, VISIBLE only in selection mode. A third row in narrow (tall) panes;
+         ClipboardPaneLayout puts it beside the results in wide (short) panes, where the
+         non-current tab icons are hidden to make room. Five 48dp targets (240dp). -->
+    <LinearLayout android:id="@+id/clipboard_selection_bar"
+        android:layout_width="match_parent" android:layout_height="48dp"
+        android:orientation="horizontal" android:gravity="center_vertical|end"
+        android:background="?attr/colorKeyboard" android:visibility="gone">
+      <ImageButton android:id="@+id/clipboard_select_matching"
+          android:layout_width="48dp" android:layout_height="48dp"
+          android:src="@drawable/ic_check_box_outline"
+          android:tint="?attr/colorLabel" tools:ignore="UseAppTint"
+          android:background="?android:attr/selectableItemBackgroundBorderless"
+          android:scaleType="centerInside" android:padding="12dp"
+          android:contentDescription="@string/clipboard_select_all_matching"/>
+      <ImageButton android:id="@+id/clipboard_selection_clear"
+          android:layout_width="48dp" android:layout_height="48dp"
+          android:src="@drawable/ic_clear_all"
+          android:tint="?attr/colorLabel" tools:ignore="UseAppTint"
+          android:background="?android:attr/selectableItemBackgroundBorderless"
+          android:scaleType="centerInside" android:padding="12dp"
+          android:contentDescription="@string/clipboard_selection_clear"/>
+      <!-- Add to Pinned / Add to Todos / Merge / Clean (2026-10-07): one 48dp target opening a
+           list, so five actions still fit beside the results in a compact landscape pane. -->
+      <ImageButton android:id="@+id/clipboard_selection_actions"
+          android:layout_width="48dp" android:layout_height="48dp"
+          android:src="@drawable/ic_more_vert"
+          android:tint="?attr/colorLabel" tools:ignore="UseAppTint"
+          android:background="?android:attr/selectableItemBackgroundBorderless"
+          android:scaleType="centerInside" android:padding="12dp"
+          android:contentDescription="@string/clipboard_selection_actions"/>
+      <ImageButton android:id="@+id/clipboard_delete_selected"
+          android:layout_width="48dp" android:layout_height="48dp"
+          android:src="@drawable/ic_delete"
+          android:tint="?attr/colorLabel" tools:ignore="UseAppTint"
+          android:background="?android:attr/selectableItemBackgroundBorderless"
+          android:scaleType="centerInside" android:padding="12dp"
+          android:contentDescription="@string/clipboard_delete_selected"/>
+      <ImageButton android:id="@+id/clipboard_selection_exit"
+          android:layout_width="48dp" android:layout_height="48dp"
+          android:src="@drawable/ic_clipboard_cancel"
+          android:tint="?attr/colorLabel" tools:ignore="UseAppTint"
+          android:background="?android:attr/selectableItemBackgroundBorderless"
+          android:scaleType="centerInside" android:padding="12dp"
+          android:contentDescription="@string/clipboard_selection_exit"/>
+    </LinearLayout>
+  </LinearLayout>
+
+  <!-- Divider below header -->
+  <View
+      android:layout_width="match_parent"
+      android:layout_height="1dp"
+      android:background="?attr/clipboard_divider_color"/>
+
+  <!-- Content area: entry list (hidden when tag panel is active) -->
+  <ScrollView
+      android:id="@+id/clipboard_content_scroll"
+      android:layout_width="match_parent"
+      android:layout_height="0dp"
+      android:layout_weight="1">
+
+    <tribixbite.cleverkeys.ClipboardHistoryView
+        android:id="@+id/clipboard_history_view"
+        android:orientation="vertical"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:divider="?attr/clipboard_divider_color"
+        android:dividerHeight="?attr/clipboard_divider_height"/>
+
+  </ScrollView>
+
+  <!-- Inline tag panel: replaces entry list when managing tags for an entry.
+       Mutually exclusive with clipboard_content_scroll — only one VISIBLE at a time.
+       Populated programmatically by ClipboardTagPanel. -->
+  <ScrollView
+      android:id="@+id/clipboard_tag_panel"
+      android:layout_width="match_parent"
+      android:layout_height="0dp"
+      android:layout_weight="1"
+      android:visibility="gone"
+      android:background="?attr/colorKeyboard">
+
+    <LinearLayout
+        android:id="@+id/clipboard_tag_panel_content"
+        android:orientation="vertical"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="12dp"/>
+
+  </ScrollView>
+
+
+
+</tribixbite.cleverkeys.ClipboardPaneLayout>

@@ -1,0 +1,619 @@
+package tribixbite.cleverkeys.ui.settings.sections
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import tribixbite.cleverkeys.Config
+import tribixbite.cleverkeys.R
+import tribixbite.cleverkeys.SettingsActivity
+import tribixbite.cleverkeys.SettingsRanges
+import tribixbite.cleverkeys.toSliderRange
+import tribixbite.cleverkeys.ui.settings.CollapsibleSettingsSection
+import tribixbite.cleverkeys.ui.settings.SettingsDropdown
+import tribixbite.cleverkeys.ui.settings.SettingsSlider
+import tribixbite.cleverkeys.ui.settings.SettingsSwitch
+import tribixbite.cleverkeys.ui.settings.openExtraKeysConfig
+import tribixbite.cleverkeys.ui.settings.openLayoutManager
+import tribixbite.cleverkeys.ui.settings.saveSetting
+import tribixbite.cleverkeys.voice.VoiceTypingConfig
+import kotlin.math.roundToInt
+
+@Composable
+internal fun SettingsActivity.InputBehaviorSection() {
+            CollapsibleSettingsSection(
+                title = stringResource(R.string.settings_section_input),
+                expanded = inputSectionExpanded,
+                onExpandChange = { inputSectionExpanded = it }
+            ) {
+                // Keyboard Layouts Manager button
+                Button(
+                    onClick = { openLayoutManager() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(stringResource(R.string.input_manage_layouts))
+                }
+
+                // Extra Keys Configuration button
+                Button(
+                    onClick = { openExtraKeysConfig() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(stringResource(R.string.input_configure_extra_keys))
+                }
+
+                // ── VOICE TYPING (phase 4 part 1) ─────────────────────────
+                // The mic key dictates inside this keyboard by default; the dropdown keeps the
+                // legacy behaviour (hand the field to a separate voice IME) one tap away, and the
+                // self-test switch proves the commit path on a device with no microphone or no
+                // speech recogniser at all - which is exactly what the CI emulator is.
+                SettingsDropdown(
+                    title = stringResource(R.string.voice_typing_mode_title),
+                    description = stringResource(R.string.voice_typing_mode_desc),
+                    options = listOf(
+                        stringResource(R.string.voice_typing_mode_dictation),
+                        stringResource(R.string.voice_typing_mode_switch_ime)
+                    ),
+                    selectedIndex = voiceTypingModeIndex,
+                    onSelectionChange = { index ->
+                        voiceTypingModeIndex = index
+                        saveSetting(
+                            VoiceTypingConfig.PREF_MODE,
+                            VoiceTypingConfig.rawOf(VoiceTypingConfig.modes()[index])
+                        )
+                    }
+                )
+                SettingsSwitch(
+                    title = stringResource(R.string.voice_typing_self_test_title),
+                    description = stringResource(R.string.voice_typing_self_test_desc),
+                    checked = voiceTypingSelfTest,
+                    onCheckedChange = { enabled ->
+                        voiceTypingSelfTest = enabled
+                        saveSetting(VoiceTypingConfig.PREF_SELF_TEST, enabled)
+                    }
+                )
+
+                // Phase 1: Typing/Prediction Settings
+                SettingsSwitch(
+                    title = stringResource(R.string.input_enable_predictions_title),
+                    description = stringResource(R.string.input_enable_predictions_desc),
+                    checked = wordPredictionEnabled,
+                    onCheckedChange = {
+                        wordPredictionEnabled = it
+                        saveSetting("word_prediction_enabled", it)
+                    }
+                )
+
+                if (wordPredictionEnabled) {
+                    SettingsSlider(
+                        title = stringResource(R.string.input_suggestion_bar_opacity_title),
+                        description = stringResource(R.string.input_suggestion_bar_opacity_desc),
+                        value = suggestionBarOpacity.toFloat(),
+                        valueRange = SettingsRanges.OPACITY_PERCENT.toSliderRange(),
+                        increment = 1f,
+                        onValueChange = {
+                            suggestionBarOpacity = it.roundToInt()
+                            saveSetting("suggestion_bar_opacity", suggestionBarOpacity)
+                        },
+                        displayValue = "$suggestionBarOpacity%"
+                    )
+
+                    // Phase 4 part 2: an empty strip read as a broken purple band on the owner's
+                    // phone, so collapsing it is the default; this is the way back to a keyboard
+                    // whose height never moves.
+                    SettingsSwitch(
+                        title = stringResource(R.string.input_strip_always_title),
+                        description = stringResource(R.string.input_strip_always_desc),
+                        checked = suggestionStripAlwaysVisible,
+                        onCheckedChange = { enabled ->
+                            suggestionStripAlwaysVisible = enabled
+                            saveSetting("suggestion_strip_always_visible", enabled)
+                            Config.globalConfig()?.suggestion_strip_always_visible = enabled
+                        }
+                    )
+
+                    // #82: Auto-space after selecting suggestion
+                    SettingsSwitch(
+                        title = stringResource(R.string.input_auto_space_after_title),
+                        description = stringResource(R.string.input_auto_space_after_desc),
+                        checked = autoSpaceAfterSuggestion,
+                        onCheckedChange = {
+                            autoSpaceAfterSuggestion = it
+                            saveSetting("auto_space_after_suggestion", it)
+                            Config.globalConfig()?.auto_space_after_suggestion = it
+                        }
+                    )
+
+                    // Auto-space before tapped suggestion (leading space)
+                    SettingsSwitch(
+                        title = stringResource(R.string.input_auto_space_before_title),
+                        description = stringResource(R.string.input_auto_space_before_desc),
+                        checked = autoSpaceBeforeSuggestion,
+                        onCheckedChange = {
+                            autoSpaceBeforeSuggestion = it
+                            saveSetting("auto_space_before_suggestion", it)
+                            Config.globalConfig()?.auto_space_before_suggestion = it
+                        }
+                    )
+
+                    // F-8 / #42 (maintainer decision 2026-09-08): the exact-typed-word
+                    // suggestion had a live reader (SuggestionHandler) but no control.
+                    SettingsSwitch(
+                        title = stringResource(R.string.input_show_exact_typed_title),
+                        description = stringResource(R.string.input_show_exact_typed_desc),
+                        checked = showExactTypedWord,
+                        onCheckedChange = {
+                            showExactTypedWord = it
+                            saveSetting("show_exact_typed_word", it)
+                            Config.globalConfig()?.show_exact_typed_word = it
+                        }
+                    )
+
+                    // #110: Backspace undo swipe — delete entire swiped word on immediate backspace
+                    if (swipeTypingEnabled) {
+                        SettingsSwitch(
+                            title = stringResource(R.string.input_backspace_undo_swipe_title),
+                            description = stringResource(R.string.input_backspace_undo_swipe_desc),
+                            checked = backspaceUndoSwipe,
+                            highlightId = "backspace_undo_swipe",
+                            onCheckedChange = {
+                                backspaceUndoSwipe = it
+                                saveSetting("backspace_undo_swipe", it)
+                                Config.globalConfig()?.backspace_undo_swipe = it
+                            }
+                        )
+                    }
+
+                    // Word Prediction Advanced section (expandable)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { wordPredictionAdvancedExpanded = !wordPredictionAdvancedExpanded }
+                            .padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(stringResource(R.string.input_advanced_prediction), fontWeight = FontWeight.SemiBold)
+                        Icon(
+                            imageVector = if (wordPredictionAdvancedExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            contentDescription = null
+                        )
+                    }
+
+                    AnimatedVisibility(visible = wordPredictionAdvancedExpanded) {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            SettingsSwitch(
+                                title = stringResource(R.string.input_context_aware_title),
+                                description = stringResource(R.string.input_context_aware_desc),
+                                checked = contextAwarePredictionsEnabled,
+                                onCheckedChange = {
+                                    contextAwarePredictionsEnabled = it
+                                    saveSetting("context_aware_predictions_enabled", it)
+                                }
+                            )
+
+                            // Next-word prediction (audit 2026-08-06 §4.3; default ON since
+                            // 2026-09-26). ALWAYS enabled: the shipped static tier works with
+                            // on-device learning and the context LM both off, so neither is a
+                            // prerequisite any more (it used to be DISABLED while Context-Aware
+                            // was off). The learned tier stays behind the learning gates at
+                            // runtime — NextWordPredictor.decideTiers +
+                            // LearningGate.canUseLearnedNextWord — and the description says so.
+                            SettingsSwitch(
+                                title = stringResource(R.string.input_next_word_title),
+                                description = stringResource(R.string.input_next_word_desc),
+                                checked = nextWordPredictionEnabled,
+                                onCheckedChange = {
+                                    nextWordPredictionEnabled = it
+                                    saveSetting("next_word_prediction_enabled", it)
+                                    Config.globalConfig()?.next_word_prediction_enabled = it
+                                }
+                            )
+
+                            // Which phrase model feeds the context boost (audit §3.2-2)
+                            SettingsDropdown(
+                                title = stringResource(R.string.input_context_source_title),
+                                description = stringResource(R.string.input_context_source_desc),
+                                // Display labels only, index-aligned with the `when` below; the stored pref value is the id string.
+                                options = listOf(
+                                    stringResource(R.string.input_context_source_both),
+                                    stringResource(R.string.input_context_source_learned_only),
+                                    stringResource(R.string.input_context_source_static_only)
+                                ),
+                                selectedIndex = when (contextSource) {
+                                    "learned_only" -> 1
+                                    "static_only" -> 2
+                                    else -> 0
+                                },
+                                onSelectionChange = { index ->
+                                    contextSource = when (index) {
+                                        1 -> "learned_only"
+                                        2 -> "static_only"
+                                        else -> "both"
+                                    }
+                                    saveSetting("context_source", contextSource)
+                                    Config.globalConfig()?.context_source = contextSource
+                                }
+                            )
+
+                            SettingsSwitch(
+                                title = stringResource(R.string.input_personalized_learning_title),
+                                description = stringResource(R.string.input_personalized_learning_desc),
+                                checked = personalizedLearningEnabled,
+                                onCheckedChange = {
+                                    personalizedLearningEnabled = it
+                                    saveSetting("personalized_learning_enabled", it)
+                                }
+                            )
+
+                            // Continuous personalization strength (audit §3.2-1) — the
+                            // aggression enum below stays as a preset on top. Both are
+                            // DISABLED (not hidden) when Personalized Learning is off, for
+                            // the same reasons as the next-word switch above (audit
+                            // 2026-08-26): a hidden control can't own its stored state, and
+                            // its search entry lands nowhere while it isn't composed.
+                            SettingsSlider(
+                                title = stringResource(R.string.input_personalization_weight_title),
+                                description = stringResource(R.string.input_personalization_weight_desc),
+                                value = personalizationWeight,
+                                valueRange = 0f..2f,
+                                increment = 0.1f,
+                                enabled = personalizedLearningEnabled,
+                                onValueChange = {
+                                    personalizationWeight = it
+                                    saveSetting("personalization_weight", personalizationWeight)
+                                    Config.globalConfig()?.personalization_weight = personalizationWeight
+                                },
+                                displayValue = "%.1fx".format(personalizationWeight)
+                            )
+
+                            SettingsDropdown(
+                                title = stringResource(R.string.input_learning_aggression_title),
+                                description = stringResource(R.string.input_learning_aggression_desc),
+                                // Display labels only, index-aligned with the `when` below; the stored pref value is the id string.
+                                // Same labels as the suggestion-provenance card's aggression line.
+                                options = listOf(
+                                    stringResource(R.string.provenance_aggression_conservative),
+                                    stringResource(R.string.provenance_aggression_balanced),
+                                    stringResource(R.string.provenance_aggression_aggressive)
+                                ),
+                                selectedIndex = when (learningAggression) {
+                                    "CONSERVATIVE" -> 0
+                                    "BALANCED" -> 1
+                                    "AGGRESSIVE" -> 2
+                                    else -> 1
+                                },
+                                enabled = personalizedLearningEnabled,
+                                onSelectionChange = { index ->
+                                    learningAggression = when (index) {
+                                        0 -> "CONSERVATIVE"
+                                        1 -> "BALANCED"
+                                        2 -> "AGGRESSIVE"
+                                        else -> "BALANCED"
+                                    }
+                                    saveSetting("learning_aggression", learningAggression)
+                                }
+                            )
+
+                            SettingsSlider(
+                                title = stringResource(R.string.input_context_boost_title),
+                                description = stringResource(R.string.input_context_boost_desc),
+                                value = predictionContextBoost,
+                                valueRange = 0.5f..5.0f,
+                                increment = 0.1f,
+                                onValueChange = {
+                                    predictionContextBoost = it
+                                    saveSetting("prediction_context_boost", predictionContextBoost)
+                                },
+                                displayValue = "%.1fx".format(predictionContextBoost)
+                            )
+
+                            SettingsSlider(
+                                title = stringResource(R.string.input_frequency_scale_title),
+                                description = stringResource(R.string.input_frequency_scale_desc),
+                                value = predictionFrequencyScale,
+                                valueRange = 100f..5000f,
+                                increment = 100f,
+                                onValueChange = {
+                                    predictionFrequencyScale = it
+                                    saveSetting("prediction_frequency_scale", predictionFrequencyScale)
+                                },
+                                displayValue = "%.0f".format(predictionFrequencyScale)
+                            )
+
+                            // Learned-data manager (audit 2026-08-06 §3.3): inspect +
+                            // clear the on-device context-LM / personalization stores.
+                            LearningDataManagerBlock()
+                        }
+                    }
+                }
+
+                SettingsSwitch(
+                    title = stringResource(R.string.settings_auto_capitalization_title),
+                    description = stringResource(R.string.settings_auto_capitalization_desc),
+                    checked = autoCapitalizationEnabled,
+                    onCheckedChange = {
+                        autoCapitalizationEnabled = it
+                        saveSetting("autocapitalisation", it)
+                        // Update Config immediately so change takes effect without restart
+                        Config.globalConfig()?.autocapitalisation = it
+                    }
+                )
+
+                // #72: Capitalize I words (I, I'm, I'll, I'd, I've)
+                SettingsSwitch(
+                    title = stringResource(R.string.input_capitalize_i_title),
+                    description = stringResource(R.string.input_capitalize_i_desc),
+                    checked = capitalizeIWords,
+                    onCheckedChange = {
+                        capitalizeIWords = it
+                        saveSetting("autocapitalize_i_words", it)
+                        // Update Config immediately
+                        Config.globalConfig()?.autocapitalize_i_words = it
+                    }
+                )
+
+                SettingsSwitch(
+                    title = stringResource(R.string.input_smart_punctuation_title),
+                    description = stringResource(R.string.input_smart_punctuation_desc),
+                    checked = smartPunctuationEnabled,
+                    onCheckedChange = {
+                        smartPunctuationEnabled = it
+                        saveSetting("smart_punctuation", it)
+                        // Update Config immediately
+                        Config.globalConfig().smart_punctuation = it
+                    }
+                )
+
+                // v1.2.8: Vibration settings moved to Accessibility section
+
+                SettingsSlider(
+                    title = stringResource(R.string.input_swipe_distance_threshold_title),
+                    description = stringResource(R.string.input_swipe_distance_threshold_desc),
+                    value = swipeDistance.toFloat(),
+                    valueRange = 5f..30f,
+                    increment = 1f,
+                    onValueChange = {
+                        swipeDistance = it.roundToInt()
+                        saveSetting("swipe_dist", swipeDistance.toString())
+                    },
+                    displayValue = "$swipeDistance"
+                )
+
+                SettingsSlider(
+                    title = stringResource(R.string.input_circle_gesture_title),
+                    description = stringResource(R.string.input_circle_gesture_desc),
+                    value = circleSensitivity.toFloat(),
+                    valueRange = SettingsRanges.CIRCLE_SENSITIVITY.toSliderRange(),
+                    increment = 1f,
+                    onValueChange = {
+                        circleSensitivity = it.roundToInt()
+                        saveSetting("circle_sensitivity", circleSensitivity.toString())
+                    },
+                    displayValue = "$circleSensitivity"
+                )
+
+                SettingsSlider(
+                    title = stringResource(R.string.input_space_slider_title),
+                    description = stringResource(R.string.input_space_slider_desc),
+                    value = sliderSensitivity.toFloat(),
+                    // F-3: floor 1 (SettingsRanges) — 0% made slide_step_px 0 and the
+                    // space slider divided by it (rightward slide moved the cursor left).
+                    valueRange = SettingsRanges.SLIDER_SENSITIVITY_PERCENT.first.toFloat()..
+                        SettingsRanges.SLIDER_SENSITIVITY_PERCENT.last.toFloat(),
+                    increment = 1f,
+                    onValueChange = {
+                        sliderSensitivity = it.roundToInt()
+                        saveSetting("slider_sensitivity", sliderSensitivity.toString())
+                    },
+                    displayValue = "$sliderSensitivity%"
+                )
+
+                SettingsSlider(
+                    title = stringResource(R.string.input_long_press_timeout_title),
+                    description = stringResource(R.string.input_long_press_timeout_desc),
+                    value = longPressTimeout.toFloat(),
+                    valueRange = SettingsRanges.LONGPRESS_TIMEOUT.toSliderRange(),
+                    increment = 50f,
+                    onValueChange = {
+                        longPressTimeout = it.roundToInt()
+                        saveSetting("longpress_timeout", longPressTimeout)
+                    },
+                    displayValue = "${longPressTimeout}ms"
+                )
+
+                SettingsSlider(
+                    title = stringResource(R.string.input_long_press_interval_title),
+                    description = stringResource(R.string.input_long_press_interval_desc),
+                    value = longPressInterval.toFloat(),
+                    // F-4: shared with the import validator + Config clamp (SettingsRanges).
+                    valueRange = SettingsRanges.LONGPRESS_INTERVAL.first.toFloat()..
+                        SettingsRanges.LONGPRESS_INTERVAL.last.toFloat(),
+                    increment = 5f,
+                    onValueChange = {
+                        longPressInterval = it.roundToInt()
+                        saveSetting("longpress_interval", longPressInterval)
+                    },
+                    displayValue = "${longPressInterval}ms"
+                )
+
+                SettingsSwitch(
+                    title = stringResource(R.string.input_key_repeat_title),
+                    description = stringResource(R.string.input_key_repeat_desc),
+                    checked = keyRepeatEnabled,
+                    onCheckedChange = {
+                        keyRepeatEnabled = it
+                        saveSetting("keyrepeat_enabled", it)
+                    }
+                )
+
+                // #81: Only show when key repeat is enabled
+                if (keyRepeatEnabled) {
+                    SettingsSwitch(
+                        title = stringResource(R.string.input_backspace_only_repeat_title),
+                        description = stringResource(R.string.input_backspace_only_repeat_desc),
+                        checked = keyRepeatBackspaceOnly,
+                        onCheckedChange = { backspaceOnly ->
+                            keyRepeatBackspaceOnly = backspaceOnly
+                            saveSetting("keyrepeat_backspace_only", backspaceOnly)
+                            // ARC-072: `keyrepeat_backspace_only` is mirrored into the
+                            // ConfigSnapshot the touch path captures at pointer-down, so a
+                            // raw field write would leave every gesture running on the old
+                            // value until the preference listener's refresh landed. edit{}
+                            // applies the write and re-publishes the read-model together.
+                            Config.globalConfig()?.edit {
+                                keyrepeat_backspace_only = backspaceOnly
+                            }
+                        }
+                    )
+                }
+
+                SettingsSwitch(
+                    title = stringResource(R.string.input_double_tap_shift_title),
+                    description = stringResource(R.string.input_double_tap_shift_desc),
+                    checked = doubleTapLockShift,
+                    onCheckedChange = {
+                        doubleTapLockShift = it
+                        saveSetting("lock_double_tap", it)
+                    }
+                )
+
+                SettingsSwitch(
+                    title = stringResource(R.string.input_immediate_switching_title),
+                    description = stringResource(R.string.input_immediate_switching_desc),
+                    checked = switchInputImmediate,
+                    onCheckedChange = {
+                        switchInputImmediate = it
+                        saveSetting("switch_input_immediate", it)
+                    }
+                )
+
+                // #139: keep Enter a newline key in multi-line fields whose app asks for an
+                // action (WhatsApp Send). Single-line fields keep their action; the decision
+                // lives in EditorInfoHelper.shouldSwapEnterActionKey and is read per field.
+                SettingsSwitch(
+                    title = stringResource(R.string.input_enter_always_newline_title),
+                    description = stringResource(R.string.input_enter_always_newline_desc),
+                    checked = enterAlwaysNewline,
+                    onCheckedChange = {
+                        enterAlwaysNewline = it
+                        saveSetting("enter_always_newline", it)
+                    }
+                )
+
+                SettingsDropdown(
+                    title = stringResource(R.string.input_number_row_title),
+                    description = stringResource(R.string.input_number_row_desc),
+                    // Display labels only, index-aligned with the `when` below; the stored pref value is the id string.
+                    options = listOf(
+                        stringResource(R.string.input_number_row_hidden),
+                        stringResource(R.string.input_number_row_numbers_only),
+                        stringResource(R.string.input_number_row_numbers_symbols)
+                    ),
+                    selectedIndex = when (numberRowMode) {
+                        "no_number_row" -> 0
+                        "no_symbols" -> 1
+                        "symbols" -> 2
+                        else -> 0
+                    },
+                    onSelectionChange = { index ->
+                        numberRowMode = when (index) {
+                            0 -> "no_number_row"
+                            1 -> "no_symbols"
+                            2 -> "symbols"
+                            else -> "no_number_row"
+                        }
+                        saveSetting("number_row", numberRowMode)
+                    }
+                )
+
+                // Phase 4 part 2: the calm default keeps one corner hint per key. This is the way
+                // back to the dense rendering for anyone who has learned it, sitting next to the
+                // number-row control because both decide what a key shows.
+                SettingsSwitch(
+                    title = stringResource(R.string.input_key_symbols_title),
+                    description = stringResource(R.string.input_key_symbols_desc),
+                    checked = printAllKeySymbols,
+                    onCheckedChange = { enabled ->
+                        printAllKeySymbols = enabled
+                        saveSetting("print_all_key_symbols", enabled)
+                        // Immediate, like the other live switches: the open keyboard redraws with
+                        // the corner labels back (or gone) without a restart.
+                        Config.globalConfig()?.print_all_key_symbols = enabled
+                    }
+                )
+
+                SettingsDropdown(
+                    title = stringResource(R.string.input_show_numpad_title),
+                    description = stringResource(R.string.input_show_numpad_desc),
+                    // Display labels only, index-aligned with the `when` below; the stored pref value is the id string.
+                    options = listOf(
+                        stringResource(R.string.input_show_numpad_never),
+                        stringResource(R.string.input_show_numpad_landscape_only),
+                        stringResource(R.string.input_show_numpad_always)
+                    ),
+                    selectedIndex = when (showNumpadMode) {
+                        "never" -> 0
+                        "landscape" -> 1
+                        "always" -> 2
+                        else -> 0
+                    },
+                    onSelectionChange = { index ->
+                        showNumpadMode = when (index) {
+                            0 -> "never"
+                            1 -> "landscape"
+                            2 -> "always"
+                            else -> "never"
+                        }
+                        saveSetting("show_numpad", showNumpadMode)
+                    }
+                )
+
+                SettingsDropdown(
+                    title = stringResource(R.string.input_numpad_layout_title),
+                    description = stringResource(R.string.input_numpad_layout_desc),
+                    // Display labels only; the stored pref value stays "default"/"low_first".
+                    options = listOf(
+                        stringResource(R.string.input_numpad_layout_high_first),
+                        stringResource(R.string.input_numpad_layout_low_first)
+                    ),
+                    selectedIndex = if (numpadLayout == "low_first") 1 else 0,
+                    onSelectionChange = { index ->
+                        numpadLayout = if (index == 1) "low_first" else "default"
+                        saveSetting("numpad_layout", numpadLayout)
+                    }
+                )
+
+                SettingsSwitch(
+                    title = stringResource(R.string.input_pin_entry_layout_title),
+                    description = stringResource(R.string.input_pin_entry_layout_desc),
+                    checked = pinEntryEnabled,
+                    onCheckedChange = {
+                        pinEntryEnabled = it
+                        // F-6 (2026-09-06): write the key the runtime actually reads.
+                        // The old `pin_entry_enabled` write drove nothing — its only
+                        // reader is Config.migrate's ONE-TIME seeding of
+                        // number_entry_layout, which runs at first launch before
+                        // Settings can ever be opened, so the switch was a no-op on
+                        // every install. `number_entry_layout` feeds
+                        // Config.selected_number_layout live via the pref listener.
+                        saveSetting("number_entry_layout", if (it) "pin" else "number")
+                    }
+                )
+            }
+}

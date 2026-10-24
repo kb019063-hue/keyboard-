@@ -1,0 +1,211 @@
+package tribixbite.cleverkeys
+
+import android.annotation.SuppressLint
+import android.app.Activity
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import android.os.UserManager
+import android.util.Log
+import android.widget.Toast
+import tribixbite.cleverkeys.clipboard.PrivateCopyIntentParser
+import tribixbite.cleverkeys.clipboard.PrivateCopyRateLimiter
+
+/**
+ * #156 F5: reconcile the OS component-enabled state of [PrivateCopyProcessTextActivity] with the
+ * persisted `clipboard_private_copy_toolbar_enabled` pref. The activity is exported but
+ * `android:enabled="false"` in the manifest, so ANY path that writes the pref (Settings toggle,
+ * settings load, a settings IMPORT / headless restore) must also flip the component — otherwise the
+ * pref reads "on" while "Private copy" never appears in other apps' selection toolbars until the user
+ * happens to reopen CleverKeys Settings.
+ *
+ * [Context]-based (not tied to `SettingsActivity`) so the backup/restore manager can call it after an
+ * import commits prefs. Uses `COMPONENT_ENABLED_STATE_DISABLED` (not `_DEFAULT`) on the off-path so a
+ * later manifest-default change won't surprise users (design §6.6). [PackageManager.DONT_KILL_APP]
+ * keeps the running IME alive across the flip.
+ *
+ * Idempotent-guarded: reads the current component state and skips the `setComponentEnabledSetting`
+ * call when it already matches, so a no-op reconcile (the common case on a load/import that didn't
+ * change the toggle) doesn't churn the PackageManager or risk DONT_KILL_APP edge behavior.
+ */
+fun reconcilePrivateCopyToolbarComponent(context: Context, enabled: Boolean) {
+    val pm = context.packageManager
+    val component = ComponentName(context, PrivateCopyProcessTextActivity::class.java)
+    val desiredState = if (enabled) {
+        PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+    } else {
+        PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+    }
+    try {
+        // Skip the flip when the OS state already matches (avoids needless PackageManager churn).
+        if (pm.getComponentEnabledSetting(component) == desiredState) return
+        pm.setComponentEnabledSetting(component, desiredState, PackageManager.DONT_KILL_APP)
+    } catch (e: Exception) {
+        // Never let a component-reconcile failure abort an import/settings-load.
+        Log.w("PrivateCopyPT", "Failed to reconcile private-copy toolbar component: ${e.message}")
+    }
+}
+
+/**
+ * #156 Private copy — entry point B: the exported `ACTION_PROCESS_TEXT` selection-toolbar target.
+ *
+ * Lets the user copy selected text from ANY app whose selection toolbar honors PROCESS_TEXT
+ * (API 23+) straight into CleverKeys' private clipboard, WITHOUT the text ever reaching the
+ * Android OS clipboard. CleverKeys need not be the active keyboard.
+ *
+ * SECURITY POSTURE (design §6): exported BY DESIGN but `android:enabled="false"` in the manifest
+ * until the user opts in via Settings → Clipboard → "Private copy in other apps". Dataflow is
+ * strictly INBOUND: text in → local DB row + toast → `finish()` with `RESULT_CANCELED`. We NEVER
+ *   - return a result (no `setResult(RESULT_OK)`) → the host app's text/selection is never mutated,
+ *     for both PROCESS_TEXT (editable) and PROCESS_TEXT_READONLY (read-only) launches;
+ *   - read `intent.clipData`, `EXTRA_STREAM`, a URI, or any extra other than `EXTRA_PROCESS_TEXT`
+ *     (all intent reading is delegated to the pure-JVM [PrivateCopyIntentParser]) → the classic
+ *     "exported activity coerced into opening attacker URIs" class is structurally closed.
+ *
+ * Provenance ([getCallingPackage]) is kernel-attested and recorded as `source_package`; a launch
+ * without `forResult` (which the real toolbar never does) is recorded as `direct-launch`.
+ *
+ * `Theme.NoDisplay` requires `finish()` before `onResume()` — we finish inside [onCreate].
+ */
+class PrivateCopyProcessTextActivity : Activity() {
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        try {
+            handle()
+        } catch (e: Exception) {
+            // Defensive: a hostile or malformed launch must never crash-loop the process.
+            Log.w(TAG, "Private copy PROCESS_TEXT failed: ${e.message}")
+        } finally {
+            // ALWAYS finish before onResume (Theme.NoDisplay contract) and NEVER setResult(RESULT_OK):
+            // default RESULT_CANCELED + null data leaves the host app's text untouched.
+            finish()
+        }
+    }
+
+    // Intent.EXTRA_PROCESS_TEXT is a String constant (API 23) inlined at compile time.
+    // This activity is only ever launched via the ACTION_PROCESS_TEXT mechanism (API 23+),
+    // so the constant is always valid at runtime here.
+    @SuppressLint("InlinedApi")
+    private fun handle() {
+        // Config-init trap: Config.globalConfig() THROWS on a cold start. This activity is a valid
+        // cold-start entry point of the process, so initialize the global config first, mirroring
+        // the standalone-activity precedent (SwipeCalibrationActivity:124-126).
+        if (Config.globalConfigOrNull() == null) {
+            val prefs = DirectBootAwarePreferences.get_shared_preferences(this)
+            Config.initGlobalConfig(prefs, resources, null, false)
+        }
+
+        // Guard 1: device unlocked — ClipboardDatabase lives in Credential-Encrypted storage, which
+        // is inaccessible before first unlock. `directBootAware="false"` should already prevent a
+        // pre-unlock launch; this is defense in depth against a stale resolver cache.
+        if (!isUserUnlocked()) {
+            Log.w(TAG, "Private copy ignored: device not unlocked")
+            return
+        }
+
+        // Guard 2: feature pref enabled. The component-disable is the real gate (design §6.6); this
+        // defensive double-check ensures a stale resolver cache can't bypass the user's opt-out.
+        val prefs = DirectBootAwarePreferences.get_shared_preferences(this)
+        if (!prefs.getBoolean(PREF_TOOLBAR_ENABLED, Defaults.CLIPBOARD_PRIVATE_COPY_TOOLBAR_ENABLED)) {
+            Log.w(TAG, "Private copy ignored: feature disabled by pref")
+            return
+        }
+
+        // Parse + validate via the pure-JVM parser (the ONLY intent-reading code). READONLY is
+        // irrelevant to behavior — we only ever read the text extra, never transform/return it.
+        // Single source of truth for the cap: the SAME clipboard_max_item_size_kb the service's
+        // storeClip enforces (design §6.2) — the parser only re-checks it so it stays unit-testable.
+        val maxSizeKb = Config.globalConfig().clipboard_max_item_size_kb
+        val maxBytes = maxSizeKb * 1024
+        val processText = intent?.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)
+        val result = PrivateCopyIntentParser.parse(intent?.action, processText, maxBytes)
+        if (result !is PrivateCopyIntentParser.Result.Accept) {
+            val reason = (result as PrivateCopyIntentParser.Result.Reject).reason
+            Log.w(TAG, "Private copy rejected: $reason")
+            // Finding 10: give the user visible feedback for the OVER_CAP path. Entry point A (IME
+            // key) surfaces the service's "too large" toast; the toolbar path previously dropped
+            // silently (Log.w only) — a user selecting oversized text perceived silent data loss.
+            // Mirror the service's message (size + limit in KB) so both entry points behave alike.
+            if (reason == PrivateCopyIntentParser.Reason.OVER_CAP) {
+                val sizeKb = (processText?.toString()?.trim()
+                    ?.toByteArray(Charsets.UTF_8)?.size ?: 0) / 1024
+                Toast.makeText(
+                    applicationContext,
+                    getString(R.string.private_copy_too_large, sizeKb, maxSizeKb),
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+            return
+        }
+
+        // Rate limit per calling package (anti-annoyance; not a security boundary — design §6.5).
+        // getCallingPackage() is non-null and kernel-attested only for startActivityForResult
+        // launches (which the real selection toolbar uses); "direct-launch" otherwise.
+        val callerPkg = callingPackage ?: DIRECT_LAUNCH
+        if (!rateLimiter.tryAcquire(callerPkg)) {
+            Log.w(TAG, "Private copy rate-limited for caller: $callerPkg")
+            return  // Drop silently — no toast, don't give a flooding app a UI channel.
+        }
+
+        // Store privately. Uses applicationContext so the singleton service outlives this activity.
+        // NEVER touches the OS clipboard (privateCopy → addPrivateClip → rewriteOsClipboard=false).
+        val stored = ClipboardHistoryService.privateCopy(applicationContext, result.text, callerPkg)
+        if (stored) {
+            // ARC-037: the confirmation is suppressible. It was unconditional, which the design
+            // had promised it would not be — this toast interrupts the HOST app (a selection in
+            // someone else's editor), so a user who copies privately many times a day has no way
+            // to stop it from covering their work. Opt-OUT (default true): a first-time user must
+            // see that something happened, since the whole point is that nothing reaches the OS
+            // clipboard where they could otherwise verify it.
+            //
+            // `prefs` is the same handle read for the feature gate above (no second load).
+            // Read here rather than through Config: this activity is a cold-start entry point and
+            // already talks to SharedPreferences directly for PREF_TOOLBAR_ENABLED.
+            //
+            // FAILURE toasts are deliberately NOT gated — see the OVER_CAP branch above. This
+            // pref suppresses a "worked as expected" acknowledgement, never a report of data loss.
+            if (prefs.getBoolean(PREF_TOAST_ENABLED, Defaults.CLIPBOARD_PRIVATE_COPY_TOAST_ENABLED)) {
+                // Activities may toast (the Android-13 IME toast suppression does not apply here).
+                Toast.makeText(applicationContext, R.string.private_copy_toast, Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            Log.w(TAG, "Private copy: service unavailable, entry not stored")
+        }
+    }
+
+    private fun isUserUnlocked(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            val userManager = getSystemService(Context.USER_SERVICE) as? UserManager
+            userManager?.isUserUnlocked ?: true
+        } else {
+            true // Pre-N devices have no Direct Boot.
+        }
+    }
+
+    companion object {
+        private const val TAG = "PrivateCopyPT"
+
+        /** Pref that gates + reflects the component-enabled state (default false — opt-in). */
+        const val PREF_TOOLBAR_ENABLED = "clipboard_private_copy_toolbar_enabled"
+
+        /**
+         * ARC-037: gates the SUCCESS confirmation toast (default true — opt-out).
+         *
+         * Scoped to THIS entry point on purpose. Entry point A (the in-IME key / editing-pane
+         * action) reports through `PrivateCopyDispatch`'s suggestion-bar callback, not a Toast,
+         * because Toasts are IME-suppressed on Android 13+ — that channel is in-keyboard and
+         * transient, so it does not have the "covers another app's UI" problem this one has.
+         */
+        const val PREF_TOAST_ENABLED = "clipboard_private_copy_toast_enabled"
+
+        /** Recorded as `source_package` when launched without `forResult` (a strong injection tell). */
+        private const val DIRECT_LAUNCH = "direct-launch"
+
+        /** Process-lifetime rate limiter shared across all launches (design §6.5). */
+        private val rateLimiter = PrivateCopyRateLimiter()
+    }
+}
