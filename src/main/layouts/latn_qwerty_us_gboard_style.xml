@@ -1,17 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- QWERTY (Gboard-style): a US-English letter pane laid out like Gboard's default
-Android keyboard (Gboard 16, portrait, default settings). Layout only: "Gboard-style"
+Android keyboard (Gboard 16, portrait, number row ON). Layout only: "Gboard-style"
 describes the arrangement; this layout is not affiliated with or endorsed by Google, and
 copies no artwork or fonts.
 
 References: the Gboard 16 default keyboard as photographed in 9to5Google's "Gboard now lets
 you hide the period and comma keys" (2025-10-21,
 https://9to5google.com/2025/10/21/gboard-period-comma-keys/), and the Gboard settings it
-documents (Preferences: number row off, comma and period keys on, by default).
+documents (Preferences: comma and period keys on, by default), plus the owner's own Gboard
+on-device screenshot (Screenshot_20261022_061716, number row enabled).
 
-What is mimicked:
-- three letter rows with no number row; digits 1-0 as top-right hints on the top row
-  (Gboard's default long-press numbers), no other letter hints;
+What is mimicked, top to bottom:
+- a full-width number row, ten equal keys, digits only — Gboard prints no symbol hints
+  next to them (the symbols are on the ?123 pane and behind long-press);
+- three letter rows with NO corner hints on the letters at all. Gboard prints one hint on
+  some keys; "no hints" is the calmer end of the same idea and this keyboard's default
+  rendering already prints at most one. The digits are NOT hinted on the top row any more,
+  because the number row above already shows them (that is what Gboard does when its own
+  number row is switched on);
 - the second row indented by half a key; Shift and Delete 1.5 keys wide;
 - bottom row "?123 | , | space | . | enter" at 1.5 / 1 / 5 / 1 / 1.5 key widths, with the
   emoji key as the comma's top hint, where Gboard draws it.
@@ -23,23 +29,40 @@ How the Gboard features map onto CleverKeys keys:
   keyboard picker (Gboard's language key) sit on its other corners.
 - Period: Gboard's hold-period punctuation popup becomes ? ! ' - : on its corners.
 - Gboard's space-bar cursor slide maps to the space bar's cursor_left / cursor_right.
-- Turning on CleverKeys' own number row (Settings) removes the top-row digit hints, the
-  same way Gboard's number-row preference does.
 - Ctrl, Fn, the arrow keys and the remaining CleverKeys bottom-row keys stay reachable as
   corner swipes on ?123, enter, Shift and Delete.
+
+`loc` corners are placement markers, never printed (see Keyboard2View's draw loop): they say
+where a key would go if the layout ever grows it, so nothing here is decoration the user has
+to decode.
+
+embedded_number_row="true" tells LayoutModifier not to add the optional number row a second
+time, so turning that preference on cannot produce two rows of digits on this layout.
 -->
-<keyboard name="QWERTY (Gboard-style)" script="latin" bottom_row="false">
+<keyboard name="QWERTY (Gboard-style)" script="latin" bottom_row="false" embedded_number_row="true">
+  <row height="0.75">
+    <key c="1"/>
+    <key c="2"/>
+    <key c="3"/>
+    <key c="4"/>
+    <key c="5"/>
+    <key c="6"/>
+    <key c="7"/>
+    <key c="8"/>
+    <key c="9"/>
+    <key c="0"/>
+  </row>
   <row>
-    <key c="q" ne="1"/>
-    <key c="w" ne="2"/>
-    <key c="e" ne="3" se="loc €"/>
-    <key c="r" ne="4"/>
-    <key c="t" ne="5"/>
-    <key c="y" ne="6"/>
-    <key c="u" ne="7"/>
-    <key c="i" ne="8"/>
-    <key c="o" ne="9"/>
-    <key c="p" ne="0"/>
+    <key c="q" se="loc esc"/>
+    <key c="w"/>
+    <key c="e" sw="loc €"/>
+    <key c="r"/>
+    <key c="t"/>
+    <key c="y"/>
+    <key c="u"/>
+    <key c="i"/>
+    <key c="o"/>
+    <key c="p"/>
   </row>
   <row>
     <key shift="0.5" c="a"/>

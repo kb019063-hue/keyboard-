@@ -2468,6 +2468,8 @@
     <string name="cmd_switch_back_emoji">Back from Emoji</string>
     <string name="cmd_switch_back_emoji_desc">Return from emoji keyboard</string>
     <string name="cmd_switch_clipboard">Clipboard History</string>
+    <string name="cmd_switch_gif">GIF</string>
+    <string name="cmd_switch_gif_desc">Open the GIF pane</string>
     <string name="cmd_switch_clipboard_desc">Open clipboard history</string>
     <string name="cmd_switch_back_clipboard">Back from Clipboard</string>
     <string name="cmd_switch_back_clipboard_desc">Return from clipboard</string>

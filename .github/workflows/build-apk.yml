@@ -22,7 +22,9 @@ name: Build APK
 on:
   push:
     branches:
-      - arena/23fde500-keyboard
+      # Every Arena session works on its own branch; the old single-branch list meant a new
+      # session's pushes built nothing at all, so its first green build was a surprise merge.
+      - 'arena/**'
       - main
     # A docs-only change cannot alter an APK, and each push costs a ~6 min build plus a ~9 min
     # emulator run. workflow_dispatch still always runs, so nothing becomes unbuildable silently.
@@ -122,14 +124,6 @@ jobs:
           done
           ls -la
 
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: keyboard-debug-${{ steps.meta.outputs.sha }}
-          path: build/outputs/apk/debug/*.apk
-          if-no-files-found: error
-          retention-days: 30
-
       # Rolling prerelease. `arm64-v8a` is the one to install on any phone from 2017 onward.
       - name: Publish rolling dev release
         uses: softprops/action-gh-release@v2
@@ -156,6 +150,21 @@ jobs:
             no uninstall is needed.
 
             After installing: Settings → System → Languages & input → On-screen keyboard → enable it.
+
+      # Kept, but never allowed to fail the run. GitHub's artifact storage is a per-account
+      # quota and this repo uploads ~97 MB per push; the run of 2026-10-23 compiled fine and then
+      # failed here, which skipped the release step below and left the owner with no APK at all.
+      # The rolling release is the delivery path that matters, so it publishes FIRST.
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: keyboard-debug-${{ steps.meta.outputs.sha }}
+          path: build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          # 30 days x ~97 MB per push exhausted the quota; a week is plenty for "grab the build
+          # from the run I just pushed".
+          retention-days: 7
 
       - name: Upload failure reports
         if: failure()

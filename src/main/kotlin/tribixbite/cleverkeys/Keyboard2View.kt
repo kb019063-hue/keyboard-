@@ -1871,8 +1871,22 @@ class Keyboard2View @JvmOverloads constructor(
                 // none on keys that do something; print_all_key_symbols restores every label the
                 // key carries. Rendering only -- the KeySpec keeps all nine slots, so long-press,
                 // swipes, hit-testing and the a11y tree still reach what is not drawn.
+                //
+                // `loc` corners are excluded here and in the draw loop below. The layout
+                // grammar reserves `loc <key>` for PLACEMENT: it says "if this layout ever
+                // grows this key, put it here" ("Symbols prefixed with 'loc ' are not visible
+                // on the keyboard", latn_qwerty_us.xml). KeyboardData parses that into
+                // Key.F_LOC, but nothing in the renderer consulted the flag, so every one of
+                // those placeholders printed as a sub-label -- `esc` under Q, `tab`/`capslock`
+                // on shift, `€` on E, `menu`/`page_up`/`page_down` on backspace. That is a
+                // large part of the "chaotic next to Gboard" look, and it is not even a
+                // reachable action: the symbol was never meant to be shown at all. Calm mode
+                // hid most of them only by accident, by picking one higher-priority corner.
                 var presentCorners = 0
-                for (i in 1..8) if (k.keys[i] != null) presentCorners = presentCorners or (1 shl i)
+                for (i in 1..8) {
+                    if (k.keys[i] != null && !k.keyHasFlag(i, KeyboardData.Key.F_LOC))
+                        presentCorners = presentCorners or (1 shl i)
+                }
                 val calmCorners = CornerLabelPolicy.drawn(
                     snap.print_all_key_symbols,
                     CornerLabelPolicy.isCharacterKind(kv0?.getKind()),
@@ -1880,7 +1894,9 @@ class Keyboard2View @JvmOverloads constructor(
                 )
                 for (i in 1..8) {
                     if (k.keys[i] != null && (coveredSubLabels and (1 shl i)) == 0 &&
-                        (calmCorners and (1 shl i)) != 0
+                        (calmCorners and (1 shl i)) != 0 &&
+                        // `loc` placeholders are never printed, even with print_all_key_symbols.
+                        !k.keyHasFlag(i, KeyboardData.Key.F_LOC)
                     ) {
                         drawSubLabel(canvas, k.keys[i]!!, x, y, keyW, keyH, i, isKeyDown, tc_key, snap, mainLabelW)
                     }

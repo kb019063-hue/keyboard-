@@ -35,7 +35,9 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - arena/23fde500-keyboard
+      # Every Arena session works on its own branch; the old single-branch list meant a new
+      # session's pushes built nothing at all, so its first green build was a surprise merge.
+      - 'arena/**'
       - main
     # A docs-only change cannot alter an APK, and each push costs a ~6 min build plus a ~9 min
     # emulator run. workflow_dispatch still always runs, so nothing becomes unbuildable silently.

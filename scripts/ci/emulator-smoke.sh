@@ -1126,9 +1126,16 @@ kb_toolbar_center() {  # $1 = zero-based toolbar button index; echoes "x y" of i
   # IME-window nodes (41 nodes, all settings widgets, kbview=0 -- while dumpsys said the IME was
   # shown), so node search cannot reach a toolbar key here, on any run, ever. The frame rect and
   # the density locate one anyway: the toolbar is a 40dp band at the top of the IME frame, and the
-  # ten default buttons are evenly weighted across it (KeyboardToolbar gives each weight=1 with
+  # default buttons are evenly weighted across it (KeyboardToolbar gives each weight=1 with
   # isFillViewport). A customised toolbar moves the buttons, so every caller treats "tapped,
   # nothing happened" as unverifiable and never as a product defect.
+  #
+  # TB_N must equal ToolbarConfig.DEFAULT_KEYS.size. It used to be hardcoded as 10 through the
+  # divisor below (/ 20); phase 4 part 5 cut the default to Gboard's seven, and the stale 20 would
+  # have placed every computed tap ~30% left of the button it meant -- 7g's more key could have
+  # landed on the undo button and reported "dispatched but no sheet", a harness bug blamed on the
+  # product.
+  local TB_N=7
   local idx=$1 rect dpi l t r th
   rect=$(ime_frame_rect)
   [ -n "$rect" ] || return 1
@@ -1140,7 +1147,7 @@ kb_toolbar_center() {  # $1 = zero-based toolbar button index; echoes "x y" of i
   th=$(( 40 * dpi / 160 ))
   # Space-separated, the same contract nodecenter/nodecenter_desc return: every caller does
   # `adb shell input tap $POINT` and relies on word splitting for the two coordinates.
-  echo "$(( l + (r - l) * (2 * idx + 1) / 20 )) $(( t + th / 2 ))"
+  echo "$(( l + (r - l) * (2 * idx + 1) / (2 * TB_N) )) $(( t + th / 2 ))"
 }
 
 MIC=""; MROUTE=node; GRANT="none"
@@ -1172,10 +1179,11 @@ if nf_reach nfvoi dictation 'Dictation Self-Test' 'Input'; then
     MIC=$(nodecenter_desc "$F" '^Voice Typing$')
     MROUTE=node
     if [ -z "$MIC" ]; then
-      # The dump-blind emulator (run 40's DUMPDIAG): fall back to the computed second toolbar
-      # button -- the mic's default position. The transcript check below does not care which
-      # route found the key: the field lives in the SETTINGS window, which dumps always carry.
-      MIC=$(kb_toolbar_center 1) && MROUTE=coord || MIC=""
+      # The dump-blind emulator (run 40's DUMPDIAG): fall back to the computed last toolbar
+      # button -- the mic's default position (voice_typing is 7th of 7, see ToolbarConfig).
+      # The transcript check below does not care which route found the key: the field lives in
+      # the SETTINGS window, which dumps always carry.
+      MIC=$(kb_toolbar_center 6) && MROUTE=coord || MIC=""
     fi
     info "self-test: field-tap='${FC:-none}' mic='${MIC:-none}' route=$MROUTE shown=$(shown)"
     if [ -n "$MIC" ]; then
