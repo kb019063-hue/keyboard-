@@ -180,11 +180,26 @@ jobs:
           echo "SMOKE_NAME=smoke-run-${{ github.run_number }}-$S" >> "$GITHUB_ENV"
           echo "  ---- artifact will be named: smoke-run-${{ github.run_number }}-$S"
 
+      # The verdict must survive the evidence upload failing. GitHub's artifact storage is a
+      # per-account quota and this repo had already blown through it (the 2026-10-23 runs of both
+      # workflows died HERE, not in the test), so an upload failure turned a passing smoke run --
+      # "Run smoke test on emulator: success" -- into a red build that says nothing about the app.
+      # The summary also goes into an annotation, because run logs live on
+      # results-receiver.actions.githubusercontent.com and are unreadable from the dev sandbox.
+      - name: Report the smoke verdict
+        if: always()
+        shell: bash
+        run: |
+          S=$(cat artifacts/summary.txt 2>/dev/null | head -1)
+          [ -n "$S" ] || S="no-summary (see the run log)"
+          echo "::notice title=Smoke verdict::${S//%/%25}"
+
       - name: Upload evidence (diagnostics, screenshots, dumps, logcat)
         if: always()
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: ${{ env.SMOKE_NAME }}
           path: artifacts/
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 7
