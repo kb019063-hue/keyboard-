@@ -1620,8 +1620,23 @@ tasks.register('genLayoutsList') {
 }
 
 tasks.register('checkKeyboardLayouts') {
-  if (!file("res/values/layouts.xml").exists()) return
-  exec { workingDir = projectDir; commandLine "python3", "tools/check_layout.py"; ignoreExitValue = true }
+  // A layout duplicate overwrites a position in KeyboardData.getKeys(). The checker
+  // keeps its other findings advisory, but exits non-zero for duplicates, so this
+  // exec must be a real task action whose failure can fail the build.
+  onlyIf { file("res/values/layouts.xml").exists() }
+  doLast {
+    project.exec {
+      workingDir = project.projectDir
+      commandLine "python3", "tools/check_layout.py"
+    }
+  }
+}
+
+// assembleDebug does not run Test tasks, so the old configuration-time exec was the
+// only reason this checker appeared to run. Realise preBuild and make the dependency
+// explicit; AGENTS.md's "every shipped layout is validated in the build" is now true.
+tasks.configureEach { task ->
+  if (task.name == "preBuild") task.dependsOn "checkKeyboardLayouts"
 }
 
 tasks.register('generateBinaryDictionaries') {

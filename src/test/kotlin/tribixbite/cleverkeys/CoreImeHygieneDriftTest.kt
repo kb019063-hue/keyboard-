@@ -1469,7 +1469,7 @@ class CoreImeHygieneDriftTest {
 
     /**
      * Saga 2026-10-07 / audit 2026-10-08: the clipboard catch-up runs only because
-     * onStartInputView calls `ClipboardHistoryService.on_keyboard_shown()`. A copy made while no
+     * onStartInputView calls `ClipboardHistoryService.on_keyboard_shown(info.packageName)`. A copy made while no
      * listener was registered (process reaped, another keyboard selected) is otherwise lost,
      * and nothing else would notice the call disappearing.
      */
@@ -1479,11 +1479,12 @@ class CoreImeHygieneDriftTest {
         val startInputView = service
             .substringAfter("override fun onStartInputView(info: EditorInfo, restarting: Boolean) {")
             .substringBefore("\n    override fun ")
-        assertWithMessage("onStartInputView must run the clipboard catch-up")
-            .that(startInputView).contains("ClipboardHistoryService.on_keyboard_shown()")
+        assertWithMessage("onStartInputView must run the clipboard catch-up with the editor package")
+            .that(startInputView).contains("ClipboardHistoryService.on_keyboard_shown(info.packageName)")
         val history = source("tribixbite/cleverkeys/clipboard/ClipboardHistoryService.kt")
-        assertWithMessage("on_keyboard_shown must reach the instance catch-up")
-            .that(history.substringAfter("fun on_keyboard_shown()").substringBefore("\n        }"))
-            .contains("_service?.onKeyboardShown()")
+        assertWithMessage("on_keyboard_shown must pass the editor package to the instance catch-up")
+            .that(history.substringAfter("fun on_keyboard_shown(editorPackage: String?)")
+                .substringBefore("\n        }"))
+            .contains("_service?.onKeyboardShown(editorPackage)")
     }
 }

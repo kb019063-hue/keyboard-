@@ -2076,9 +2076,9 @@ class Keyboard2View @JvmOverloads constructor(
     override fun onDetachedFromWindow() {
         cancelContinuousSwipe()
         super.onDetachedFromWindow()
-        // The click lives in a native SoundPool; letting it outlive the view would leak it on
-        // every IME switch or rotation. Release is safe when sound was never enabled.
-        KeyClickSound.release()
+        // KeyClickSound is process-wide and is released by CleanupHandler on service destroy.
+        // Releasing it here would also kill the live IME's pool when a settings-theme preview
+        // (another Keyboard2View) detaches.
         if (_shortSwipeListenerRegistered) {
             _shortSwipeManager.removeChangeListener(_shortSwipeMappingsChanged)
             _shortSwipeListenerRegistered = false

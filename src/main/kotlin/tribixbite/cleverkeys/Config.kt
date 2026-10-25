@@ -1368,8 +1368,10 @@ class Config private constructor(
         incognito_enabled = _prefs.getBoolean("incognito_enabled", Defaults.INCOGNITO_ENABLED)
         floating_enabled = _prefs.getBoolean(FloatingConfig.PREF_ENABLED, Defaults.FLOATING_ENABLED)
         floating_width_percent = safeGetInt(_prefs, FloatingConfig.PREF_WIDTH_PERCENT, Defaults.FLOATING_WIDTH_PERCENT)
-        floating_x_fraction = _prefs.getFloat(FloatingConfig.PREF_X_FRACTION, Defaults.FLOATING_X_FRACTION)
-        floating_y_fraction = _prefs.getFloat(FloatingConfig.PREF_Y_FRACTION, Defaults.FLOATING_Y_FRACTION)
+        // Imported or hand-edited prefs can hold the wrong type. A raw getFloat would throw
+        // ClassCastException during every Config.refresh and take the IME down.
+        floating_x_fraction = safeGetFloat(_prefs, FloatingConfig.PREF_X_FRACTION, Defaults.FLOATING_X_FRACTION)
+        floating_y_fraction = safeGetFloat(_prefs, FloatingConfig.PREF_Y_FRACTION, Defaults.FLOATING_Y_FRACTION)
         split_enabled = _prefs.getBoolean(SplitConfig.PREF_ENABLED, Defaults.SPLIT_ENABLED)
         split_gap_percent = safeGetInt(_prefs, SplitConfig.PREF_GAP_PERCENT, Defaults.SPLIT_GAP_PERCENT)
         on_device_learning_enabled = _prefs.getBoolean("on_device_learning_enabled", Defaults.ON_DEVICE_LEARNING_ENABLED)

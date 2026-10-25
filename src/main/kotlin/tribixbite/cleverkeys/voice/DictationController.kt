@@ -157,7 +157,10 @@ internal class DictationController(private val context: Context) {
      * user focuses.
      */
     fun cancel() {
-        if (!sessionActive && recognizer == null) return
+        // `focusHeld` is part of the condition: a failed start can leave transient audio focus
+        // held after sessionActive has already been cleared. Releasing it unconditionally here
+        // is safe (abandonAudioFocus is a no-op when no focus is held) and closes that leak.
+        if (!sessionActive && recognizer == null && !focusHeld) return
         sessionActive = false
         abandonAudioFocus()
         main.post {
@@ -223,6 +226,9 @@ internal class DictationController(private val context: Context) {
         } catch (t: Throwable) {
             Log.e(TAG, "startListening threw", t)
             sessionActive = false
+            // No recognition callback will arrive from a start that threw, so this is the
+            // only place that can release the focus requested above.
+            abandonAudioFocus()
             sink?.showMessage(context.getString(R.string.voice_typing_failed))
         }
     }
@@ -234,6 +240,7 @@ internal class DictationController(private val context: Context) {
             Log.w(TAG, "stopListening threw: $t")
             // Nothing will arrive now, so the session must not stay open forever.
             sessionActive = false
+            abandonAudioFocus()
         }
     }
 

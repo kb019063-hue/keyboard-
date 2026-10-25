@@ -50,8 +50,10 @@ unless they are migrated through backup/restore.
 - `loc <key>` in a layout is a **placement marker, not a printed label** ("Symbols prefixed with
   'loc ' are not visible on the keyboard"). `KeyboardData` records it as `Key.F_LOC`; the renderer
   must not draw it. Do not add `loc` corners expecting them to appear.
-- Every shipped layout is validated by `tools/check_layout.py` in the build. Run it on a layout
-  you edit.
+- Every shipped layout is validated by `tools/check_layout.py` during `preBuild` (so
+  `assembleDebug` sees it). Duplicate key values are a hard build failure because
+  `KeyboardData.getKeys()` keeps only one position per value; the checker's other findings
+  stay advisory. Run it on a layout you edit.
 - A `SystemLayout` preference entry resolves to the current subtype's `default_layout` in
   `res/xml/method.xml` — changing a user's default layout means changing that file, not
   `LayoutsPreference.DEFAULT`.

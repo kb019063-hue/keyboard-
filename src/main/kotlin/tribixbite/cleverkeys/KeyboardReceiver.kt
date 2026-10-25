@@ -82,7 +82,8 @@ class KeyboardReceiver(
      * Phase 4 part 1: in-process dictation for the mic key. Created on first use and kept for the
      * lifetime of the receiver, because a `SpeechRecognizer` is expensive to create and holds the
      * audio route; [DictationController.cancel] is what the input-finish hook calls so a transcript
-     * can never land in the next field the user focuses.
+     * can never land in the next field the user focuses. [destroy] releases the recogniser itself
+     * when the IME service goes away.
      */
     private var dictationController: DictationController? = null
 
@@ -213,6 +214,16 @@ class KeyboardReceiver(
         // going away here, so end the session rather than let a late transcript commit into
         // whatever the user focuses next.
         dictationController?.cancel()
+    }
+
+    /**
+     * Release the receiver's process-lifetime resources. `onFinishInputView` only cancels a
+     * dictation session; without this, the `SpeechRecognizer` and its service `Context` survive
+     * the IME's own destruction.
+     */
+    fun destroy() {
+        dictationController?.destroy()
+        dictationController = null
     }
 
     /**
@@ -665,10 +676,13 @@ class KeyboardReceiver(
      */
     private fun handleVoiceTypingKey() {
         val prefs = Config.globalPrefs()
+        // A hand-edited or imported preference with the wrong type must not crash the mic key:
+        // Config's safe readers fall back to the documented defaults on ClassCastException.
         val mode = VoiceTypingConfig.modeOf(
-            prefs.getString(VoiceTypingConfig.PREF_MODE, VoiceTypingConfig.DEFAULT_MODE)
+            Config.safeGetString(prefs, VoiceTypingConfig.PREF_MODE, VoiceTypingConfig.DEFAULT_MODE)
         )
-        val selfTest = prefs.getBoolean(
+        val selfTest = Config.safeGetBoolean(
+            prefs,
             VoiceTypingConfig.PREF_SELF_TEST,
             VoiceTypingConfig.DEFAULT_SELF_TEST
         )

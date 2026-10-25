@@ -3,6 +3,9 @@ import sys, os, glob, re
 
 layout_file_name = 0
 warnings = []
+# Warnings that must break the build. Other checks remain advisory because the
+# shipped non-Latin layouts intentionally omit ASCII punctuation/digits.
+fatal = []
 
 KNOWN_NOT_LAYOUT = set([
     "number_row", "numpad", "pin",
@@ -15,15 +18,26 @@ KEY_ATTRIBUTES = set([
     "c", "nw", "ne", "sw", "se", "w", "e", "n", "s"
     ])
 
-# Keys defined in KeyValue.java
+# Keys defined in KeyValue.kt
 known_keys = set()
 
 def warn(msg):
-    global warnings
     warnings.append("%s: %s" % (layout_file_name, msg))
 
 def key_list_str(keys):
     return ", ".join(sorted(list(keys)))
+
+def canonical_key_value(raw):
+    """Resolve the layout's `label:key` syntax to the underlying key name.
+
+    `?123:switch_numeric` is one key whose centre label is "?123"; treating the
+    whole string as a key name made the bottom-row check ask for a second
+    `switch_numeric` that was already present. Single-character ":" values and
+    parser expressions such as `keyevent:123` are left alone.
+    """
+    k = raw.removeprefix("\\")
+    labelled = re.fullmatch(r"([^:]+):([A-Za-z_][A-Za-z0-9_]*)", k)
+    return labelled.group(2) if labelled else k
 
 def missing_some_of(keys, symbols, class_name=None):
     if class_name is None:
@@ -48,7 +62,7 @@ def parse_row_from_et(row, keys, dup):
     for key in row:
         for attr in key.keys():
             if attr in KEY_ATTRIBUTES:
-                k = key.get(attr).removeprefix("\\")
+                k = canonical_key_value(key.get(attr))
                 if k in keys: dup.add(k)
                 keys.add(k)
 
@@ -73,7 +87,13 @@ def parse_row(fname):
 
 def check_layout(layout):
     root, keys, dup = layout
-    if len(dup) > 0: warn("Duplicate keys: " + key_list_str(dup))
+    if len(dup) > 0:
+        # KeyboardData.getKeys() is a Map<KeyValue, KeyPos>, so the second
+        # occurrence silently overwrites the first position. This is a real
+        # layout bug, not a style warning.
+        msg = "Duplicate keys: " + key_list_str(dup)
+        warn(msg)
+        fatal.append("%s: %s" % (layout_file_name, msg))
     missing_some_of(keys, "~!@#$%^&*(){}`[]=\\-_;:/.,?<>'\"+|", "ASCII punctuation")
     missing_some_of(keys, "0123456789", "digits")
     missing_required(keys, ["backspace", "delete"], "Layout doesn't define some important keys")
@@ -117,11 +137,19 @@ def check_layout(layout):
 def parse_known_keys():
     global known_keys
     with open("src/main/kotlin/tribixbite/cleverkeys/KeyValue.kt", "r") as f:
-        # Match both Java format (case "key":) and Kotlin format (namedKeys["key"] =)
+        # This tree is Kotlin, not Java: getSpecialKeyByName is a `when` whose
+        # branches are `"name" -> ...`. The old regexes only matched Java
+        # `case` / `namedKeys[...]` syntax and therefore reported EVERY special
+        # key as unknown.
         content = f.read()
         keys = set()
-        keys.update( m.group(1) for m in re.finditer('case "([^"]+)":', content) )
-        keys.update( m.group(1) for m in re.finditer('namedKeys\\["([^"]+)"\\]', content) )
+        # Collect every string literal on a `when` branch line, including
+        # comma-separated alternatives such as `"zwnj", "halfspace" ->`.
+        for line in content.splitlines():
+            if "->" in line:
+                keys.update(re.findall(r'"((?:\\.|[^"\\])*)"', line))
+        keys.update(m.group(1) for m in re.finditer('case "([^"]+)":', content))
+        keys.update(m.group(1) for m in re.finditer('namedKeys\\["([^"]+)"\\]', content))
         known_keys = keys
 
 parse_known_keys()
@@ -140,3 +168,8 @@ for fname in sorted(glob.glob("src/main/layouts/*.xml")):
 with open("check_layout.output", "w") as out:
     for w in warnings:
         print(w, file=out)
+
+if fatal:
+    for f in fatal:
+        print("check_layout.py: " + f, file=sys.stderr)
+    sys.exit(1)

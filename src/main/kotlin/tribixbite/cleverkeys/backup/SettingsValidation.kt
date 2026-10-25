@@ -1,6 +1,9 @@
 package tribixbite.cleverkeys.backup
 
+import tribixbite.cleverkeys.FloatingConfig
+import tribixbite.cleverkeys.OneHandedConfig
 import tribixbite.cleverkeys.SettingsRanges
+import tribixbite.cleverkeys.SplitConfig
 import tribixbite.cleverkeys.TerminalUtils
 import tribixbite.cleverkeys.autocorrect.AutocorrectTuning
 import tribixbite.cleverkeys.autocorrect.FrequencyFloor
@@ -234,6 +237,9 @@ object SettingsValidation {
         return when (key) {
             // Character and UI sizing
             "character_size", "secondary_label_size_scale", "key_vertical_margin", "key_horizontal_margin", "custom_border_line_width",
+            // Floating-window position fractions. Without this allowlist, an integer-shaped
+            // JSON literal (0 or 1) imports as an Int and then breaks Config.getFloat.
+            FloatingConfig.PREF_X_FRACTION, FloatingConfig.PREF_Y_FRACTION,
             // Prediction weights
             "prediction_context_boost", "prediction_frequency_scale",
             // Auto-correction threshold
@@ -315,6 +321,13 @@ object SettingsValidation {
         // Ranges come from SettingsRanges — the same constant the slider and the Config read
         // clamp use (audit M8, 2026-10-20). A key whose import range is deliberately WIDER than
         // its slider reads SettingsRanges.ImportEnvelope instead, which says why.
+
+        // Phase 3-4 integer settings: reject out-of-range backups before a corrupt value can
+        // reach a slider or the floating/split geometry maths.
+        put("sound_volume", 0..100)
+        put(OneHandedConfig.PREF_SCALE, OneHandedConfig.MIN_SCALE..OneHandedConfig.MAX_SCALE)
+        put(FloatingConfig.PREF_WIDTH_PERCENT, FloatingConfig.MIN_WIDTH_PERCENT..FloatingConfig.MAX_WIDTH_PERCENT)
+        put(SplitConfig.PREF_GAP_PERCENT, SplitConfig.MIN_GAP_PERCENT..SplitConfig.MAX_GAP_PERCENT)
 
         // CTC beam width — the same bounds CtcEngineAdapter and Config clamp to, so a hostile
         // or hand-edited backup cannot smuggle a value the engine would silently clamp anyway:
@@ -439,6 +452,11 @@ object SettingsValidation {
 
             // #133: Secondary (flick) label size multiplier (0.5-2.0)
             "secondary_label_size_scale" -> value in 0.5f..2.0f
+
+            // Floating window fractions: x spans the full travel, y is capped so the window
+            // cannot be dragged almost entirely off the bottom of the screen.
+            FloatingConfig.PREF_X_FRACTION -> value in 0f..1f
+            FloatingConfig.PREF_Y_FRACTION -> value in 0f..FloatingConfig.MAX_Y_FRACTION
 
             // Margins (0-5%)
             "key_vertical_margin", "key_horizontal_margin" -> value in 0f..5f

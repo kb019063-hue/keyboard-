@@ -20,8 +20,10 @@ import android.media.SoundPool
  * FLAG_IGNORE_GLOBAL_SETTING for the same reason.
  *
  * The pool is created lazily on first use (a keyboard that never enables sound never pays for it)
- * and released when the keyboard view detaches, so rotating or switching IMEs cannot leak a native
- * SoundPool. `play` is called on the main thread from the key event path; SoundPool.play itself is
+ * and released by `CleanupHandler` when the IME service is destroyed, so switching IMEs cannot
+ * leak a native SoundPool. It is NOT released on a `Keyboard2View` detach: the settings theme
+ * preview owns another such view, and detaching it must not steal the live IME's pool.
+ * `play` is called on the main thread from the key event path; SoundPool.play itself is
  * thread-safe and returns immediately, mixing in its own thread, so it cannot add latency to the
  * keystroke.
  */

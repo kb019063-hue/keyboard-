@@ -551,6 +551,19 @@ class CleverKeysService : InputMethodService(),
             _themeChangeReceiver = null
         }
 
+        // The two SharedPreferences listeners registered in onCreate hold this service and its
+        // ConfigurationManager. SharedPreferences keeps only weak references, but unregistering
+        // is still the lifecycle contract and stops callbacks reaching a destroyed IME.
+        val prefs = DirectBootAwarePreferences.get_shared_preferences(this)
+        if (::_configManager.isInitialized) {
+            prefs.unregisterOnSharedPreferenceChangeListener(_configManager)
+        }
+        prefs.unregisterOnSharedPreferenceChangeListener(this)
+
+        // Dictation owns a SpeechRecognizer and transient audio focus. Input-finish cancels a
+        // session; service destruction must destroy the recogniser itself.
+        _receiver?.destroy()
+
         // Cleanup all managers (v1.32.404: extracted to CleanupHandler)
         CleanupHandler.create(
             this,
@@ -757,7 +770,9 @@ class CleverKeysService : InputMethodService(),
         _suggestionHandler.onEditorSessionChanged()
         // Record a copy the clipboard listener could not see (Saga 2026-10-07): one bounded
         // read of the current clip, recorded only if this service has not observed it.
-        ClipboardHistoryService.on_keyboard_shown()
+        // Pass the editor's package so password-manager exclusion identifies the app the user
+        // is actually typing into, instead of a cached UsageStats guess from another app.
+        ClipboardHistoryService.on_keyboard_shown(info.packageName)
         // NOTE: Config refresh is handled by SharedPreferences listener (onSharedPreferenceChanged)
         // We only do initial config load here if config is completely null (shouldn't happen normally)
         if (_config == null) {
@@ -1013,22 +1028,31 @@ class CleverKeysService : InputMethodService(),
     }
 
     /** `split_toggle` command; writes the same preference the Settings switch writes. */
-    fun toggleSplit() {
-        val next = !(_config?.split_enabled ?: false)
+    fun toggleSplit() = setSplitEnabled(!(_config?.split_enabled ?: false))
+
+    /**
+     * Explicit setter for split mode. The more-tools sheet passes `isChecked` from its own
+     * checked array, so a fast second tap cannot read a stale `_config` before the
+     * SharedPreferences listener has refreshed it and turn the feature back off.
+     */
+    private fun setSplitEnabled(enabled: Boolean) {
         DirectBootAwarePreferences.get_shared_preferences(this).edit()
-            .putBoolean(SplitConfig.PREF_ENABLED, next)
+            .putBoolean(SplitConfig.PREF_ENABLED, enabled)
             .apply()
-        Toast.makeText(this, getString(if (next) R.string.split_toast_on else R.string.split_toast_off),
+        _config?.split_enabled = enabled
+        Toast.makeText(this, getString(if (enabled) R.string.split_toast_on else R.string.split_toast_off),
             Toast.LENGTH_SHORT).show()
     }
 
     /** `floating_toggle` command; writes the same preference the Settings switch writes. */
-    fun toggleFloating() {
-        val next = !(_config?.floating_enabled ?: false)
+    fun toggleFloating() = setFloatingEnabled(!(_config?.floating_enabled ?: false))
+
+    private fun setFloatingEnabled(enabled: Boolean) {
         DirectBootAwarePreferences.get_shared_preferences(this).edit()
-            .putBoolean(FloatingConfig.PREF_ENABLED, next)
+            .putBoolean(FloatingConfig.PREF_ENABLED, enabled)
             .apply()
-        Toast.makeText(this, getString(if (next) R.string.floating_toast_on else R.string.floating_toast_off),
+        _config?.floating_enabled = enabled
+        Toast.makeText(this, getString(if (enabled) R.string.floating_toast_on else R.string.floating_toast_off),
             Toast.LENGTH_SHORT).show()
     }
 
@@ -1060,12 +1084,14 @@ class CleverKeysService : InputMethodService(),
      * not two that could disagree. The toast is the only confirmation a toolbar key can give:
      * unlike one-handed mode there is no visible geometry change to notice.
      */
-    fun toggleIncognito() {
-        val next = !(_config?.incognito_enabled ?: false)
+    fun toggleIncognito() = setIncognitoEnabled(!(_config?.incognito_enabled ?: false))
+
+    private fun setIncognitoEnabled(enabled: Boolean) {
         DirectBootAwarePreferences.get_shared_preferences(this).edit()
-            .putBoolean("incognito_enabled", next)
+            .putBoolean("incognito_enabled", enabled)
             .apply()
-        Toast.makeText(this, getString(if (next) R.string.incognito_toast_on else R.string.incognito_toast_off),
+        _config?.incognito_enabled = enabled
+        Toast.makeText(this, getString(if (enabled) R.string.incognito_toast_on else R.string.incognito_toast_off),
             Toast.LENGTH_SHORT).show()
     }
 
@@ -1076,11 +1102,10 @@ class CleverKeysService : InputMethodService(),
      * window token, non-focusable per [ImeDialogWindowPolicy] — so it cannot hide the keyboard it
      * was opened from.
      *
-     * Every toggle goes through the method its command uses ([toggleIncognito], [toggleFloating],
-     * [toggleSplit], [toggleOneHandedMode], and the two writes the Accessibility sound switch
-     * makes), so the sheet shares one source of truth per feature and cannot drift from it. Rows
-     * carry their state as of opening; each tap writes the preference, and the ordinary listener
-     * refreshes [Config].
+     * Every toggle goes through the same explicit setter its command uses, so the sheet shares
+     * one source of truth per feature and cannot drift from it. Rows carry their state as of
+     * opening; each tap writes the dialog's own `isChecked` value rather than re-reading a
+     * possibly stale [Config], and the ordinary listener refreshes [Config] afterwards.
      */
     fun showMoreToolsSheet() {
         // The press is logged before the sheet is built, and the sheet logs "shown" (below): over
@@ -1106,13 +1131,13 @@ class CleverKeysService : InputMethodService(),
         val checked = BooleanArray(rows.size) { rows[it].checked }
         val dialog = AlertDialog.Builder(this)
             .setTitle(R.string.more_tools_sheet_title)
-            .setMultiChoiceItems(labels, checked) { _, which, _ ->
+            .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
                 when (rows[which].action) {
-                    MoreToolsSheet.Action.INCOGNITO -> toggleIncognito()
-                    MoreToolsSheet.Action.FLOATING -> toggleFloating()
-                    MoreToolsSheet.Action.SPLIT -> toggleSplit()
-                    MoreToolsSheet.Action.ONE_HANDED -> toggleOneHandedMode()
-                    MoreToolsSheet.Action.SOUND -> toggleKeySound()
+                    MoreToolsSheet.Action.INCOGNITO -> setIncognitoEnabled(isChecked)
+                    MoreToolsSheet.Action.FLOATING -> setFloatingEnabled(isChecked)
+                    MoreToolsSheet.Action.SPLIT -> setSplitEnabled(isChecked)
+                    MoreToolsSheet.Action.ONE_HANDED -> setOneHandedEnabled(isChecked)
+                    MoreToolsSheet.Action.SOUND -> setKeySoundEnabled(isChecked)
                 }
             }
             .setNeutralButton(R.string.activities_theme_title) { _, _ ->
@@ -1141,13 +1166,12 @@ class CleverKeysService : InputMethodService(),
         MoreToolsSheet.Action.SOUND -> R.string.settings_key_sound_title
     }
 
-    /** Flip key sound from the sheet: the same two writes the Accessibility switch makes. */
-    private fun toggleKeySound() {
-        val next = !(_config?.sound_enabled ?: false)
+    /** Set key sound from the sheet: the same two writes the Accessibility switch makes. */
+    private fun setKeySoundEnabled(enabled: Boolean) {
         DirectBootAwarePreferences.get_shared_preferences(this).edit()
-            .putBoolean("sound_enabled", next)
+            .putBoolean("sound_enabled", enabled)
             .apply()
-        Config.globalConfig().sound_enabled = next
+        _config?.sound_enabled = enabled
     }
 
     /** Move the shrunken keyboard to the other edge (`one_handed_side` command). */
@@ -1172,6 +1196,7 @@ class CleverKeysService : InputMethodService(),
         DirectBootAwarePreferences.get_shared_preferences(this).edit()
             .putBoolean(OneHandedConfig.PREF_ENABLED, enabled)
             .apply()
+        _config?.one_handed_enabled = enabled
     }
 
     /** gh #175: collapse the keyboard to [style] until it is tapped or hidden. */

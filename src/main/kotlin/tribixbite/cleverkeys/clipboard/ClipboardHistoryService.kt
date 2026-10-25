@@ -169,7 +169,14 @@ class ClipboardHistoryService private constructor(ctx: Context) {
      * This listener persists for the entire InputMethodService lifetime.
      * Should be called ONCE from InputMethodService.onCreate().
      */
-    fun registerClipboardListener() {
+    fun registerClipboardListener() = registerClipboardListener(null)
+
+    /**
+     * [editorPackage] is the package of the editor that caused this registration, when known.
+     * It is threaded into the registration catch-up so password-manager exclusion does not have
+     * to guess the foreground app from UsageStats on the keyboard-shown path.
+     */
+    fun registerClipboardListener(editorPackage: String?) {
         if (_isListenerRegistered) return
 
         // On Android 10+ (API 29+), being default IME grants system-wide clipboard access
@@ -189,7 +196,7 @@ class ClipboardHistoryService private constructor(ctx: Context) {
             // Record the current clip in case it changed while no listener was registered —
             // unless this service already observed it (persisted [lastSeenClip]), so a clip the
             // user deleted from history is not re-added by an IME switch-back or a restart.
-            captureClip(catchUp = true)
+            captureClip(catchUp = true, editorPackage = editorPackage)
         } catch (e: SecurityException) {
             _isListenerRegistered = false
             android.util.Log.e("ClipboardHistory", "Clipboard access denied: " + e.message)
@@ -214,9 +221,16 @@ class ClipboardHistoryService private constructor(ctx: Context) {
      * Every capture filter — password-manager exclusion, IS_SENSITIVE, size limit, dedupe,
      * sanitizer, the history switch — applies unchanged.
      */
-    fun onKeyboardShown() {
+    fun onKeyboardShown() = onKeyboardShown(null)
+
+    /**
+     * [editorPackage] comes from `EditorInfo.packageName`. It is the app the user is actually
+     * typing into, so the password-manager filter must use it rather than a UsageStats guess
+     * that may still name an app the user left moments ago.
+     */
+    fun onKeyboardShown(editorPackage: String?) {
         if (!_isListenerRegistered) {
-            registerClipboardListener()
+            registerClipboardListener(editorPackage)
             return
         }
         val historyEnabled = Config.globalConfigOrNull()?.clipboardHistoryEffective ?: false
@@ -228,7 +242,7 @@ class ClipboardHistoryService private constructor(ctx: Context) {
         // listener has already observed every set event. Gaps happen only while no listener is
         // registered, and registration (above) performs the one read that covers them.
         if (VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        captureClip(catchUp = true)
+        captureClip(catchUp = true, editorPackage = editorPackage)
     }
 
     /**
@@ -787,33 +801,21 @@ class ClipboardHistoryService private constructor(ctx: Context) {
      * Returns null if detection fails or permission not granted.
      */
     @Suppress("DEPRECATION")
-    // ── Foreground-app detection, cached ─────────────────────────────────────────────────────
+    // ── Foreground-app detection ────────────────────────────────────────────────────────────
     // queryUsageStats is a cross-process query that walks daily buckets; on several OEM builds
-    // (Huawei in particular) it is one of the slower framework calls a keyboard can make, and it
-    // is asked only one question: "is the app I am typing into a password manager?" That answer
-    // cannot change while the keyboard is up. Caching it for a couple of seconds means a burst of
-    // field changes (a form with several inputs) costs ONE query instead of one per focus change,
-    // which matters because captureClip runs from onStartInputView -- i.e. the keyboard-shown
-    // path the user is waiting on.
+    // (Huawei in particular) it is one of the slower framework calls a keyboard can make. The
+    // keyboard-shown catch-up no longer calls it at all: onStartInputView passes the editor's
+    // EditorInfo.packageName, which is both exact and free. This fallback is only for the OS
+    // clipboard listener, which can fire while no editor is started.
     //
-    // _usageStatsUnusable records that the query threw, so a device without PACKAGE_USAGE_STATS
-    // stops paying an exception construct+throw on every capture.
-    private var _fgPkgCache: String? = null
-    private var _fgPkgCacheAt = 0L
+    // A two-second cache used to sit here, but foreground package CAN change within two seconds:
+    // a copy in a password manager followed by a paste in another app could inherit the previous
+    // app's answer. No cache is therefore used. _usageStatsUnusable records that the query threw,
+    // so a device without PACKAGE_USAGE_STATS stops paying an exception construct+throw on every
+    // listener callback.
     private var _usageStatsUnusable = false
 
     private fun getForegroundAppPackage(): String? {
-        val now = android.os.SystemClock.uptimeMillis()
-        if (_fgPkgCacheAt != 0L && now - _fgPkgCacheAt < FG_PKG_CACHE_MS) {
-            return _fgPkgCache
-        }
-        val resolved = resolveForegroundAppPackage()
-        _fgPkgCache = resolved
-        _fgPkgCacheAt = now
-        return resolved
-    }
-
-    private fun resolveForegroundAppPackage(): String? {
         return try {
             if (!_usageStatsUnusable && VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
                 // UsageStatsManager (requires PACKAGE_USAGE_STATS permission). The 5.1+ guard
@@ -882,19 +884,18 @@ class ClipboardHistoryService private constructor(ctx: Context) {
      * left alone, checked from the description's set time first so that, on API 26+, an
      * unchanged clipboard costs one small description read and never a content fetch.
      */
-    private fun captureClip(catchUp: Boolean) {
+    private fun captureClip(catchUp: Boolean, editorPackage: String? = null) {
         try {
             // ORDER MATTERS, and it used to be wrong. The cheap "is this clip even new?" test
-            // ran SECOND, behind the password-manager exclusion -- and that exclusion calls
-            // getForegroundAppPackage(), a UsageStatsManager.queryUsageStats scan (plus a
-            // SecurityException thrown and caught on every device without usage access, which
-            // then falls through to the deprecated getRunningTasks). All of that ran on the main
-            // thread, inside InputMethodService.onStartInputView, BEFORE the keyboard was drawn,
-            // on every single appearance of the keyboard. The overwhelmingly common case is an
-            // unchanged clipboard, which the cheap test answers from one description read -- so
-            // paying a usage-stats query first was paying the most expensive part of the work for
-            // the case that does nothing. Doing the cheap test first is behaviour-preserving: when
-            // the clip is unchanged there is nothing to record, so no filter needs evaluating.
+            // ran SECOND, behind a password-manager exclusion that always called
+            // getForegroundAppPackage() — a UsageStatsManager.queryUsageStats scan (plus a
+            // SecurityException on devices without usage access, then the deprecated
+            // getRunningTasks). All of that used to run on the main thread inside
+            // InputMethodService.onStartInputView, BEFORE the keyboard was drawn, even when the
+            // clipboard had not changed. The keyboard-shown path now passes the editor package
+            // directly, so the OS listener is the only caller that can still reach that fallback.
+            // Doing the cheap test first remains behaviour-preserving: an unchanged clip has
+            // nothing to record, so no filter needs evaluating.
             if (catchUp) {
                 // Cheap pre-check (API 26+): the set timestamp is the whole identity and lives
                 // in the DESCRIPTION, so an already-observed clip is rejected without fetching
@@ -910,9 +911,11 @@ class ClipboardHistoryService private constructor(ctx: Context) {
                 }
             }
 
-            // Check if password manager exclusion is enabled
+            // Check if password manager exclusion is enabled. On the keyboard-shown path the
+            // editor package is authoritative; the UsageStats fallback is only for OS clipboard
+            // listener callbacks that can arrive with no started editor.
             if (Config.globalConfig().clipboard_exclude_password_managers) {
-                val foregroundApp = getForegroundAppPackage()
+                val foregroundApp = editorPackage ?: getForegroundAppPackage()
                 if (isPasswordManagerApp(foregroundApp)) {
                     if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
                         android.util.Log.d("ClipboardHistory", "Skipping clipboard from password manager: $foregroundApp")
@@ -1146,12 +1149,6 @@ class ClipboardHistoryService private constructor(ctx: Context) {
         /** SharedPreferences file holding only [lastSeenClip] (not backed up, not exported). */
         const val LAST_SEEN_PREFS = "clipboard_last_seen"
 
-        /**
-         * How long a foreground-app answer is trusted. Long enough that focusing several fields
-         * in one form costs a single UsageStats query, short enough that switching apps and
-         * typing again re-checks.
-         */
-        private const val FG_PKG_CACHE_MS = 2000L
         private const val LAST_SEEN_KEY = "last_seen_clip"
 
         /**
@@ -1249,8 +1246,12 @@ class ClipboardHistoryService private constructor(ctx: Context) {
          * service exists (it is never constructed here — on a locked device it is deferred).
          */
         @JvmStatic
-        fun on_keyboard_shown() {
-            _service?.onKeyboardShown()
+        fun on_keyboard_shown() = on_keyboard_shown(null)
+
+        /** Pass the current editor's package so the catch-up filter cannot use a stale app. */
+        @JvmStatic
+        fun on_keyboard_shown(editorPackage: String?) {
+            _service?.onKeyboardShown(editorPackage)
         }
 
         /** Cleanup and unregister listener. Call from InputMethodService.onDestroy(). */

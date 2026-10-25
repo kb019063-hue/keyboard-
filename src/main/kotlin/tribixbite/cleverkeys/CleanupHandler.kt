@@ -8,6 +8,7 @@ import android.content.Context
  * This class centralizes all cleanup logic when the keyboard service is destroyed:
  * - Closes fold state tracker
  * - Shuts down clipboard service and manager
+ * - Releases the shared native key-click SoundPool
  * - Shuts down prediction coordinator
  * - Unregisters debug mode receiver and closes log writer
  *
@@ -44,6 +45,10 @@ class CleanupHandler(
 
         // Cleanup clipboard listener (static service)
         ClipboardHistoryService.on_shutdown()
+
+        // The click sample is process-wide. Releasing it from a Keyboard2View detach also
+        // releases the settings-theme preview's pool while the live IME is using it.
+        KeyClickSound.release()
 
         // R-6: cancel the emoji-keyword prewarm coroutine (owned by the service, started in
         // onCreate) so its background load scope isn't left running past service death.

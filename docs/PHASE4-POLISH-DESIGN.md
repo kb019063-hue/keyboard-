@@ -145,3 +145,30 @@ offered it. It is a command now, with `cmd_switch_gif`/`cmd_switch_gif_desc`.
 tapped index 1 for the mic; both are now derived from an explicit `TB_N=7` and the mic is index 6.
 Left alone, 7g's more-key tap would have landed on the undo button and reported "dispatched but no
 sheet" — a harness bug blamed on the product.
+
+## Part 7 — bug audit after the Gboard pass (2026-10-25)
+
+The seven-toolbar pass compiled and the smoke job was green, but its annotations said
+`MTSHEET ... log='none'` and `VOICE ... log='none'`: coordinate taps on the first and last
+toolbar buttons dispatched nothing. The harness stood those two checks down rather than failing,
+so a dead toolbar could still ship. The root cause and the other defects found in the same audit
+are recorded in [`BUG-AUDIT-2026-10-25.md`](BUG-AUDIT-2026-10-25.md).
+
+The toolbar fixes are:
+
+- The icon `ImageView` is no longer clickable or focusable; its `FrameLayout` wrapper owns the
+  click, ripple, long-press label and 40 dp hit target. A clickable child consumed `ACTION_UP`
+  before the parent listener could fire.
+- The icon box is now a real 24 dp with no 8 dp internal padding on each side. The old geometry
+  left 6 dp for the glyph.
+- `redo` gets a mirrored `ic_tool_redo`; it previously reused the undo arrow.
+- Compact mode keeps the first and last rendered buttons by position, with a flexible spacer
+  between them, instead of hardcoding `more_tools` and `voice_typing`. A custom toolbar that
+  removed either command no longer loses every button while suggestions are showing.
+- A wholly unrecognisable `toolbar_keys` preference falls back to the seven defaults instead of
+  hiding the toolbar.
+
+The audit also repairs dictation/audio-focus lifecycle leaks, backup defaults for thirteen phase
+1-4 preferences, clipboard password-manager detection across app switches, more-tools double-tap
+state, key-sound pool ownership, a duplicate `loc esc` placement, and the layout checker that was
+supposed to catch that duplicate.
