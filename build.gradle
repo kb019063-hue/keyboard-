@@ -479,7 +479,18 @@ android {
       // had not taken. strings.xml is now the single source of truth for the app name;
       // do not re-add an override here without changing it there too.
       resValue "bool", "debug_logs", "true"
-      buildConfigField "boolean", "ENABLE_VERBOSE_LOGGING", "true"
+      // Verbose logging was unconditionally ON for debug, and the debug APK is the one this
+      // project actually installs (README: "Debug builds are signed with the committed
+      // debug.keystore, so successive builds install as upgrades"). 257 Log sites are gated on
+      // this flag and they sit on the keystroke and draw paths, each one building an interpolated
+      // string before handing it to logcat -- so the daily driver was paying debug-logging cost
+      // for every key press, on a build that is also unminified and `debuggable`, where ART
+      // deliberately skips optimisations. That is a large part of "laggy and kinda slow".
+      //
+      // Opt-in instead of forced: LOCAL_BUILD=true keeps the noisy behaviour for someone
+      // actually debugging on a desk. It is NOT the SDK/CI environment variable, so an ordinary
+      // CI build stays quiet and fast.
+      buildConfigField "boolean", "ENABLE_VERBOSE_LOGGING", isLocalBuild ? "true" : "false"
       signingConfig signingConfigs.debug
     }
   }

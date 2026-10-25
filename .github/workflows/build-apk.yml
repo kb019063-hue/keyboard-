@@ -151,20 +151,21 @@ jobs:
 
             After installing: Settings → System → Languages & input → On-screen keyboard → enable it.
 
-      # Kept, but never allowed to fail the run. GitHub's artifact storage is a per-account
-      # quota and this repo uploads ~97 MB per push; the run of 2026-10-23 compiled fine and then
-      # failed here, which skipped the release step below and left the owner with no APK at all.
-      # The rolling release is the delivery path that matters, so it publishes FIRST.
-      - name: Upload build artifact
+      # NOT uploaded on every push. Each artifact was all three ABIs (~94 MB), and 41 of them
+      # filled 3.9 GB of a 500 MB private-repo quota -- which is what made this workflow fail at
+      # the upload step on 2026-10-23 and skip the release entirely. The APKs are already on the
+      # rolling release at permanent URLs, so an artifact per push is pure duplication; it exists
+      # only for the case of inspecting a build without downloading from the release, which is a
+      # manual-dispatch situation, not a push. Retention is 3 days: the release is the durable copy.
+      - name: Upload build artifact (manual dispatch only)
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
           name: keyboard-debug-${{ steps.meta.outputs.sha }}
           path: build/outputs/apk/debug/*.apk
           if-no-files-found: error
-          # 30 days x ~97 MB per push exhausted the quota; a week is plenty for "grab the build
-          # from the run I just pushed".
-          retention-days: 7
+          retention-days: 3
 
       - name: Upload failure reports
         if: failure()
@@ -176,4 +177,5 @@ jobs:
             build/outputs/logs
             build-output.log
           if-no-files-found: ignore
-          retention-days: 14
+          # Small (logs), but the 500 MB private-repo quota is shared with the smoke evidence.
+          retention-days: 5
