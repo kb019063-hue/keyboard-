@@ -154,6 +154,106 @@ def parse_known_keys():
 
 parse_known_keys()
 
+
+def check_gboard_default():
+    """Fail the build if the shipped default stops matching the Gboard reference screenshot.
+
+    The owner asked (2026-10-26) for a keyboard that "matches the Gboard screenshot": a clean
+    digit row, plain lowercase QWERTY, one 7-icon toolbar and a minimal Gboard bottom row. The
+    layout file latn_qwerty_us_gboard_style.xml delivers that, but a layout file alone is not a
+    default: three other places decide what a fresh install / English locale / settings preview
+    actually shows. These checks run at preBuild (assembleDebug, and therefore CI), so the whole
+    chain is pinned here rather than only in a JVM test that CI does not run.
+    """
+    def fail(msg):
+        fatal.append("gboard-default: " + msg)
+
+    gb = "latn_qwerty_us_gboard_style"
+    layout_path = "src/main/layouts/%s.xml" % gb
+
+    # (1) The layout itself must stay the calm Gboard arrangement.
+    try:
+        root = ET.parse(layout_path).getroot()
+    except Exception as ex:  # missing / broken file is itself a regression
+        fail("cannot parse %s: %s" % (layout_path, ex))
+        return
+    if root.get("embedded_number_row") != "true":
+        fail("%s lost embedded_number_row=true (digit row would be doubled or missing)" % gb)
+    if root.get("bottom_row") != "false":
+        fail("%s lost bottom_row=false (the Ctrl/Fn/123+ PC row would come back)" % gb)
+    rows = list(root)
+    centers = []
+    for row in rows:
+        centers.append([canonical_key_value(k.get("c")) for k in row if k.get("c") is not None])
+    if not centers or centers[0] != list("1234567890"):
+        fail("%s first row is not the clean 1234567890 digit row: %s" % (gb, centers[0] if centers else None))
+    # The 26 letter keys must carry NO corner hints (Gboard's calm look). `loc` placement
+    # markers never render. Non-letter keys (shift/backspace/space/enter) legitimately keep
+    # functional corner commands — CornerLabelPolicy hides those because their centre is not a
+    # character, so they never appear as clutter on screen.
+    for i, row in enumerate(rows):
+        for k in row:
+            c = k.get("c")
+            if c is None or not re.fullmatch(r"[a-z]", c):
+                continue
+            for attr in ("nw", "ne", "sw", "se", "w", "e", "n", "s"):
+                v = k.get(attr)
+                if v is not None and not v.startswith("loc "):
+                    fail("%s letter key %r has a visible corner hint %r (clutter)" % (gb, c, v))
+
+    # (2) method.xml: the generic `en` and the English regional subtypes must all resolve to it.
+    try:
+        method = open("res/xml/method.xml", encoding="utf-8").read()
+    except Exception as ex:
+        fail("cannot read res/xml/method.xml: %s" % ex)
+        return
+    subtypes = re.findall(r"<subtype\b[^>]*/>", method)
+    en_default = {}
+    for s in subtypes:
+        tag = re.search(r'android:languageTag="([^"]+)"', s)
+        lay = re.search(r"default_layout=([^,\"]+)", s)
+        if tag and tag.group(1).startswith("en"):
+            en_default[tag.group(1)] = lay.group(1) if lay else None
+    if "en" not in en_default or en_default.get("en") != gb:
+        fail("generic en subtype default_layout is %r, expected %r" % (en_default.get("en"), gb))
+    for tag in ("en-US", "en-GB", "en-GH", "en-IN", "en-AU", "en-CA"):
+        if tag not in en_default:
+            fail("missing English subtype %s" % tag)
+        elif en_default[tag] != gb:
+            fail("subtype %s default_layout is %r, expected %r" % (tag, en_default[tag], gb))
+    if not any('android:imeSubtypeLocale="en_GH"' in s for s in subtypes):
+        fail("no en-GH (Ghana) subtype declared")
+
+    # (3) The no-subtype runtime fallback must be the same clean layout, not the dense one.
+    try:
+        graph = open("src/main/kotlin/tribixbite/cleverkeys/wiring/KeyboardComponentGraph.kt",
+                     encoding="utf-8").read()
+    except Exception as ex:
+        fail("cannot read KeyboardComponentGraph.kt: %s" % ex)
+        return
+    if "R.raw.%s" % gb not in graph:
+        fail("no-subtype fallback in KeyboardComponentGraph no longer loads R.raw.%s" % gb)
+    if re.search(r"\?:\s*KeyboardData\.load\(resources,\s*R\.raw\.latn_qwerty_us\)", graph):
+        fail("no-subtype fallback fell back to the dense latn_qwerty_us again")
+
+    # (4) Settings/theme previews must preview the keyboard the user actually types on.
+    previews = [
+        "src/main/kotlin/tribixbite/cleverkeys/customization/KeyboardPreviewHost.kt",
+        "src/main/kotlin/tribixbite/cleverkeys/customization/KeyboardPreviewView.kt",
+        "src/main/kotlin/tribixbite/cleverkeys/theme/ThemeEditorPreview.kt",
+    ]
+    for p in previews:
+        try:
+            src = open(p, encoding="utf-8").read()
+        except Exception as ex:
+            fail("cannot read preview %s: %s" % (p, ex))
+            continue
+        if "R.raw.%s" % gb not in src:
+            fail("preview %s no longer loads R.raw.%s" % (p, gb))
+
+
+check_gboard_default()
+
 for fname in sorted(glob.glob("src/main/layouts/*.xml")):
     layout_id, _ = os.path.splitext(os.path.basename(fname))
     if layout_id in KNOWN_NOT_LAYOUT:

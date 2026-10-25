@@ -55,8 +55,11 @@ unless they are migrated through backup/restore.
   `KeyboardData.getKeys()` keeps only one position per value; the checker's other findings
   stay advisory. Run it on a layout you edit.
 - A `SystemLayout` preference entry resolves to the current subtype's `default_layout` in
-  `res/xml/method.xml` — changing a user's default layout means changing that file, not
-  `LayoutsPreference.DEFAULT`.
+  `res/xml/method.xml`. English subtypes, including `en-GB` and `en-GH`, name
+  `latn_qwerty_us_gboard_style`. When no subtype resolves, `KeyboardComponentGraph` falls back
+  to that same layout — not the dense `latn_qwerty_us`. `tools/check_layout.py` fails the build
+  if that chain drifts. Changing the default means changing `method.xml` and that fallback
+  together, not `LayoutsPreference.DEFAULT`.
 
 ## Documentation
 

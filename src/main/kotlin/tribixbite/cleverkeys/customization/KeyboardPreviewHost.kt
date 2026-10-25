@@ -162,10 +162,11 @@ class KeyboardPreviewHost @JvmOverloads constructor(
      */
     private fun loadFallbackLayout() {
         try {
-            // Default to QWERTY
+            // Default to the shipped Gboard-style QWERTY, not the legacy dense layout, so the
+            // settings preview matches the keyboard the user actually types on.
             val resources = context.resources
             // Static resource name → direct R reference (no reflection needed).
-            val layout = KeyboardData.load(resources, R.raw.latn_qwerty_us)
+            val layout = KeyboardData.load(resources, R.raw.latn_qwerty_us_gboard_style)
             if (layout != null) {
                 keyboardData = layout
                 keyboardView?.setKeyboard(layout)

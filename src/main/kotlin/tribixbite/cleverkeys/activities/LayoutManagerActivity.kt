@@ -71,8 +71,9 @@ private fun getLayoutXml(context: android.content.Context, layoutName: String): 
         if (id > 0) {
             res.openRawResource(id).use { Utils.read_all_utf8(it) }
         } else {
-            // Fallback for System or unknown
-            res.openRawResource(R.raw.latn_qwerty_us).use { Utils.read_all_utf8(it) }
+            // Fallback for System or unknown: the shipped Gboard-style layout, which is what a
+            // SystemLayout resolves to at runtime (see method.xml + the no-subtype fallback).
+            res.openRawResource(R.raw.latn_qwerty_us_gboard_style).use { Utils.read_all_utf8(it) }
         }
     } catch (e: Exception) {
         ""
@@ -237,7 +238,7 @@ fun LayoutManagerScreen(onBack: () -> Unit) {
                                 val initialXml = when (val layout = layoutWithId.layout) {
                                     is LayoutsPreference.CustomLayout -> layout.xml
                                     is LayoutsPreference.NamedLayout -> getLayoutXml(context, layout.name)
-                                    is LayoutsPreference.SystemLayout -> getLayoutXml(context, "latn_qwerty_us")
+                                    is LayoutsPreference.SystemLayout -> getLayoutXml(context, "latn_qwerty_us_gboard_style")
                                     else -> ""
                                 }
                                 showCustomLayoutDialog = Pair(index, initialXml)
@@ -993,7 +994,7 @@ private fun saveLayouts(
 
 private fun readInitialCustomLayout(context: android.content.Context): String {
     return try {
-        context.resources.openRawResource(R.raw.latn_qwerty_us).use { inputStream ->
+        context.resources.openRawResource(R.raw.latn_qwerty_us_gboard_style).use { inputStream ->
             Utils.read_all_utf8(inputStream)
         }
     } catch (e: Exception) {

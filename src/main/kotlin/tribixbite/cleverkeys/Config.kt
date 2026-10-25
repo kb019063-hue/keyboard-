@@ -801,6 +801,39 @@ object SubkeyPopoverMigration {
     ): Boolean = !isFreshInstall && savedVersion < INTRODUCED_IN_VERSION && !hasExplicitChoice
 }
 
+/**
+ * One-time (2026-10-26): re-point installs still pinned to a legacy DENSE default layout
+ * (`latn_qwerty_us` / `latn_qwerty_gb`) to the locale-following `system` entry, which now
+ * resolves to the Gboard-style layout (see res/xml/method.xml and the no-subtype fallback).
+ *
+ * Why needed: before the Gboard-style layout shipped, config v0 migration wrote
+ * `NamedLayout("latn_qwerty_us")` from the old `layout` pref without the user ever choosing a
+ * layout. That pinned pref shadows the dynamic `localeTextLayout`, so the method.xml/fallback
+ * fixes alone cannot reach those installs. This migration runs once (marker persisted
+ * unconditionally) and only touches a SINGLE named legacy-dense entry: custom layouts, multiple
+ * layouts, a `system` entry, or any other named layout are left exactly as the user set them.
+ * Decision logic: [GboardDefaultLayoutMigration.shouldRepoint].
+ */
+object GboardDefaultLayoutMigration {
+    /** Persisted on user devices once the migration has run — never rename. */
+    const val MIGRATION_MARKER_KEY = "gboard_default_layout_migration_v1"
+    const val GBOARD_LAYOUT = "latn_qwerty_us_gboard_style"
+
+    /**
+     * The exact raw `layouts` pref strings the config-v0 migration wrote for the old default —
+     * a single, unbound, plain-string named layout. Object-form entries carry a language/theme
+     * binding (a deliberate user edit) and are deliberately NOT in this set.
+     */
+    private val LEGACY_DENSE_JSON = setOf(
+        "[\"latn_qwerty_us\"]",
+        "[\"latn_qwerty_gb\"]"
+    )
+
+    /** Pure: re-point only that one legacy form, and only once. */
+    fun shouldRepoint(alreadyMigrated: Boolean, rawLayouts: String?): Boolean =
+        !alreadyMigrated && rawLayouts != null && rawLayouts.trim() in LEGACY_DENSE_JSON
+}
+
 object HapticsMigration {
     /** Persisted on user devices once the migration has run — never rename. */
     const val MIGRATION_MARKER_KEY = "vibrate_custom_migration_v1"
@@ -1825,6 +1858,7 @@ class Config private constructor(
             migrate(prefs)
             migrateMarginPrefs(prefs, res.displayMetrics)
             migrateForcedVibrateCustom(prefs)
+            migrateGboardDefaultLayout(prefs)
             val config = Config(prefs, res, handler, foldableUnfolded)
             _globalConfig = config
             LayoutModifier.init(config, res)
@@ -2207,6 +2241,34 @@ class Config private constructor(
             }
             // Always mark migrated so this never runs again.
             e.putBoolean("vibrate_custom_migration_v1", true)
+            e.apply()
+        }
+
+        /**
+         * One-time re-point of an install still pinned to a legacy dense default layout to the
+         * Gboard-style layout. Runs exactly once; the marker is always written, even when
+         * nothing changes. Decision logic: [GboardDefaultLayoutMigration.shouldRepoint].
+         */
+        @JvmStatic
+        fun migrateGboardDefaultLayout(prefs: SharedPreferences) {
+            // True no-op once migrated, exactly like migrateForcedVibrateCustom.
+            if (prefs.getBoolean(GboardDefaultLayoutMigration.MIGRATION_MARKER_KEY, false)) return
+            val alreadyMigrated = false
+            val raw = try {
+                prefs.getString(LayoutsPreference.KEY, null)
+            } catch (e: ClassCastException) {
+                null
+            }
+
+            val e = prefs.edit()
+            if (GboardDefaultLayoutMigration.shouldRepoint(alreadyMigrated, raw)) {
+                // Re-point to the SAME Gboard-style layout as a plain named entry, so behaviour
+                // is deterministic even on a device whose subtype resolution is unavailable.
+                e.putString(LayoutsPreference.KEY, "[\"${GboardDefaultLayoutMigration.GBOARD_LAYOUT}\"]")
+                Log.i("Config", "Re-pointed legacy dense layout to the Gboard-style default")
+            }
+            // Always mark migrated so this never runs again.
+            e.putBoolean(GboardDefaultLayoutMigration.MIGRATION_MARKER_KEY, true)
             e.apply()
         }
 

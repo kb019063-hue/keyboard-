@@ -350,8 +350,14 @@ class KeyboardComponentGraph(
         // Refresh subtype and get default layout. gh #160: when this refresh is driven by
         // onCurrentInputMethodSubtypeChanged the delivered subtype is passed through and wins
         // over the IMM re-derivation (stale/aliased answers) — see SubtypeManager.refreshSubtype.
+        // Gboard-style is the shipped default for English (see res/xml/method.xml). When no
+        // enabled subtype resolves — a fresh install, an emulator with no locale, or an
+        // unrecognised system locale — the locale-less fallback must be the SAME clean layout,
+        // not the legacy dense latn_qwerty_us (symbols in every corner + Ctrl/Fn bottom row).
+        // Loading that here is exactly how the owner's phone ended up showing the cluttered
+        // PC-style keyboard in the reference screenshot. tools/check_layout.py pins this.
         val defaultLayout = subtypeManager.refreshSubtype(config, resources, changedTo)
-            ?: KeyboardData.load(resources, R.raw.latn_qwerty_us)
+            ?: KeyboardData.load(resources, R.raw.latn_qwerty_us_gboard_style)
 
         // Update or create LayoutManager
         val layoutManager: LayoutManager?
