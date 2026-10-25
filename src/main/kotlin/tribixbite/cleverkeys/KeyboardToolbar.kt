@@ -184,7 +184,9 @@ class KeyboardToolbar(
             setImageResource(iconRes)
             scaleType = ImageView.ScaleType.FIT_CENTER
             imageTintList = ColorStateList.valueOf(textColor())
-            minWidth = dp(BUTTON_MIN_WIDTH_DP)
+            // No minWidth here: that is a TextView property. The hit target is the weighted
+            // FrameLayout wrapper, which is a full row-height cell wide, and the icon itself is
+            // a fixed 22 dp box centred in it.
             setPadding(dp(ICON_PADDING_DP), 0, dp(ICON_PADDING_DP), 0)
             isClickable = true
             isFocusable = true
