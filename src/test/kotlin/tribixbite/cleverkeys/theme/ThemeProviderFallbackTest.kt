@@ -35,7 +35,7 @@ import tribixbite.cleverkeys.Theme
  * ## The contract pinned here
  *
  * [ThemeProvider.getTheme] is TOTAL: for any theme id — dangling custom, unknown
- * decorative, garbage — it returns a usable [Theme] (the default cleverkeysdark
+ * decorative, garbage — it returns a usable [Theme] (the default Harbor
  * palette) instead of throwing. The fallback is built from the in-code colour scheme
  * (not XML style resolution) so the escape hatch has no failure modes of its own.
  *
@@ -108,8 +108,8 @@ class ThemeProviderFallbackTest {
         // thrown from here — in production, straight into Keyboard2View's constructor.
         val theme = provider.getTheme("custom_nonexistent")
 
-        val expected = provider.getColorScheme("cleverkeysdark")
-        assertWithMessage("fallback must carry the default cleverkeysdark palette")
+        val expected = provider.getColorScheme(ThemeProvider.FALLBACK_THEME_ID)
+        assertWithMessage("fallback must carry the default theme palette")
             .that(theme.colorKeyboardBackground)
             .isEqualTo(expected!!.keyboardBackground.toThemeArgb())
         assertThat(theme.colorKey).isEqualTo(expected.keyDefault.toThemeArgb())
@@ -123,7 +123,7 @@ class ThemeProviderFallbackTest {
         // via a backup restored from a build with different decorative IDs.
         val theme = provider.getTheme("decorative_from_some_other_build")
 
-        val expected = provider.getColorScheme("cleverkeysdark")
+        val expected = provider.getColorScheme(ThemeProvider.FALLBACK_THEME_ID)
         assertThat(theme.colorKeyboardBackground)
             .isEqualTo(expected!!.keyboardBackground.toThemeArgb())
     }

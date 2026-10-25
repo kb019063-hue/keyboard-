@@ -36,11 +36,10 @@ object CustomThemePrefPolicy {
     const val SWIPE_TRAIL_PREF_KEY = "swipe_trail_color"
 
     /**
-     * [ThemeProvider.FALLBACK_THEME_ID]'s swipe-trail colour (getBuiltInColorScheme
-     * "cleverkeysdark": silver). Drift-pinned against getColorScheme by
-     * CustomThemePrefPolicyTest.
+     * [ThemeProvider.FALLBACK_THEME_ID]'s swipe-trail colour (Harbor: ice blue).
+     * Drift-pinned against getColorScheme by CustomThemePrefPolicyTest.
      */
-    const val FALLBACK_SWIPE_TRAIL_COLOR = 0xFFC0C0C0.toInt()
+    const val FALLBACK_SWIPE_TRAIL_COLOR = 0xFF9CC7FF.toInt()
 
     /** The `theme` pref value that selects the custom theme with raw store id [rawThemeId]. */
     fun themePrefId(rawThemeId: String): String = "custom_$rawThemeId"

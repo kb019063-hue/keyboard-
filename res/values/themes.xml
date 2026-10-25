@@ -319,7 +319,7 @@
   <!-- Alias for CleverKeys Light -->
   <style name="CleverKeysLight" parent="Jewel"/>
 
-  <!-- CleverKeys Dark theme: Deep jewel purple with silver text (DEFAULT) -->
+  <!-- CleverKeys Dark theme: Deep jewel purple with silver text. Kept, no longer the default. -->
   <style name="CleverKeysDark" parent="BaseTheme">
     <item name="android:isLightTheme" tools:targetApi="29">false</item>
     <item name="colorKeyboard">#1E1030</item>
@@ -339,6 +339,112 @@
     <item name="emoji_button_bg">#2A1845</item>
     <item name="emoji_color">#C0C0C0</item>
     <item name="clipboard_divider_color">#4A2070</item>
+  </style>
+
+  <!--
+    Wardrobe (2026-10-26). The owner rejected the purple default as generic. These five are
+    selectable built-in themes; Harbor is the new default. None of them is a purple recolor:
+    each changes the field, the key, the type colour, and what a press does.
+  -->
+  <style name="Harbor" parent="BaseTheme">
+    <item name="android:isLightTheme" tools:targetApi="29">false</item>
+    <item name="colorKeyboard">#0C1826</item>
+    <item name="colorKey">#1A3352</item>
+    <item name="colorKeyActivated">#2B6CB0</item>
+    <item name="keyBorderWidth">0dp</item>
+    <item name="keyBorderWidthActivated">0dp</item>
+    <item name="keyBorderColorLeft">#24466E</item>
+    <item name="keyBorderColorTop">#24466E</item>
+    <item name="keyBorderColorRight">#24466E</item>
+    <item name="keyBorderColorBottom">#24466E</item>
+    <item name="colorLabel">#F4F7FB</item>
+    <item name="colorLabelActivated">#FFFFFF</item>
+    <item name="colorLabelLocked">#9CC7FF</item>
+    <item name="colorSubLabel">#8AA4BE</item>
+    <item name="keyBorderRadius">8dp</item>
+    <item name="emoji_button_bg">#1A3352</item>
+    <item name="emoji_color">#F4F7FB</item>
+    <item name="clipboard_divider_color">#24466E</item>
+  </style>
+  <style name="Daybreak" parent="BaseTheme">
+    <item name="android:isLightTheme" tools:targetApi="29">true</item>
+    <item name="colorKeyboard">#E4EDF6</item>
+    <item name="colorKey">#F8FBFE</item>
+    <item name="colorKeyActivated">#1B5FBF</item>
+    <item name="keyBorderWidth">1dp</item>
+    <item name="keyBorderWidthActivated">1dp</item>
+    <item name="keyBorderColorLeft">#C9D7E6</item>
+    <item name="keyBorderColorTop">#FFFFFF</item>
+    <item name="keyBorderColorRight">#C9D7E6</item>
+    <item name="keyBorderColorBottom">#B7C8DA</item>
+    <item name="colorLabel">#142033</item>
+    <item name="colorLabelActivated">#FFFFFF</item>
+    <item name="colorLabelLocked">#1B5FBF</item>
+    <item name="colorSubLabel">#5D738C</item>
+    <item name="keyBorderRadius">8dp</item>
+    <item name="emoji_button_bg">#F8FBFE</item>
+    <item name="emoji_color">#142033</item>
+    <item name="clipboard_divider_color">#C9D7E6</item>
+  </style>
+  <style name="Signal" parent="BaseTheme">
+    <item name="android:isLightTheme" tools:targetApi="29">false</item>
+    <item name="colorKeyboard">#070B12</item>
+    <item name="colorKey">#101826</item>
+    <item name="colorKeyActivated">#E8F1FF</item>
+    <item name="keyBorderWidth">1dp</item>
+    <item name="keyBorderWidthActivated">0dp</item>
+    <item name="keyBorderColorLeft">#2A4E86</item>
+    <item name="keyBorderColorTop">#2A4E86</item>
+    <item name="keyBorderColorRight">#2A4E86</item>
+    <item name="keyBorderColorBottom">#2A4E86</item>
+    <item name="colorLabel">#A9CFFF</item>
+    <item name="colorLabelActivated">#071018</item>
+    <item name="colorLabelLocked">#FFFFFF</item>
+    <item name="colorSubLabel">#6E8CB3</item>
+    <item name="keyBorderRadius">5dp</item>
+    <item name="emoji_button_bg">#101826</item>
+    <item name="emoji_color">#A9CFFF</item>
+    <item name="clipboard_divider_color">#2A4E86</item>
+  </style>
+  <style name="Ember" parent="BaseTheme">
+    <item name="android:isLightTheme" tools:targetApi="29">false</item>
+    <item name="colorKeyboard">#120E0C</item>
+    <item name="colorKey">#241816</item>
+    <item name="colorKeyActivated">#E24A38</item>
+    <item name="keyBorderWidth">1.2dp</item>
+    <item name="keyBorderWidthActivated">0dp</item>
+    <item name="keyBorderColorLeft">#C44536</item>
+    <item name="keyBorderColorTop">#C44536</item>
+    <item name="keyBorderColorRight">#C44536</item>
+    <item name="keyBorderColorBottom">#C44536</item>
+    <item name="colorLabel">#F6EDE8</item>
+    <item name="colorLabelActivated">#FFFFFF</item>
+    <item name="colorLabelLocked">#FFB0A4</item>
+    <item name="colorSubLabel">#C4A59C</item>
+    <item name="keyBorderRadius">7dp</item>
+    <item name="emoji_button_bg">#241816</item>
+    <item name="emoji_color">#F6EDE8</item>
+    <item name="clipboard_divider_color">#C44536</item>
+  </style>
+  <style name="Kiln" parent="BaseTheme">
+    <item name="android:isLightTheme" tools:targetApi="29">true</item>
+    <item name="colorKeyboard">#F6EBE4</item>
+    <item name="colorKey">#FFF8F4</item>
+    <item name="colorKeyActivated">#B4332A</item>
+    <item name="keyBorderWidth">1dp</item>
+    <item name="keyBorderWidthActivated">0dp</item>
+    <item name="keyBorderColorLeft">#E4C9BC</item>
+    <item name="keyBorderColorTop">#FFF8F4</item>
+    <item name="keyBorderColorRight">#E4C9BC</item>
+    <item name="keyBorderColorBottom">#D7B5A6</item>
+    <item name="colorLabel">#3C241E</item>
+    <item name="colorLabelActivated">#FFFFFF</item>
+    <item name="colorLabelLocked">#9A2E28</item>
+    <item name="colorSubLabel">#8C6B62</item>
+    <item name="keyBorderRadius">8dp</item>
+    <item name="emoji_button_bg">#FFF8F4</item>
+    <item name="emoji_color">#3C241E</item>
+    <item name="clipboard_divider_color">#E4C9BC</item>
   </style>
 
   <!-- Emoji group button style -->

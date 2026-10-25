@@ -21,7 +21,7 @@ import kotlin.math.roundToInt
  */
 object Defaults {
     // Appearance
-    const val THEME = "cleverkeysdark"
+    const val THEME = "harbor"
     // 2026-05-15: lowered from 30% to 27% — feels less cramped on most phones
     // and gives the input field more breathing room above.
     const val KEYBOARD_HEIGHT_PORTRAIT = 27
@@ -832,6 +832,20 @@ object GboardDefaultLayoutMigration {
     /** Pure: re-point only that one legacy form, and only once. */
     fun shouldRepoint(alreadyMigrated: Boolean, rawLayouts: String?): Boolean =
         !alreadyMigrated && rawLayouts != null && rawLayouts.trim() in LEGACY_DENSE_JSON
+}
+
+/**
+ * One-time (2026-10-26): the shipped default was deep purple (`cleverkeysdark`). The owner
+ * rejected that look, so an install still on that exact stored value moves to [Defaults.THEME]
+ * (Harbor). Any other stored theme — including an explicit later return to purple — is left
+ * alone. Runs once; the marker is always written.
+ */
+object ThemeDefaultMigration {
+    const val MIGRATION_MARKER_KEY = "theme_harbor_default_v1"
+    const val RETIRED_DEFAULT = "cleverkeysdark"
+
+    fun shouldRepoint(alreadyMigrated: Boolean, storedTheme: String?): Boolean =
+        !alreadyMigrated && storedTheme == RETIRED_DEFAULT
 }
 
 object HapticsMigration {
@@ -1859,6 +1873,7 @@ class Config private constructor(
             migrateMarginPrefs(prefs, res.displayMetrics)
             migrateForcedVibrateCustom(prefs)
             migrateGboardDefaultLayout(prefs)
+            migrateThemeDefault(prefs)
             val config = Config(prefs, res, handler, foldableUnfolded)
             _globalConfig = config
             LayoutModifier.init(config, res)
@@ -2135,9 +2150,14 @@ class Config private constructor(
                     "jewel" -> R.style.Jewel
                     "cleverkeysdark" -> R.style.CleverKeysDark
                     "cleverkeyslight" -> R.style.CleverKeysLight
-                    // ARC-111: an unset theme follows the system like every other fallback;
-                    // users who explicitly chose a theme are unaffected.
-                    "" -> if (systemLight) R.style.CleverKeysLight else R.style.CleverKeysDark
+                    "harbor" -> R.style.Harbor
+                    "daybreak" -> R.style.Daybreak
+                    "signal" -> R.style.Signal
+                    "ember" -> R.style.Ember
+                    "kiln" -> R.style.Kiln
+                    // ARC-111: an unset theme follows the system. The pair is Harbor / Daybreak,
+                    // not the old purple styles.
+                    "" -> if (systemLight) R.style.Daybreak else R.style.Harbor
                     else -> if (systemLight) R.style.Light else R.style.Dark
                 }
             }
@@ -2269,6 +2289,23 @@ class Config private constructor(
             }
             // Always mark migrated so this never runs again.
             e.putBoolean(GboardDefaultLayoutMigration.MIGRATION_MARKER_KEY, true)
+            e.apply()
+        }
+
+        @JvmStatic
+        fun migrateThemeDefault(prefs: SharedPreferences) {
+            if (prefs.getBoolean(ThemeDefaultMigration.MIGRATION_MARKER_KEY, false)) return
+            val stored = try {
+                prefs.getString("theme", null)
+            } catch (e: ClassCastException) {
+                null
+            }
+            val e = prefs.edit()
+            if (ThemeDefaultMigration.shouldRepoint(alreadyMigrated = false, storedTheme = stored)) {
+                e.putString("theme", Defaults.THEME)
+                Log.i("Config", "Moved the retired purple default to ${Defaults.THEME}")
+            }
+            e.putBoolean(ThemeDefaultMigration.MIGRATION_MARKER_KEY, true)
             e.apply()
         }
 
