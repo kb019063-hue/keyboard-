@@ -86,10 +86,17 @@ time, so turning that preference on cannot produce two rows of digits on this la
     <key c="m"/>
     <key width="1.5" c="backspace" nw="delete_last_word" ne="delete" sw="loc esc" se="loc menu" n="loc page_up" s="loc page_down"/>
   </row>
+  <!-- Gboard's bottom row, in Gboard's order and widths: ?123 (1.5) | , (1) | emoji (1) |
+       space (4) | . (1) | enter (1.5). The emoji key is its OWN key, not a hint on the comma:
+       that is where Gboard draws it and the owner reported "I don't see the emoji button", which
+       was exactly the cost of hiding it on a corner. It carries no corner hints, also like
+       Gboard: a value may appear only once in a whole layout (Key.getKeys is keyed by value), so
+       corners here would either duplicate the comma's own commands or shadow them. -->
   <row height="0.95">
     <key width="1.5" c="?123:switch_numeric" nw="ctrl" ne="fn" sw="loc switch_greekmath" se="loc meta" n="loc alt" s="loc compose"/>
-    <key c="," n="switch_emoji" nw="loc change_method" ne="config" sw="loc switch_clipboard" se="switch_gif" s="switch_back_clipboard"/>
-    <key width="5" c="space" n="loc switch_forward" s="loc switch_backward" w="cursor_left" e="cursor_right"/>
+    <key c="," ne="config" nw="loc change_method" sw="loc switch_clipboard" se="switch_gif" s="switch_back_clipboard"/>
+    <key c="switch_emoji"/>
+    <key width="4" c="space" n="loc switch_forward" s="loc switch_backward" w="cursor_left" e="cursor_right"/>
     <key c="." nw="'" n="\?" ne="!" sw="-" se=":"/>
     <key width="1.5" c="enter" nw="loc voice_typing" ne="action" n="up" s="down" w="left" e="right" sw="doc_home" se="doc_end"/>
   </row>

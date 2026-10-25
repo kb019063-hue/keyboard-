@@ -325,9 +325,13 @@ class StyleLayoutsTest {
             .filter { visibleCorners(it).isNotEmpty() }
         assertThat(hinted).isEmpty()
 
-        // Gboard draws the emoji key as the comma's top hint.
-        val comma = kw.rows.last().keys.first { it.getKeyValue(0) == key(",") }
-        assertThat(comma.getKeyValue(7)).isEqualTo(key("switch_emoji"))
+        // Phase 4 part 6: the emoji key is its OWN key in Gboard's bottom row, not a hint on
+        // the comma. Hiding it on a corner is why the owner could not find it.
+        val bottom = kw.rows.last().keys
+        assertThat(bottom.mapNotNull { it.getKeyValue(0)?.getString() })
+            .containsExactly("?123:switch_numeric", ",", "switch_emoji", "space", ".", "enter")
+        // Gboard's widths: ?123 1.5 | , 1 | emoji 1 | space 4 | . 1 | enter 1.5
+        assertThat(bottom.map { it.width }).containsExactly(1.5f, 1f, 1f, 4f, 1f, 1.5f).inOrder()
     }
 
     @Test
