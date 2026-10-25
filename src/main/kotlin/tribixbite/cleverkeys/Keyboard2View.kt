@@ -490,6 +490,9 @@ class Keyboard2View @JvmOverloads constructor(
     fun setKeyboard(kw: KeyboardData) {
         cancelContinuousSwipe()
         _keyboard = kw
+        // The draw-geometry cache is keyed on the layout's identity, so this is belt and braces
+        // for a caller that ever swaps a KeyboardData in place; it costs one field write.
+        invalidateDrawSpans()
         rebuildKeyCodeLowerCache(kw)
         val shiftKv = KeyValue.getKeyByName("shift")
         _shift_kv = shiftKv
@@ -1795,6 +1798,56 @@ class Keyboard2View @JvmOverloads constructor(
         }
     }
 
+    // ── Draw-geometry cache ────────────────────────────────────────────────────────────────
+    // onDraw used to rebuild the horizontal layout of every key on every frame:
+    // KeyboardGeometry.rowSpans returns a fresh ArrayList plus one KeySpan per key, so a 40-key
+    // layout allocated ~46 objects per frame -- and frames run continuously while a swipe trail
+    // animates (postInvalidateOnAnimation) and once more for every key press. That is steady
+    // allocation on the draw path, i.e. GC pauses showing up as stutter on a mid-range device,
+    // which is exactly what "laggy" feels like.
+    //
+    // The spans are a pure function of (layout instance, keyWidth, split gap, split scale,
+    // startX), all of which only move on a measure, a layout switch or a config change, so the
+    // result is memoised against those five values. Referential identity is used for the layout
+    // because KeyboardData is immutable: a new layout is a new object, and the same object can
+    // never mean different geometry. Nothing here is on the hit-test path --
+    // KeyboardGeometry.keyAt walks the keys directly and never calls rowSpans.
+    private var _spansCache: List<List<KeyboardGeometry.KeySpan>>? = null
+    private var _spansKeyboard: KeyboardData? = null
+    private var _spansStartX = Float.NaN
+    private var _spansKeyWidth = Float.NaN
+    private var _spansSplitGap = Float.NaN
+    private var _spansSplitScale = Float.NaN
+
+    private fun drawRowSpans(
+        keyboard: KeyboardData,
+        gp: KeyboardGeometry.Params,
+        startX: Float
+    ): List<List<KeyboardGeometry.KeySpan>> {
+        val cached = _spansCache
+        if (cached != null && _spansKeyboard === keyboard &&
+            _spansStartX == startX && _spansKeyWidth == gp.keyWidth &&
+            _spansSplitGap == gp.splitGap && _spansSplitScale == gp.splitScale
+        ) {
+            return cached
+        }
+        val built = ArrayList<List<KeyboardGeometry.KeySpan>>(keyboard.rows.size)
+        for (row in keyboard.rows) built.add(KeyboardGeometry.rowSpans(row, gp, startX))
+        _spansKeyboard = keyboard
+        _spansStartX = startX
+        _spansKeyWidth = gp.keyWidth
+        _spansSplitGap = gp.splitGap
+        _spansSplitScale = gp.splitScale
+        _spansCache = built
+        return built
+    }
+
+    /** Drop the cached draw geometry. Called when the layout is replaced. */
+    private fun invalidateDrawSpans() {
+        _spansCache = null
+        _spansKeyboard = null
+    }
+
     override fun onDraw(canvas: Canvas) {
         val keyboard = _keyboard ?: return
         val tc = _tc ?: return
@@ -1817,11 +1870,14 @@ class Keyboard2View @JvmOverloads constructor(
         // sees. geometryParams carries the gap and its compensating scale; startX adds the
         // theme's per-row margin this path layers on top of the view's own.
         val gp = geometryParams() ?: return
+        // One cached layout of every row's spans for this frame (see drawRowSpans).
+        val rowSpans = drawRowSpans(keyboard, gp, _marginLeft + tc.margin_left)
+        var rowIndex = 0
 
         for (row in keyboard.rows) {
             y += row.shift * tc.row_height
             val keyH = row.height * tc.row_height - tc.vertical_margin
-            val spans = KeyboardGeometry.rowSpans(row, gp, startX = _marginLeft + tc.margin_left)
+            val spans = rowSpans[rowIndex++]
 
             for (span in spans) {
                 val k = span.key
@@ -1871,8 +1927,23 @@ class Keyboard2View @JvmOverloads constructor(
                 // none on keys that do something; print_all_key_symbols restores every label the
                 // key carries. Rendering only -- the KeySpec keeps all nine slots, so long-press,
                 // swipes, hit-testing and the a11y tree still reach what is not drawn.
+                //
+                // `loc` corners are excluded here and in the draw loop below. The layout
+                // grammar reserves `loc <key>` for PLACEMENT -- "Symbols prefixed with 'loc '
+                // are not visible on the keyboard" (latn_qwerty_us.xml) -- and KeyboardData
+                // parses that into Key.F_LOC, but nothing in the renderer ever read the flag.
+                // The slots that survive to here are the ones whose key an Extra-keys checkbox
+                // has enabled (LayoutModifier nulls the rest, and the defaults turn on esc,
+                // tab, home, end, page_up, page_down, menu and compose), so Q printed `esc`,
+                // shift printed home/end/tab/capslock, backspace printed menu/page_up/
+                // page_down. That is a large part of what read as chaos next to Gboard. All of
+                // them stay reachable exactly as before by corner swipe; like the rest of calm
+                // mode they are simply no longer printed (docs/PHASE4-POLISH-DESIGN.md S1).
                 var presentCorners = 0
-                for (i in 1..8) if (k.keys[i] != null) presentCorners = presentCorners or (1 shl i)
+                for (i in 1..8) {
+                    if (k.keys[i] != null && !k.keyHasFlag(i, KeyboardData.Key.F_LOC))
+                        presentCorners = presentCorners or (1 shl i)
+                }
                 val calmCorners = CornerLabelPolicy.drawn(
                     snap.print_all_key_symbols,
                     CornerLabelPolicy.isCharacterKind(kv0?.getKind()),
@@ -1880,7 +1951,9 @@ class Keyboard2View @JvmOverloads constructor(
                 )
                 for (i in 1..8) {
                     if (k.keys[i] != null && (coveredSubLabels and (1 shl i)) == 0 &&
-                        (calmCorners and (1 shl i)) != 0
+                        (calmCorners and (1 shl i)) != 0 &&
+                        // `loc` placeholders are never printed, even with print_all_key_symbols.
+                        !k.keyHasFlag(i, KeyboardData.Key.F_LOC)
                     ) {
                         drawSubLabel(canvas, k.keys[i]!!, x, y, keyW, keyH, i, isKeyDown, tc_key, snap, mainLabelW)
                     }

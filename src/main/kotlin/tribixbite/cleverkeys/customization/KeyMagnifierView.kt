@@ -6,6 +6,7 @@ import android.util.AttributeSet
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
+import tribixbite.cleverkeys.BuildConfig
 import tribixbite.cleverkeys.Config
 import tribixbite.cleverkeys.KeyValue
 import tribixbite.cleverkeys.KeyboardData
@@ -218,7 +219,7 @@ class KeyMagnifierView @JvmOverloads constructor(
         this.customMappings = customMappings
         this.keyWidthUnits = key.width
         this.rowHeightUnits = rowHeight
-        Log.d(TAG, "setKey: keyWidth=${key.width}, rowHeight=$rowHeight, aspectRatio=${key.width / rowHeight}")
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "setKey: keyWidth=${key.width}, rowHeight=$rowHeight, aspectRatio=${key.width / rowHeight}")
         requestLayout() // Force re-measure for new aspect ratio
         invalidate()
     }
@@ -241,7 +242,7 @@ class KeyMagnifierView @JvmOverloads constructor(
         this.customMappings = customMappings
         this.keyWidthUnits = 1.0f
         this.rowHeightUnits = 1.0f  // Square for simplified view
-        Log.d(TAG, "setKeyCode: keyCode=$keyCode, mappings=${customMappings.size}")
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "setKeyCode: keyCode=$keyCode, mappings=${customMappings.size}")
         requestLayout()
         invalidate()
     }
@@ -273,8 +274,8 @@ class KeyMagnifierView @JvmOverloads constructor(
         val availableWidth = MeasureSpec.getSize(widthMeasureSpec)
         val availableHeight = MeasureSpec.getSize(heightMeasureSpec)
 
-        Log.d(TAG, "onMeasure: widthMode=${modeName(widthMode)}, heightMode=${modeName(heightMode)}")
-        Log.d(TAG, "onMeasure: available=${availableWidth}x${availableHeight}")
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "onMeasure: widthMode=${modeName(widthMode)}, heightMode=${modeName(heightMode)}")
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "onMeasure: available=${availableWidth}x${availableHeight}")
 
         // Get key aspect ratio from the stored dimensions
         // keyWidthUnits is the key's width (usually 1.0 for standard keys)
@@ -286,7 +287,7 @@ class KeyMagnifierView @JvmOverloads constructor(
             0.85f // Default: keys are typically slightly taller than wide
         }
 
-        Log.d(TAG, "onMeasure: keyWidthUnits=$keyWidthUnits, rowHeightUnits=$rowHeightUnits, aspectRatio=$aspectRatio")
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "onMeasure: keyWidthUnits=$keyWidthUnits, rowHeightUnits=$rowHeightUnits, aspectRatio=$aspectRatio")
 
         // Handle cases where parent doesn't provide useful constraints
         val effectiveWidth = if (availableWidth > 0 && widthMode != MeasureSpec.UNSPECIFIED) {
@@ -326,7 +327,7 @@ class KeyMagnifierView @JvmOverloads constructor(
         val finalWidth = maxOf(width, minSize)
         val finalHeight = maxOf(height, (minSize / aspectRatio).toInt())
 
-        Log.d(TAG, "onMeasure: result=${finalWidth}x${finalHeight}")
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "onMeasure: result=${finalWidth}x${finalHeight}")
         setMeasuredDimension(finalWidth, finalHeight)
     }
 
@@ -610,12 +611,12 @@ class KeyMagnifierView @JvmOverloads constructor(
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val x = event.x
         val y = event.y
-        Log.d(TAG, "onTouchEvent: action=${event.action}, x=$x, y=$y, bounds=${directionBounds.size}")
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "onTouchEvent: action=${event.action}, x=$x, y=$y, bounds=${directionBounds.size}")
 
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
                 hoveredDirection = findDirectionAt(x, y)
-                Log.d(TAG, "ACTION_DOWN: hoveredDirection=$hoveredDirection")
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "ACTION_DOWN: hoveredDirection=$hoveredDirection")
                 invalidate()
                 return true
             }
@@ -629,9 +630,9 @@ class KeyMagnifierView @JvmOverloads constructor(
             }
             MotionEvent.ACTION_UP -> {
                 val direction = findDirectionAt(x, y)
-                Log.d(TAG, "ACTION_UP: direction=$direction, callback=${onDirectionTapped != null}")
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "ACTION_UP: direction=$direction, callback=${onDirectionTapped != null}")
                 if (direction != null && direction == hoveredDirection) {
-                    Log.d(TAG, "Invoking callback for $direction")
+                    if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "Invoking callback for $direction")
                     onDirectionTapped?.invoke(direction)
                 }
                 hoveredDirection = null

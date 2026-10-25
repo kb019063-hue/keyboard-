@@ -42,6 +42,12 @@ There is no local build path in this project's dev sandbox — the Android SDK, 
 distribution, and Maven Central are all unreachable from it. **GitHub Actions is the build
 system.** `.github/workflows/build-apk.yml` runs on every push and produces per-ABI debug APKs.
 
+> **CI storage is a hard constraint, not a detail.** Per-ABI splits mean one build is ~94 MB, and
+> a private repo gets 500 MB of *artifact* storage in total; exhausting it silently skips the
+> release step, so the build stays green and no APK appears. The rules, the arithmetic and the
+> recovery steps are in [`docs/CI-STORAGE.md`](docs/CI-STORAGE.md), and
+> [`AGENTS.md`](AGENTS.md) summarises them for anyone changing the workflows.
+
 The build is a single-module Gradle project rooted at the repo:
 
 ```

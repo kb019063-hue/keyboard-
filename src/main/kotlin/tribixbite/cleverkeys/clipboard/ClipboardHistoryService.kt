@@ -787,11 +787,37 @@ class ClipboardHistoryService private constructor(ctx: Context) {
      * Returns null if detection fails or permission not granted.
      */
     @Suppress("DEPRECATION")
+    // ── Foreground-app detection, cached ─────────────────────────────────────────────────────
+    // queryUsageStats is a cross-process query that walks daily buckets; on several OEM builds
+    // (Huawei in particular) it is one of the slower framework calls a keyboard can make, and it
+    // is asked only one question: "is the app I am typing into a password manager?" That answer
+    // cannot change while the keyboard is up. Caching it for a couple of seconds means a burst of
+    // field changes (a form with several inputs) costs ONE query instead of one per focus change,
+    // which matters because captureClip runs from onStartInputView -- i.e. the keyboard-shown
+    // path the user is waiting on.
+    //
+    // _usageStatsUnusable records that the query threw, so a device without PACKAGE_USAGE_STATS
+    // stops paying an exception construct+throw on every capture.
+    private var _fgPkgCache: String? = null
+    private var _fgPkgCacheAt = 0L
+    private var _usageStatsUnusable = false
+
     private fun getForegroundAppPackage(): String? {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (_fgPkgCacheAt != 0L && now - _fgPkgCacheAt < FG_PKG_CACHE_MS) {
+            return _fgPkgCache
+        }
+        val resolved = resolveForegroundAppPackage()
+        _fgPkgCache = resolved
+        _fgPkgCacheAt = now
+        return resolved
+    }
+
+    private fun resolveForegroundAppPackage(): String? {
         return try {
-            if (VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+            if (!_usageStatsUnusable && VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
                 // UsageStatsManager (requires PACKAGE_USAGE_STATS permission). The 5.1+ guard
-                // is vestigial — always true at minSdk 24 (ARC-113) — and retained as-is.
+                // is vestigial -- always true at minSdk 24 (ARC-113) -- and retained as-is.
                 val usageStatsManager = _context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
                 if (usageStatsManager != null) {
                     val endTime = System.currentTimeMillis()
@@ -820,6 +846,7 @@ class ClipboardHistoryService private constructor(ctx: Context) {
             null
         } catch (e: SecurityException) {
             // Permission not granted - this is expected, silently return null
+            _usageStatsUnusable = true
             if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
                 android.util.Log.d("ClipboardHistory", "Cannot detect foreground app: ${e.message}")
             }
@@ -830,9 +857,6 @@ class ClipboardHistoryService private constructor(ctx: Context) {
         }
     }
 
-    /**
-     * Check if the given package is a known password manager.
-     */
     private fun isPasswordManagerApp(packageName: String?): Boolean {
         if (packageName == null) return false
         return Defaults.PASSWORD_MANAGER_PACKAGES.contains(packageName)
@@ -860,6 +884,32 @@ class ClipboardHistoryService private constructor(ctx: Context) {
      */
     private fun captureClip(catchUp: Boolean) {
         try {
+            // ORDER MATTERS, and it used to be wrong. The cheap "is this clip even new?" test
+            // ran SECOND, behind the password-manager exclusion -- and that exclusion calls
+            // getForegroundAppPackage(), a UsageStatsManager.queryUsageStats scan (plus a
+            // SecurityException thrown and caught on every device without usage access, which
+            // then falls through to the deprecated getRunningTasks). All of that ran on the main
+            // thread, inside InputMethodService.onStartInputView, BEFORE the keyboard was drawn,
+            // on every single appearance of the keyboard. The overwhelmingly common case is an
+            // unchanged clipboard, which the cheap test answers from one description read -- so
+            // paying a usage-stats query first was paying the most expensive part of the work for
+            // the case that does nothing. Doing the cheap test first is behaviour-preserving: when
+            // the clip is unchanged there is nothing to record, so no filter needs evaluating.
+            if (catchUp) {
+                // Cheap pre-check (API 26+): the set timestamp is the whole identity and lives
+                // in the DESCRIPTION, so an already-observed clip is rejected without fetching
+                // its content over Binder (which can be up to the ~1 MB transaction limit).
+                val setAt = clipSetTime(runCatching { _cm.primaryClipDescription }.getOrNull())
+                if (setAt > 0 && !ClipboardCatchUp.shouldRecord(
+                        historyEnabled = true,
+                        current = ClipboardCatchUp.fingerprint(setAt, emptyList()),
+                        lastSeen = lastSeenClip,
+                    )
+                ) {
+                    return
+                }
+            }
+
             // Check if password manager exclusion is enabled
             if (Config.globalConfig().clipboard_exclude_password_managers) {
                 val foregroundApp = getForegroundAppPackage()
@@ -874,21 +924,6 @@ class ClipboardHistoryService private constructor(ctx: Context) {
                         .takeIf { it > 0 }
                         ?.let { lastSeenClip = ClipboardCatchUp.fingerprint(it, emptyList()) }
                     return // Don't store clipboard from password managers
-                }
-            }
-
-            if (catchUp) {
-                // Cheap pre-check (API 26+): the set timestamp is the whole identity and lives
-                // in the DESCRIPTION, so an already-observed clip is rejected without fetching
-                // its content over Binder (which can be up to the ~1 MB transaction limit).
-                val setAt = clipSetTime(runCatching { _cm.primaryClipDescription }.getOrNull())
-                if (setAt > 0 && !ClipboardCatchUp.shouldRecord(
-                        historyEnabled = true,
-                        current = ClipboardCatchUp.fingerprint(setAt, emptyList()),
-                        lastSeen = lastSeenClip,
-                    )
-                ) {
-                    return
                 }
             }
 
@@ -1110,6 +1145,13 @@ class ClipboardHistoryService private constructor(ctx: Context) {
     companion object {
         /** SharedPreferences file holding only [lastSeenClip] (not backed up, not exported). */
         const val LAST_SEEN_PREFS = "clipboard_last_seen"
+
+        /**
+         * How long a foreground-app answer is trusted. Long enough that focusing several fields
+         * in one form costs a single UsageStats query, short enough that switching apps and
+         * typing again re-checks.
+         */
+        private const val FG_PKG_CACHE_MS = 2000L
         private const val LAST_SEEN_KEY = "last_seen_clip"
 
         /**

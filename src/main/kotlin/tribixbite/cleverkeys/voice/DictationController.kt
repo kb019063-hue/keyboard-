@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -48,6 +49,48 @@ internal class DictationController(private val context: Context) {
     private val main = Handler(Looper.getMainLooper())
     private var recognizer: SpeechRecognizer? = null
     private var sink: Sink? = null
+
+    /**
+     * Audio focus, held for the length of one session.
+     *
+     * Without it the recogniser can open the microphone and still receive silence: on OEM builds
+     * that police background recording (EMUI among them) an IME is not the app the user sees in
+     * Recents, so the capture is attenuated or dropped and every attempt ends in NO_MATCH --
+     * which is exactly the reported symptom (a loud voice, several tries, "Didn't catch that").
+     * Asking for transient focus puts this process in the queue the platform expects, and it is
+     * the same thing a voice IME does before it listens.
+     */
+    private var audioManager: AudioManager? = null
+    private var focusHeld = false
+
+    @Suppress("DEPRECATION")
+    private fun requestAudioFocus() {
+        if (focusHeld) return
+        val am = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+        audioManager = am
+        try {
+            val result = am.requestAudioFocus(
+                null,
+                AudioManager.STREAM_MUSIC,
+                AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
+            )
+            focusHeld = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            Log.i(TAG, "audio focus granted=$focusHeld code=$result")
+        } catch (t: Throwable) {
+            Log.w(TAG, "requestAudioFocus threw: $t")
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun abandonAudioFocus() {
+        if (!focusHeld) return
+        focusHeld = false
+        try {
+            audioManager?.abandonAudioFocus(null)
+        } catch (t: Throwable) {
+            Log.w(TAG, "abandonAudioFocus threw: $t")
+        }
+    }
 
     @Volatile
     private var sessionActive = false
@@ -116,6 +159,7 @@ internal class DictationController(private val context: Context) {
     fun cancel() {
         if (!sessionActive && recognizer == null) return
         sessionActive = false
+        abandonAudioFocus()
         main.post {
             try {
                 recognizer?.cancel()
@@ -129,6 +173,7 @@ internal class DictationController(private val context: Context) {
     fun destroy() {
         sessionActive = false
         sink = null
+        abandonAudioFocus()
         main.post {
             try {
                 recognizer?.destroy()
@@ -147,16 +192,31 @@ internal class DictationController(private val context: Context) {
             sink?.showMessage(context.getString(R.string.voice_typing_unavailable))
             return
         }
+        // Focus BEFORE listening: see requestAudioFocus. Released in endSession/reportFailure/
+        // cancel/destroy so it can never outlive the session.
+        requestAudioFocus()
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(
                 RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                 RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
             )
-            // Partials are discarded by policy; not asking for them keeps the callbacks quiet.
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+            // Partials are still discarded by DictationPolicy (only a final result commits), but
+            // asking for them is not free of side effects: several recognisers only start
+            // decoding -- and only arm their endpointing -- when partials are requested. Asking
+            // for them costs nothing here and makes the session behave the way a real dictation
+            // session does.
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
+            // End the utterance promptly after the speaker stops instead of waiting for the
+            // recogniser's default timeout, which is what turns a good attempt into NO_MATCH.
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1000L)
+            // Dictate in the language the user is typing, not the service default.
+            localeLanguageTag()?.let { putExtra(RecognizerIntent.EXTRA_LANGUAGE, it) }
         }
+        Log.i(TAG, "startListening language=${localeLanguageTag() ?: "default"}")
         try {
             active.startListening(intent)
             sink?.showMessage(context.getString(R.string.voice_typing_listening))
@@ -236,12 +296,45 @@ internal class DictationController(private val context: Context) {
 
     private fun endSession() {
         sessionActive = false
+        abandonAudioFocus()
+    }
+
+    /** The language to dictate in: the keyboard's current locale as a BCP-47 tag. */
+    private fun localeLanguageTag(): String? = try {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+            context.resources.configuration.locales[0]?.toLanguageTag()
+        } else {
+            @Suppress("DEPRECATION")
+            context.resources.configuration.locale?.toLanguageTag()
+        }
+    } catch (t: Throwable) {
+        null
+    }
+
+    /**
+     * The symbolic name of a recogniser error. The numeric code alone is useless in a bug
+     * report, and the difference between them is the difference between "the microphone never
+     * delivered audio" (SPEECH_TIMEOUT / NO_MATCH), "the OS refused us the mic"
+     * (INSUFFICIENT_PERMISSIONS) and "another session owns the recogniser" (RECOGNIZER_BUSY).
+     */
+    private fun errorName(code: Int): String = when (code) {
+        SpeechRecognizer.ERROR_AUDIO -> "ERROR_AUDIO"
+        SpeechRecognizer.ERROR_CLIENT -> "ERROR_CLIENT"
+        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "ERROR_INSUFFICIENT_PERMISSIONS"
+        SpeechRecognizer.ERROR_NETWORK -> "ERROR_NETWORK"
+        SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "ERROR_NETWORK_TIMEOUT"
+        SpeechRecognizer.ERROR_NO_MATCH -> "ERROR_NO_MATCH"
+        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "ERROR_RECOGNIZER_BUSY"
+        SpeechRecognizer.ERROR_SERVER -> "ERROR_SERVER"
+        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "ERROR_SPEECH_TIMEOUT"
+        else -> "ERROR_$code"
     }
 
     private fun reportFailure(errorCode: Int) {
         val failure = DictationPolicy.onFailure(errorCode)
-        Log.w(TAG, "recognition error=$errorCode failure=$failure")
+        Log.w(TAG, "recognition error=$errorCode (${errorName(errorCode)}) failure=$failure")
         sessionActive = false
+        abandonAudioFocus()
         val message = when (failure) {
             DictationPolicy.Failure.NOTHING_HEARD -> R.string.voice_typing_nothing_heard
             DictationPolicy.Failure.PERMISSION -> R.string.voice_typing_permission_needed

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Toolbar glyph, drawn as a vector rather than a character from the key font.
+     Phase 4 part 6: the toolbar used to paint registry symbols through special_font.ttf,
+     which for commands with no glyph of their own fell back to the first four characters
+     of the command id — `[w]` for select_word, `GIF` as loose text, and generally an
+     uneven baseline against the 24 dp icon grid Gboard uses. A real path draws the same at
+     every density and takes the theme's text colour through an ImageView tint.
+     Source: Material Icons (Apache-2.0), 24x24 viewport. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M4,8h4V4H4V8zM10,20h4v-4h-4V20zM4,20h4v-4H4V20zM4,14h4v-4H4V14zM10,14h4v-4h-4V14zM16,4v4h4V4H16zM10,8h4V4h-4V8zM16,14h4v-4h-4V14zM16,20h4v-4h-4V20z" />
+</vector>

@@ -22,7 +22,9 @@ name: Build APK
 on:
   push:
     branches:
-      - arena/23fde500-keyboard
+      # Every Arena session works on its own branch; the old single-branch list meant a new
+      # session's pushes built nothing at all, so its first green build was a surprise merge.
+      - 'arena/**'
       - main
     # A docs-only change cannot alter an APK, and each push costs a ~6 min build plus a ~9 min
     # emulator run. workflow_dispatch still always runs, so nothing becomes unbuildable silently.
@@ -122,14 +124,6 @@ jobs:
           done
           ls -la
 
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: keyboard-debug-${{ steps.meta.outputs.sha }}
-          path: build/outputs/apk/debug/*.apk
-          if-no-files-found: error
-          retention-days: 30
-
       # Rolling prerelease. `arm64-v8a` is the one to install on any phone from 2017 onward.
       - name: Publish rolling dev release
         uses: softprops/action-gh-release@v2
@@ -157,6 +151,22 @@ jobs:
 
             After installing: Settings → System → Languages & input → On-screen keyboard → enable it.
 
+      # NOT uploaded on every push. Each artifact was all three ABIs (~94 MB), and 41 of them
+      # filled 3.9 GB of a 500 MB private-repo quota -- which is what made this workflow fail at
+      # the upload step on 2026-10-23 and skip the release entirely. The APKs are already on the
+      # rolling release at permanent URLs, so an artifact per push is pure duplication; it exists
+      # only for the case of inspecting a build without downloading from the release, which is a
+      # manual-dispatch situation, not a push. Retention is 3 days: the release is the durable copy.
+      - name: Upload build artifact (manual dispatch only)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: keyboard-debug-${{ steps.meta.outputs.sha }}
+          path: build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 3
+
       - name: Upload failure reports
         if: failure()
         uses: actions/upload-artifact@v4
@@ -167,4 +177,5 @@ jobs:
             build/outputs/logs
             build-output.log
           if-no-files-found: ignore
-          retention-days: 14
+          # Small (logs), but the 500 MB private-repo quota is shared with the smoke evidence.
+          retention-days: 5

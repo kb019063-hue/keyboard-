@@ -42,32 +42,44 @@ object ToolbarConfig {
     private const val REMOVED = "removed"
 
     /**
-     * Default buttons: HeliBoard's `ToolbarUtils.defaultToolbarPref`
-     * (SETTINGS, VOICE, CLIPBOARD, UNDO, REDO, SELECT_WORD, COPY, PASTE, LEFT, RIGHT) mapped onto
-     * this codebase's command names — with phase 4 part 3 replacing HeliBoard's SETTINGS slot
-     * with `more_tools`, the four-dot sheet key. The sheet hosts Settings and Theme Manager as
-     * buttons alongside the five feature toggles, so a separate `config` button would be a
-     * duplicate; `config` remains in the picker for anyone who wants the one-tap route back.
-     * The other nine stay in HeliBoard's order, so muscle memory still transfers.
+     * Default buttons: Gboard's toolbar, left to right, mapped onto this codebase's commands.
+     *
+     * | Gboard slot | here            |
+     * |---|---|
+     * | four-dot grid | `more_tools`  |
+     * | undo          | `undo`        |
+     * | select (I-beam) | `select_word` |
+     * | clipboard     | `switch_clipboard` |
+     * | gear          | `config`      |
+     * | GIF           | `switch_gif`  |
+     * | mic (far right) | `voice_typing` |
+     *
+     * Seven buttons, not ten. The previous default was HeliBoard's ten
+     * (settings, voice, clipboard, undo, redo, select, copy, paste, left, right): redo/copy/paste
+     * and the two cursor keys are all reachable by long-press and swipe on the keys that own
+     * them, and ten 40 dp buttons on a phone-width toolbar is most of the row spent on duplicates.
+     * Gboard puts one button per action the keyboard cannot otherwise reach and leaves the rest
+     * to the keys, which is why this list is shorter.
+     *
+     * The mic sits last because that is where Gboard puts it and where a thumb reaches for it.
+     * `config` stays alongside `more_tools` (whose sheet also hosts settings) because Gboard has
+     * both a grid and a gear, and one-tap settings is worth a slot.
      */
     const val DEFAULT_KEYS_STRING =
-        "more_tools,voice_typing,switch_clipboard,undo,redo,select_word,copy,paste,cursor_left,cursor_right"
+        "more_tools,undo,select_word,switch_clipboard,config,switch_gif,voice_typing"
 
     /**
-     * [DEFAULT_KEYS_STRING] split, with the HeliBoard entry each one stands for:
+     * [DEFAULT_KEYS_STRING] split, so each button's route through the dispatcher is explicit:
      *
-     * | position | this codebase | HeliBoard `ToolbarKey` | dispatch route |
-     * |---|---|---|---|
-     * | 1 | `more_tools`       | SETTINGS (superset: the sheet hosts settings and theme) | custom command -> `showMoreToolsSheet` |
-     * | 2 | `voice_typing`     | VOICE         | Kind.Event |
-     * | 3 | `switch_clipboard` | CLIPBOARD     | Kind.Event, opens the clipboard pane |
-     * | 4 | `undo`             | UNDO          | Kind.Editing -> `KeyEventHandler.key_up` |
-     * | 5 | `redo`             | REDO          | Kind.Editing |
-     * | 6 | `select_word`      | SELECT_WORD   | Kind.Editing |
-     * | 7 | `copy`             | COPY          | Kind.Editing |
-     * | 8 | `paste`            | PASTE         | Kind.Editing |
-     * | 9 | `cursor_left`      | LEFT          | `CustomShortSwipeExecutor` |
-     * | 10 | `cursor_right`    | RIGHT         | `CustomShortSwipeExecutor` |
+     * | position | command | route |
+     * |---|---|---|
+     * | 1 | `more_tools`       | custom command -> `showMoreToolsSheet` |
+     * | 2 | `undo`             | Kind.Editing -> `KeyEventHandler.key_up` |
+     * | 3 | `select_word`      | Kind.Editing |
+     * | 4 | `switch_clipboard` | Kind.Event, opens the clipboard pane |
+     * | 5 | `config`           | Kind.Event, opens settings |
+     * | 6 | `switch_gif`       | Kind.Event, opens the GIF pane |
+     * | 7 | `voice_typing`     | Kind.Event -> in-service dictation |
      */
     val DEFAULT_KEYS: List<String> = DEFAULT_KEYS_STRING.split(SEPARATOR)
 

@@ -211,6 +211,13 @@ object CommandRegistry {
             keywords = listOf("clipboard", "history", "paste", "recent")),
         Command("switch_back_clipboard", R.string.cmd_switch_back_clipboard, R.string.cmd_switch_back_clipboard_desc, Category.EVENTS,
             keywords = listOf("switch", "back", "clipboard", "abc")),
+        // The GIF pane has existed as a keyboard key (`switch_gif` in KeyValue's event table)
+        // but was missing from this registry, so it could not be put on the toolbar and the
+        // command picker never offered it. Gboard's toolbar has a GIF slot; this is the entry
+        // that lets ours match.
+        Command("switch_gif", R.string.cmd_switch_gif, R.string.cmd_switch_gif_desc, Category.EVENTS,
+            symbol = "GIF",
+            keywords = listOf("gif", "media", "animation", "picture", "sticker")),
         Command("switch_forward", R.string.cmd_switch_forward, R.string.cmd_switch_forward_desc, Category.EVENTS,
             keywords = listOf("switch", "next", "layout", "forward")),
         Command("switch_backward", R.string.cmd_switch_backward, R.string.cmd_switch_backward_desc, Category.EVENTS,

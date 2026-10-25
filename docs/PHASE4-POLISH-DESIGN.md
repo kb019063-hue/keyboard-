@@ -97,3 +97,51 @@ than fifteen minutes per guess on the emulator.
 4. **Settings drawer** — the largest change, last, with the harness updated ahead of it.
 
 Each lands as its own commit with a green build and smoke run, exactly as phases 1–3 did.
+
+## Part 5 — the Gboard alignment that parts 1–4 left out
+
+Raised 2026-10-24, the same day parts 1–4 landed, from the owner's follow-up: *"as you can see in
+the screenshot (Google's keyboard), I want mine to look exactly like that. Same layout, how the
+toolbar is arranged etc."* Parts 1–4 built the machinery (calm labels, dictation, insets, the drawer,
+the more-tools sheet) but left three gaps between that machinery and Gboard's screen.
+
+### 1. `loc` corners were being printed at all
+
+The grammar reserves `loc <key>` for placement — `latn_qwerty_us.xml` says so in its header:
+*"Symbols prefixed with 'loc ' are not visible on the keyboard."* `KeyboardData` parses that into
+`Key.F_LOC` and `LayoutModifier` nulls the slots whose key no Extra-keys checkbox enables, but the
+draw loop never consulted the flag. So the slots that *did* survive — the ones the defaults turn on
+(`esc`, `tab`, `home`, `end`, `menu`, `page_up`, `page_down`, `compose`) — printed as sub-labels: `esc`
+under Q, `home`/`end`/`tab`/`capslock` on shift, `menu`/`page_up`/`page_down` on backspace. Calm mode
+part 2 hid most of them by accident, by picking one higher-priority corner. `Keyboard2View` now skips
+`F_LOC` corners in both the calm-mask computation and the draw loop, for `print_all_key_symbols` too.
+They stay reachable by corner swipe — the same contract as every other unprinted corner.
+
+### 2. The layout had no number row, and the letters still carried hints
+
+The owner's Gboard runs with its number row on; the shipped `latn_qwerty_us_gboard_style.xml`
+followed Gboard's *default* (row off, digit hints on the top letters) instead. It now embeds a
+ten-key digit row at `height="0.75"` with no symbol hints, sets `embedded_number_row="true"` so the
+`number_row` preference cannot add a second one, and the letters carry no hints at all.
+
+Making it *reach* the phone needed a second change: `LayoutsPreference.DEFAULT` is a `SystemLayout`,
+and a `SystemLayout` resolves to whatever the current subtype's `default_layout` names. So the 13
+Latin-script subtypes in `res/xml/method.xml` now name the Gboard-style layout. Non-Latin and
+azerty/qwertz subtypes keep their own arrangement.
+
+### 3. The toolbar was HeliBoard's ten, not Gboard's seven
+
+`more_tools,voice_typing,switch_clipboard,undo,redo,select_word,copy,paste,cursor_left,cursor_right`
+— ten buttons, with the mic second. Gboard puts seven: grid, undo, select, clipboard, gear, GIF, mic.
+`redo`/`copy`/`paste` and both cursor keys are already on the keys that own them (long-press and
+corner swipe), so the default is now
+`more_tools,undo,select_word,switch_clipboard,config,switch_gif,voice_typing`.
+
+`switch_gif` was missing from `CommandRegistry` — it existed as a `KeyValue` event and as a layout
+key, but not as a command, so the GIF pane could not be put on the toolbar and the picker never
+offered it. It is a command now, with `cmd_switch_gif`/`cmd_switch_gif_desc`.
+
+`scripts/ci/emulator-smoke.sh` computed toolbar tap points by dividing the row into **ten** slots and
+tapped index 1 for the mic; both are now derived from an explicit `TB_N=7` and the mic is index 6.
+Left alone, 7g's more-key tap would have landed on the undo button and reported "dispatched but no
+sheet" — a harness bug blamed on the product.

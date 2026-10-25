@@ -288,18 +288,19 @@ class SuggestionBar : LinearLayout {
         while (suggestionViews.size < count) {
             suggestionViews.add(createSuggestionView(context, suggestionViews.size))
         }
-        val dividerCount = if (count > 0) count - 1 else 0
-        while (dividerViews.size < dividerCount) {
-            dividerViews.add(createDivider(context))
-        }
+        // Phase 4 part 6: no dividers between word suggestions. The strip used to draw a 1 dp
+        // vertical rule between every pair of candidates, which is where the "horrible design"
+        // impression came from -- Gboard's word strip has no separators at all; the words are
+        // simply spread across one row and read as a list. The divider pool is kept (empty) so the
+        // reconcile path and the classifier below are untouched.
+        val dividerCount = 0
 
         // Build the desired ordered child sequence from the pools.
-        val desired = ArrayList<View>(count + dividerCount)
+        val desired = ArrayList<View>(count)
         for (i in 0 until count) {
             val suggestion = Suggestion.parse(currentSuggestions[i])
             val isCenteredPrompt = suggestion is Suggestion.AddToDictionary && count == 1
             bindSuggestionView(suggestionViews[i], i, suggestion, isCenteredPrompt)
-            if (i > 0) desired.add(dividerViews[i - 1])
             desired.add(suggestionViews[i])
         }
 

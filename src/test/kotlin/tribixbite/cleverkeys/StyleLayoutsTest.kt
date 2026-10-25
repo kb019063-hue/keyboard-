@@ -306,23 +306,32 @@ class StyleLayoutsTest {
     }
 
     @Test
-    fun gboardStyleShowsOnlyTheTopRowDigitHints() {
+    fun gboardStyleHasADigitRowAndBareLetters() {
         val kw = parse(GBOARD)
-        val top = topLetterRow(kw)
-        assertThat(top).isEqualTo(0)
-        // Digits 1..0 on the top-right (ne) of q..p, Gboard's default long-press numbers.
-        val digits = kw.rows[0].keys.map { it.getKeyValue(2)?.getString() }
-        assertThat(digits).containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "0").inOrder()
-        for (k in kw.rows[0].keys) assertThat(visibleCorners(k)).hasSize(1)
-        // The other two letter rows are bare, as in Gboard's default.
-        val hinted = (1..2).flatMap { kw.rows[it].keys }
+        // The owner's Gboard runs with its number row on, so the layout embeds one: ten equal
+        // digit keys on their own row, and embedded_number_row so LayoutModifier never adds the
+        // optional preference row on top of it.
+        assertWithMessage("Gboard-style embeds its number row").that(kw.embedded_number_row).isTrue()
+        assertThat(kw.rows[0].keys.map { it.getKeyValue(0)?.getString() })
+            .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "0").inOrder()
+        assertThat(kw.rows[0].height).isEqualTo(0.75f)
+        // No symbol hints beside the digits: Gboard prints none, and the ?123 pane has them.
+        for (k in kw.rows[0].keys) assertThat(visibleCorners(k)).isEmpty()
+
+        // Three letter rows below it, letters with no corner hints at all.
+        assertThat(topLetterRow(kw)).isEqualTo(1)
+        val hinted = (1..3).flatMap { kw.rows[it].keys }
             .filter { it.getKeyValue(0)?.getKind() == KeyValue.Kind.Char }
             .filter { visibleCorners(it).isNotEmpty() }
         assertThat(hinted).isEmpty()
-        // Gboard draws the emoji key as the comma's top hint.
-        val comma = kw.rows.last().keys.first { it.getKeyValue(0) == key(",") }
-        assertThat(comma.getKeyValue(7)).isEqualTo(key("switch_emoji"))
-        assertWithMessage("Gboard's default has no number row").that(kw.embedded_number_row).isFalse()
+
+        // Phase 4 part 6: the emoji key is its OWN key in Gboard's bottom row, not a hint on
+        // the comma. Hiding it on a corner is why the owner could not find it.
+        val bottom = kw.rows.last().keys
+        assertThat(bottom.mapNotNull { it.getKeyValue(0)?.getString() })
+            .containsExactly("?123:switch_numeric", ",", "switch_emoji", "space", ".", "enter")
+        // Gboard's widths: ?123 1.5 | , 1 | emoji 1 | space 4 | . 1 | enter 1.5
+        assertThat(bottom.map { it.width }).containsExactly(1.5f, 1f, 1f, 4f, 1f, 1.5f).inOrder()
     }
 
     @Test

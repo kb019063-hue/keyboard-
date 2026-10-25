@@ -861,8 +861,18 @@ class CleverKeysService : InputMethodService(),
         // Capture the band's full height once, while it still holds the built-in value, and let
         // the bar's occupancy reports drive it from then on.
         if (_stripFullHeightPx <= 0) _stripFullHeightPx = _topPane?.layoutParams?.height ?: 0
-        _suggestionBar?.onOccupancyChanged = { occupied -> applyStripHeight(occupied) }
-        applyStripHeight(_suggestionBar?.isOccupied() == true)
+        // Phase 4 part 6: one header, not two. Gboard's toolbar and suggestion strip are the
+        // same row -- four-square menu, then either the tool icons or the words, then the mic --
+        // so while the strip carries words the toolbar keeps only those two end keys. This view
+        // is a sibling of the strip rather than part of it, so this is the closest equivalent
+        // that does not restructure the input-view hierarchy.
+        _suggestionBar?.onOccupancyChanged = { occupied ->
+            applyStripHeight(occupied)
+            _keyboardToolbar?.setCompactMode(occupied)
+        }
+        val stripOccupied = _suggestionBar?.isOccupied() == true
+        applyStripHeight(stripOccupied)
+        _keyboardToolbar?.setCompactMode(stripOccupied)
         setInputView(predictionSetup.inputView)
 
         // #41 v5: Emoji search manager persists across onStartInputView calls
