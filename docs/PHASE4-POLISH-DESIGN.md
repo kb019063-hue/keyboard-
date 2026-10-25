@@ -172,3 +172,9 @@ The audit also repairs dictation/audio-focus lifecycle leaks, backup defaults fo
 1-4 preferences, clipboard password-manager detection across app switches, more-tools double-tap
 state, key-sound pool ownership, a duplicate `loc esc` placement, and the layout checker that was
 supposed to catch that duplicate.
+
+The audit's fixes were verified by a green `Build APK` and, after a follow-up harness repair for a
+killed-emulator-launcher state, a green `Emulator smoke test` (`fails=0 anr=0`, both activity
+focus checks passing). The offline smoke harness was also corrected to model the real seven-button
+toolbar (mic last at index 6) rather than the old ten, so its coordinate-fallback scenarios test the
+geometry the script actually taps. See [`BUG-AUDIT-2026-10-25.md`](BUG-AUDIT-2026-10-25.md).
