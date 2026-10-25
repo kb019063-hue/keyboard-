@@ -35,7 +35,7 @@ Every detail here corresponds to something that broke a real run.
 | BACK: an open drawer sheet closes first; then an IME hides and the activity survives; only then does it pop | run 39783242401 pressed BACK to "dismiss a keyboard" that was never up, and left the next hunt dumping the launcher |
 | Swipes apply no fling momentum | a device flings further than it is dragged, so what passes here passes there |
 | While the IME is up, the keyboard occludes the bottom band of the screen and the settings rows there are absent | 7e taps the mic key by its `content-desc`, and a settings row rendering in the same band would win the hit test and be tapped instead |
-| The toolbar's ten default buttons evenly weighted across the top 40dp of the IME frame, at the 420dpi `wm density` reports | 7e's coordinate fallback and 7g compute button centres from the frame rect and the density; a formula bug must fail here in thirty seconds, not on the emulator in fifteen minutes |
+| The toolbar's seven default buttons (`ToolbarConfig.DEFAULT_KEYS_STRING`), mic LAST at index 6, evenly weighted across the top 40dp of the IME frame, at the 420dpi `wm density` reports — matching the script's `TB_N=7` | 7e's coordinate fallback and 7g compute button centres from the frame rect and the density; a formula bug must fail here in thirty seconds, not on the emulator in fifteen minutes |
 | Host-side `adb logcat` -- no `shell` prefix | the smoke script calls `adb logcat`, and a fake that only served `adb shell logcat` silently swallowed every replay line, which is why VOICE-DIAG read `log='none'` even in scenarios that had logged a press |
 | The more key logs `press` then `shown rows=5 <state>`; `mt_deaf` logs only the press | the 7g ladder: press+shown passes, press without shown is the defect, silence is the harness's miss |
 | The hit space carries IME nodes even when the dump hides them (`no_ime_nodes`) | run 40's emulator renders the toolbar -- taps land and logcat proves it -- while its dumps carry no IME nodes; without the split the coordinate routes could never be tested against a dump-blind device |
@@ -67,7 +67,8 @@ point so a tap on a toolbar key lands on the key and not on the view containing 
 yet the accessibility dump carries none of its nodes — only the settings screen behind it. 7f must
 stand down and say so (a `KBCLIP skipped` warning), never pass over a view bottom of 0 that only
 means "no node found". 7e must survive it anyway: with no node to aim at it falls back to the
-COMPUTED mic position — frame rect plus density, the second of ten evenly weighted buttons — and
+COMPUTED mic position — frame rect plus density, the LAST of seven evenly weighted buttons
+(13/14 of the frame width, `voice_typing` is 7th of 7) — and
 the fake, whose hit space sees the toolbar even while its dump hides it, takes the tap, so the
 transcript still lands and `voice=ok`. That fallback is the only route a dump-blind emulator has,
 and its verdict ladder stays honest: a computed point that logs no dictation press is the harness's

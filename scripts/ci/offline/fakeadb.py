@@ -335,13 +335,15 @@ def ime_nodes(s, for_hit=False):
           'package="%s" content-desc="" checkable="false" checked="false" clickable="true" '
           'enabled="true" focusable="true" focused="false" scrollable="false" '
           'bounds="[%d,%d][%d,%d]" />' % (s["pkg"], left, IME_BAND_TOP, right, view_bottom))]
-    # The toolbar: KeyboardToolbar's ten default buttons, evenly weighted across the top 40dp of
-    # the frame -- the geometry 7e/7g's coordinate taps compute against, so a formula bug fails
-    # here in thirty seconds instead of on the emulator in fifteen minutes. More Tools holds
-    # position 0 (phase 4 part 3 took the slot from config); no_toolbar_mic deletes the mic and
-    # the rest re-space, exactly like a user removing the button.
-    descs = ["More Tools", "Voice Typing", "Clipboard", "Undo", "Redo", "Select Word", "Copy",
-             "Paste", "Cursor Left", "Cursor Right"]
+    # The toolbar: KeyboardToolbar's SEVEN default buttons (ToolbarConfig.DEFAULT_KEYS_STRING;
+    # phase 4 part 5 cut the old ten to Gboard's seven), evenly weighted across the top 40dp of
+    # the frame -- the geometry 7e/7g's coordinate taps compute against (TB_N=7), so a formula bug
+    # fails here in thirty seconds instead of on the emulator in fifteen minutes. More Tools holds
+    # position 0 and the mic is LAST (index 6: voice_typing is 7th of 7). Keeping the mic at the
+    # old index 1 of ten is exactly the stale model that let a green run prove nothing: with
+    # TB_N=7 the computed mic point (13/14 of the frame width) landed on "Cursor Right" instead.
+    # no_toolbar_mic deletes the mic and the rest re-space, like a user removing the button.
+    descs = ["More Tools", "Undo", "Select Word", "Clipboard", "Settings", "GIF", "Voice Typing"]
     if s.get("no_toolbar_mic"):
         descs.remove("Voice Typing")
     slot = (right - left) / len(descs)
