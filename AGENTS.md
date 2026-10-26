@@ -61,6 +61,20 @@ unless they are migrated through backup/restore.
   if that chain drifts. Changing the default means changing `method.xml` and that fallback
   together, not `LayoutsPreference.DEFAULT`.
 
+## What the owner has already decided
+
+Read [`docs/OWNER-DECISIONS.md`](docs/OWNER-DECISIONS.md) before "improving" the look. Short
+version, do not revert:
+
+- The target layout is the Gboard screenshot, not the dense October 23 CleverKeys photo.
+  English defaults and the no-subtype fallback are `latn_qwerty_us_gboard_style`.
+- The owner rejected the purple default. `Defaults.THEME` is `harbor`. The wardrobe is
+  Harbor, Daybreak, Signal, Ember, Kiln. Purple remains selectable; it is not the default.
+- The toolbar is seven buttons, mic last. Icon buttons are dead if the inner `ImageView` is
+  clickable.
+- The installable app is the debug APK on the rolling `dev-builds` release:
+  `keyboard-arm64-v8a.apk` for a phone.
+
 ## Documentation
 
 Design decisions live in `docs/`, numbered by phase (`PHASE2-*`, `PHASE3-*`, `PHASE4-*`). When

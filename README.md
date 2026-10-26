@@ -69,10 +69,13 @@ Two build-time details that are easy to trip over:
 
 ## Install
 
-1. Open the repo's **Actions** tab → latest *Build APK* run → download the artifact, **or**
-   grab it from the rolling `dev-builds` release (one permanent URL per ABI).
-2. Pick your ABI — **`arm64-v8a`** for essentially any phone from 2017 onward;
-   `armeabi-v7a` for older 32-bit devices; `x86_64` for emulators.
+1. On a phone, download
+   [keyboard-arm64-v8a.apk](https://github.com/kb019063-hue/keyboard-/releases/download/dev-builds/keyboard-arm64-v8a.apk).
+   That file is overwritten by every green build, so the link always points at the latest app.
+   The release page is
+   [dev-builds](https://github.com/kb019063-hue/keyboard-/releases/tag/dev-builds).
+2. Other ABIs, from that same release: `keyboard-armeabi-v7a.apk` for an older 32-bit phone,
+   `keyboard-x86_64.apk` for an emulator.
 3. Allow "install unknown apps" for your browser, install the APK.
 4. Android Settings → System → Languages & input → On-screen keyboard → enable it.
 5. Open the keyboard's launcher activity and follow the enable prompt.
