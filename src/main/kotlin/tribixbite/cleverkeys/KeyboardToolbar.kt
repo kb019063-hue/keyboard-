@@ -44,8 +44,10 @@ import tribixbite.cleverkeys.customization.SwipeDirection
  *
  * A [HorizontalScrollView] with `isFillViewport = true` around a weighted row: when the buttons
  * fit they stretch to divide the width evenly, and when they do not the row scrolls instead of
- * shrinking buttons below [BUTTON_MIN_WIDTH_DP]. No button is ever unreachable or too small to
- * hit.
+ * shrinking buttons below [BUTTON_MIN_WIDTH_DP]. In compact mode the two end buttons return
+ * to their intrinsic widths and [ToolbarCompactPolicy] gives the middle to [compactSpacer],
+ * so they sit at the edges rather than as two half-width blocks. No button is ever
+ * unreachable or too small to hit.
  *
  * ## Theming
  *
@@ -61,6 +63,15 @@ class KeyboardToolbar(
     /** The weighted row the buttons live in. */
     private val row = LinearLayout(context)
 
+    /**
+     * Flexible gap between the two end buttons in compact mode. It is inserted after the
+     * first button on every rebuild, so the row's other children keep their original order.
+     */
+    private val compactSpacer = View(context).apply {
+        layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 0f)
+        visibility = View.GONE
+    }
+
     /** Set by the caller; a tap builds a mapping and hands it over. Null until wired. */
     private var dispatcher: ((ShortSwipeMapping) -> Unit)? = null
 
@@ -68,13 +79,12 @@ class KeyboardToolbar(
     private var keys: List<String> = emptyList()
 
     /**
-     * Gboard's one-row behaviour (phase 4 part 6). On Gboard the toolbar and the word
-     * suggestions are the SAME row: the four-square menu sits at its left, the mic at its
-     * right, and while words are being suggested the middle icons give way to those words.
-     * This view is a sibling of the suggestion strip rather than part of it, so the closest
-     * honest equivalent is to keep only the two end keys while the strip has content -- the
-     * row above the suggestions then reads as the same header Gboard shows instead of a second
-     * full row of tools competing with the words for attention.
+     * Gboard's one-row behaviour (phase 4 part 6, corrected in part 7). On Gboard the toolbar
+     * and the word suggestions are the SAME row: one button at its left, one at its right, and
+     * words between them. This view is a sibling of the suggestion strip rather than part of
+     * it, so the closest honest equivalent is to keep the two END buttons while the strip has
+     * content and let [compactSpacer] own the middle. Which buttons those are is positional,
+     * not name-based: a custom toolbar without `more_tools` or `voice_typing` must not vanish.
      */
     private var compact = false
 
@@ -147,13 +157,16 @@ class KeyboardToolbar(
         for (name in keys) {
             createButton(name)?.let { row.addView(it) }
         }
+        // Between the first and second button, so a visible spacer pushes the last button to
+        // the opposite edge in compact mode without disturbing normal-mode button order.
+        if (row.childCount > 1) row.addView(compactSpacer, 1)
         applyCompact()
     }
 
     /**
-     * Keep only the end keys (the four-square menu and the mic) while [enabled], which is what
-     * Gboard shows once the strip is carrying words. Visibility rather than removal, so the
-     * weighted row does not re-layout its children on every keystroke.
+     * Keep the end buttons while [enabled], which is what Gboard shows once the strip is
+     * carrying words. `setCompactMode` early-returns when the state is unchanged, so this is
+     * called on occupancy transitions, not on every keystroke.
      */
     fun setCompactMode(enabled: Boolean) {
         if (compact == enabled) return
@@ -162,21 +175,53 @@ class KeyboardToolbar(
     }
 
     private fun applyCompact() {
+        val buttons = ArrayList<View>(row.childCount)
         for (i in 0 until row.childCount) {
             val child = row.getChildAt(i)
-            val name = child.tag as? String
-            val keep = !compact || name == KEEP_COMPACT_MORE || name == KEEP_COMPACT_MIC
-            child.visibility = if (keep) View.VISIBLE else View.GONE
+            if (child !== compactSpacer) buttons.add(child)
         }
+
+        var changed = false
+        val buttonWeight = ToolbarCompactPolicy.buttonWeight(buttons.size, compact)
+        for ((index, child) in buttons.withIndex()) {
+            val visible = ToolbarCompactPolicy.buttonVisible(index, buttons.size, compact)
+            val targetVisibility = if (visible) View.VISIBLE else View.GONE
+            if (child.visibility != targetVisibility) {
+                child.visibility = targetVisibility
+                changed = true
+            }
+            val lp = child.layoutParams as? LinearLayout.LayoutParams ?: continue
+            if (lp.weight != buttonWeight) {
+                lp.weight = buttonWeight
+                changed = true
+            }
+        }
+
+        val spacerVisibility =
+            if (ToolbarCompactPolicy.spacerVisible(buttons.size, compact)) View.VISIBLE else View.GONE
+        if (compactSpacer.visibility != spacerVisibility) {
+            compactSpacer.visibility = spacerVisibility
+            changed = true
+        }
+        val spacerLp = compactSpacer.layoutParams as LinearLayout.LayoutParams
+        val spacerWeight = if (spacerVisibility == View.VISIBLE) 1f else 0f
+        if (spacerLp.weight != spacerWeight) {
+            spacerLp.weight = spacerWeight
+            changed = true
+        }
+        // Mutating LayoutParams.weight needs a layout pass; visibility changes do not always
+        // schedule one when the view is inside a HorizontalScrollView.
+        if (changed) row.requestLayout()
     }
 
     /**
-     * One command button, or null when [name] no longer resolves. Labels and symbols both come
-     * from the registry, so nothing here hardcodes a command's appearance.
-     */
-    /**
-     * An icon button on the 24 dp grid Gboard uses, tinted with the strip's text colour so it
-     * follows the theme exactly as the text buttons do.
+     * An icon button on Gboard's 24 dp glyph grid, tinted with the strip's text colour.
+     *
+     * The wrapper owns the ripple, the click, the long-press label and the 40 dp minimum hit
+     * target. The [ImageView] is deliberately NOT clickable or focusable: a clickable child
+     * consumes ACTION_UP before a parent OnClickListener can fire, which made every icon on
+     * the default toolbar a dead button in part 6. The child also used to carry 8 dp of
+     * horizontal padding inside a 22 dp box, leaving only 6 dp for the glyph itself.
      */
     private fun createIconButton(name: String, nameRes: Int, iconRes: Int): View {
         val size = dp(ICON_SIZE_DP)
@@ -184,34 +229,36 @@ class KeyboardToolbar(
             setImageResource(iconRes)
             scaleType = ImageView.ScaleType.FIT_CENTER
             imageTintList = ColorStateList.valueOf(textColor())
-            // No minWidth here: that is a TextView property. The hit target is the weighted
-            // FrameLayout wrapper, which is a full row-height cell wide, and the icon itself is
-            // a fixed 22 dp box centred in it.
-            setPadding(dp(ICON_PADDING_DP), 0, dp(ICON_PADDING_DP), 0)
-            isClickable = true
-            isFocusable = true
-            tag = name
-            contentDescription = context.getString(nameRes)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                tooltipText = context.getString(nameRes)
-            }
-            rippleBackground()
+            // The wrapper is the interactive view. A clickable/focusable child would swallow
+            // the tap and expose a duplicate, label-less node to TalkBack.
+            isClickable = false
+            isFocusable = false
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            contentDescription = null
         }
-        // Fixed box inside the weighted wrapper, so every icon is the same size whatever its path.
+        val label = context.getString(nameRes)
         val wrapper = FrameLayout(context).apply {
             tag = name
             isClickable = true
             isFocusable = true
+            minimumWidth = dp(BUTTON_MIN_WIDTH_DP)
             rippleBackground()
             addView(button, FrameLayout.LayoutParams(size, size, Gravity.CENTER))
             setOnClickListener { dispatch(name, CommandRegistry.getDisplayInfo(name)) }
+            setOnLongClickListener {
+                Toast.makeText(context, label, Toast.LENGTH_SHORT).show()
+                true
+            }
+            contentDescription = label
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                tooltipText = label
+            }
         }
         wrapper.layoutParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT,
             LinearLayout.LayoutParams.MATCH_PARENT,
             1f
         )
-        wrapper.contentDescription = context.getString(nameRes)
         return wrapper
     }
 
@@ -219,8 +266,8 @@ class KeyboardToolbar(
         val command = CommandRegistry.getByName(name) ?: return null
         val info = CommandRegistry.getDisplayInfo(name)
         val iconRes = toolbarIcon(name)
-        // The name is carried as a tag so applyCompact can hide buttons by command rather than by
-        // index, which stays correct even if createButton ever returns null for some entry.
+        // The command name stays on the view as a lightweight diagnostic tag. Compact mode
+        // uses positions, so a custom toolbar no longer depends on particular command names.
         if (iconRes != 0) return createIconButton(name, command.nameRes, iconRes)
 
         val button = TextView(context).apply {
@@ -312,15 +359,8 @@ class KeyboardToolbar(
     ).toInt()
 
     companion object {
-        /** The two commands Gboard keeps visible while word suggestions are showing. */
-        private const val KEEP_COMPACT_MORE = "more_tools"
-        private const val KEEP_COMPACT_MIC = "voice_typing"
-
-        /** Icon size on the 40 dp row: Gboard's 24 dp glyph box. */
-        private const val ICON_SIZE_DP = 22
-
-        /** Horizontal breathing room around an icon inside its weighted slot. */
-        private const val ICON_PADDING_DP = 8
+        /** Icon size on the 40 dp row: Gboard's 24 dp glyph box, with no internal padding. */
+        private const val ICON_SIZE_DP = 24
 
         /**
          * Command name to drawable. A command with no entry keeps its font glyph, which is the
@@ -329,7 +369,7 @@ class KeyboardToolbar(
         private fun toolbarIcon(name: String): Int = when (name) {
             "more_tools" -> R.drawable.ic_tool_more
             "undo" -> R.drawable.ic_tool_undo
-            "redo" -> R.drawable.ic_tool_undo
+            "redo" -> R.drawable.ic_tool_redo
             "select_word" -> R.drawable.ic_tool_select
             "switch_clipboard" -> R.drawable.ic_tool_clipboard
             "config" -> R.drawable.ic_tool_settings

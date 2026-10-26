@@ -1,10 +1,13 @@
 package tribixbite.cleverkeys.backup
 
 import tribixbite.cleverkeys.Defaults
+import tribixbite.cleverkeys.FloatingConfig
 import tribixbite.cleverkeys.KeyboardHeightPrefs
 import tribixbite.cleverkeys.OneHandedConfig
+import tribixbite.cleverkeys.SplitConfig
 import tribixbite.cleverkeys.ToolbarConfig
 import tribixbite.cleverkeys.autocorrect.AutocorrectTuning
+import tribixbite.cleverkeys.voice.VoiceTypingConfig
 
 /**
  * Effective compile-time defaults for every preference key the app reads.
@@ -156,6 +159,22 @@ internal val SETTINGS_DEFAULTS: Map<String, PrefValue> = mapOf(
     OneHandedConfig.PREF_ENABLED to PrefValue.Bool(Defaults.ONE_HANDED_ENABLED),
     OneHandedConfig.PREF_SIDE to PrefValue.Str(Defaults.ONE_HANDED_SIDE),
     OneHandedConfig.PREF_SCALE to PrefValue.IntV(Defaults.ONE_HANDED_SCALE),
+    // Phase 3-4 features. Every one of these is read from SharedPreferences in Config.kt;
+    // leaving one out made backup/import preview it as an unclassified ADDED row on a fresh
+    // install and broke SettingsDefaultsDriftTest's three-bucket contract.
+    "sound_enabled" to PrefValue.Bool(Defaults.SOUND_ENABLED),
+    "sound_volume" to PrefValue.IntV(Defaults.SOUND_VOLUME),
+    "incognito_enabled" to PrefValue.Bool(Defaults.INCOGNITO_ENABLED),
+    FloatingConfig.PREF_ENABLED to PrefValue.Bool(Defaults.FLOATING_ENABLED),
+    FloatingConfig.PREF_WIDTH_PERCENT to PrefValue.IntV(Defaults.FLOATING_WIDTH_PERCENT),
+    FloatingConfig.PREF_X_FRACTION to PrefValue.FloatV(Defaults.FLOATING_X_FRACTION),
+    FloatingConfig.PREF_Y_FRACTION to PrefValue.FloatV(Defaults.FLOATING_Y_FRACTION),
+    SplitConfig.PREF_ENABLED to PrefValue.Bool(Defaults.SPLIT_ENABLED),
+    SplitConfig.PREF_GAP_PERCENT to PrefValue.IntV(Defaults.SPLIT_GAP_PERCENT),
+    VoiceTypingConfig.PREF_MODE to PrefValue.Str(Defaults.VOICE_TYPING_MODE),
+    VoiceTypingConfig.PREF_SELF_TEST to PrefValue.Bool(Defaults.VOICE_TYPING_SELF_TEST),
+    "print_all_key_symbols" to PrefValue.Bool(Defaults.PRINT_ALL_KEY_SYMBOLS),
+    "suggestion_strip_always_visible" to PrefValue.Bool(Defaults.SUGGESTION_STRIP_ALWAYS_VISIBLE),
     "show_exact_typed_word" to PrefValue.Bool(Defaults.SHOW_EXACT_TYPED_WORD),
     "context_aware_predictions_enabled" to PrefValue.Bool(Defaults.CONTEXT_AWARE_PREDICTIONS_ENABLED),
     "personalized_learning_enabled" to PrefValue.Bool(Defaults.PERSONALIZED_LEARNING_ENABLED),

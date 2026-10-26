@@ -50,11 +50,30 @@ unless they are migrated through backup/restore.
 - `loc <key>` in a layout is a **placement marker, not a printed label** ("Symbols prefixed with
   'loc ' are not visible on the keyboard"). `KeyboardData` records it as `Key.F_LOC`; the renderer
   must not draw it. Do not add `loc` corners expecting them to appear.
-- Every shipped layout is validated by `tools/check_layout.py` in the build. Run it on a layout
-  you edit.
+- Every shipped layout is validated by `tools/check_layout.py` during `preBuild` (so
+  `assembleDebug` sees it). Duplicate key values are a hard build failure because
+  `KeyboardData.getKeys()` keeps only one position per value; the checker's other findings
+  stay advisory. Run it on a layout you edit.
 - A `SystemLayout` preference entry resolves to the current subtype's `default_layout` in
-  `res/xml/method.xml` — changing a user's default layout means changing that file, not
-  `LayoutsPreference.DEFAULT`.
+  `res/xml/method.xml`. English subtypes, including `en-GB` and `en-GH`, name
+  `latn_qwerty_us_gboard_style`. When no subtype resolves, `KeyboardComponentGraph` falls back
+  to that same layout — not the dense `latn_qwerty_us`. `tools/check_layout.py` fails the build
+  if that chain drifts. Changing the default means changing `method.xml` and that fallback
+  together, not `LayoutsPreference.DEFAULT`.
+
+## What the owner has already decided
+
+Read [`docs/OWNER-DECISIONS.md`](docs/OWNER-DECISIONS.md) before "improving" the look. Short
+version, do not revert:
+
+- The target layout is the Gboard screenshot, not the dense October 23 CleverKeys photo.
+  English defaults and the no-subtype fallback are `latn_qwerty_us_gboard_style`.
+- The owner rejected the purple default. `Defaults.THEME` is `harbor`. The wardrobe is
+  Harbor, Daybreak, Signal, Ember, Kiln. Purple remains selectable; it is not the default.
+- The toolbar is seven buttons, mic last. Icon buttons are dead if the inner `ImageView` is
+  clickable.
+- The installable app is the debug APK on the rolling `dev-builds` release:
+  `keyboard-arm64-v8a.apk` for a phone.
 
 ## Documentation
 

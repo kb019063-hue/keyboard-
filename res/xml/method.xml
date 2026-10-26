@@ -2,7 +2,11 @@
 <input-method xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" android:settingsActivity="tribixbite.cleverkeys.SettingsActivity" android:supportsSwitchingToNextInputMethod="true" android:supportsInlineSuggestions="true" tools:targetApi="30">
   <!-- The first entry of the list makes latn_qwerty_us_gboard_style the default layout for
        unrecognized locales. Latin-script Latin-alphabet subtypes use the Gboard-style layout
-       too; azerty/qwertz scripts keep their own arrangement. -->
+       too; azerty/qwertz scripts keep their own arrangement. en-GB and en-GH MUST stay on the
+       Gboard-style layout as well: the old latn_qwerty_gb / latn_qwerty_us defaults were the
+       dense PC-style layout (a symbol in every corner, Ctrl/Fn bottom row) that the owner's
+       Gboard reference screenshot is meant to replace. tools/check_layout.py fails the build if
+       any English subtype drifts back to a non-Gboard default. -->
   <subtype android:label="%s" android:languageTag="en" android:imeSubtypeLocale="en" android:imeSubtypeMode="keyboard" android:isAsciiCapable="true" android:imeSubtypeExtraValue="script=latin,default_layout=latn_qwerty_us_gboard_style"/>
   <subtype android:label="%s" android:languageTag="ar" android:imeSubtypeLocale="ar" android:imeSubtypeMode="keyboard" android:isAsciiCapable="true" android:imeSubtypeExtraValue="script=arabic,default_layout=arab_pc_hindu"/>
   <subtype android:label="%s" android:languageTag="ar" android:imeSubtypeLocale="ar_TN" android:imeSubtypeMode="keyboard" android:isAsciiCapable="true" android:imeSubtypeExtraValue="script=arabic,default_layout=arab_pc"/>
@@ -20,7 +24,10 @@
   <subtype android:label="%s" android:languageTag="en" android:imeSubtypeLocale="en_NG" android:imeSubtypeMode="keyboard" android:isAsciiCapable="true" android:imeSubtypeExtraValue="script=latin,default_layout=latn_qwerty_us_gboard_style,extra_keys=₦"/>
   <subtype android:label="%s" android:languageTag="en-AU" android:imeSubtypeLocale="en_AU" android:imeSubtypeMode="keyboard" android:isAsciiCapable="true" android:imeSubtypeExtraValue="script=latin,default_layout=latn_qwerty_us_gboard_style"/>
   <subtype android:label="%s" android:languageTag="en-CA" android:imeSubtypeLocale="en_CA" android:imeSubtypeMode="keyboard" android:isAsciiCapable="true" android:imeSubtypeExtraValue="script=latin,default_layout=latn_qwerty_us_gboard_style"/>
-  <subtype android:label="%s" android:languageTag="en-GB" android:imeSubtypeLocale="en_GB" android:imeSubtypeMode="keyboard" android:isAsciiCapable="true" android:imeSubtypeExtraValue="script=latin,default_layout=latn_qwerty_gb,extra_keys=£@l"/>
+  <subtype android:label="%s" android:languageTag="en-GB" android:imeSubtypeLocale="en_GB" android:imeSubtypeMode="keyboard" android:isAsciiCapable="true" android:imeSubtypeExtraValue="script=latin,default_layout=latn_qwerty_us_gboard_style,extra_keys=£@l"/>
+  <!-- Ghana (owner's locale): an exact en-GH tag, so Android does NOT fall back to the first
+       "en" subtype or to a locale-less default layout. Same Gboard-style arrangement. -->
+  <subtype android:label="%s" android:languageTag="en-GH" android:imeSubtypeLocale="en_GH" android:imeSubtypeMode="keyboard" android:isAsciiCapable="true" android:imeSubtypeExtraValue="script=latin,default_layout=latn_qwerty_us_gboard_style,extra_keys=₵"/>
   <subtype android:label="%s" android:languageTag="en-IN" android:imeSubtypeLocale="en_IN" android:imeSubtypeMode="keyboard" android:isAsciiCapable="true" android:imeSubtypeExtraValue="script=latin,default_layout=latn_qwerty_us_gboard_style"/>
   <subtype android:label="%s" android:languageTag="en-US" android:imeSubtypeLocale="en_US" android:imeSubtypeMode="keyboard" android:isAsciiCapable="true" android:imeSubtypeExtraValue="script=latin,default_layout=latn_qwerty_us_gboard_style"/>
   <subtype android:label="%s" android:languageTag="es" android:imeSubtypeLocale="es_ES" android:imeSubtypeMode="keyboard" android:isAsciiCapable="true" android:imeSubtypeExtraValue="script=latin,default_layout=latn_qwerty_es,extra_keys=accent_aigu:á:é:í:ó:ú@d|accent_tilde:ñ@n|accent_grave@f|accent_trema@u|€"/>

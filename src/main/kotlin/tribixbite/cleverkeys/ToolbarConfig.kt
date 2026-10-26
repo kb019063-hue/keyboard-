@@ -89,7 +89,8 @@ object ToolbarConfig {
      *
      * Validating against the registry on *read* is what keeps this forward-safe: a command that a
      * future upstream merge renames or deletes makes its button disappear instead of rendering a
-     * button that does nothing when tapped. A blank or absent value yields [DEFAULT_KEYS].
+     * button that does nothing when tapped. A blank, absent, or wholly unrecognisable value
+     * yields [DEFAULT_KEYS] — otherwise a corrupt preference would hide the entire toolbar.
      */
     fun parse(raw: String?): List<String> {
         val source = if (raw.isNullOrBlank()) DEFAULT_KEYS_STRING else raw
@@ -100,7 +101,7 @@ object ToolbarConfig {
             if (CommandRegistry.getByName(name) == null) continue
             kept.add(name)
         }
-        return kept.toList()
+        return if (kept.isEmpty()) DEFAULT_KEYS else kept.toList()
     }
 
     /** Serialize a button order back to the persisted form. */

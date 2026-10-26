@@ -35,10 +35,9 @@ class SuggestionBar : LinearLayout {
     // of removeAllViews() + new TextView per suggestion per keystroke, we keep this
     // pool sized to the current suggestion count, rebind text/typeface/color/click,
     // and add/remove only the delta. Children are laid out as
-    // [sug0, div, sug1, div, sug2, …] so a parallel divider pool tracks the "div"
-    // slots (N-1 of them for N suggestions).
+    // [sug0, sug1, sug2, …]. Phase 4 part 6 removed the 1dp vertical rules between
+    // candidates; a suggestion is its own full row cell, as on Gboard.
     private val suggestionViews: MutableList<TextView> = mutableListOf()
-    private val dividerViews: MutableList<View> = mutableListOf()
     private var listener: OnSuggestionSelectedListener? = null
     private var inspectListener: OnSuggestionInspectedListener? = null
     private val currentSuggestions: MutableList<String> = mutableListOf()
@@ -232,26 +231,6 @@ class SuggestionBar : LinearLayout {
         }
     }
 
-    private fun createDivider(context: Context): View {
-        return View(context).apply {
-            layoutParams = LayoutParams(
-                dpToPx(context, 1),
-                ViewGroup.LayoutParams.MATCH_PARENT
-            ).apply {
-                setMargins(0, dpToPx(context, 4), 0, dpToPx(context, 4))
-            }
-
-            // Use theme sublabel color with some transparency for divider
-            val dividerColor = theme?.subLabelColor ?: Color.GRAY
-            setBackgroundColor(Color.argb(
-                100,
-                Color.red(dividerColor),
-                Color.green(dividerColor),
-                Color.blue(dividerColor)
-            ))
-        }
-    }
-
     /**
      * Default layout params for a (non-centered) suggestion TextView:
      * WRAP_CONTENT width so the bar scrolls horizontally, MATCH_PARENT height,
@@ -269,10 +248,9 @@ class SuggestionBar : LinearLayout {
 
     /**
      * R3: Reconcile the child views to the current [currentSuggestions] by
-     * recycling pooled TextViews/dividers rather than reallocating them.
+     * recycling pooled TextViews rather than reallocating them.
      *
-     * Layout order is `[sug0, div0, sug1, div1, …, sug(n-1)]` — n suggestion
-     * views and (n-1) dividers. Pool slot `i` is dedicated to suggestion `i` and
+     * Layout order is `[sug0, sug1, …, sug(n-1)]`. Pool slot `i` is dedicated to suggestion `i` and
      * its click listener (bound once in [createSuggestionView]) references
      * `currentSuggestions[i]`, so reuse never changes click semantics.
      *
@@ -288,12 +266,9 @@ class SuggestionBar : LinearLayout {
         while (suggestionViews.size < count) {
             suggestionViews.add(createSuggestionView(context, suggestionViews.size))
         }
-        // Phase 4 part 6: no dividers between word suggestions. The strip used to draw a 1 dp
-        // vertical rule between every pair of candidates, which is where the "horrible design"
-        // impression came from -- Gboard's word strip has no separators at all; the words are
-        // simply spread across one row and read as a list. The divider pool is kept (empty) so the
-        // reconcile path and the classifier below are untouched.
-        val dividerCount = 0
+        // No dividers between word suggestions: Gboard's word strip has none. Each pooled
+        // TextView is bound in place below and the surplus views are detached by
+        // reconcileChildren.
 
         // Build the desired ordered child sequence from the pools.
         val desired = ArrayList<View>(count)
@@ -424,7 +399,7 @@ class SuggestionBar : LinearLayout {
      * Reconcile the actual children of this LinearLayout to [desired] in order,
      * touching only the delta: detach any leftover child, and (re)attach/reorder
      * only where the current child differs from the desired one. Pooled views not
-     * in [desired] (surplus suggestions/dividers) are detached but retained in the
+     * in [desired] (surplus suggestions) are detached but retained in the
      * pool for future reuse.
      */
     private fun reconcileChildren(desired: List<View>) {
@@ -444,7 +419,7 @@ class SuggestionBar : LinearLayout {
         }
         // Remove surplus trailing children (larger previous suggestion set, or
         // leftover views from a prior imperative mode). Detach only — pooled
-        // views remain in suggestionViews/dividerViews for reuse.
+        // views remain in suggestionViews for reuse.
         while (childCount > desired.size) {
             removeViewAt(childCount - 1)
         }
@@ -666,8 +641,8 @@ class SuggestionBar : LinearLayout {
         }
 
         // R3 (audit finding #5): Recycle TextViews instead of removeAllViews() +
-        // allocating a fresh TextView (and divider) per suggestion per keystroke.
-        // The view pools ([suggestionViews]/[dividerViews]) are grown on demand and
+        // allocating a fresh TextView per suggestion per keystroke.
+        // The view pool ([suggestionViews]) is grown on demand and
         // rebound in place; only the child-count delta is added/removed. Click
         // listeners are bound once at pool-creation with an index-stable closure
         // (pool slot i always renders suggestion i), preserving click semantics.
@@ -819,7 +794,6 @@ class SuggestionBar : LinearLayout {
         // Clear and show single message
         removeAllViews()
         suggestionViews.clear()
-        dividerViews.clear()
         currentSuggestions.clear()
         currentScores.clear()
         currentMetas.clear()
@@ -884,7 +858,6 @@ class SuggestionBar : LinearLayout {
         // Clear and show single status message
         removeAllViews()
         suggestionViews.clear()
-        dividerViews.clear()
         currentSuggestions.clear()
         currentScores.clear()
         currentMetas.clear()
@@ -917,7 +890,6 @@ class SuggestionBar : LinearLayout {
         // Clear the display
         removeAllViews()
         suggestionViews.clear()
-        dividerViews.clear()
         currentSuggestions.clear()
         currentScores.clear()
         currentMetas.clear()
@@ -959,7 +931,6 @@ class SuggestionBar : LinearLayout {
         // Clear existing suggestions and views
         removeAllViews()
         suggestionViews.clear()
-        dividerViews.clear()
         currentSuggestions.clear()
         currentScores.clear()
         currentMetas.clear()
@@ -1187,7 +1158,6 @@ class SuggestionBar : LinearLayout {
         // Clear any existing suggestion views
         removeAllViews()
         suggestionViews.clear()
-        dividerViews.clear()
 
         // #109: Remove padding so password eye icon (36dp) and autofill chips
         // get the full 40dp bar height. Password views manage their own spacing.
@@ -1422,7 +1392,6 @@ class SuggestionBar : LinearLayout {
         // Clear all views - suggestions will be recreated as needed
         removeAllViews()
         suggestionViews.clear()
-        dividerViews.clear()
 
         // #109: Restore normal padding after leaving password/autofill mode
         val padding = dpToPx(context, 8)

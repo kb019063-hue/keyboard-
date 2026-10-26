@@ -54,8 +54,8 @@ class ThemeStyleMapTest {
 
     @Test
     fun unsetAndUnknownNames_followTheSystem() {
-        assertThat(Config.builtInThemeStyleId("", systemLight = true, sdk = api31)).isEqualTo(R.style.CleverKeysLight)
-        assertThat(Config.builtInThemeStyleId("", systemLight = false, sdk = api31)).isEqualTo(R.style.CleverKeysDark)
+        assertThat(Config.builtInThemeStyleId("", systemLight = true, sdk = api31)).isEqualTo(R.style.Daybreak)
+        assertThat(Config.builtInThemeStyleId("", systemLight = false, sdk = api31)).isEqualTo(R.style.Harbor)
         assertThat(Config.builtInThemeStyleId("no_such_theme", systemLight = true, sdk = api31)).isEqualTo(R.style.Light)
         assertThat(Config.builtInThemeStyleId("no_such_theme", systemLight = false, sdk = api31)).isEqualTo(R.style.Dark)
     }

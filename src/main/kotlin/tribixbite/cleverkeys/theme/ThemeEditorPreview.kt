@@ -236,7 +236,7 @@ class ThemeKeyboardPreviewView(context: Context) : ViewGroup(context) {
          */
         private fun resolveLayout(context: Context): KeyboardData? {
             val base = Config.globalConfig().layouts.firstOrNull { it != null }
-                ?: KeyboardData.load(context.resources, R.raw.latn_qwerty_us)
+                ?: KeyboardData.load(context.resources, R.raw.latn_qwerty_us_gboard_style)
                 ?: return null
             return try {
                 LayoutModifier.modify_layout(base)

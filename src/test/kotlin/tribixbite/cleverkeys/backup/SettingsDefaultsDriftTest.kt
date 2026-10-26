@@ -2,6 +2,7 @@ package tribixbite.cleverkeys.backup
 
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
+import tribixbite.cleverkeys.Defaults
 import java.io.File
 
 /**
@@ -95,6 +96,32 @@ class SettingsDefaultsDriftTest {
         val unclassified = foundKeys - classified
 
         assertThat(unclassified).isEmpty()
+    }
+
+    /**
+     * Phase 1-4 added thirteen live preferences after the backup map was last extended. Without
+     * this pin, a fresh-install settings import reports every one of them as ADDED with
+     * `current=Unset`, and an exported default is missing from the backup seed.
+     */
+    @Test
+    fun phaseFourFeaturePreferencesHaveTypedBackupDefaults() {
+        val expectedKeys = listOf(
+            "sound_enabled", "sound_volume", "incognito_enabled",
+            "floating_enabled", "floating_width_percent", "floating_x_fraction",
+            "floating_y_fraction", "split_enabled", "split_gap_percent",
+            "voice_typing_mode", "voice_typing_self_test",
+            "print_all_key_symbols", "suggestion_strip_always_visible",
+        )
+        assertThat(expectedKeys.filterNot { it in SETTINGS_DEFAULTS }).isEmpty()
+
+        assertThat(SETTINGS_DEFAULTS["sound_volume"])
+            .isEqualTo(PrefValue.IntV(Defaults.SOUND_VOLUME))
+        assertThat(SETTINGS_DEFAULTS["floating_x_fraction"])
+            .isEqualTo(PrefValue.FloatV(Defaults.FLOATING_X_FRACTION))
+        assertThat(SETTINGS_DEFAULTS["voice_typing_mode"])
+            .isEqualTo(PrefValue.Str(Defaults.VOICE_TYPING_MODE))
+        assertThat(SETTINGS_DEFAULTS["print_all_key_symbols"])
+            .isEqualTo(PrefValue.Bool(Defaults.PRINT_ALL_KEY_SYMBOLS))
     }
 
     @Test

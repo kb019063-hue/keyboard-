@@ -21,7 +21,7 @@ import kotlin.math.roundToInt
  */
 object Defaults {
     // Appearance
-    const val THEME = "cleverkeysdark"
+    const val THEME = "harbor"
     // 2026-05-15: lowered from 30% to 27% — feels less cramped on most phones
     // and gives the input field more breathing room above.
     const val KEYBOARD_HEIGHT_PORTRAIT = 27
@@ -801,6 +801,53 @@ object SubkeyPopoverMigration {
     ): Boolean = !isFreshInstall && savedVersion < INTRODUCED_IN_VERSION && !hasExplicitChoice
 }
 
+/**
+ * One-time (2026-10-26): re-point installs still pinned to a legacy DENSE default layout
+ * (`latn_qwerty_us` / `latn_qwerty_gb`) to the locale-following `system` entry, which now
+ * resolves to the Gboard-style layout (see res/xml/method.xml and the no-subtype fallback).
+ *
+ * Why needed: before the Gboard-style layout shipped, config v0 migration wrote
+ * `NamedLayout("latn_qwerty_us")` from the old `layout` pref without the user ever choosing a
+ * layout. That pinned pref shadows the dynamic `localeTextLayout`, so the method.xml/fallback
+ * fixes alone cannot reach those installs. This migration runs once (marker persisted
+ * unconditionally) and only touches a SINGLE named legacy-dense entry: custom layouts, multiple
+ * layouts, a `system` entry, or any other named layout are left exactly as the user set them.
+ * Decision logic: [GboardDefaultLayoutMigration.shouldRepoint].
+ */
+object GboardDefaultLayoutMigration {
+    /** Persisted on user devices once the migration has run — never rename. */
+    const val MIGRATION_MARKER_KEY = "gboard_default_layout_migration_v1"
+    const val GBOARD_LAYOUT = "latn_qwerty_us_gboard_style"
+
+    /**
+     * The exact raw `layouts` pref strings the config-v0 migration wrote for the old default —
+     * a single, unbound, plain-string named layout. Object-form entries carry a language/theme
+     * binding (a deliberate user edit) and are deliberately NOT in this set.
+     */
+    private val LEGACY_DENSE_JSON = setOf(
+        "[\"latn_qwerty_us\"]",
+        "[\"latn_qwerty_gb\"]"
+    )
+
+    /** Pure: re-point only that one legacy form, and only once. */
+    fun shouldRepoint(alreadyMigrated: Boolean, rawLayouts: String?): Boolean =
+        !alreadyMigrated && rawLayouts != null && rawLayouts.trim() in LEGACY_DENSE_JSON
+}
+
+/**
+ * One-time (2026-10-26): the shipped default was deep purple (`cleverkeysdark`). The owner
+ * rejected that look, so an install still on that exact stored value moves to [Defaults.THEME]
+ * (Harbor). Any other stored theme — including an explicit later return to purple — is left
+ * alone. Runs once; the marker is always written.
+ */
+object ThemeDefaultMigration {
+    const val MIGRATION_MARKER_KEY = "theme_harbor_default_v1"
+    const val RETIRED_DEFAULT = "cleverkeysdark"
+
+    fun shouldRepoint(alreadyMigrated: Boolean, storedTheme: String?): Boolean =
+        !alreadyMigrated && storedTheme == RETIRED_DEFAULT
+}
+
 object HapticsMigration {
     /** Persisted on user devices once the migration has run — never rename. */
     const val MIGRATION_MARKER_KEY = "vibrate_custom_migration_v1"
@@ -1368,8 +1415,10 @@ class Config private constructor(
         incognito_enabled = _prefs.getBoolean("incognito_enabled", Defaults.INCOGNITO_ENABLED)
         floating_enabled = _prefs.getBoolean(FloatingConfig.PREF_ENABLED, Defaults.FLOATING_ENABLED)
         floating_width_percent = safeGetInt(_prefs, FloatingConfig.PREF_WIDTH_PERCENT, Defaults.FLOATING_WIDTH_PERCENT)
-        floating_x_fraction = _prefs.getFloat(FloatingConfig.PREF_X_FRACTION, Defaults.FLOATING_X_FRACTION)
-        floating_y_fraction = _prefs.getFloat(FloatingConfig.PREF_Y_FRACTION, Defaults.FLOATING_Y_FRACTION)
+        // Imported or hand-edited prefs can hold the wrong type. A raw getFloat would throw
+        // ClassCastException during every Config.refresh and take the IME down.
+        floating_x_fraction = safeGetFloat(_prefs, FloatingConfig.PREF_X_FRACTION, Defaults.FLOATING_X_FRACTION)
+        floating_y_fraction = safeGetFloat(_prefs, FloatingConfig.PREF_Y_FRACTION, Defaults.FLOATING_Y_FRACTION)
         split_enabled = _prefs.getBoolean(SplitConfig.PREF_ENABLED, Defaults.SPLIT_ENABLED)
         split_gap_percent = safeGetInt(_prefs, SplitConfig.PREF_GAP_PERCENT, Defaults.SPLIT_GAP_PERCENT)
         on_device_learning_enabled = _prefs.getBoolean("on_device_learning_enabled", Defaults.ON_DEVICE_LEARNING_ENABLED)
@@ -1823,6 +1872,8 @@ class Config private constructor(
             migrate(prefs)
             migrateMarginPrefs(prefs, res.displayMetrics)
             migrateForcedVibrateCustom(prefs)
+            migrateGboardDefaultLayout(prefs)
+            migrateThemeDefault(prefs)
             val config = Config(prefs, res, handler, foldableUnfolded)
             _globalConfig = config
             LayoutModifier.init(config, res)
@@ -2099,9 +2150,14 @@ class Config private constructor(
                     "jewel" -> R.style.Jewel
                     "cleverkeysdark" -> R.style.CleverKeysDark
                     "cleverkeyslight" -> R.style.CleverKeysLight
-                    // ARC-111: an unset theme follows the system like every other fallback;
-                    // users who explicitly chose a theme are unaffected.
-                    "" -> if (systemLight) R.style.CleverKeysLight else R.style.CleverKeysDark
+                    "harbor" -> R.style.Harbor
+                    "daybreak" -> R.style.Daybreak
+                    "signal" -> R.style.Signal
+                    "ember" -> R.style.Ember
+                    "kiln" -> R.style.Kiln
+                    // ARC-111: an unset theme follows the system. The pair is Harbor / Daybreak,
+                    // not the old purple styles.
+                    "" -> if (systemLight) R.style.Daybreak else R.style.Harbor
                     else -> if (systemLight) R.style.Light else R.style.Dark
                 }
             }
@@ -2205,6 +2261,51 @@ class Config private constructor(
             }
             // Always mark migrated so this never runs again.
             e.putBoolean("vibrate_custom_migration_v1", true)
+            e.apply()
+        }
+
+        /**
+         * One-time re-point of an install still pinned to a legacy dense default layout to the
+         * Gboard-style layout. Runs exactly once; the marker is always written, even when
+         * nothing changes. Decision logic: [GboardDefaultLayoutMigration.shouldRepoint].
+         */
+        @JvmStatic
+        fun migrateGboardDefaultLayout(prefs: SharedPreferences) {
+            // True no-op once migrated, exactly like migrateForcedVibrateCustom.
+            if (prefs.getBoolean(GboardDefaultLayoutMigration.MIGRATION_MARKER_KEY, false)) return
+            val alreadyMigrated = false
+            val raw = try {
+                prefs.getString(LayoutsPreference.KEY, null)
+            } catch (e: ClassCastException) {
+                null
+            }
+
+            val e = prefs.edit()
+            if (GboardDefaultLayoutMigration.shouldRepoint(alreadyMigrated, raw)) {
+                // Re-point to the SAME Gboard-style layout as a plain named entry, so behaviour
+                // is deterministic even on a device whose subtype resolution is unavailable.
+                e.putString(LayoutsPreference.KEY, "[\"${GboardDefaultLayoutMigration.GBOARD_LAYOUT}\"]")
+                Log.i("Config", "Re-pointed legacy dense layout to the Gboard-style default")
+            }
+            // Always mark migrated so this never runs again.
+            e.putBoolean(GboardDefaultLayoutMigration.MIGRATION_MARKER_KEY, true)
+            e.apply()
+        }
+
+        @JvmStatic
+        fun migrateThemeDefault(prefs: SharedPreferences) {
+            if (prefs.getBoolean(ThemeDefaultMigration.MIGRATION_MARKER_KEY, false)) return
+            val stored = try {
+                prefs.getString("theme", null)
+            } catch (e: ClassCastException) {
+                null
+            }
+            val e = prefs.edit()
+            if (ThemeDefaultMigration.shouldRepoint(alreadyMigrated = false, storedTheme = stored)) {
+                e.putString("theme", Defaults.THEME)
+                Log.i("Config", "Moved the retired purple default to ${Defaults.THEME}")
+            }
+            e.putBoolean(ThemeDefaultMigration.MIGRATION_MARKER_KEY, true)
             e.apply()
         }
 

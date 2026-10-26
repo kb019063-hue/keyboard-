@@ -104,8 +104,9 @@ class KeyboardPreviewView @JvmOverloads constructor(
 
     private fun loadKeyboardLayout() {
         try {
-            // Try to load the main QWERTY layout (static name → direct R reference).
-            _keyboard = KeyboardData.load(resources, R.raw.latn_qwerty_us)
+            // Try to load the shipped Gboard-style QWERTY layout (static name → direct R
+            // reference), so the preview is the same clean keyboard as the live IME.
+            _keyboard = KeyboardData.load(resources, R.raw.latn_qwerty_us_gboard_style)
         } catch (e: Exception) {
             // Will fall back to QWERTY_ROWS
         }

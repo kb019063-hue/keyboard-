@@ -19,8 +19,8 @@ class ConfigDefaultsTest {
     // =========================================================================
 
     @Test
-    fun `theme default is cleverkeysdark`() {
-        assertThat(Defaults.THEME).isEqualTo("cleverkeysdark")
+    fun `theme default is harbor`() {
+        assertThat(Defaults.THEME).isEqualTo("harbor")
     }
 
     @Test

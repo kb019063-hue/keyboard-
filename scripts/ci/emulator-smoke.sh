@@ -232,6 +232,32 @@ dismiss_anr() {
   return 0
 }
 
+# Bring one of OUR activities to the foreground. A foreign launcher ANR can leave NO dialog on
+# screen: run 40171181789 had only `am_kill ... launcher3 ... user request after error`, focus was
+# stuck on the killed Quickstep window, and `dismiss_anr` correctly found nothing to dismiss. In
+# that state an ordinary `am start` reports WARM/ok without changing focus. Restart the launcher,
+# return HOME, and retry the start; three failures still produce the original FAIL annotation.
+focus_activity() {
+  local component="$1" label="$2" prefix="$3" try f
+  for try in 1 2 3; do
+    dismiss_anr || true
+    adb shell am start -W -n "$component" > "$OUT/$prefix-$try.log" 2>&1
+    sleep 5
+    f=$(focus)
+    case "$f" in *"$label"*) return 0 ;; esac
+    [ "$try" -lt 3 ] || continue
+    case "$f" in
+      *"$PKG"*) ;;  # our process is alive but the wrong activity has focus
+      *)
+        adb shell am force-stop com.android.launcher3 > /dev/null 2>&1 || true
+        adb shell input keyevent KEYCODE_HOME > /dev/null 2>&1 || true
+        sleep 3
+        ;;
+    esac
+  done
+  return 1
+}
+
 # --- locate the x86_64 split (the emulator is x86_64; ARM splits cannot run on it) ---
 APK="${APK:-}"
 [ -z "$APK" ] && APK=$(find build/outputs/apk/debug -name '*x86_64*.apk' 2>/dev/null | head -1)
@@ -296,20 +322,11 @@ esac
 info "mCurId before any focus (expected to still be the stock IME): $(curime)"
 
 echo "== 4. launcher screen is really foreground, and did not crash =="
-adb shell am start -W -n "$PKG/$NS.LauncherActivity" > "$OUT/am-start.log" 2>&1
-sleep 6
+# focus_activity retries through a killed/ANR-ed launcher as well as an actual ANR dialog.
+focus_activity "$PKG/$NS.LauncherActivity" "LauncherActivity" "am-start"
+cp -f "$OUT/am-start-1.log" "$OUT/am-start.log" 2>/dev/null || true
 shot 01-launcher
-dismiss_anr || true
 FOCUS=$(focus)
-# Dismissing the dialog is not enough on its own: an ANR covering the launch swallows it, so the
-# activity has to be started again. This is the retry run 39684027086 never got.
-if ! printf '%s' "$FOCUS" | grep -q "LauncherActivity" && dismiss_anr; then
-  info "ANR dialog dismissed -- relaunching LauncherActivity"
-  adb shell am start -W -n "$PKG/$NS.LauncherActivity" > "$OUT/am-start-retry.log" 2>&1
-  sleep 6
-  shot 01b-launcher-retry
-  FOCUS=$(focus)
-fi
 CRASH=$(crashln)
 if [ -n "$CRASH" ]; then
   fail "CRASH after launching LauncherActivity: $CRASH"
@@ -419,10 +436,9 @@ fi
 
 echo "== 7. settings + keyboard preview render =="
 adb shell input keyevent KEYCODE_BACK; sleep 2
-adb shell am start -W -n "$PKG/$NS.SettingsActivity" > "$OUT/am-settings.log" 2>&1
-sleep 6
+focus_activity "$PKG/$NS.SettingsActivity" "SettingsActivity" "am-settings"
+cp -f "$OUT/am-settings-1.log" "$OUT/am-settings.log" 2>/dev/null || true
 shot 04-settings
-dismiss_anr || true
 FOCUS3=$(focus)
 if printf '%s' "$FOCUS3" | grep -q "SettingsActivity"; then
   pass "SettingsActivity foreground"

@@ -141,13 +141,15 @@ class LayoutsPreference(ctx: Context, attrs: AttributeSet?) : ListGroupPreferenc
     }
 
     /**
-     * The initial text for the custom layout entry box. The qwerty_us layout is
-     * a good default and contains a bit of documentation.
+     * The initial text for the custom layout entry box. The shipped Gboard-style layout is the
+     * documented default: it carries a thorough header comment AND is the arrangement the user
+     * already sees, so a custom layout starts from the familiar clean keyboard rather than the
+     * legacy dense one.
      */
     private fun readInitialCustomLayout(): String {
         return try {
             val res = context.resources
-            Utils.read_all_utf8(res.openRawResource(R.raw.latn_qwerty_us))
+            Utils.read_all_utf8(res.openRawResource(R.raw.latn_qwerty_us_gboard_style))
         } catch (e: Exception) {
             ""
         }

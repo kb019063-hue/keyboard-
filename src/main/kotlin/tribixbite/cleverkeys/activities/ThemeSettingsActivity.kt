@@ -63,6 +63,11 @@ class ThemeSettingsActivity : ComponentActivity() {
          * These are the theme IDs that Config.kt's getThemeId() recognizes
          */
         val BUILTIN_THEMES = listOf(
+            BuiltinTheme("harbor", R.string.theme_builtin_harbor_name, R.string.theme_builtin_harbor_desc, 0xFF0C1826, 0xFF1A3352, 0xFFF4F7FB),
+            BuiltinTheme("daybreak", R.string.theme_builtin_daybreak_name, R.string.theme_builtin_daybreak_desc, 0xFFE4EDF6, 0xFFF8FBFE, 0xFF142033),
+            BuiltinTheme("signal", R.string.theme_builtin_signal_name, R.string.theme_builtin_signal_desc, 0xFF070B12, 0xFF101826, 0xFFA9CFFF),
+            BuiltinTheme("ember", R.string.theme_builtin_ember_name, R.string.theme_builtin_ember_desc, 0xFF120E0C, 0xFF241816, 0xFFF6EDE8),
+            BuiltinTheme("kiln", R.string.theme_builtin_kiln_name, R.string.theme_builtin_kiln_desc, 0xFFF6EBE4, 0xFFFFF8F4, 0xFF3C241E),
             BuiltinTheme("cleverkeysdark", R.string.theme_builtin_cleverkeysdark_name, R.string.theme_builtin_cleverkeysdark_desc, 0xFF1E1030, 0xFF2A1845, 0xFFC0C0C0),
             BuiltinTheme("cleverkeyslight", R.string.theme_builtin_cleverkeyslight_name, R.string.theme_builtin_cleverkeyslight_desc, 0xFFC0C0C0, 0xFFD8D8D8, 0xFF2C3E50),
             BuiltinTheme("dark", R.string.theme_builtin_dark_name, R.string.theme_builtin_dark_desc, 0xFF1B1B1B, 0xFF333333, 0xFFFFFFFF),
@@ -267,7 +272,7 @@ fun ThemeSettingsScreen(
     // Use DirectBootAwarePreferences to ensure we read the same prefs as the service
     val prefs = remember { DirectBootAwarePreferences.get_shared_preferences(context) }
     // Use mutableStringStateOf instead of mutableStateOf to avoid type inference issues
-    var currentThemeId by remember { mutableStateOf(prefs.getString("theme", "cleverkeysdark") ?: "cleverkeysdark") }
+    var currentThemeId by remember { mutableStateOf(prefs.getString("theme", Defaults.THEME) ?: Defaults.THEME) }
     // Audit H-4: mutate the SAME store instance ThemeProvider renders from — a private
     // CustomThemeManager here wrote the same prefs file but left the provider's
     // in-memory theme list stale, so active-theme edits didn't reach the keyboard

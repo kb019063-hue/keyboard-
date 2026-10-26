@@ -306,6 +306,19 @@ class StyleLayoutsTest {
     }
 
     @Test
+    fun gboardStyleHasNoDuplicateKeyValues() {
+        val kw = parse(GBOARD)
+        // getKeys() is a Map<KeyValue, KeyPos>, so a repeated `loc esc` silently
+        // discards one placement. The strict layout checker now fails the build on
+        // exactly this; pin it against the production parser too.
+        val declared = kw.rows.sumOf { row ->
+            row.keys.sumOf { key -> (0..8).count { key.getKeyValue(it) != null } }
+        }
+        assertWithMessage("every declared key value must keep exactly one position")
+            .that(kw.getKeys().size).isEqualTo(declared)
+    }
+
+    @Test
     fun gboardStyleHasADigitRowAndBareLetters() {
         val kw = parse(GBOARD)
         // The owner's Gboard runs with its number row on, so the layout embeds one: ten equal

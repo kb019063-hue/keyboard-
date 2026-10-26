@@ -69,6 +69,46 @@ class ThemeProvider(
      */
     private fun getBuiltInColorScheme(themeId: String): KeyboardColorScheme {
         return when (themeId) {
+            "harbor" -> darkKeyboardColorScheme(
+                primary = androidx.compose.ui.graphics.Color(0xFF2B6CB0)
+            ).copy(
+                keyDefault = androidx.compose.ui.graphics.Color(0xFF1A3352),
+                keyboardBackground = androidx.compose.ui.graphics.Color(0xFF0C1826),
+                keyLabel = androidx.compose.ui.graphics.Color(0xFFF4F7FB),
+                swipeTrail = androidx.compose.ui.graphics.Color(0xFF9CC7FF)
+            )
+            "daybreak" -> lightKeyboardColorScheme(
+                primary = androidx.compose.ui.graphics.Color(0xFF1B5FBF)
+            ).copy(
+                keyDefault = androidx.compose.ui.graphics.Color(0xFFF8FBFE),
+                keyboardBackground = androidx.compose.ui.graphics.Color(0xFFE4EDF6),
+                keyLabel = androidx.compose.ui.graphics.Color(0xFF142033),
+                swipeTrail = androidx.compose.ui.graphics.Color(0xFF1B5FBF)
+            )
+            "signal" -> darkKeyboardColorScheme(
+                primary = androidx.compose.ui.graphics.Color(0xFFA9CFFF)
+            ).copy(
+                keyDefault = androidx.compose.ui.graphics.Color(0xFF101826),
+                keyboardBackground = androidx.compose.ui.graphics.Color(0xFF070B12),
+                keyLabel = androidx.compose.ui.graphics.Color(0xFFA9CFFF),
+                swipeTrail = androidx.compose.ui.graphics.Color(0xFFA9CFFF)
+            )
+            "ember" -> darkKeyboardColorScheme(
+                primary = androidx.compose.ui.graphics.Color(0xFFE24A38)
+            ).copy(
+                keyDefault = androidx.compose.ui.graphics.Color(0xFF241816),
+                keyboardBackground = androidx.compose.ui.graphics.Color(0xFF120E0C),
+                keyLabel = androidx.compose.ui.graphics.Color(0xFFF6EDE8),
+                swipeTrail = androidx.compose.ui.graphics.Color(0xFFE24A38)
+            )
+            "kiln" -> lightKeyboardColorScheme(
+                primary = androidx.compose.ui.graphics.Color(0xFFB4332A)
+            ).copy(
+                keyDefault = androidx.compose.ui.graphics.Color(0xFFFFF8F4),
+                keyboardBackground = androidx.compose.ui.graphics.Color(0xFFF6EBE4),
+                keyLabel = androidx.compose.ui.graphics.Color(0xFF3C241E),
+                swipeTrail = androidx.compose.ui.graphics.Color(0xFFB4332A)
+            )
             "cleverkeysdark" -> darkKeyboardColorScheme(
                 primary = androidx.compose.ui.graphics.Color(0xFF9B59B6)
             ).copy(
@@ -338,7 +378,7 @@ class ThemeProvider(
 
         /** The theme every dangling-id fallback resolves to (audit H-2). Also the id the
          *  delete-active-theme guard resets the `theme` pref to (CustomThemePrefPolicy). */
-        const val FALLBACK_THEME_ID = "cleverkeysdark"
+        const val FALLBACK_THEME_ID = "harbor"
 
         /**
          * Ids of the built-in XML themes — the `theme` values Theme Manager offers in its
@@ -346,6 +386,7 @@ class ThemeProvider(
          * LayoutThemeBindingConfigTest.
          */
         val BUILT_IN_THEME_IDS: List<String> = listOf(
+            "harbor", "daybreak", "signal", "ember", "kiln",
             "cleverkeysdark", "cleverkeyslight", "dark", "light", "black", "altblack",
             "white", "rosepine", "cobalt", "pine", "desert", "jungle", "epaper",
             "epaperblack", "everforestlight", "monet", "monetlight", "monetdark"
