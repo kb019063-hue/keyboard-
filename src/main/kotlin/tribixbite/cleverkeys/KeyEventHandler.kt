@@ -451,7 +451,14 @@ class KeyEventHandler(
             val isPunctChar = isSmartPunctuationChar(char)
             val isQuote = isQuoteChar(char)
 
-            if (smartPuncEnabled && (isPunctChar || isQuote)) {
+            // SAS-1 short-circuit: the swallow is impossible unless an automatic space is
+            // pending, and that is a local flag. The two reads that exist to PROVE eligibility
+            // — a 500-char getTextBeforeCursor and a full getExtractedText (currentSelection) —
+            // are Binder round trips, and they used to run on EVERY punctuation keystroke even
+            // when nothing was pending, i.e. almost always. Consult the flag first; the
+            // verify-at-use reads still run whenever the answer can actually be yes.
+            val autoSpacePending = recv.wasLastSpaceAutoInserted()
+            if (smartPuncEnabled && (isPunctChar || isQuote) && autoSpacePending) {
                 val textBefore = conn.getTextBeforeCursor(500, 0)  // Get enough context for quote counting
                 val selection = PredictionContextTracker.currentSelection(conn)
                 // A range can start at the old auto-space stamp. Replacing that range
@@ -459,7 +466,7 @@ class KeyEventHandler(
                 val collapsedSelection = if (selection != null) selection.first == selection.second
                     else try { conn.getSelectedText(0).isNullOrEmpty() } catch (_: Exception) { false }
                 val eligible = collapsedSelection && SmartAutoSpace.isSwallowEligible(
-                    autoSpacePending = recv.wasLastSpaceAutoInserted(),
+                    autoSpacePending = autoSpacePending,
                     stampedPosition = recv.getAutoSpaceStampedPosition(),
                     actualPrevChar = textBefore?.lastOrNull(),
                     actualPosition = selection?.first ?: -1
