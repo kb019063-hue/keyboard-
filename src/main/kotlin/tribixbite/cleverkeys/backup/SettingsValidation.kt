@@ -248,6 +248,10 @@ object SettingsValidation {
             "swipe_rare_words_penalty", "swipe_common_words_boost", "swipe_top5000_boost",
             // Advanced gesture tuning floats
             "slider_speed_smoothing", "slider_speed_max",
+            // GH #190 vertical selection multiplier: divided into the repeat delay, so an
+            // integer-shaped JSON literal must not import as an Int (same trap as the
+            // floating-window fractions above).
+            "selection_delete_vertical_speed",
             "swipe_min_distance", "swipe_min_key_distance", "swipe_noise_threshold",
             "swipe_high_velocity_threshold",
             // Language detection
@@ -419,6 +423,14 @@ object SettingsValidation {
 
         // GH #190: follow-finger backspace selection step (dp). Shared with slider + Config clamp.
         put("selection_delete_step_dp", SettingsRanges.SELECTION_DELETE_STEP_DP)
+
+        // GH #190: vertical selection dead zone (% of key height). Shared with the slider and
+        // the Config clamp — it was the last slider-backed gesture key with no range at all, so
+        // any imported int (including 0 or 10 000) reached the repeat maths unvalidated.
+        put(
+            "selection_delete_vertical_threshold",
+            SettingsRanges.SELECTION_DELETE_VERTICAL_THRESHOLD,
+        )
     }
 
     /**
@@ -463,6 +475,16 @@ object SettingsValidation {
 
             // Border line width — F-4: shared with the slider (0-10 dp; was 0-5)
             "custom_border_line_width" -> value in SettingsRanges.CUSTOM_BORDER_LINE_WIDTH
+
+            // Space-slider speed estimate — the two numbers Pointers.Sliding feeds into
+            // `min(max, travelled/elapsed + 1)` and the smoothing interpolation. A zero or
+            // negative max reverses the cursor; a smoothing factor above 1 oscillates.
+            "slider_speed_max" -> value in SettingsRanges.SLIDER_SPEED_MAX
+            "slider_speed_smoothing" -> value in SettingsRanges.SLIDER_SPEED_SMOOTHING
+
+            // GH #190: vertical selection repeat multiplier — the repeat delay DIVIDES by it,
+            // so 0 becomes an infinite delay (the repeat never fires again).
+            "selection_delete_vertical_speed" -> value in SettingsRanges.SELECTION_DELETE_VERTICAL_SPEED
 
             // Prediction weights
             "prediction_context_boost" -> value in 0.5f..5.0f

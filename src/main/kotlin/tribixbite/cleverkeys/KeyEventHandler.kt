@@ -408,7 +408,10 @@ class KeyEventHandler(
 
         // Double-space-to-period: If typing space after space within threshold, replace with ". "
         // Skip if: feature disabled, key repeat (long press), or previous char wasn't alphanumeric
-        val currentTime = System.currentTimeMillis()
+        // Uptime, not the wall clock: this is an elapsed-time comparison, and a clock change
+        // between the two spaces (NTP correction, manual change) would otherwise either fire
+        // the period early or make the delta negative and never fire it at all.
+        val currentTime = android.os.SystemClock.uptimeMillis()
         var textToCommit = text
         // SAS-1: set when sentence-ending punctuation swallows the auto-space and
         // re-adds one — the fresh space is re-marked pending AFTER the commit below.

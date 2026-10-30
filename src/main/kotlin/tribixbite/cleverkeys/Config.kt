@@ -599,11 +599,50 @@ object SettingsRanges {
     val SLIDER_SENSITIVITY_PERCENT: IntRange = 1..100
 
     /**
+     * Exponential-smoothing factor for the space slider's speed estimate
+     * (`slider_speed_smoothing`). The bounds are the slider's own (0.1–0.95): above 1 the
+     * smoothed estimate overshoots and oscillates instead of converging on the finger's
+     * speed, below 0.1 it never responds.
+     */
+    val SLIDER_SPEED_SMOOTHING: ClosedFloatingPointRange<Float> = 0.1f..0.95f
+
+    /**
+     * Ceiling on the space slider's speed multiplier (`slider_speed_max`). The floor is 1,
+     * NOT 0: `Pointers.Sliding` takes `min(slider_speed_max, …)` of its speed estimate, so a
+     * zero or negative imported value makes the multiplier negative and the cursor slides the
+     * WRONG WAY. Same class as the [SLIDER_SENSITIVITY_PERCENT] floor (F-3).
+     */
+    val SLIDER_SPEED_MAX: ClosedFloatingPointRange<Float> = 1f..10f
+
+    /**
      * GH #190: follow-finger selection step in dp (`selection_delete_step_dp`). Shared by
      * the slider, the backup validator and the Config clamp; the floor keeps the step
      * well above touch jitter.
      */
     val SELECTION_DELETE_STEP_DP: IntRange = 4..40
+
+    /**
+     * GH #190: vertical dead zone for selection-delete, as a percent of the key height
+     * (`selection_delete_vertical_threshold`). Shared with the slider (20–80) and the backup
+     * validator — it was the only slider-backed gesture key with no range anywhere.
+     *
+     * The value is not merely cosmetic: `Pointers.handleSelectionDeleteRepeat` subtracts the
+     * zone from a half key diagonal to normalise the finger's distance, and the shipped
+     * geometry already makes that span non-positive at the top of the slider (the "key height"
+     * is approximated as 0.7 × the diagonal, so 80% of it is 56% of the diagonal, past the 50%
+     * half-diagonal). The repeat maths clamps the span, and this range stops an import from
+     * sending the zone arbitrarily far past it.
+     */
+    val SELECTION_DELETE_VERTICAL_THRESHOLD: IntRange = 20..80
+
+    /**
+     * GH #190: repeat-rate multiplier for vertical selection (`selection_delete_vertical_speed`).
+     * The floor is 0.1, NOT 0: `Pointers.handleSelectionDeleteRepeat` DIVIDES its repeat delay
+     * by this value, so 0 (or a negative) gives ±Infinity, whose `toLong()` is
+     * `Long.MAX_VALUE` — the vertical repeat is then scheduled ~292 million years out and never
+     * fires again while the finger is held. Same class as [SLIDER_SPEED_MAX]'s floor.
+     */
+    val SELECTION_DELETE_VERTICAL_SPEED: ClosedFloatingPointRange<Float> = 0.1f..1f
 
     /** Clipboard history entry cap (`clipboard_history_limit`; 0 = unlimited). */
     val CLIPBOARD_HISTORY_LIMIT: IntRange = 0..500
@@ -1483,9 +1522,17 @@ class Config private constructor(
         subkey_popover_neutral_height = safeGetInt(_prefs, "subkey_popover_neutral_height", Defaults.SUBKEY_POPOVER_NEUTRAL_HEIGHT)
             .coerceIn(Defaults.SUBKEY_POPOVER_NEUTRAL_MIN, Defaults.SUBKEY_POPOVER_NEUTRAL_MAX)
 
-        // Selection-delete mode configuration
+        // Selection-delete mode configuration. Both values are CONSUMED BY DIVISION in
+        // Pointers.handleSelectionDeleteRepeat (the delay divides by the speed, the
+        // normalised distance divides by maxDistance − deadZone), so an out-of-range value
+        // from an imported backup or a hand-edited pref is not cosmetic: 0 speed schedules
+        // the vertical repeat Long.MAX_VALUE ms out, and a threshold past the slider's top
+        // already inverts the distance term. Clamped here, at the one read site, and
+        // range-checked on import (SettingsValidation) so all three sites agree.
         selection_delete_vertical_threshold = safeGetInt(_prefs, "selection_delete_vertical_threshold", Defaults.SELECTION_DELETE_VERTICAL_THRESHOLD)
+            .coerceIn(SettingsRanges.SELECTION_DELETE_VERTICAL_THRESHOLD)
         selection_delete_vertical_speed = safeGetFloat(_prefs, "selection_delete_vertical_speed", Defaults.SELECTION_DELETE_VERTICAL_SPEED)
+            .let { if (it.isNaN()) Defaults.SELECTION_DELETE_VERTICAL_SPEED else it.coerceIn(SettingsRanges.SELECTION_DELETE_VERTICAL_SPEED) }
         // GH #190: any value other than "follow" (including a corrupt one) keeps the
         // historical speed-by-distance joystick.
         selection_delete_follow_finger = safeGetString(_prefs, "selection_delete_mode", Defaults.SELECTION_DELETE_MODE)
@@ -1504,9 +1551,14 @@ class Config private constructor(
         swipe_min_distance = safeGetFloat(_prefs, "swipe_min_distance", Defaults.SWIPE_MIN_DISTANCE)
         swipe_min_key_distance = safeGetFloat(_prefs, "swipe_min_key_distance", Defaults.SWIPE_MIN_KEY_DISTANCE)
 
-        // Slider speed configuration
+        // Slider speed configuration. Both values feed Pointers.Sliding's speed estimate: the
+        // multiplier is a `min()` ceiling (so a negative value reverses the cursor), and the
+        // smoothing factor is the interpolation weight (so >1 overshoots and oscillates).
+        // Clamped at the read site like every other slider-backed number.
         slider_speed_smoothing = safeGetFloat(_prefs, "slider_speed_smoothing", Defaults.SLIDER_SPEED_SMOOTHING)
+            .let { if (it.isNaN()) Defaults.SLIDER_SPEED_SMOOTHING else it.coerceIn(SettingsRanges.SLIDER_SPEED_SMOOTHING) }
         slider_speed_max = safeGetFloat(_prefs, "slider_speed_max", Defaults.SLIDER_SPEED_MAX)
+            .let { if (it.isNaN()) Defaults.SLIDER_SPEED_MAX else it.coerceIn(SettingsRanges.SLIDER_SPEED_MAX) }
 
         // Swipe trail appearance
         swipe_trail_enabled = _prefs.getBoolean("swipe_trail_enabled", Defaults.SWIPE_TRAIL_ENABLED)

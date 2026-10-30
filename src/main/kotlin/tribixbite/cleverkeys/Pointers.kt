@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.PointF
 import android.os.Handler
 import android.os.Message
+import android.os.SystemClock
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -406,7 +407,12 @@ class Pointers(
                 }
             }
 
-            val timeElapsed = System.currentTimeMillis() - ptr.downTime
+            // Monotonic (uptime) clock, never the wall clock: an NTP correction or a manual
+            // clock change between touch-down and touch-up would otherwise make this delta
+            // negative (the SWIPE verdict's `timeElapsed > tap_duration_threshold` can never
+            // fire) or absurdly large (a plain tap classified as a swipe after a forward
+            // jump). The same clock the platform's own Handler timeouts use.
+            val timeElapsed = SystemClock.uptimeMillis() - ptr.downTime
             val keyWidth = _handler.getKeyWidth(ptr.key)
 
             val gestureData = GestureClassifier.GestureData(
@@ -1310,7 +1316,13 @@ class Pointers(
         val keyHeight = keyHypotenuse * 0.7f
         val maxDistance = keyHypotenuse * 0.5f
 
-        // Vertical dead zone is configurable (% of key height)
+        // Vertical dead zone is configurable (% of key height). The normalised distance is
+        // computed against (maxDistance - verticalDeadZone), and with the shipped geometry
+        // that span is already ZERO OR NEGATIVE at the top of the slider's own range: the key
+        // height is approximated as 0.7 × the hypotenuse, so an 80% threshold is 56% of the
+        // hypotenuse while maxDistance is 50% of it. See
+        // [selectionDeleteVerticalNormalized] for the guard (a negative span used to invert
+        // the distance, making a faster vertical drag SLOW the repeat down).
         val verticalDeadZone = keyHeight * (ptr.snap.selection_delete_vertical_threshold / 100.0f)
 
         // Create modifiers with SHIFT for selection
@@ -1360,8 +1372,17 @@ class Pointers(
             _handler.onPointerDown(arrowKey, false)
             _handler.onPointerUp(arrowKey, shiftedMods)
             movedVertical = true
-            maxVertNormalizedDist = min((absDy - verticalDeadZone) / (maxDistance - verticalDeadZone), 1.0f)
+            maxVertNormalizedDist = selectionDeleteVerticalNormalized(absDy, verticalDeadZone, maxDistance)
         }
+
+        // The vertical delay is DIVIDED by the configured multiplier. Config clamps it to
+        // 0.1..1, but a snapshot can also arrive from an older export or a test fixture, so
+        // the divisor is validated here rather than trusted: 0 or a negative would make the
+        // quotient ±Infinity, `toLong()` would saturate to Long.MAX_VALUE, and the repeat
+        // would be scheduled ~292 million years out — i.e. the selection simply stops
+        // extending while the finger is still held.
+        val verticalSpeed = ptr.snap.selection_delete_vertical_speed
+            .takeIf { it.isFinite() && it > 0f } ?: 1f
 
         // Calculate repeat delay
         // Horizontal: standard speed based on distance
@@ -1370,7 +1391,7 @@ class Pointers(
             movedHorizontal && movedVertical -> {
                 // Both axes moved - use faster of the two (horizontal dominates)
                 val horizDelay = TRACKPOINT_MAX_DELAY - (maxHorizNormalizedDist * (TRACKPOINT_MAX_DELAY - TRACKPOINT_MIN_DELAY))
-                val vertDelay = (TRACKPOINT_MAX_DELAY - (maxVertNormalizedDist * (TRACKPOINT_MAX_DELAY - TRACKPOINT_MIN_DELAY))) / ptr.snap.selection_delete_vertical_speed
+                val vertDelay = (TRACKPOINT_MAX_DELAY - (maxVertNormalizedDist * (TRACKPOINT_MAX_DELAY - TRACKPOINT_MIN_DELAY))) / verticalSpeed
                 minOf(horizDelay, vertDelay).toLong()
             }
             movedHorizontal -> {
@@ -1379,7 +1400,7 @@ class Pointers(
             }
             movedVertical -> {
                 // Vertical only - slower speed using multiplier (lower multiplier = slower)
-                ((TRACKPOINT_MAX_DELAY - (maxVertNormalizedDist * (TRACKPOINT_MAX_DELAY - TRACKPOINT_MIN_DELAY))) / ptr.snap.selection_delete_vertical_speed).toLong()
+                ((TRACKPOINT_MAX_DELAY - (maxVertNormalizedDist * (TRACKPOINT_MAX_DELAY - TRACKPOINT_MIN_DELAY))) / verticalSpeed).toLong()
             }
             else -> {
                 // Finger is in dead zone - check again after a short delay
@@ -2019,8 +2040,11 @@ class Pointers(
         /** Gesture state, see [Gesture]. [null] means the pointer has not moved out of the center region. */
         var gesture: Gesture? = null
 
-        /** Time when touch began (for gesture classification). */
-        val downTime: Long = System.currentTimeMillis()
+        /**
+         * Time when touch began (for gesture classification). Uptime, not wall clock — see
+         * the elapsed-time read at the SWIPE/TAP decision.
+         */
+        val downTime: Long = SystemClock.uptimeMillis()
 
         /** Identify timeout messages. */
         var timeoutWhat: Int = -1
@@ -2095,7 +2119,7 @@ class Pointers(
         var last_y = y
 
         /**
-         * [System.currentTimeMillis()] at the time of the last move. Equals to
+         * [SystemClock.uptimeMillis] at the time of the last move. Equals to
          * [-1] when the sliding hasn't started yet.
          */
         var last_move_ms: Long = -1
@@ -2109,7 +2133,7 @@ class Pointers(
                 if (travelled < snap.slide_step_px) {
                     return
                 }
-                last_move_ms = System.currentTimeMillis()
+                last_move_ms = SystemClock.uptimeMillis()
             }
             d += ((x - last_x) * speed * direction_x +
                 (y - last_y) * speed * SLIDING_SPEED_VERTICAL_MULT * direction_y) /
@@ -2139,9 +2163,14 @@ class Pointers(
          * the noise. Sets [last_move_ms] and [last_pos].
          */
         private fun update_speed(travelled: Float, x: Float, y: Float) {
-            val now = System.currentTimeMillis()
-            val instant_speed = min(snap.slider_speed_max, travelled / (now - last_move_ms) + 1f)
-            speed = speed + (instant_speed - speed) * snap.slider_speed_smoothing
+            val now = SystemClock.uptimeMillis()
+            speed = Pointers.smoothedSpeed(
+                previous = speed,
+                travelled = travelled,
+                elapsedMs = now - last_move_ms,
+                maxSpeed = snap.slider_speed_max,
+                smoothing = snap.slider_speed_smoothing,
+            )
             last_move_ms = now
             last_x = x
             last_y = y
@@ -2414,6 +2443,55 @@ class Pointers(
         fun followFingerSteps(dx: Float, stepPx: Float): Int {
             if (!(stepPx > 0f) || !dx.isFinite()) return 0
             return (dx / stepPx).toInt()
+        }
+
+        /**
+         * One exponential-smoothing step of the space slider's speed estimate.
+         *
+         * [elapsedMs] must be > 0. A move that lands in the SAME millisecond as the previous
+         * one — always the case for the first sample, because `Sliding.onTouchMove` seeds
+         * `last_move_ms` and then measures against it microseconds later — must leave the
+         * estimate alone: dividing by it yields +Infinity, and `min(slider_speed_max,
+         * Infinity)` then pins the multiplier at its ceiling. That made every slide start out
+         * at the 4-6x maximum on its first movement, so `slider_sensitivity`,
+         * `slider_speed_smoothing` and `slider_speed_max` were all effectively dead. A clock
+         * that stepped backwards fails the same test with a negative delta.
+         *
+         * Pure (no state, no clock) so both the bug and its fix are unit-testable without a
+         * device — [tribixbite.cleverkeys.PointersSliderSpeedTest].
+         */
+        @JvmStatic
+        fun smoothedSpeed(
+            previous: Float,
+            travelled: Float,
+            elapsedMs: Long,
+            maxSpeed: Float,
+            smoothing: Float
+        ): Float {
+            if (elapsedMs <= 0L) return previous
+            val instant = min(maxSpeed, travelled / elapsedMs + 1f)
+            return previous + (instant - previous) * smoothing
+        }
+
+        /**
+         * GH #190 speed-mode vertical selection: the finger's distance past the dead zone,
+         * normalised to 0..1 over the remaining travel, which sets the repeat rate.
+         *
+         * The span is clamped because it is a SUBTRACTION of two independently-derived
+         * lengths: [maxDistancePx] is half the key diagonal while [deadZonePx] is a
+         * percentage of an approximated key height (0.7 × that diagonal), so a threshold at
+         * the slider's own maximum (80%) already puts the dead zone past [maxDistancePx]. A
+         * non-positive span flipped the sign of the result, and the caller's delay formula
+         * (`max - normalised × (max - min)`) then produced a delay LONGER than the idle one —
+         * a faster drag slowed the selection instead of speeding it up. Also guards a zero
+         * [maxDistancePx] (an unmeasured key) and a non-finite input.
+         */
+        @JvmStatic
+        fun selectionDeleteVerticalNormalized(absDy: Float, deadZonePx: Float, maxDistancePx: Float): Float {
+            if (!absDy.isFinite() || !deadZonePx.isFinite() || !maxDistancePx.isFinite()) return 0f
+            val span = (maxDistancePx - deadZonePx).coerceAtLeast(maxDistancePx * 0.1f)
+            if (!(span > 0f)) return 0f
+            return ((absDy - deadZonePx) / span).coerceIn(0f, 1f)
         }
 
         /**

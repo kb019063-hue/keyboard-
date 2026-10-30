@@ -377,7 +377,9 @@ internal fun SettingsActivity.loadCurrentSettings() {
         swipeNoiseThreshold = Config.safeGetFloat(prefs, "swipe_noise_threshold", Defaults.SWIPE_NOISE_THRESHOLD)
         swipeHighVelocityThreshold = Config.safeGetFloat(prefs, "swipe_high_velocity_threshold", Defaults.SWIPE_HIGH_VELOCITY_THRESHOLD)
         sliderSpeedSmoothing = Config.safeGetFloat(prefs, "slider_speed_smoothing", Defaults.SLIDER_SPEED_SMOOTHING)
+            .let { if (it.isNaN()) Defaults.SLIDER_SPEED_SMOOTHING else it.coerceIn(SettingsRanges.SLIDER_SPEED_SMOOTHING) }
         sliderSpeedMax = Config.safeGetFloat(prefs, "slider_speed_max", Defaults.SLIDER_SPEED_MAX)
+            .let { if (it.isNaN()) Defaults.SLIDER_SPEED_MAX else it.coerceIn(SettingsRanges.SLIDER_SPEED_MAX) }
 
         // Number row and numpad settings
         numberRowMode = prefs.getSafeString("number_row", Defaults.NUMBER_ROW)
@@ -502,9 +504,13 @@ internal fun SettingsActivity.loadCurrentSettings() {
         subkeyPopoverNeutralWidth = Config.safeGetInt(prefs, "subkey_popover_neutral_width", Defaults.SUBKEY_POPOVER_NEUTRAL_WIDTH)
         subkeyPopoverNeutralHeight = Config.safeGetInt(prefs, "subkey_popover_neutral_height", Defaults.SUBKEY_POPOVER_NEUTRAL_HEIGHT)
 
-        // Selection-delete mode settings
+        // Selection-delete mode settings. Clamped through the shared ranges so the slider
+        // state can never hold a value its own `valueRange` does not contain (Compose draws
+        // such a thumb outside the track, and the write-back would persist it again).
         selectionDeleteVerticalThreshold = Config.safeGetInt(prefs, "selection_delete_vertical_threshold", Defaults.SELECTION_DELETE_VERTICAL_THRESHOLD)
+            .coerceIn(SettingsRanges.SELECTION_DELETE_VERTICAL_THRESHOLD)
         selectionDeleteVerticalSpeed = Config.safeGetFloat(prefs, "selection_delete_vertical_speed", Defaults.SELECTION_DELETE_VERTICAL_SPEED)
+            .let { if (it.isNaN()) Defaults.SELECTION_DELETE_VERTICAL_SPEED else it.coerceIn(SettingsRanges.SELECTION_DELETE_VERTICAL_SPEED) }
         selectionDeleteMode = readSelectionDeleteMode()
         selectionDeleteStepDp = readSelectionDeleteStepDp()
 
