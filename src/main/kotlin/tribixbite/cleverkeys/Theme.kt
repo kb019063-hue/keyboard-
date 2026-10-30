@@ -216,9 +216,17 @@ class Theme {
         // would sit on the app itself; every older theme leaves the attribute unset (0) and gets
         // exactly the key colour it always had.
         suggestionBackgroundColor = if (suggestionBarColor != 0) suggestionBarColor else colorKey
-        // colorLabelActivated was designed for colorKeyActivated, not the bar (colorKey):
+        // colorLabelActivated was designed for colorKeyActivated, not for the bar:
         // readable only after SuggestionBarPalette (Cobalt's was the bar colour itself).
-        val bar = SuggestionBarPalette.resolve(labelColor, activatedColor, subLabelColor, colorKey)
+        //
+        // Resolve against the BAR's background, not the key colour. They were the same colour
+        // until `colorSuggestionBar` existed; on the translucent themes the key colour is a
+        // 15 %-white tile, so resolving against it decided white-on-white and fell back to BLACK
+        // text and black toolbar icons on a near-black glass keyboard (2026-10-30). The runtime
+        // constructor has always passed the bar background here — this makes the XML path agree.
+        val bar = SuggestionBarPalette.resolve(
+            labelColor, activatedColor, subLabelColor, suggestionBackgroundColor
+        )
         suggestionTextColor = bar.text
         suggestionHighConfidenceColor = bar.highlight
         suggestionSecondaryTextColor = bar.secondary
