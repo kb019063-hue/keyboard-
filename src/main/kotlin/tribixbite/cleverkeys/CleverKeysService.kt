@@ -962,11 +962,12 @@ class CleverKeysService : InputMethodService(),
         try {
             win.setBackgroundBlurRadius(radiusPx.toInt().coerceAtLeast(0))
             if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
-                Log.d(
-                    "CleverKeysService",
-                    "backdrop blur radius=${radiusPx.toInt()}px crossWindow=" +
-                        runCatching { windowManager.isCrossWindowBlurEnabled() }.getOrDefault(false)
-                )
+                // No isCrossWindowBlurEnabled() probe here: Context.getWindowManager() is not
+                // reachable as a property from InputMethodService in this codebase (compile error
+                // 2026-10-30), and the value would only ever be logged. The platform silently
+                // ignores the radius when cross-window blur is off, which is exactly the fallback
+                // the scrim is sized for.
+                Log.d("CleverKeysService", "backdrop blur radius=${radiusPx.toInt()}px")
             }
         } catch (t: Throwable) {
             // A window that refuses the attribute must not take the keyboard down with it.
