@@ -21,7 +21,13 @@ import kotlin.math.roundToInt
  */
 object Defaults {
     // Appearance
-    const val THEME = "harbor"
+    /**
+     * The out-of-box theme id (2026-10-30): the Gboard-glass pair, whose light/dark variant the
+     * system's night mode picks. Harbor and Daybreak stay in the picker; they were the previous
+     * default pair and are still the fallback when a custom theme is deleted
+     * (ThemeProvider.FALLBACK_THEME_ID).
+     */
+    const val THEME = "gboard"
     // 2026-05-15: lowered from 30% to 27% — feels less cramped on most phones
     // and gives the input field more breathing room above.
     const val KEYBOARD_HEIGHT_PORTRAIT = 27
@@ -599,11 +605,50 @@ object SettingsRanges {
     val SLIDER_SENSITIVITY_PERCENT: IntRange = 1..100
 
     /**
+     * Exponential-smoothing factor for the space slider's speed estimate
+     * (`slider_speed_smoothing`). The bounds are the slider's own (0.1–0.95): above 1 the
+     * smoothed estimate overshoots and oscillates instead of converging on the finger's
+     * speed, below 0.1 it never responds.
+     */
+    val SLIDER_SPEED_SMOOTHING: ClosedFloatingPointRange<Float> = 0.1f..0.95f
+
+    /**
+     * Ceiling on the space slider's speed multiplier (`slider_speed_max`). The floor is 1,
+     * NOT 0: `Pointers.Sliding` takes `min(slider_speed_max, …)` of its speed estimate, so a
+     * zero or negative imported value makes the multiplier negative and the cursor slides the
+     * WRONG WAY. Same class as the [SLIDER_SENSITIVITY_PERCENT] floor (F-3).
+     */
+    val SLIDER_SPEED_MAX: ClosedFloatingPointRange<Float> = 1f..10f
+
+    /**
      * GH #190: follow-finger selection step in dp (`selection_delete_step_dp`). Shared by
      * the slider, the backup validator and the Config clamp; the floor keeps the step
      * well above touch jitter.
      */
     val SELECTION_DELETE_STEP_DP: IntRange = 4..40
+
+    /**
+     * GH #190: vertical dead zone for selection-delete, as a percent of the key height
+     * (`selection_delete_vertical_threshold`). Shared with the slider (20–80) and the backup
+     * validator — it was the only slider-backed gesture key with no range anywhere.
+     *
+     * The value is not merely cosmetic: `Pointers.handleSelectionDeleteRepeat` subtracts the
+     * zone from a half key diagonal to normalise the finger's distance, and the shipped
+     * geometry already makes that span non-positive at the top of the slider (the "key height"
+     * is approximated as 0.7 × the diagonal, so 80% of it is 56% of the diagonal, past the 50%
+     * half-diagonal). The repeat maths clamps the span, and this range stops an import from
+     * sending the zone arbitrarily far past it.
+     */
+    val SELECTION_DELETE_VERTICAL_THRESHOLD: IntRange = 20..80
+
+    /**
+     * GH #190: repeat-rate multiplier for vertical selection (`selection_delete_vertical_speed`).
+     * The floor is 0.1, NOT 0: `Pointers.handleSelectionDeleteRepeat` DIVIDES its repeat delay
+     * by this value, so 0 (or a negative) gives ±Infinity, whose `toLong()` is
+     * `Long.MAX_VALUE` — the vertical repeat is then scheduled ~292 million years out and never
+     * fires again while the finger is held. Same class as [SLIDER_SPEED_MAX]'s floor.
+     */
+    val SELECTION_DELETE_VERTICAL_SPEED: ClosedFloatingPointRange<Float> = 0.1f..1f
 
     /** Clipboard history entry cap (`clipboard_history_limit`; 0 = unlimited). */
     val CLIPBOARD_HISTORY_LIMIT: IntRange = 0..500
@@ -846,6 +891,29 @@ object ThemeDefaultMigration {
 
     fun shouldRepoint(alreadyMigrated: Boolean, storedTheme: String?): Boolean =
         !alreadyMigrated && storedTheme == RETIRED_DEFAULT
+}
+
+/**
+ * One-time (2026-10-30): the out-of-box look became the Gboard-glass pair (`gboard`).
+ *
+ * Moves only values that mean "the shipped default" — the retired purple, the Harbor/Daybreak
+ * pair it was replaced with, and an explicitly empty value. A deliberate choice (any other
+ * built-in id, a decorative theme, a custom theme) is left alone: those users picked a look.
+ * Runs once; the marker is always written, so a later deliberate return to Harbor sticks.
+ */
+object GboardThemeMigration {
+    /** Persisted on user devices once the migration has run — never rename. */
+    const val MIGRATION_MARKER_KEY = "theme_gboard_default_v1"
+
+    /**
+     * Stored values that mean "no opinion", i.e. the default of some earlier build:
+     * empty (unset), the retired deep purple, and the Harbor/Daybreak pair that replaced it.
+     * Deliberately NOT included: `monet*` and every other built-in id, which are choices.
+     */
+    val PREVIOUS_DEFAULTS = setOf("", "cleverkeysdark", "harbor", "daybreak")
+
+    fun shouldRepoint(alreadyMigrated: Boolean, storedTheme: String?): Boolean =
+        !alreadyMigrated && storedTheme != null && storedTheme in PREVIOUS_DEFAULTS
 }
 
 object HapticsMigration {
@@ -1483,9 +1551,17 @@ class Config private constructor(
         subkey_popover_neutral_height = safeGetInt(_prefs, "subkey_popover_neutral_height", Defaults.SUBKEY_POPOVER_NEUTRAL_HEIGHT)
             .coerceIn(Defaults.SUBKEY_POPOVER_NEUTRAL_MIN, Defaults.SUBKEY_POPOVER_NEUTRAL_MAX)
 
-        // Selection-delete mode configuration
+        // Selection-delete mode configuration. Both values are CONSUMED BY DIVISION in
+        // Pointers.handleSelectionDeleteRepeat (the delay divides by the speed, the
+        // normalised distance divides by maxDistance − deadZone), so an out-of-range value
+        // from an imported backup or a hand-edited pref is not cosmetic: 0 speed schedules
+        // the vertical repeat Long.MAX_VALUE ms out, and a threshold past the slider's top
+        // already inverts the distance term. Clamped here, at the one read site, and
+        // range-checked on import (SettingsValidation) so all three sites agree.
         selection_delete_vertical_threshold = safeGetInt(_prefs, "selection_delete_vertical_threshold", Defaults.SELECTION_DELETE_VERTICAL_THRESHOLD)
+            .coerceIn(SettingsRanges.SELECTION_DELETE_VERTICAL_THRESHOLD)
         selection_delete_vertical_speed = safeGetFloat(_prefs, "selection_delete_vertical_speed", Defaults.SELECTION_DELETE_VERTICAL_SPEED)
+            .let { if (it.isNaN()) Defaults.SELECTION_DELETE_VERTICAL_SPEED else it.coerceIn(SettingsRanges.SELECTION_DELETE_VERTICAL_SPEED) }
         // GH #190: any value other than "follow" (including a corrupt one) keeps the
         // historical speed-by-distance joystick.
         selection_delete_follow_finger = safeGetString(_prefs, "selection_delete_mode", Defaults.SELECTION_DELETE_MODE)
@@ -1504,9 +1580,14 @@ class Config private constructor(
         swipe_min_distance = safeGetFloat(_prefs, "swipe_min_distance", Defaults.SWIPE_MIN_DISTANCE)
         swipe_min_key_distance = safeGetFloat(_prefs, "swipe_min_key_distance", Defaults.SWIPE_MIN_KEY_DISTANCE)
 
-        // Slider speed configuration
+        // Slider speed configuration. Both values feed Pointers.Sliding's speed estimate: the
+        // multiplier is a `min()` ceiling (so a negative value reverses the cursor), and the
+        // smoothing factor is the interpolation weight (so >1 overshoots and oscillates).
+        // Clamped at the read site like every other slider-backed number.
         slider_speed_smoothing = safeGetFloat(_prefs, "slider_speed_smoothing", Defaults.SLIDER_SPEED_SMOOTHING)
+            .let { if (it.isNaN()) Defaults.SLIDER_SPEED_SMOOTHING else it.coerceIn(SettingsRanges.SLIDER_SPEED_SMOOTHING) }
         slider_speed_max = safeGetFloat(_prefs, "slider_speed_max", Defaults.SLIDER_SPEED_MAX)
+            .let { if (it.isNaN()) Defaults.SLIDER_SPEED_MAX else it.coerceIn(SettingsRanges.SLIDER_SPEED_MAX) }
 
         // Swipe trail appearance
         swipe_trail_enabled = _prefs.getBoolean("swipe_trail_enabled", Defaults.SWIPE_TRAIL_ENABLED)
@@ -1874,6 +1955,8 @@ class Config private constructor(
             migrateForcedVibrateCustom(prefs)
             migrateGboardDefaultLayout(prefs)
             migrateThemeDefault(prefs)
+            // 2026-10-30: after the purple→Harbor step, so both orders end at the Gboard pair.
+            migrateThemeToGboard(prefs)
             val config = Config(prefs, res, handler, foldableUnfolded)
             _globalConfig = config
             LayoutModifier.init(config, res)
@@ -2152,12 +2235,15 @@ class Config private constructor(
                     "cleverkeyslight" -> R.style.CleverKeysLight
                     "harbor" -> R.style.Harbor
                     "daybreak" -> R.style.Daybreak
+                    // Gboard-glass: one id, light or dark by the system, like "monet".
+                    "gboard" -> if (systemLight) R.style.GboardLight else R.style.GboardDark
                     "signal" -> R.style.Signal
                     "ember" -> R.style.Ember
                     "kiln" -> R.style.Kiln
-                    // ARC-111: an unset theme follows the system. The pair is Harbor / Daybreak,
-                    // not the old purple styles.
-                    "" -> if (systemLight) R.style.Daybreak else R.style.Harbor
+                    // An unset theme follows the system on the CURRENT default pair (the
+                    // Gboard-glass styles). ARC-111 introduced the pattern with Harbor/Daybreak;
+                    // 2026-10-30 moved the default to Gboard, so "unset" means Gboard too.
+                    "" -> if (systemLight) R.style.GboardLight else R.style.GboardDark
                     else -> if (systemLight) R.style.Light else R.style.Dark
                 }
             }
@@ -2306,6 +2392,29 @@ class Config private constructor(
                 Log.i("Config", "Moved the retired purple default to ${Defaults.THEME}")
             }
             e.putBoolean(ThemeDefaultMigration.MIGRATION_MARKER_KEY, true)
+            e.apply()
+        }
+
+        /**
+         * 2026-10-30: move installs that are still on a shipped default to the Gboard-glass
+         * pair. Runs once; a deliberate choice anywhere else is untouched (see
+         * [GboardThemeMigration]). A fresh install never reaches the write because the pref
+         * getter already returns [Defaults.THEME].
+         */
+        @JvmStatic
+        fun migrateThemeToGboard(prefs: SharedPreferences) {
+            if (prefs.getBoolean(GboardThemeMigration.MIGRATION_MARKER_KEY, false)) return
+            val stored = try {
+                prefs.getString("theme", null)
+            } catch (e: ClassCastException) {
+                null
+            }
+            val e = prefs.edit()
+            if (GboardThemeMigration.shouldRepoint(alreadyMigrated = false, storedTheme = stored)) {
+                e.putString("theme", Defaults.THEME)
+                Log.i("Config", "Moved the previous default theme ($stored) to ${Defaults.THEME}")
+            }
+            e.putBoolean(GboardThemeMigration.MIGRATION_MARKER_KEY, true)
             e.apply()
         }
 

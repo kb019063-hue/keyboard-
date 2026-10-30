@@ -24,8 +24,32 @@ class ThemeDefaultMigrationTest {
     }
 
     @Test
-    fun newDefaultIsHarborNotPurple() {
-        assertThat(Defaults.THEME).isEqualTo("harbor")
+    fun newDefaultIsTheGboardPairNotPurple() {
+        assertThat(Defaults.THEME).isEqualTo("gboard")
         assertThat(Defaults.THEME).isNotEqualTo(ThemeDefaultMigration.RETIRED_DEFAULT)
+    }
+
+    // 2026-10-30: the default moved again, to the Gboard-glass pair. Only values that mean
+    // "no opinion" move; a deliberate pick (any other built-in, decorative, custom) stays.
+
+    @Test
+    fun previousDefaultsAreRepointedToGboard() {
+        for (stored in listOf("", "cleverkeysdark", "harbor", "daybreak")) {
+            assertThat(GboardThemeMigration.shouldRepoint(false, stored)).isTrue()
+        }
+    }
+
+    @Test
+    fun deliberateChoicesSurviveTheGboardMigration() {
+        for (stored in listOf("cobalt", "ember", "monet", "monetlight", "monetdark", "light",
+                              "decorative_neon_hot_pink", "custom_1234", "gboard")) {
+            assertThat(GboardThemeMigration.shouldRepoint(false, stored)).isFalse()
+        }
+        assertThat(GboardThemeMigration.shouldRepoint(false, null)).isFalse()
+    }
+
+    @Test
+    fun gboardMigrationRunsOnce() {
+        assertThat(GboardThemeMigration.shouldRepoint(true, "harbor")).isFalse()
     }
 }

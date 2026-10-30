@@ -11,6 +11,45 @@ import tribixbite.cleverkeys.theme.KeyboardColorScheme
 import kotlin.math.min
 
 /**
+ * How a key's fill alpha is composed from the theme colour and the user's opacity setting.
+ *
+ * `Paint.setAlpha` REPLACES the colour's alpha channel, so the old `bg_paint.alpha = keyOpacity`
+ * silently flattened every translucent theme colour to the user's percentage: a 15 %-white glass
+ * key rendered fully opaque. Multiplying instead keeps every opaque theme bit-identical
+ * (255 × opacity / 255 == opacity) and lets a translucent theme stay translucent.
+ */
+internal object KeyFillAlpha {
+    /** [color]'s own alpha scaled by [userOpacity] (0..255). Fully transparent stays transparent. */
+    fun of(color: Int, userOpacity: Int): Int {
+        val base = android.graphics.Color.alpha(color)
+        if (base == 0) return 0
+        return (base * userOpacity.coerceIn(0, 255) / 255).coerceIn(0, 255)
+    }
+}
+
+/**
+ * Reads the backdrop-blur radius a theme declares, without constructing the whole [Theme].
+ *
+ * The IME window is already translucent (`CleverKeysIMETheme` sets a transparent window
+ * background), so a theme only has to (a) paint a see-through scrim and (b) name a blur radius
+ * here; the service then asks the platform to blur what is behind the window. Splitting it out
+ * keeps [tribixbite.cleverkeys.CleverKeysService] free of colour/attribute plumbing.
+ */
+internal object KeyboardBackdrop {
+    /** Blur radius in px for [styleId], or 0 when the theme declares none (the common case). */
+    fun blurRadiusPx(context: Context, styleId: Int): Float {
+        if (styleId == 0) return 0f
+        val ta = ContextThemeWrapper(context, styleId).theme
+            .obtainStyledAttributes(null, R.styleable.keyboard, 0, 0)
+        return try {
+            ta.getDimension(R.styleable.keyboard_blurRadius, 0f)
+        } finally {
+            ta.recycle()
+        }
+    }
+}
+
+/**
  * Theme class for keyboard rendering.
  *
  * Supports two modes:
@@ -88,6 +127,19 @@ class Theme {
     /** Border colour of the ACTIVATED (pressed/locked) key frame. */
     val keyBorderColorActivated: Int
 
+    /**
+     * Visual gap between neighbouring keys, in px (`keyGap`). The gap is drawn INSIDE the key
+     * cell, so it costs nothing from the touch target — the whole cell still hits the key.
+     * 0 for every theme that predates the attribute, which keeps their rendering identical.
+     */
+    val keyGap: Float
+
+    /**
+     * Backdrop blur radius behind the IME window, in px (`blurRadius`). 0 = no blur. Only the
+     * translucent themes set it; [tribixbite.cleverkeys.CleverKeysService] applies it on API 31+.
+     */
+    val blurRadius: Float
+
     /** Press-ripple colour; 0 = keep the platform default ripple (XML themes). */
     @JvmField
     val rippleColor: Int
@@ -142,11 +194,15 @@ class Theme {
         keyBorderRadius = s.getDimension(R.styleable.keyboard_keyBorderRadius, 0f)
         keyBorderWidth = s.getDimension(R.styleable.keyboard_keyBorderWidth, 0f)
         keyBorderWidthActivated = s.getDimension(R.styleable.keyboard_keyBorderWidthActivated, 0f)
+        keyGap = s.getDimension(R.styleable.keyboard_keyGap, 0f)
+        blurRadius = s.getDimension(R.styleable.keyboard_blurRadius, 0f)
         keyBorderColorLeft = s.getColor(R.styleable.keyboard_keyBorderColorLeft, colorKey)
         keyBorderColorTop = s.getColor(R.styleable.keyboard_keyBorderColorTop, colorKey)
         keyBorderColorRight = s.getColor(R.styleable.keyboard_keyBorderColorRight, colorKey)
         keyBorderColorBottom = s.getColor(R.styleable.keyboard_keyBorderColorBottom, colorKey)
         colorKeyboardBackground = s.getColor(R.styleable.keyboard_colorKeyboard, 0)
+        // Read before recycle(); 0 = "no opinion", which falls back to the key colour below.
+        val suggestionBarColor = s.getColor(R.styleable.keyboard_colorSuggestionBar, 0)
         s.recycle()
 
         // H-4: no XML attrs exist for the Theme-Creator fields — default each to the
@@ -156,10 +212,21 @@ class Theme {
         colorKeySpecial = colorKey
         keyBorderColorActivated = keyBorderColorTop
         rippleColor = 0 // platform-default ripple
-        suggestionBackgroundColor = colorKey
-        // colorLabelActivated was designed for colorKeyActivated, not the bar (colorKey):
+        // Translucent themes need a strip that is more opaque than their keys or the suggestions
+        // would sit on the app itself; every older theme leaves the attribute unset (0) and gets
+        // exactly the key colour it always had.
+        suggestionBackgroundColor = if (suggestionBarColor != 0) suggestionBarColor else colorKey
+        // colorLabelActivated was designed for colorKeyActivated, not for the bar:
         // readable only after SuggestionBarPalette (Cobalt's was the bar colour itself).
-        val bar = SuggestionBarPalette.resolve(labelColor, activatedColor, subLabelColor, colorKey)
+        //
+        // Resolve against the BAR's background, not the key colour. They were the same colour
+        // until `colorSuggestionBar` existed; on the translucent themes the key colour is a
+        // 15 %-white tile, so resolving against it decided white-on-white and fell back to BLACK
+        // text and black toolbar icons on a near-black glass keyboard (2026-10-30). The runtime
+        // constructor has always passed the bar background here — this makes the XML path agree.
+        val bar = SuggestionBarPalette.resolve(
+            labelColor, activatedColor, subLabelColor, suggestionBackgroundColor
+        )
         suggestionTextColor = bar.text
         suggestionHighConfidenceColor = bar.highlight
         suggestionSecondaryTextColor = bar.secondary
@@ -198,6 +265,9 @@ class Theme {
         keyBorderRadius = 8f * density  // 8dp default
         keyBorderWidth = 1f * density   // 1dp default
         keyBorderWidthActivated = 2f * density  // 2dp when activated
+        // A KeyboardColorScheme carries colours, not geometry: keep the historical look.
+        keyGap = 0f
+        blurRadius = 0f
 
         // Nav bar - derive from keyboard background
         colorNavBar = colorScheme.keyboardBackground.toArgb()
@@ -374,6 +444,10 @@ class Theme {
             val border_width: Float
             @JvmField
             val border_radius: Float
+
+            /** Visual gap to leave around this key, px (half is taken from each side). */
+            @JvmField
+            val gap: Float
             private val _label_paint: Paint
             private val _special_label_paint: Paint
             private val _sublabel_paint: Paint
@@ -381,11 +455,13 @@ class Theme {
             private val _label_alpha_bits: Int
 
             init {
-                bg_paint.color = when {
+                val fill = when {
                     bgColorOverride != 0 -> bgColorOverride
                     activated -> theme.colorKeyActivated
                     else -> theme.colorKey
                 }
+                bg_paint.color = fill
+                gap = theme.keyGap
 
                 if (config.borderConfig) {
                     border_radius = config.customBorderRadius * keyWidth
@@ -395,7 +471,10 @@ class Theme {
                     border_width = if (activated) theme.keyBorderWidthActivated else theme.keyBorderWidth
                 }
 
-                bg_paint.alpha = if (activated) config.keyActivatedOpacity else config.keyOpacity
+                bg_paint.alpha = KeyFillAlpha.of(
+                    fill,
+                    if (activated) config.keyActivatedOpacity else config.keyOpacity
+                )
                 // H-4: the activated frame's border uses the Theme-Creator's "Border
                 // Activated" colour (XML themes default it to keyBorderColorTop).
                 border_paint = init_border_paint(

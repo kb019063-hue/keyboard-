@@ -63,6 +63,9 @@ class ThemeSettingsActivity : ComponentActivity() {
          * These are the theme IDs that Config.kt's getThemeId() recognizes
          */
         val BUILTIN_THEMES = listOf(
+            // Swatch colours are the DARK variant of the glass pair (translucent over a neutral
+            // field reads as a smudge in a 40dp chip, so the chip shows the opaque equivalents).
+            BuiltinTheme("gboard", R.string.theme_builtin_gboard_name, R.string.theme_builtin_gboard_desc, 0xFF1A1C1F, 0xFF3C4043, 0xFFFFFFFF),
             BuiltinTheme("harbor", R.string.theme_builtin_harbor_name, R.string.theme_builtin_harbor_desc, 0xFF0C1826, 0xFF1A3352, 0xFFF4F7FB),
             BuiltinTheme("daybreak", R.string.theme_builtin_daybreak_name, R.string.theme_builtin_daybreak_desc, 0xFFE4EDF6, 0xFFF8FBFE, 0xFF142033),
             BuiltinTheme("signal", R.string.theme_builtin_signal_name, R.string.theme_builtin_signal_desc, 0xFF070B12, 0xFF101826, 0xFFA9CFFF),

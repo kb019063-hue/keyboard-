@@ -318,6 +318,8 @@ class PredictionViewSetup(
             ?: container?.findViewById<KeyboardToolbar>(R.id.keyboard_toolbar)
             ?: return null
         toolbar.setCommandDispatcher { mapping -> keyboardView.onCustomShortSwipe(mapping) }
+        // Same opacity the strip is given, so the two rows are one shade (see KeyboardToolbar).
+        toolbar.setOpacity(config.suggestion_bar_opacity)
         toolbar.applyFromConfig(config)
         return toolbar
     }

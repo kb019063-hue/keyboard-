@@ -79,6 +79,16 @@ class KeyboardToolbar(
     private var keys: List<String> = emptyList()
 
     /**
+     * Opacity (0..100) applied to the bar background, mirroring `SuggestionBar.setOpacity`.
+     *
+     * The strip has always multiplied its background by the user's `suggestion_bar_opacity`
+     * (default 80 %) while the toolbar painted the raw colour, so the two rows sat one shade
+     * apart even on an opaque theme — visible as a faint band across the top. With a translucent
+     * theme the mismatch is not faint, so both rows now follow the same rule.
+     */
+    private var opacity = 100
+
+    /**
      * Gboard's one-row behaviour (phase 4 part 6, corrected in part 7). On Gboard the toolbar
      * and the word suggestions are the SAME row: one button at its left, one at its right, and
      * words between them. This view is a sibling of the suggestion strip rather than part of
@@ -334,8 +344,19 @@ class KeyboardToolbar(
         )
     }
 
+    /** Same contract as `SuggestionBar.setOpacity`: clamps, ignores no-op updates. */
+    fun setOpacity(percent: Int) {
+        val clamped = percent.coerceIn(0, 100)
+        if (clamped == opacity) return
+        opacity = clamped
+        applyThemeColors()
+    }
+
     private fun applyThemeColors() {
-        setBackgroundColor(theme?.suggestionBackgroundColor ?: 0)
+        val bg = theme?.suggestionBackgroundColor ?: 0
+        // KeyFillAlpha multiplies the colour's own alpha, so a translucent strip colour survives
+        // and an opaque one keeps exactly the percentage it always had.
+        setBackgroundColor(KeyFillAlpha.of(bg, opacity * 255 / 100))
     }
 
     private fun textColor(): Int = theme?.suggestionTextColor ?: 0xFF000000.toInt()

@@ -408,7 +408,10 @@ class KeyEventHandler(
 
         // Double-space-to-period: If typing space after space within threshold, replace with ". "
         // Skip if: feature disabled, key repeat (long press), or previous char wasn't alphanumeric
-        val currentTime = System.currentTimeMillis()
+        // Uptime, not the wall clock: this is an elapsed-time comparison, and a clock change
+        // between the two spaces (NTP correction, manual change) would otherwise either fire
+        // the period early or make the delta negative and never fire it at all.
+        val currentTime = android.os.SystemClock.uptimeMillis()
         var textToCommit = text
         // SAS-1: set when sentence-ending punctuation swallows the auto-space and
         // re-adds one — the fresh space is re-marked pending AFTER the commit below.
@@ -448,7 +451,14 @@ class KeyEventHandler(
             val isPunctChar = isSmartPunctuationChar(char)
             val isQuote = isQuoteChar(char)
 
-            if (smartPuncEnabled && (isPunctChar || isQuote)) {
+            // SAS-1 short-circuit: the swallow is impossible unless an automatic space is
+            // pending, and that is a local flag. The two reads that exist to PROVE eligibility
+            // — a 500-char getTextBeforeCursor and a full getExtractedText (currentSelection) —
+            // are Binder round trips, and they used to run on EVERY punctuation keystroke even
+            // when nothing was pending, i.e. almost always. Consult the flag first; the
+            // verify-at-use reads still run whenever the answer can actually be yes.
+            val autoSpacePending = recv.wasLastSpaceAutoInserted()
+            if (smartPuncEnabled && (isPunctChar || isQuote) && autoSpacePending) {
                 val textBefore = conn.getTextBeforeCursor(500, 0)  // Get enough context for quote counting
                 val selection = PredictionContextTracker.currentSelection(conn)
                 // A range can start at the old auto-space stamp. Replacing that range
@@ -456,7 +466,7 @@ class KeyEventHandler(
                 val collapsedSelection = if (selection != null) selection.first == selection.second
                     else try { conn.getSelectedText(0).isNullOrEmpty() } catch (_: Exception) { false }
                 val eligible = collapsedSelection && SmartAutoSpace.isSwallowEligible(
-                    autoSpacePending = recv.wasLastSpaceAutoInserted(),
+                    autoSpacePending = autoSpacePending,
                     stampedPosition = recv.getAutoSpaceStampedPosition(),
                     actualPrevChar = textBefore?.lastOrNull(),
                     actualPosition = selection?.first ?: -1

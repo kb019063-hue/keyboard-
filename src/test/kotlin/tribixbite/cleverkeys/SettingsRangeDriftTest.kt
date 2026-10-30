@@ -166,6 +166,68 @@ class SettingsRangeDriftTest {
         assertThat(SettingsRanges.SLIDER_SENSITIVITY_PERCENT.first).isAtLeast(1)
     }
 
+    // ── Bug hunt 2026-10-30: the space slider's speed estimate and the GH #190 vertical
+    //    selection multiplier are the last slider-backed numbers consumed by DIVISION with
+    //    no range anywhere. Same ratchet as F-3, applied to the three sites.
+
+    @Test
+    fun sliderSpeedAndVerticalSelection_floorsAreAboveZero() {
+        assertWithMessage("a 0 max multiplier makes min(max, …) zero or negative — the cursor reverses")
+            .that(SettingsRanges.SLIDER_SPEED_MAX.start).isGreaterThan(0f)
+        assertWithMessage("a 0 smoothing factor never responds; the floor is the slider's own")
+            .that(SettingsRanges.SLIDER_SPEED_SMOOTHING.start).isAtLeast(0.1f)
+        assertWithMessage("the repeat delay divides by this value")
+            .that(SettingsRanges.SELECTION_DELETE_VERTICAL_SPEED.start).isGreaterThan(0f)
+    }
+
+    @Test
+    fun zeroVerticalSelectionSpeed_isRejectedOnImport() {
+        assertThat(SettingsValidation.validate("selection_delete_vertical_speed", PrefValue.FloatV(0f)))
+            .isNotNull()
+        assertThat(SettingsValidation.validate("selection_delete_vertical_speed", PrefValue.FloatV(-0.5f)))
+            .isNotNull()
+        assertThat(SettingsValidation.validate("selection_delete_vertical_speed", PrefValue.FloatV(Float.NaN)))
+            .isNotNull()
+        assertThat(SettingsValidation.validate("selection_delete_vertical_speed", PrefValue.FloatV(0.4f)))
+            .isNull()
+    }
+
+    @Test
+    fun verticalSelectionThreshold_isRangeCheckedOnImport() {
+        assertThat(SettingsValidation.intRangeFor("selection_delete_vertical_threshold"))
+            .isEqualTo(SettingsRanges.SELECTION_DELETE_VERTICAL_THRESHOLD)
+        assertThat(SettingsValidation.validate("selection_delete_vertical_threshold", PrefValue.IntV(0)))
+            .isNotNull()
+        assertThat(SettingsValidation.validate("selection_delete_vertical_threshold", PrefValue.IntV(10_000)))
+            .isNotNull()
+        assertThat(SettingsValidation.validate("selection_delete_vertical_threshold", PrefValue.IntV(40)))
+            .isNull()
+    }
+
+    @Test
+    fun sliderSpeedAndVerticalSelection_allSitesConsumeSharedRanges() {
+        assertSiteReferences("ui/settings/sections/GestureTuningSection.kt", "SLIDER_SPEED_MAX")
+        assertSiteReferences("ui/settings/sections/GestureTuningSection.kt", "SLIDER_SPEED_SMOOTHING")
+        assertSiteReferences(
+            "ui/settings/sections/GestureTuningSection.kt",
+            "SELECTION_DELETE_VERTICAL_THRESHOLD",
+        )
+        assertSiteReferences(
+            "ui/settings/sections/GestureTuningSection.kt",
+            "SELECTION_DELETE_VERTICAL_SPEED",
+        )
+        assertSiteReferences("Config.kt", "SLIDER_SPEED_MAX")
+        assertSiteReferences("Config.kt", "SLIDER_SPEED_SMOOTHING")
+        assertSiteReferences("Config.kt", "SELECTION_DELETE_VERTICAL_THRESHOLD")
+        assertSiteReferences("Config.kt", "SELECTION_DELETE_VERTICAL_SPEED")
+        assertSiteReferences("ui/settings/SettingsPersistence.kt", "SLIDER_SPEED_MAX")
+        assertSiteReferences(
+            "ui/settings/SettingsPersistence.kt",
+            "SELECTION_DELETE_VERTICAL_THRESHOLD",
+        )
+        assertSiteReferences("backup/SettingsValidation.kt", "SELECTION_DELETE_VERTICAL_SPEED")
+    }
+
     // ── F-8 (maintainer decision 2026-09-08): clipboard_max_media_size_mb is
     //    surfaced, so it joins the shared-range ratchet — the new slider, the
     //    import validator and the Config read-site clamp must all consume ONE
@@ -211,6 +273,7 @@ class SettingsRangeDriftTest {
         put("custom_border_radius", SettingsRanges.CUSTOM_BORDER_RADIUS)
         put("vibrate_duration", SettingsRanges.VIBRATE_DURATION)
         put("selection_delete_step_dp", SettingsRanges.SELECTION_DELETE_STEP_DP)
+        put("selection_delete_vertical_threshold", SettingsRanges.SELECTION_DELETE_VERTICAL_THRESHOLD)
         put("clipboard_max_media_size_mb", SettingsRanges.CLIPBOARD_MAX_MEDIA_SIZE_MB)
         put("clipboard_history_limit", SettingsRanges.CLIPBOARD_HISTORY_LIMIT)
         put("circle_sensitivity", SettingsRanges.CIRCLE_SENSITIVITY)

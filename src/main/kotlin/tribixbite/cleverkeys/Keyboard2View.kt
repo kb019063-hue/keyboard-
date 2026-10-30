@@ -1018,7 +1018,12 @@ class Keyboard2View @JvmOverloads constructor(
 
                 return distanceFromCenter <= maxDistance
             }
-            keyX += k.width * _keyWidth
+            // Advance by the key's OWN shift plus its width, exactly as the canonical layout
+            // loop does (`xLeft = x + key.shift * _keyWidth; x = xLeft + key.width * _keyWidth`
+            // in getRealKeyPositions). Dropping `k.shift` put every key AFTER a shifted key on
+            // the wrong x, mangling the hit box on the non-Latin layouts that inset keys this
+            // way (arab_pc, beng_national, deva_*, cyrl_yaverti, georgian_* ...).
+            keyX += (k.width + k.shift) * _keyWidth
         }
 
         if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
@@ -2099,7 +2104,13 @@ class Keyboard2View @JvmOverloads constructor(
     private fun drawKeyFrame(canvas: Canvas, x: Float, y: Float, keyW: Float, keyH: Float, tc: Theme.Computed.Key) {
         val r = tc.border_radius
         val w = tc.border_width
-        val padding = w / 2f
+        // The border is drawn INSIDE the rect (hence half its width), and a theme's `keyGap`
+        // shrinks the tile on all four sides so neighbouring keys read as separate tiles the way
+        // Gboard's do. The inset is capped just short of half the shorter side so a large gap on a
+        // short row can never invert the rectangle.
+        val wanted = w / 2f + tc.gap / 2f
+        val limit = minOf(keyW, keyH) / 2f - 1f
+        val padding = wanted.coerceIn(0f, if (limit > 0f) limit else 0f)
         _tmpRect.set(x + padding, y + padding, x + keyW - padding, y + keyH - padding)
         canvas.drawRoundRect(_tmpRect, r, r, tc.bg_paint)
         if (w > 0f) {

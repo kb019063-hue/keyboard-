@@ -244,3 +244,7 @@ src/androidTest/assets/ctc_bench/*.onnx
 
 # Decoded at deploy/dev time from ctc_vocab.bin.b64 (F-Droid scanner cleanliness)
 web_demo/demo/models/ctc_vocab.bin
+
+# Generated previews (dev-only, never checked in — keep stale renders out of the tree)
+docs/gboard-style-preview.png
+docs/theme-wardrobe.png

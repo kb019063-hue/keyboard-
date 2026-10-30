@@ -40,8 +40,22 @@ class ThemeStyleMapTest {
     }
 
     @Test
+    fun gboardPair_followsTheSystem() {
+        // 2026-10-30: the default look. Same shape as "monet": one id, two styles.
+        assertThat(Config.builtInThemeStyleId("gboard", systemLight = true, sdk = api31))
+            .isEqualTo(R.style.GboardLight)
+        assertThat(Config.builtInThemeStyleId("gboard", systemLight = false, sdk = api31))
+            .isEqualTo(R.style.GboardDark)
+        // The glass pair is not API-gated: translucency works from minSdk, only the blur is 31+.
+        assertThat(Config.builtInThemeStyleId("gboard", systemLight = true, sdk = api30))
+            .isEqualTo(R.style.GboardLight)
+    }
+
+    @Test
     fun everyExplicitBuiltInTheme_ignoresTheSystemMode() {
-        for (id in ThemeProvider.BUILT_IN_THEME_IDS - "monet") {
+        // "monet" and (since 2026-10-30) "gboard" are the two ids that are a PAIR resolved from
+        // the system mode, so they are the two the rule does not apply to.
+        for (id in ThemeProvider.BUILT_IN_THEME_IDS - setOf("monet", "gboard")) {
             for (sdk in listOf(api30, api31)) {
                 assertWithMessage("$id on API $sdk must not depend on light/dark mode")
                     .that(Config.builtInThemeStyleId(id, systemLight = true, sdk = sdk))
@@ -54,8 +68,9 @@ class ThemeStyleMapTest {
 
     @Test
     fun unsetAndUnknownNames_followTheSystem() {
-        assertThat(Config.builtInThemeStyleId("", systemLight = true, sdk = api31)).isEqualTo(R.style.Daybreak)
-        assertThat(Config.builtInThemeStyleId("", systemLight = false, sdk = api31)).isEqualTo(R.style.Harbor)
+        // 2026-10-30: "unset" means the CURRENT default pair, which is the Gboard-glass pair.
+        assertThat(Config.builtInThemeStyleId("", systemLight = true, sdk = api31)).isEqualTo(R.style.GboardLight)
+        assertThat(Config.builtInThemeStyleId("", systemLight = false, sdk = api31)).isEqualTo(R.style.GboardDark)
         assertThat(Config.builtInThemeStyleId("no_such_theme", systemLight = true, sdk = api31)).isEqualTo(R.style.Light)
         assertThat(Config.builtInThemeStyleId("no_such_theme", systemLight = false, sdk = api31)).isEqualTo(R.style.Dark)
     }

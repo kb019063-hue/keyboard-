@@ -558,11 +558,16 @@ class SuggestionBar : LinearLayout {
 
         // Use theme colors with user-defined opacity (audit H-4: the Theme-Creator's
         // "Suggestion Background"; XML themes default it to the old key colour).
+        //
+        // The opacity MULTIPLIES the colour's own alpha (KeyFillAlpha) instead of replacing it:
+        // argb(alpha, …) flattened a translucent theme colour to a fully opaque strip, which is
+        // why the Gboard-glass themes could not have a see-through bar. Opaque themes are
+        // unaffected — 255 × opacity / 255 is the percentage they always got.
         if (theme?.suggestionBackgroundColor != 0) {
             val bgColor = theme?.suggestionBackgroundColor ?: Color.DKGRAY
             setBackgroundColor(
                 Color.argb(
-                    alpha,
+                    KeyFillAlpha.of(bgColor, alpha),
                     Color.red(bgColor),
                     Color.green(bgColor),
                     Color.blue(bgColor)

@@ -52,6 +52,10 @@ class SuggestionBarPaletteTest {
         return styles.keys.mapNotNull { style ->
             val label = resolve(style, "colorLabel") ?: return@mapNotNull null
             val key = resolve(style, "colorKey") ?: return@mapNotNull null
+            // The bar's OWN background, which is what Theme passes to the resolver since
+            // 2026-10-30 (it was the key colour, and on a translucent theme that made the
+            // resolver pick black text for a near-black strip).
+            val bar = resolve(style, "colorSuggestionBar") ?: key
             // Monet styles reference @android:color/system_* (wallpaper-derived at runtime):
             // not resolvable here; their palette is Material's own tonal contrast.
             if (!label.startsWith("#") || !key.startsWith("#")) return@mapNotNull null
@@ -59,7 +63,7 @@ class SuggestionBarPaletteTest {
                 style, argb(label),
                 argb(resolve(style, "colorLabelActivated") ?: label),
                 argb(resolve(style, "colorSubLabel") ?: label),
-                argb(key),
+                argb(bar),
             )
         }
     }
@@ -91,6 +95,23 @@ class SuggestionBarPaletteTest {
         val themes = decorativeThemes()
         assertThat(themes.map { it.name }).contains("neon_cyberpunk")
         assertWithMessage("roles below ${SuggestionBarPalette.MIN_CONTRAST}:1").that(failures(themes)).isEmpty()
+    }
+
+    @Test
+    fun translucentKeyColourDoesNotDecideTheTextColour() {
+        // The 2026-10-30 regression: the Gboard-glass key is 15 % white, and resolving the bar's
+        // text against THAT pixel colour made the resolver answer black — black text and black
+        // toolbar icons on a near-black keyboard. Resolving against the strip's real backdrop
+        // keeps the theme's white text.
+        val glassText = SuggestionBarPalette.resolve(
+            0xFFFFFFFF.toInt(), 0xFFFFFFFF.toInt(), 0xB3FFFFFF.toInt(), 0xC4141619.toInt()
+        )
+        assertThat(glassText.text).isEqualTo(0xFFFFFFFF.toInt())
+        // And the light variant keeps its ink.
+        val lightGlass = SuggestionBarPalette.resolve(
+            0xFF1F1F1F.toInt(), 0xFF1F1F1F.toInt(), 0xFF5F6368.toInt(), 0xCCF1F3F4.toInt()
+        )
+        assertThat(lightGlass.text).isEqualTo(0xFF1F1F1F.toInt())
     }
 
     @Test

@@ -22,9 +22,18 @@ GitHub Actions is the compiler: this sandbox cannot build an APK.
 
 ## The layout must match the Gboard screenshot
 
-Reference photo: `Screenshot_20261022_061716_com.huawei.android.launcher.jpg`.
-The October 23 CleverKeys photo is the **before** state (dense PC layout, Ctrl/Fn bottom
-row, symbols on every letter). Do not treat that photo as the target.
+The reference is the owner's own Gboard (Gboard 16 on Android, portrait, number row ON)
+and it is described here in words because the on-device screenshots that used to sit in
+the tree are stale and have been removed:
+
+- one toolbar row of seven commands, mic on the right
+- a plain `1234567890` row
+- lowercase QWERTY, with Gboard's single corner hint per letter
+- bottom row `?123`, comma, emoji, space, period, action/enter
+- keys are separate rounded tiles with a visible gap, not one continuous slab
+
+The "before" state was the dense PC-style layout (Ctrl/Fn bottom row, symbols on every
+letter); it is not the target.
 
 Shipped arrangement, file `src/main/layouts/latn_qwerty_us_gboard_style.xml`:
 
@@ -53,13 +62,41 @@ They called the deep-purple theme AI slop and asked for blue, or a cool red, and
 than two themes they can switch between. Purple is still in the picker as
 "Mr. Brown's Keyboard Dark". It is no longer the default.
 
-`Defaults.THEME` is `harbor`. An install still stored as `cleverkeysdark` moves to Harbor
-once (`ThemeDefaultMigration`, marker `theme_harbor_default_v1`). Never rename that marker.
-Any other saved theme is left alone.
+`ThemeDefaultMigration` (marker `theme_harbor_default_v1`) moved that one stored value to
+Harbor in 2026-10-26. Never rename that marker.
+
+## The look must be Gboard's (2026-10-30)
+
+The owner's verdict on the shipped appearance: the arrangement was Gboard's but the keyboard
+"still doesn't look like it". Their Gboard (Gboard 16, portrait, number row on) draws:
+
+- separate rounded tiles with a real gap between them, never one continuous slab
+- a see-through field: the app behind stays visible through the keys
+- white letters, one small corner hint per letter, a blue action key
+- seven toolbar commands with the mic last
+
+`Defaults.THEME` is now `gboard` — one id with a light and a dark variant, resolved from the
+system night mode exactly the way `monet` resolves its pair. The styles are `GboardLight` and
+`GboardDark`, and what they add to the attribute set is `keyGap` (3dp, drawn inside the key cell
+so the touch target does not shrink) and `blurRadius` (24dp, applied by the service on API 31+;
+below that, and wherever the OEM disables cross-window blur, the translucent scrim carries the
+look on its own).
+
+Two migrations now exist and both markers are permanent:
+
+| Marker | Moves | Leaves alone |
+|---|---|---|
+| `theme_harbor_default_v1` | `cleverkeysdark` → the then-default | everything else |
+| `theme_gboard_default_v1` | `""`, `cleverkeysdark`, `harbor`, `daybreak` → `gboard` | every deliberate pick, including `monet*`, decorative and custom themes |
+
+Not copied, still: Google's icons, typeface and artwork. The glass is geometry and alpha, not
+asset art. `ThemeProvider.FALLBACK_THEME_ID` stays `harbor` (the landing spot when a *custom*
+theme is deleted), so `CustomThemePrefPolicy.FALLBACK_SWIPE_TRAIL_COLOR` still matches Harbor.
 
 | Id | Name | What it is |
 |---|---|---|
-| `harbor` | Harbor | Night navy, white letters. **Default.** |
+| `gboard` | Gboard (glass) | Rounded tiles with a gap, see-through, light or dark with the system. **Default.** |
+| `harbor` | Harbor | Night navy, white letters. |
 | `daybreak` | Daybreak | Cool daylight blue, white keys. |
 | `signal` | Signal | Black field, electric-blue letters, light key when pressed. |
 | `ember` | Ember | Charcoal keys with a lacquer-red edge. Not a flat red fill. |
@@ -72,10 +109,12 @@ A new built-in theme is not done until all of these agree: `res/values/themes.xm
 diverge. `CustomThemePrefPolicy.FALLBACK_SWIPE_TRAIL_COLOR` must match Harbor's trail
 (`0xFF9CC7FF`) while Harbor is the fallback id.
 
-Comparison sheet: [`theme-wardrobe.png`](theme-wardrobe.png). The coloured enter key in
-that sheet is the press/accent colour, drawn so the accent is visible. On device the enter
-key uses the same resting colour as the other keys until it is pressed, except Ember and
-Signal, whose coloured edges are real borders.
+The comparison sheet (`docs/theme-wardrobe.png`) used to be checked in; it is a stale
+render, is no longer in the tree, and is regenerated on demand with
+`python3 tools/render_theme_wardrobe.py`. The coloured enter key in that render is the
+press/accent colour, drawn so the accent is visible. On device the enter key uses the same
+resting colour as the other keys until it is pressed, except Ember and Signal, whose
+coloured edges are real borders.
 
 ## Bugs already fixed — do not reintroduce
 

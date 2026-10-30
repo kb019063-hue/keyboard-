@@ -185,7 +185,7 @@ internal fun SettingsActivity.GestureTuningSection() {
                     title = stringResource(R.string.gesture_vertical_threshold_title),
                     description = stringResource(R.string.gesture_vertical_threshold_desc),
                     value = selectionDeleteVerticalThreshold.toFloat(),
-                    valueRange = 20f..80f,
+                    valueRange = SettingsRanges.SELECTION_DELETE_VERTICAL_THRESHOLD.toSliderRange(),
                     increment = 5f,
                     onValueChange = {
                         selectionDeleteVerticalThreshold = it.roundToInt()
@@ -236,7 +236,7 @@ internal fun SettingsActivity.GestureTuningSection() {
                         title = stringResource(R.string.gesture_vertical_speed_title),
                         description = stringResource(R.string.gesture_vertical_speed_desc),
                         value = selectionDeleteVerticalSpeed,
-                        valueRange = 0.1f..1.0f,
+                        valueRange = SettingsRanges.SELECTION_DELETE_VERTICAL_SPEED,
                         increment = 0.05f,
                         onValueChange = {
                             selectionDeleteVerticalSpeed = it
@@ -387,7 +387,7 @@ internal fun SettingsActivity.GestureTuningSection() {
                     title = stringResource(R.string.gesture_speed_smoothing_title),
                     description = stringResource(R.string.gesture_speed_smoothing_desc),
                     value = sliderSpeedSmoothing,
-                    valueRange = 0.1f..0.95f,
+                    valueRange = SettingsRanges.SLIDER_SPEED_SMOOTHING,
                     increment = 0.05f,
                     onValueChange = {
                         sliderSpeedSmoothing = it
@@ -400,7 +400,7 @@ internal fun SettingsActivity.GestureTuningSection() {
                     title = stringResource(R.string.gesture_max_speed_multiplier_title),
                     description = stringResource(R.string.gesture_max_speed_multiplier_desc),
                     value = sliderSpeedMax,
-                    valueRange = 1.0f..10f,
+                    valueRange = SettingsRanges.SLIDER_SPEED_MAX,
                     increment = 0.5f,
                     onValueChange = {
                         sliderSpeedMax = it

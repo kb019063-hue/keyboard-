@@ -83,7 +83,10 @@ class PreferenceUIUpdateHandler(
      * updating the detached original.
      */
     private fun updateToolbar() {
-        config?.let { cfg -> toolbar()?.applyFromConfig(cfg) }
+        config?.let { cfg ->
+            toolbar()?.setOpacity(cfg.suggestion_bar_opacity)
+            toolbar()?.applyFromConfig(cfg)
+        }
     }
 
     /**
