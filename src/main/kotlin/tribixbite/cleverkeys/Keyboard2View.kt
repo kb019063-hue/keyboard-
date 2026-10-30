@@ -1018,7 +1018,12 @@ class Keyboard2View @JvmOverloads constructor(
 
                 return distanceFromCenter <= maxDistance
             }
-            keyX += k.width * _keyWidth
+            // Advance by the key's OWN shift plus its width, exactly as the canonical layout
+            // loop does (`xLeft = x + key.shift * _keyWidth; x = xLeft + key.width * _keyWidth`
+            // in getRealKeyPositions). Dropping `k.shift` put every key AFTER a shifted key on
+            // the wrong x, mangling the hit box on the non-Latin layouts that inset keys this
+            // way (arab_pc, beng_national, deva_*, cyrl_yaverti, georgian_* ...).
+            keyX += (k.width + k.shift) * _keyWidth
         }
 
         if (BuildConfig.ENABLE_VERBOSE_LOGGING) {

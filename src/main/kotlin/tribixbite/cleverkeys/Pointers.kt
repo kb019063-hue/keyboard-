@@ -2215,11 +2215,33 @@ class Pointers(
             return ModifiersDiffIterator(this, m2)
         }
 
-        override fun hashCode(): Int = _mods.contentHashCode()
+        /**
+         * Value semantics over the LIVE prefix only, `0 until _size`.
+         *
+         * The backing array is usually longer than `_size`: `getModifiers` allocates one slot
+         * per pointer and `ofArray` compacts nulls into a prefix without shrinking it, so the
+         * tail past `_size` is dead slots. Comparing the whole array made two Modifiers with the
+         * same modifiers unequal whenever they came from different pointer counts — most
+         * visibly `getModifiers()` with one finger down (array length 1, size 0) did NOT equal
+         * [EMPTY] (array length 0). [KeyModifier] uses this type as a memo key and its KDoc
+         * promises content equality, so the tail broke memo hits and split one logical modifier
+         * set across several map entries.
+         */
+        override fun hashCode(): Int {
+            var h = 1
+            for (i in 0 until _size) {
+                h = 31 * h + (_mods[i]?.hashCode() ?: 0)
+            }
+            return h
+        }
 
         override fun equals(other: Any?): Boolean {
             if (other !is Modifiers) return false
-            return _mods.contentEquals(other._mods)
+            if (_size != other._size) return false
+            for (i in 0 until _size) {
+                if (_mods[i] != other._mods[i]) return false
+            }
+            return true
         }
 
         companion object {
