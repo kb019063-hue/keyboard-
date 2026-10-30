@@ -199,10 +199,22 @@ preference is still exactly the old single default (`["latn_qwerty_us"]` or
 second layout, or any other named choice is left alone.
 
 `tools/check_layout.py` fails `preBuild` if the digit row, the hint-free letters, the English
-subtype defaults, the no-subtype fallback, or the previews drift. A rendered check of the layout
-file is `docs/gboard-style-preview.png`, generated on demand by
-`tools/render_layout_preview.py` and deliberately not checked in (a stale render in the tree
-is worse than no render).
+subtype defaults, the no-subtype fallback, or the previews drift.
+
+For looking at the result there are two renderers, and neither is checked in (a stale render in
+the tree is worse than no render):
+
+- **Real pixels:** the `Emulator smoke test` workflow boots a Pixel 7 / API 34 AVD and the
+  `shot()` helper in `scripts/ci/emulator-smoke.sh` runs `adb exec-out screencap` at each step,
+  so `03-typed-text.png` and friends are what the keyboard actually looked like. They travel in
+  the run's artifact; download it from the run page.
+- **Offline approximation:** `tools/render_layout_preview.py` draws the layout XML *and* the
+  `<style>` you name from `res/values/themes.xml`, reproducing `KeyFillAlpha` and
+  `SuggestionBarPalette` so the translucency and the resolved text colours are the app's own
+  arithmetic, over a blurred stand-in app. `--theme GboardDark` / `--theme GboardLight`,
+  `--opacity` to move the suggestion-bar opacity away from its 80 % default. The letters are
+  DejaVu and the toolbar glyphs are geometric stand-ins — it shows the geometry, the colours and
+  the composition, never Google's artwork, and it is not a device screenshot.
 
 What this does **not** copy from the Gboard photograph, on purpose:
 
