@@ -22,9 +22,18 @@ GitHub Actions is the compiler: this sandbox cannot build an APK.
 
 ## The layout must match the Gboard screenshot
 
-Reference photo: `Screenshot_20261022_061716_com.huawei.android.launcher.jpg`.
-The October 23 CleverKeys photo is the **before** state (dense PC layout, Ctrl/Fn bottom
-row, symbols on every letter). Do not treat that photo as the target.
+The reference is the owner's own Gboard (Gboard 16 on Android, portrait, number row ON)
+and it is described here in words because the on-device screenshots that used to sit in
+the tree are stale and have been removed:
+
+- one toolbar row of seven commands, mic on the right
+- a plain `1234567890` row
+- lowercase QWERTY, with Gboard's single corner hint per letter
+- bottom row `?123`, comma, emoji, space, period, action/enter
+- keys are separate rounded tiles with a visible gap, not one continuous slab
+
+The "before" state was the dense PC-style layout (Ctrl/Fn bottom row, symbols on every
+letter); it is not the target.
 
 Shipped arrangement, file `src/main/layouts/latn_qwerty_us_gboard_style.xml`:
 
@@ -72,10 +81,12 @@ A new built-in theme is not done until all of these agree: `res/values/themes.xm
 diverge. `CustomThemePrefPolicy.FALLBACK_SWIPE_TRAIL_COLOR` must match Harbor's trail
 (`0xFF9CC7FF`) while Harbor is the fallback id.
 
-Comparison sheet: [`theme-wardrobe.png`](theme-wardrobe.png). The coloured enter key in
-that sheet is the press/accent colour, drawn so the accent is visible. On device the enter
-key uses the same resting colour as the other keys until it is pressed, except Ember and
-Signal, whose coloured edges are real borders.
+The comparison sheet (`docs/theme-wardrobe.png`) used to be checked in; it is a stale
+render, is no longer in the tree, and is regenerated on demand with
+`python3 tools/render_theme_wardrobe.py`. The coloured enter key in that render is the
+press/accent colour, drawn so the accent is visible. On device the enter key uses the same
+resting colour as the other keys until it is pressed, except Ember and Signal, whose
+coloured edges are real borders.
 
 ## Bugs already fixed — do not reintroduce
 
