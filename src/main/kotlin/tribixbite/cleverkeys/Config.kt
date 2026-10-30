@@ -21,7 +21,13 @@ import kotlin.math.roundToInt
  */
 object Defaults {
     // Appearance
-    const val THEME = "harbor"
+    /**
+     * The out-of-box theme id (2026-10-30): the Gboard-glass pair, whose light/dark variant the
+     * system's night mode picks. Harbor and Daybreak stay in the picker; they were the previous
+     * default pair and are still the fallback when a custom theme is deleted
+     * (ThemeProvider.FALLBACK_THEME_ID).
+     */
+    const val THEME = "gboard"
     // 2026-05-15: lowered from 30% to 27% — feels less cramped on most phones
     // and gives the input field more breathing room above.
     const val KEYBOARD_HEIGHT_PORTRAIT = 27
@@ -885,6 +891,29 @@ object ThemeDefaultMigration {
 
     fun shouldRepoint(alreadyMigrated: Boolean, storedTheme: String?): Boolean =
         !alreadyMigrated && storedTheme == RETIRED_DEFAULT
+}
+
+/**
+ * One-time (2026-10-30): the out-of-box look became the Gboard-glass pair (`gboard`).
+ *
+ * Moves only values that mean "the shipped default" — the retired purple, the Harbor/Daybreak
+ * pair it was replaced with, and an explicitly empty value. A deliberate choice (any other
+ * built-in id, a decorative theme, a custom theme) is left alone: those users picked a look.
+ * Runs once; the marker is always written, so a later deliberate return to Harbor sticks.
+ */
+object GboardThemeMigration {
+    /** Persisted on user devices once the migration has run — never rename. */
+    const val MIGRATION_MARKER_KEY = "theme_gboard_default_v1"
+
+    /**
+     * Stored values that mean "no opinion", i.e. the default of some earlier build:
+     * empty (unset), the retired deep purple, and the Harbor/Daybreak pair that replaced it.
+     * Deliberately NOT included: `monet*` and every other built-in id, which are choices.
+     */
+    val PREVIOUS_DEFAULTS = setOf("", "cleverkeysdark", "harbor", "daybreak")
+
+    fun shouldRepoint(alreadyMigrated: Boolean, storedTheme: String?): Boolean =
+        !alreadyMigrated && storedTheme != null && storedTheme in PREVIOUS_DEFAULTS
 }
 
 object HapticsMigration {
@@ -1926,6 +1955,8 @@ class Config private constructor(
             migrateForcedVibrateCustom(prefs)
             migrateGboardDefaultLayout(prefs)
             migrateThemeDefault(prefs)
+            // 2026-10-30: after the purple→Harbor step, so both orders end at the Gboard pair.
+            migrateThemeToGboard(prefs)
             val config = Config(prefs, res, handler, foldableUnfolded)
             _globalConfig = config
             LayoutModifier.init(config, res)
@@ -2204,12 +2235,15 @@ class Config private constructor(
                     "cleverkeyslight" -> R.style.CleverKeysLight
                     "harbor" -> R.style.Harbor
                     "daybreak" -> R.style.Daybreak
+                    // Gboard-glass: one id, light or dark by the system, like "monet".
+                    "gboard" -> if (systemLight) R.style.GboardLight else R.style.GboardDark
                     "signal" -> R.style.Signal
                     "ember" -> R.style.Ember
                     "kiln" -> R.style.Kiln
-                    // ARC-111: an unset theme follows the system. The pair is Harbor / Daybreak,
-                    // not the old purple styles.
-                    "" -> if (systemLight) R.style.Daybreak else R.style.Harbor
+                    // An unset theme follows the system on the CURRENT default pair (the
+                    // Gboard-glass styles). ARC-111 introduced the pattern with Harbor/Daybreak;
+                    // 2026-10-30 moved the default to Gboard, so "unset" means Gboard too.
+                    "" -> if (systemLight) R.style.GboardLight else R.style.GboardDark
                     else -> if (systemLight) R.style.Light else R.style.Dark
                 }
             }
@@ -2358,6 +2392,29 @@ class Config private constructor(
                 Log.i("Config", "Moved the retired purple default to ${Defaults.THEME}")
             }
             e.putBoolean(ThemeDefaultMigration.MIGRATION_MARKER_KEY, true)
+            e.apply()
+        }
+
+        /**
+         * 2026-10-30: move installs that are still on a shipped default to the Gboard-glass
+         * pair. Runs once; a deliberate choice anywhere else is untouched (see
+         * [GboardThemeMigration]). A fresh install never reaches the write because the pref
+         * getter already returns [Defaults.THEME].
+         */
+        @JvmStatic
+        fun migrateThemeToGboard(prefs: SharedPreferences) {
+            if (prefs.getBoolean(GboardThemeMigration.MIGRATION_MARKER_KEY, false)) return
+            val stored = try {
+                prefs.getString("theme", null)
+            } catch (e: ClassCastException) {
+                null
+            }
+            val e = prefs.edit()
+            if (GboardThemeMigration.shouldRepoint(alreadyMigrated = false, storedTheme = stored)) {
+                e.putString("theme", Defaults.THEME)
+                Log.i("Config", "Moved the previous default theme ($stored) to ${Defaults.THEME}")
+            }
+            e.putBoolean(GboardThemeMigration.MIGRATION_MARKER_KEY, true)
             e.apply()
         }
 

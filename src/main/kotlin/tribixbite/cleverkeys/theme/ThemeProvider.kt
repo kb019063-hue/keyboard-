@@ -69,6 +69,16 @@ class ThemeProvider(
      */
     private fun getBuiltInColorScheme(themeId: String): KeyboardColorScheme {
         return when (themeId) {
+            // Gboard-glass. The pair's dark variant is the approximation used here; the theme
+            // creator only needs a starting point and the picker shows its own swatches.
+            "gboard" -> darkKeyboardColorScheme(
+                primary = androidx.compose.ui.graphics.Color(0xFF8AB4F8)
+            ).copy(
+                keyDefault = androidx.compose.ui.graphics.Color(0x26FFFFFF),
+                keyboardBackground = androidx.compose.ui.graphics.Color(0xC4141619),
+                keyLabel = androidx.compose.ui.graphics.Color(0xFFFFFFFF),
+                swipeTrail = androidx.compose.ui.graphics.Color(0xFF8AB4F8)
+            )
             "harbor" -> darkKeyboardColorScheme(
                 primary = androidx.compose.ui.graphics.Color(0xFF2B6CB0)
             ).copy(
@@ -386,6 +396,8 @@ class ThemeProvider(
          * LayoutThemeBindingConfigTest.
          */
         val BUILT_IN_THEME_IDS: List<String> = listOf(
+            // 2026-10-30: the out-of-box look. One id, light or dark by the system mode.
+            "gboard",
             "harbor", "daybreak", "signal", "ember", "kiln",
             "cleverkeysdark", "cleverkeyslight", "dark", "light", "black", "altblack",
             "white", "rosepine", "cobalt", "pine", "desert", "jungle", "epaper",

@@ -19,8 +19,9 @@ class ConfigDefaultsTest {
     // =========================================================================
 
     @Test
-    fun `theme default is harbor`() {
-        assertThat(Defaults.THEME).isEqualTo("harbor")
+    fun `theme default is the gboard pair`() {
+        // 2026-10-30: the out-of-box look became the Gboard-glass pair (light/dark by system).
+        assertThat(Defaults.THEME).isEqualTo("gboard")
     }
 
     @Test

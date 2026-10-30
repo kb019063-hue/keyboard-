@@ -2065,6 +2065,8 @@
     <string name="calibration_percent_value">%1$d%%</string>
     <string name="theme_builtin_cleverkeysdark_name">Mr. Brown\'s Keyboard Dark</string>
     <string name="theme_builtin_cleverkeysdark_desc">Deep purple with silver accents</string>
+    <string name="theme_builtin_gboard_name">Gboard (glass)</string>
+    <string name="theme_builtin_gboard_desc">Separate rounded keys, see-through, light or dark with the system. The default.</string>
     <string name="theme_builtin_harbor_name">Harbor</string>
     <string name="theme_builtin_harbor_desc">Night navy. The default.</string>
     <string name="theme_builtin_daybreak_name">Daybreak</string>

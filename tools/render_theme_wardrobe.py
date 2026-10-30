@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render the five wardrobe themes as one comparison sheet.
+"""Render the wardrobe themes as one comparison sheet.
 
 Development aid only. Colours are the same hex values as res/values/themes.xml.
 Output: docs/theme-wardrobe.png
@@ -13,7 +13,11 @@ LAYOUT = "src/main/layouts/latn_qwerty_us_gboard_style.xml"
 OUT = "docs/theme-wardrobe.png"
 
 THEMES = [
-    ("Harbor", "Night navy · default", "#0C1826", "#1A3352", "#2B6CB0", "#F4F7FB", "#24466E", 0),
+    # 2026-10-30: the default pair is the Gboard-glass one; the flat hexes here are its scrim and
+    # keys pre-composited over a neutral backdrop, because this sheet has no wallpaper to show.
+    ("Gboard", "Glass · default (dark)", "#1A1C1F", "#3C4043", "#6E7278", "#FFFFFF", "#00000000", 0),
+    ("Gboard light", "Glass · default (light)", "#E9EBEE", "#F7F8F9", "#FFFFFF", "#1F1F1F", "#00000000", 0),
+    ("Harbor", "Night navy", "#0C1826", "#1A3352", "#2B6CB0", "#F4F7FB", "#24466E", 0),
     ("Daybreak", "Cool daylight", "#E4EDF6", "#F8FBFE", "#1B5FBF", "#142033", "#C9D7E6", 1),
     ("Signal", "Electric blue on black", "#070B12", "#101826", "#E8F1FF", "#A9CFFF", "#2A4E86", 1),
     ("Ember", "Lacquer red edge", "#120E0C", "#241816", "#E24A38", "#F6EDE8", "#C44536", 1.2),

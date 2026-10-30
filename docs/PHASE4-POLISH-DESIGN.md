@@ -206,8 +206,9 @@ is worse than no render).
 
 What this does **not** copy from the Gboard photograph, on purpose:
 
-- Google's icons, typeface, or translucent key art. The toolbar uses this keyboard's own seven
-  vectors. The default theme is Harbor (part 9), not a copy of Gboard's wallpaper.
+- Google's icons, typeface or artwork. The toolbar uses this keyboard's own seven vectors. The
+  glass in part 9 is geometry and alpha over whatever the app behind happens to be — never a
+  copied Gboard asset, palette exported from its APK, or wallpaper.
 - The word "English" on the space bar. The space key is the special-font space glyph
   (`KeyValue` `0xE00D`). Putting a text label there would type that label.
 - The blue search magnifier. That is the field's action key (Search), which the existing
@@ -215,14 +216,17 @@ What this does **not** copy from the Gboard photograph, on purpose:
 
 ## Part 9 — the purple default is retired (2026-10-26)
 
-The owner rejected the deep-purple default. Five built-in themes were added, and **Harbor**
-(night navy) is now `Defaults.THEME`. An install still stored as `cleverkeysdark` is moved to
-Harbor once (`ThemeDefaultMigration`); any other saved theme is left alone. Purple remains in
-the picker as "Mr. Brown's Keyboard Dark".
+The owner rejected the deep-purple default. Five built-in themes were added and **Harbor**
+(night navy) became `Defaults.THEME` on 2026-10-26. On 2026-10-30 the owner asked for Gboard's
+appearance itself, so `Defaults.THEME` is now **`gboard`** — a pair of glass styles resolved from
+the system night mode, described in [`OWNER-DECISIONS.md`](OWNER-DECISIONS.md). An install still stored as a previous
+default (the purple, Harbor or Daybreak) is moved once by `GboardThemeMigration`; any deliberate
+choice is left alone. Purple remains in the picker as "Mr. Brown's Keyboard Dark".
 
 | Theme | Look |
 |---|---|
-| Harbor | Night navy keys, white letters. The default. |
+| Gboard (glass) | Rounded tiles with a real gap over a see-through field; light or dark with the system. **The default since 2026-10-30.** |
+| Harbor | Night navy keys, white letters. |
 | Daybreak | Cool daylight blue, white keys, ink labels. |
 | Signal | Black field, electric-blue letters, a light key when pressed. |
 | Ember | Charcoal keys with a lacquer-red edge. Not a flat red slab. |

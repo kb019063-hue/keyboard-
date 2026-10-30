@@ -940,7 +940,38 @@ class CleverKeysService : InputMethodService(),
         floated.setState(floatingActive())
         super.setInputView(floated)
         updateSoftInputWindowLayoutParams()
+        applyBackdropBlur()
         root.requestApplyInsets()
+    }
+
+    /**
+     * Ask the platform to blur what is behind the IME window, for themes that declare a
+     * `blurRadius` (the Gboard-glass pair does; every other theme declares 0dp, which clears it).
+     *
+     * This is what makes the translucent themes read as glass rather than as a washed-out
+     * rectangle over sharp text. Three things can take it away, and none of them may break the
+     * keyboard: API < 31 (no cross-window blur at all), battery saver / an OEM that disables
+     * cross-window blur, and a window that is not translucent. In all three the scrim colour still
+     * carries the look, which is why [Theme.colorKeyboardBackground] keeps a substantial alpha
+     * instead of relying on the blur for legibility.
+     */
+    private fun applyBackdropBlur() {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return
+        val win = window?.window ?: return
+        val radiusPx = KeyboardBackdrop.blurRadiusPx(this, _config?.theme ?: 0)
+        try {
+            win.setBackgroundBlurRadius(radiusPx.toInt().coerceAtLeast(0))
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                Log.d(
+                    "CleverKeysService",
+                    "backdrop blur radius=${radiusPx.toInt()}px crossWindow=" +
+                        runCatching { windowManager.isCrossWindowBlurEnabled() }.getOrDefault(false)
+                )
+            }
+        } catch (t: Throwable) {
+            // A window that refuses the attribute must not take the keyboard down with it.
+            Log.w("CleverKeysService", "backdrop blur unavailable: ${t.javaClass.simpleName}")
+        }
     }
 
     /**

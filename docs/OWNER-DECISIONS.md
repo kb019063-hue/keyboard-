@@ -62,13 +62,41 @@ They called the deep-purple theme AI slop and asked for blue, or a cool red, and
 than two themes they can switch between. Purple is still in the picker as
 "Mr. Brown's Keyboard Dark". It is no longer the default.
 
-`Defaults.THEME` is `harbor`. An install still stored as `cleverkeysdark` moves to Harbor
-once (`ThemeDefaultMigration`, marker `theme_harbor_default_v1`). Never rename that marker.
-Any other saved theme is left alone.
+`ThemeDefaultMigration` (marker `theme_harbor_default_v1`) moved that one stored value to
+Harbor in 2026-10-26. Never rename that marker.
+
+## The look must be Gboard's (2026-10-30)
+
+The owner's verdict on the shipped appearance: the arrangement was Gboard's but the keyboard
+"still doesn't look like it". Their Gboard (Gboard 16, portrait, number row on) draws:
+
+- separate rounded tiles with a real gap between them, never one continuous slab
+- a see-through field: the app behind stays visible through the keys
+- white letters, one small corner hint per letter, a blue action key
+- seven toolbar commands with the mic last
+
+`Defaults.THEME` is now `gboard` — one id with a light and a dark variant, resolved from the
+system night mode exactly the way `monet` resolves its pair. The styles are `GboardLight` and
+`GboardDark`, and what they add to the attribute set is `keyGap` (3dp, drawn inside the key cell
+so the touch target does not shrink) and `blurRadius` (24dp, applied by the service on API 31+;
+below that, and wherever the OEM disables cross-window blur, the translucent scrim carries the
+look on its own).
+
+Two migrations now exist and both markers are permanent:
+
+| Marker | Moves | Leaves alone |
+|---|---|---|
+| `theme_harbor_default_v1` | `cleverkeysdark` → the then-default | everything else |
+| `theme_gboard_default_v1` | `""`, `cleverkeysdark`, `harbor`, `daybreak` → `gboard` | every deliberate pick, including `monet*`, decorative and custom themes |
+
+Not copied, still: Google's icons, typeface and artwork. The glass is geometry and alpha, not
+asset art. `ThemeProvider.FALLBACK_THEME_ID` stays `harbor` (the landing spot when a *custom*
+theme is deleted), so `CustomThemePrefPolicy.FALLBACK_SWIPE_TRAIL_COLOR` still matches Harbor.
 
 | Id | Name | What it is |
 |---|---|---|
-| `harbor` | Harbor | Night navy, white letters. **Default.** |
+| `gboard` | Gboard (glass) | Rounded tiles with a gap, see-through, light or dark with the system. **Default.** |
+| `harbor` | Harbor | Night navy, white letters. |
 | `daybreak` | Daybreak | Cool daylight blue, white keys. |
 | `signal` | Signal | Black field, electric-blue letters, light key when pressed. |
 | `ember` | Ember | Charcoal keys with a lacquer-red edge. Not a flat red fill. |

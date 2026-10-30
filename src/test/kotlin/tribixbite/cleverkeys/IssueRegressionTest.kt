@@ -308,7 +308,7 @@ class IssueRegressionTest {
     @Test
     fun `issue 92 — theme default is a valid theme name`() {
         assertThat(Defaults.THEME).isNotEmpty()
-        assertThat(Defaults.THEME).isEqualTo("harbor")
+        assertThat(Defaults.THEME).isEqualTo("gboard")
     }
 
     // =========================================================================
