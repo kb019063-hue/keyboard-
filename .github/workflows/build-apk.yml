@@ -134,6 +134,10 @@ jobs:
             --tests '*SettingsRangeDriftTest' \
             --tests '*ConfigurationBurstCoalescingTest' \
             --tests '*VerboseLogRatchetTest' \
+            --tests '*LearningFunnelBookkeepingTest' \
+            --tests '*LearningWiringDriftTest' \
+            --tests '*NextWordStaticTierTest' \
+            --tests '*SwipeAutocapCommitTest' \
             2>&1 | tee unit-test-output.log
 
       # Reachable summary: per-class counts from the JUnit XML, plus any compiler diagnostic.

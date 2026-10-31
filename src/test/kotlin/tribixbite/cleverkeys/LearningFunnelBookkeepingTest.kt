@@ -109,6 +109,10 @@ class LearningFunnelBookkeepingTest {
         config.backspace_undo_swipe = true
         config.backspace_undo_autocorrect = true
         every { Config.globalConfig() } returns config
+        // Config.learningEffective is a GETTER (IncognitoPolicy.allows(on_device_learning_enabled,
+        // incognito_enabled)); a relaxed mock answers it false, so a test that only set the raw
+        // field would silently run with learning OFF. Mirror the production fold here.
+        every { config.learningEffective } answers { config.on_device_learning_enabled }
 
         tracker = PredictionContextTracker()
 

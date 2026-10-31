@@ -67,6 +67,8 @@ class SwipeAutocapCommitTest {
         config = mockk(relaxed = true)
         config.autocapitalisation = true
         config.auto_space_after_suggestion = true
+        // The commit path reads the incognito-folded getter, which a relaxed mock answers false.
+        every { config.autocapEffective } answers { config.autocapitalisation }
         every { Config.globalConfig() } returns config
 
         dictionary = mockk(relaxed = true)
@@ -115,6 +117,10 @@ class SwipeAutocapCommitTest {
         handler.setField("contractionManager", mockk<ContractionManager>(relaxed = true))
         handler.setField("keyeventhandler", mockk<KeyEventHandler>(relaxed = true))
         handler.setField("predictionTasks", mockk<PredictionTaskRunner>(relaxed = true))
+        // Objenesis skips field initialisers: production's non-null defaults must exist.
+        handler.setField("autocorrectMemo", tribixbite.cleverkeys.autocorrect.AutocorrectMemo())
+        handler.setField("fieldAllowsPersonalizedLearning", true)
+        handler.setField("mainHandler", mockk<android.os.Handler>(relaxed = true))
         return handler
     }
 
