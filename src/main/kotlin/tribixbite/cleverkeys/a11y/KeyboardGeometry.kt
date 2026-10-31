@@ -257,6 +257,9 @@ object KeyboardGeometry {
      * the left-edge slop, while the earlier key keeps its physical cell, and the helper resolves
      * the overlap with the same row-major first match as [keyAt].
      * Physical key rectangles remain available through [computeKeyRects] for swipe-model centers.
+     *
+     * Split mode is part of [keyAt]'s answer, so it is part of this one too: the walk below goes
+     * through [rowSpans] and therefore carries the split gap and its compensating scale.
      */
     fun computeAccessibilityKeyRects(
         keyboard: KeyboardData,
@@ -275,27 +278,37 @@ object KeyboardGeometry {
         var virtualId = 0
         for (row in rows) {
             val yBottom = y + (row.shift + row.height) * params.rowHeight
-            var x = params.marginLeft
             val extendLeftToEdge = rowContainsAAndL(row)
-            for ((index, key) in row.keys.withIndex()) {
-                val physicalLeft = x + key.shift * params.keyWidth
-                val physicalRight = physicalLeft + key.width * params.keyWidth
-                val kv = key.keys[0]
+            // Split mode (phase 3 part 4) moves the right half by `splitGap` and narrows both
+            // halves by `splitScale`. This walk used to apply neither -- it advanced by
+            // `key.width * keyWidth` only -- so with split on, every rect on the right half sat
+            // where the key is NOT drawn and TalkBack's node bounds (touch exploration, focus
+            // rectangles) disagreed with [keyAt] by up to the gap. Walking [rowSpans] applies
+            // both the gap and the scale, so a node owns exactly the cell the finger would hit;
+            // with split off (gap 0, scale 1) this is the same accumulation as before, float
+            // operation for float operation.
+            val spans = rowSpans(row, params)
+            // Where this key's tappable cell starts: the previous cell's right edge (row start
+            // for the first key), so the inter-key gap -- and the split gap -- belong to the key
+            // on its right, exactly as [keyAt] resolves them.
+            var cellLeft = params.marginLeft
+            for ((index, span) in spans.withIndex()) {
+                val kv = span.key.keys[0]
                 if (kv != null) {
-                    val left = if (extendLeftToEdge && isCharacterKey(key, 'a')) 0f else x
-                    val right = if (index == row.keys.lastIndex) hostWidth else physicalRight
+                    val left = if (extendLeftToEdge && isCharacterKey(span.key, 'a')) 0f else cellLeft
+                    val right = if (index == spans.lastIndex) hostWidth else span.xRight
                     val boundedLeft = left.coerceIn(0f, hostWidth)
                     val boundedRight = right.coerceIn(0f, hostWidth)
                     if (boundedRight > boundedLeft && yBottom > y) {
                         rects.add(
                             KeyRect(
-                                virtualId++, key, kv,
+                                virtualId++, span.key, kv,
                                 KeyBounds(boundedLeft, y, boundedRight, yBottom),
                             )
                         )
                     }
                 }
-                x = physicalRight
+                cellLeft = span.xRight
             }
             y = yBottom
         }

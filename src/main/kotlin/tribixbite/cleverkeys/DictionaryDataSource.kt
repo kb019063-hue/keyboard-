@@ -136,7 +136,7 @@ class MainDictionarySource(
 
                 while (keys.hasNext()) {
                     val word = keys.next().lowercase()
-                    if (word.matches(Regex("^[\\p{L}'-]+$"))) {
+                    if (VALID_WORD.matches(word)) {
                         val frequency = jsonDict.getInt(word)
                         // Use raw frequency from JSON (128-255 range)
                         words.add(
@@ -345,6 +345,16 @@ class MainDictionarySource(
     companion object {
         private const val TAG = "MainDictionarySource"
         private const val PREFIX_INDEX_MAX_LENGTH = 3
+
+        /**
+         * The lexicon's word alphabet: letters, apostrophe and hyphen, nothing else.
+         *
+         * Compiled once. The JSON fallback below used to build this pattern inside its per-word
+         * loop, so loading a `*_enhanced.json` lexicon (tens of thousands of words, on a path
+         * that only languages without a `.bin` take) paid one `Pattern.compile` per word -- on
+         * the order of a minute of CPU for no added safety, since the pattern is constant.
+         */
+        private val VALID_WORD = Regex("^[\\p{L}'-]+$")
 
         // Per-language shared cache across MainDictionarySource instances.
         // Eliminates redundant 98k-word binary dict parsing when DictionaryManager

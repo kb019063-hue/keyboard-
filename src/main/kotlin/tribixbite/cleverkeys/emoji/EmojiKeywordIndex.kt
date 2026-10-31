@@ -25,8 +25,21 @@ object EmojiKeywordIndex {
     private const val TAG = "EmojiKeywordIndex"
     private const val ASSET_FILE = "emoji_keywords.tsv"
 
+    /**
+     * The built trie, published by the IO loader and read by the emoji search TextWatcher on the
+     * main thread. `@Volatile` is what makes that hand-off safe: the loader builds a complete
+     * [TrieNode] graph and only then assigns it here, so the volatile write/read pair is the
+     * happens-before edge that guarantees a reader sees a fully constructed trie instead of a
+     * partially published one. Without it the read was a plain (unsynchronized) field access --
+     * a data race whose symptom is an intermittent "search finds nothing" until the next read
+     * happens to observe the write.
+     */
+    @Volatile
     private var rootNode: TrieNode? = null
     private var loadJob: Job? = null
+
+    /** `@Volatile` for the same reason as [rootNode]: written on IO, read on main. */
+    @Volatile
     private var isLoaded = false
 
     /**

@@ -73,6 +73,18 @@ class PredictionContextTracker {
         )
 
         /**
+         * Combining diacritical marks (Unicode general category Mn), stripped by
+         * [normalizeForPrediction] so `café` matches a `cafe` entry.
+         *
+         * Compiled ONCE, in the companion: the old inline `Regex("\\p{Mn}")` inside
+         * [normalizeForPrediction] compiled a fresh pattern on every call, and that call runs
+         * twice per [synchronizeWithCursor] (prefix and suffix) and again for every committed
+         * word on the typing path. A `Pattern.compile` is tens of microseconds and an
+         * allocation, which is the wrong shape of work for a per-keystroke function.
+         */
+        private val COMBINING_MARKS = Regex("\\p{Mn}")
+
+        /**
          * SAS-1: current absolute cursor position, or -1 when unknown (editor
          * without ExtractedText support). Shared by SuggestionHandler /
          * InputCoordinator (stamp capture at auto-space commit time) and
@@ -848,7 +860,7 @@ class PredictionContextTracker {
         // NFD decomposition separates base chars from combining diacritics
         val normalized = Normalizer.normalize(text, Normalizer.Form.NFD)
         // Remove combining diacritical marks (Unicode category Mn)
-        return normalized.replace(Regex("\\p{Mn}"), "").lowercase()
+        return normalized.replace(COMBINING_MARKS, "").lowercase()
     }
 
     /**
