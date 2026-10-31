@@ -237,10 +237,20 @@ object KeyboardGeometry {
         val out = ArrayList<KeySpan>(row.keys.size)
         var x = startX
         var cumUnits = 0f
+        var gapApplied = false
         for (k in row.keys) {
             val leftUnits = cumUnits + k.shift
-            if (params.splitGap > 0f && SplitConfig.isRightHalf(totalUnits, leftUnits)) {
+            // The split gap is ONE opening between the halves, not a per-key offset: open it at
+            // the first key whose left edge has reached the midpoint, then never again. Adding it
+            // inside this loop without the latch put a whole gap *between every pair of right-half
+            // keys* -- a five-key right half was pushed right by 5 x the gap, so with the shipped
+            // 10 % default the right half hung ~40 % of the keyboard width off the end and the
+            // `splitScale` compensation shrank it into the void.
+            if (!gapApplied && params.splitGap > 0f &&
+                SplitConfig.isRightHalf(totalUnits, leftUnits)
+            ) {
                 x += params.splitGap
+                gapApplied = true
             }
             val xLeft = x + k.shift * kw
             val xRight = xLeft + k.width * kw

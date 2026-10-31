@@ -1454,19 +1454,20 @@ class Keyboard2View @JvmOverloads constructor(
             return keyPositions
         }
 
-        var y = _config.snapshot.marginTop
+        // Same single horizontal walk as hit-testing and drawing: [KeyboardGeometry.rowSpans]
+        // carries the split gap and its compensating scale. The bespoke accumulation this
+        // replaced applied `key.shift` only, so with split mode on the theme editor's sample
+        // trail was drawn against unsplit coordinates -- up to a hanging half-key away.
+        val gp = geometryParams() ?: return keyPositions
+        var y = gp.marginTop
 
         for (row in keyboard.rows) {
-            var x = _marginLeft
+            val yTop = y + row.shift * tc.row_height
+            val yBottom = yTop + row.height * tc.row_height
 
-            for (key in row.keys) {
-                val xLeft = x + key.shift * _keyWidth
-                val xRight = xLeft + key.width * _keyWidth
-                val yTop = y + row.shift * tc.row_height
-                val yBottom = yTop + row.height * tc.row_height
-
-                // Calculate center coordinates
-                val centerX = (xLeft + xRight) / 2f
+            for (span in KeyboardGeometry.rowSpans(row, gp)) {
+                val key = span.key
+                val centerX = (span.xLeft + span.xRight) / 2f
                 val centerY = (yTop + yBottom) / 2f
 
                 // The key's centre letter, by the shared single-letter rule (Locale.ROOT
@@ -1477,8 +1478,6 @@ class Keyboard2View @JvmOverloads constructor(
                 tribixbite.cleverkeys.swipe.KeyLetter.centreLetterOf(key.keys[0])?.let { keyChar ->
                     keyPositions[keyChar] = PointF(centerX, centerY)
                 }
-
-                x = xRight
             }
 
             y += (row.shift + row.height) * tc.row_height
@@ -1815,8 +1814,10 @@ class Keyboard2View @JvmOverloads constructor(
     // startX), all of which only move on a measure, a layout switch or a config change, so the
     // result is memoised against those five values. Referential identity is used for the layout
     // because KeyboardData is immutable: a new layout is a new object, and the same object can
-    // never mean different geometry. Nothing here is on the hit-test path --
-    // KeyboardGeometry.keyAt walks the keys directly and never calls rowSpans.
+    // never mean different geometry. The cache is draw-only, and that is a correctness property,
+    // not a convenience: KeyboardGeometry.keyAt calls rowSpans itself rather than reading this
+    // memo, so a stale cache can only mis-draw a frame -- it can never make a tap hit the wrong
+    // key.
     private var _spansCache: List<List<KeyboardGeometry.KeySpan>>? = null
     private var _spansKeyboard: KeyboardData? = null
     private var _spansStartX = Float.NaN
