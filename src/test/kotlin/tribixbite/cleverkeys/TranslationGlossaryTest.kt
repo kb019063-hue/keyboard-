@@ -9,6 +9,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.Before
 
 /**
  * Terminology consistency across the 21 translated locales, driven by the checked-in
@@ -27,6 +28,15 @@ import org.junit.Test
  * Unicode-aware; see [containsStem] for the matching rule.
  */
 class TranslationGlossaryTest {
+
+    /**
+     * 2026-10-31: this class verifies upstream release bookkeeping, none of which is
+     * vendored here (see [UpstreamArtefacts]). Skipped, not failed — and not silently green.
+     */
+    @Before
+    fun skipWhenUpstreamArtefactsAreAbsent() {
+        UpstreamArtefacts.require(UpstreamArtefacts.GLOSSARY)
+    }
 
     private data class Terms(val allowed: List<String>, val forbidden: List<String>)
     private data class LocaleGlossary(

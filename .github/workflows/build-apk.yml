@@ -132,53 +132,82 @@ jobs:
           # `|| true`: no compiler diagnostics is the GOOD case, and bash -e would otherwise
           # fail this step on grep's exit 1 and skip the summary below it.
           if [ -f unit-test-output.log ]; then
-            grep -E "^e: |: error: |^> Task .* FAILED" unit-test-output.log | head -8 | esc \
+            grep -E "^e: |: error: |^> Task .* FAILED" unit-test-output.log | head -3 | esc \
               | while IFS= read -r line; do echo "::error::${line}"; done || true
           fi
           python3 - <<'PY'
-          import glob, xml.etree.ElementTree as ET
-          rows = []
+          import glob, os, xml.etree.ElementTree as ET
+
+          def esc(t):
+              return t.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+
+          rows, cases = [], []
           for f in sorted(glob.glob('build/test-results/testDebugUnitTest/*.xml')):
               try:
                   r = ET.parse(f).getroot()
               except Exception:
                   continue
-              rows.append((r.get('name', '?'), int(r.get('tests', 0)),
-                           int(r.get('failures', 0)) + int(r.get('errors', 0)),
-                           int(r.get('skipped', 0))))
-          if not rows:
-              print('::warning::no JUnit XML found - the test task did not run')
-              raise SystemExit(0)
-          total = sum(r[1] for r in rows)
-          bad = sum(r[2] for r in rows)
-          print('::notice::unit tests: %d run, %d failed, %d skipped in %d classes'
-                % (total, bad, sum(r[3] for r in rows), len(rows)))
-          for name, tests, failed, _ in rows:
-              if failed:
-                  print('::error::%s: %d of %d failed' % (name, failed, tests))
-
-          # Which cases, and why: the message is the only part of the failure that is reachable
-          # from outside the web UI, so flatten it to one line and keep the assertion head.
-          import glob as _g
-          shown = 0
-          for f in sorted(_g.glob('build/test-results/testDebugUnitTest/*.xml')):
-              try:
-                  root = ET.parse(f).getroot()
-              except Exception:
-                  continue
-              for case in root.iter('testcase'):
+              name = r.get('name', '?')
+              tests, skipped = int(r.get('tests', 0)), int(r.get('skipped', 0))
+              failed = int(r.get('failures', 0)) + int(r.get('errors', 0))
+              rows.append((name, tests, failed, skipped))
+              for case in r.iter('testcase'):
                   for kind in ('failure', 'error'):
                       node = case.find(kind)
                       if node is None:
                           continue
-                      msg = ' '.join((node.get('message') or node.text or '').split())[:300]
-                      print('::error::%s#%s: %s'
-                            % (case.get('classname', '?'), case.get('name', '?'), msg))
-                      shown += 1
-                      if shown >= 10:
-                          raise SystemExit(0)
-          if bad == 0:
-              print('::notice::all selected unit tests passed')
+                      msg = ' '.join((node.get('message') or node.text or '').split())
+                      cases.append((name, case.get('name', '?'), msg))
+                      break
+
+          if not rows:
+              print('::warning::no JUnit XML found - the test task did not run')
+              raise SystemExit(0)
+
+          total = sum(r[1] for r in rows)
+          bad = sum(r[2] for r in rows)
+          skipped = sum(r[3] for r in rows)
+          bad_classes = sorted([r for r in rows if r[2]], key=lambda r: (-r[2], r[0]))
+          print('::notice::unit tests: %d run, %d failed, %d skipped in %d classes'
+                % (total, bad, skipped, len(rows)))
+          skipped_classes = [r for r in rows if r[3] and not r[2]]
+          if skipped_classes:
+              print('::notice::%d class(es) skipped their checks (upstream artefacts absent): %s'
+                    % (len(skipped_classes),
+                       ', '.join(r[0].split('.')[-1] for r in skipped_classes)[:1000]))
+
+          # Everything a person needs, in as few annotations as the limit allows: the ceiling is
+          # TEN per step, so the two below carry the whole inventory (class + counts, then the
+          # first failure of each class). The step summary gets the unabridged list.
+          if bad_classes:
+              short = '; '.join('%s %d/%d' % (n.split('.')[-1], f, t) for n, t, f, _ in bad_classes)
+              print('::error::' + esc('FAILING CLASSES (%d): %s' % (len(bad_classes), short))[:60000])
+
+              parts, size = [], 0
+              for name, tests, failed, _ in bad_classes:
+                  first = next((c for c in cases if c[0] == name), None)
+                  if first is None:
+                      continue
+                  seg = '%s#%s: %s' % (name.split('.')[-1], first[1], first[2][:180])
+                  if size + len(seg) > 55000:
+                      break
+                  parts.append(seg)
+                  size += len(seg) + 3
+              print('::error::' + esc('FIRST FAILURE PER CLASS: ' + ' | '.join(parts))[:60000])
+
+              summary = ['### Unit tests', '',
+                         '- %d run, **%d failed**, %d skipped, %d classes' % (total, bad, skipped, len(rows)),
+                         '', '#### Failing classes', '']
+              summary += ['- `%s` — %d of %d' % (n, f, t) for n, t, f, _ in bad_classes]
+              summary += ['', '#### Failures (first 60)', '']
+              for name, case, msg in cases[:60]:
+                  summary.append('- `%s#%s`: %s' % (name.split('.')[-1], case, msg[:300]))
+              path = os.environ.get('GITHUB_STEP_SUMMARY')
+              if path:
+                  with open(path, 'a') as fh:
+                      fh.write('\n'.join(summary) + '\n')
+          else:
+              print('::notice::all %d unit tests passed' % total)
           PY
 
       - name: Report APK sizes
