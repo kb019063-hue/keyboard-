@@ -154,6 +154,27 @@ jobs:
           for name, tests, failed, _ in rows:
               if failed:
                   print('::error::%s: %d of %d failed' % (name, failed, tests))
+
+          # Which cases, and why: the message is the only part of the failure that is reachable
+          # from outside the web UI, so flatten it to one line and keep the assertion head.
+          import glob as _g
+          shown = 0
+          for f in sorted(_g.glob('build/test-results/testDebugUnitTest/*.xml')):
+              try:
+                  root = ET.parse(f).getroot()
+              except Exception:
+                  continue
+              for case in root.iter('testcase'):
+                  for kind in ('failure', 'error'):
+                      node = case.find(kind)
+                      if node is None:
+                          continue
+                      msg = ' '.join((node.get('message') or node.text or '').split())[:300]
+                      print('::error::%s#%s: %s'
+                            % (case.get('classname', '?'), case.get('name', '?'), msg))
+                      shown += 1
+                      if shown >= 10:
+                          raise SystemExit(0)
           if bad == 0:
               print('::notice::all selected unit tests passed')
           PY
