@@ -46,7 +46,10 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # 45 was not enough once the whole unit-test suite ran on every build: it needs ~20 min on a
+    # good runner and the emulator-free job still has to assemble the APK around it. 90 gives the
+    # suite room to finish (and to report) instead of being cancelled by the ceiling.
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
@@ -179,6 +182,12 @@ jobs:
           # Everything a person needs, in as few annotations as the limit allows: the ceiling is
           # TEN per step, so the two below carry the whole inventory (class + counts, then the
           # first failure of each class). The step summary gets the unabridged list.
+          slow = sorted(((float(r.get('time', 0) or 0), r.get('name', '?')) for r in
+                         (ET.parse(f).getroot() for f in glob.glob('build/test-results/testDebugUnitTest/*.xml'))), reverse=True)
+          if slow:
+              print('::notice::slowest classes: %s'
+                    % ', '.join('%s %.1fs' % (n.split('.')[-1], t) for t, n in slow[:10])[:1000])
+
           if bad_classes:
               short = '; '.join('%s %d/%d' % (n.split('.')[-1], f, t) for n, t, f, _ in bad_classes)
               print('::error::' + esc('FAILING CLASSES (%d): %s' % (len(bad_classes), short))[:60000])
