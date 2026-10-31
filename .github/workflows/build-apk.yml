@@ -111,7 +111,7 @@ jobs:
       # this doubles as the only compile check that source set has ever had. `continue-on-error`
       # means an advisory red here never blocks the APK, which is what the push path builds.
       - name: Unit tests (opt-in, portable subset)
-        if: (github.event_name == 'workflow_dispatch' && inputs.unit_tests) || github.ref == 'refs/heads/arena/2b94d5a3-keyboard'
+        if: github.event_name == 'workflow_dispatch' && inputs.unit_tests
         continue-on-error: true
         shell: bash
         run: |
@@ -125,7 +125,7 @@ jobs:
 
       # Reachable summary: per-class counts from the JUnit XML, plus any compiler diagnostic.
       - name: Summarise unit-test results as annotations
-        if: (github.event_name == 'workflow_dispatch' && inputs.unit_tests) || github.ref == 'refs/heads/arena/2b94d5a3-keyboard'
+        if: github.event_name == 'workflow_dispatch' && inputs.unit_tests
         shell: bash
         run: |
           esc() { sed -e 's/%/%25/g' -e 's/\r/%0D/g'; }
