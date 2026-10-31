@@ -115,22 +115,31 @@ are the product.
 98.4% of the problem is the APK bundles, so clearing those alone is sufficient — and no
 `keyboard-debug-*` artifact needs to be kept, because every one of them is already on the release.
 
-## Still true on 2026-10-31
+## What was still true on 2026-10-31 — and how it was finally cleared
 
-Re-measured, and nothing had been cleared: **81 artifacts, 3,896 MB**, none of them expired, all
-created 2026-10-21..23. The backlog above is not historical, it is the current state — so the quota
-has stayed blown for over a week and every optional upload since has failed silently
-(`continue-on-error`, which is also why it looks like nothing is wrong).
+Re-measured that morning, and nothing had been cleared: **81 artifacts, 3,896 MB**, none expired,
+all created 2026-10-21..23. The backlog was not historical, it was the then-current state, so the
+quota had been blown for over a week and every optional upload was failing silently
+(`continue-on-error`, which is exactly why nothing looked wrong).
 
-What actually broke this time was the *failure-report* upload, triggered by a step that failed on a
+What finally surfaced it was the *failure-report* upload, triggered by a step that failed on a
 `grep` exit code rather than a real error (`docs/BUG-HUNT-2026-10-31.md`, F5). The APK build and the
 rolling release were unaffected, exactly as the "trap" section above predicts.
 
-Two changes came out of that run:
+Deletion needs `actions: write`, which the agent's token does not have — and the owner was on a
+phone, where deleting 41 runs one at a time is not a reasonable ask. The way out was a workflow:
+`.github/workflows/cleanup-artifacts.yml`, running with its own `GITHUB_TOKEN`, **triggered by its
+own merge to `main`** so that no manual step was required. It counted 41 artifacts / 3,834 MB and
+deleted them; the repo now holds **40 artifacts / 62.6 MB**, i.e. 13 % of the quota, all of it smoke
+evidence (which rule 7 says to keep).
 
-- the dispatch-only APK artifact now uses **`retention-days: 1`** instead of 3. It is the one
-  upload that is multi-megabyte (94 MB), and it exists only so a manual dispatch yields a
-  downloadable artifact — the release is the durable copy. Worst case is one day of dispatches
-  (~94 MB each) rather than three.
+Reusable for the future: edit that file (any change re-triggers it), or dispatch it manually — dry
+by default, with a `prefix` input so the scope can be narrowed or widened deliberately.
+
+Two changes came out of the same audit and stay in place:
+
+- the dispatch-only APK artifact uses **`retention-days: 1`** instead of 3. It is the one upload
+  that is multi-megabyte (94 MB), and it exists only so a manual dispatch yields a downloadable
+  artifact — the release is the durable copy. Worst case is one day of dispatches (~94 MB each).
 - the unit-test summary is emitted as **annotations**, never as an artifact, for the same reason:
   whatever fails, the reason must still be readable when the quota is full.
