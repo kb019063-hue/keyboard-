@@ -2,6 +2,8 @@ package tribixbite.cleverkeys.swipe.geometric
 
 import com.google.common.truth.Truth.assertWithMessage
 import org.junit.Test
+import org.junit.Before
+import tribixbite.cleverkeys.UpstreamArtefacts
 
 /**
  * Accuracy harness for **Russian / ЙЦУКЕН** — the second DEFAULT in-suite grid
@@ -21,8 +23,18 @@ import org.junit.Test
  */
 class GeoAccuracyJcukenRuTest {
 
-    private val layout = GeoLayoutFixtures.loadShipped("cyrl_jcuken_ru")
-    private val dict = GeoTestFixtures.russianCkdt()
+    /**
+     * 2026-10-31: the checks in this class decode against the SHIPPED language packs
+     * (`scripts/dictionaries/langpack-*.zip`), which this fork does not vendor. Skipped, not
+     * failed — and not silently green: see [UpstreamArtefacts].
+     */
+    @Before
+    fun skipWhenLanguagePacksAreAbsent() {
+        UpstreamArtefacts.require(UpstreamArtefacts.LANGPACK_DIR)
+    }
+
+    private val layout by lazy { GeoLayoutFixtures.loadShipped("cyrl_jcuken_ru") }
+    private val dict by lazy { GeoTestFixtures.russianCkdt() }
     private val harness = GeoAccuracyHarness(layout, dict, "ru/JCUKEN")
 
     private val sampleSize =

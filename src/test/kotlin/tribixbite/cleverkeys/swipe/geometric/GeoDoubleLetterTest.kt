@@ -2,6 +2,8 @@ package tribixbite.cleverkeys.swipe.geometric
 
 import com.google.common.truth.Truth.assertWithMessage
 import org.junit.Test
+import org.junit.Before
+import tribixbite.cleverkeys.UpstreamArtefacts
 
 /**
  * Phase-6 doubled-letter suite (spec Testing Strategy: "Double letters: `fell` beats
@@ -31,12 +33,22 @@ import org.junit.Test
  */
 class GeoDoubleLetterTest {
 
+    /**
+     * 2026-10-31: the checks in this class decode against the SHIPPED language packs
+     * (`scripts/dictionaries/langpack-*.zip`), which this fork does not vendor. Skipped, not
+     * failed — and not silently green: see [UpstreamArtefacts].
+     */
+    @Before
+    fun skipWhenLanguagePacksAreAbsent() {
+        UpstreamArtefacts.require(UpstreamArtefacts.LANGPACK_DIR)
+    }
+
     private val config = GeometricEngineConfig()
     private val synth = GeoTraceSynthesizer(config)
-    private val qwerty = GeoLayoutFixtures.loadShipped("latn_qwerty_us")
-    private val jcuken = GeoLayoutFixtures.loadShipped("cyrl_jcuken_ru")
-    private val en = GeoTestFixtures.englishCkdt()
-    private val ru = GeoTestFixtures.russianCkdt()
+    private val qwerty by lazy { GeoLayoutFixtures.loadShipped("latn_qwerty_us") }
+    private val jcuken by lazy { GeoLayoutFixtures.loadShipped("cyrl_jcuken_ru") }
+    private val en by lazy { GeoTestFixtures.englishCkdt() }
+    private val ru by lazy { GeoTestFixtures.russianCkdt() }
 
     private val engineEn = GeometricSwipeEngine(config).also { it.warmUp(qwerty, en) }
     private val engineRu = GeometricSwipeEngine(config).also { it.warmUp(jcuken, ru) }

@@ -625,6 +625,9 @@ class LanguagePackImportTest {
      */
     @Test
     fun everyShippedPackImportsAndCarriesItsAttribution() {
+        // 2026-10-31: the shipped packs are not vendored here, so this is the only check in this
+        // class that cannot run (the other 50 use synthetic packs and still do).
+        tribixbite.cleverkeys.UpstreamArtefacts.require(tribixbite.cleverkeys.UpstreamArtefacts.LANGPACK_DIR)
         val packs = File("scripts/dictionaries").listFiles { f ->
             f.name.startsWith("langpack-") && f.name.endsWith(".zip")
         }?.sortedBy { it.name }.orEmpty()

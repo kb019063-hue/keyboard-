@@ -7,6 +7,8 @@ import java.security.MessageDigest
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import org.junit.Before
+import tribixbite.cleverkeys.UpstreamArtefacts
 
 /**
  * The load-side half of "the script models travel in their language packs" (APK diet,
@@ -29,6 +31,16 @@ import org.junit.rules.TemporaryFolder
  * possibly disagree.
  */
 class CtcPackModelTest {
+
+    /**
+     * 2026-10-31: the checks in this class decode against the SHIPPED language packs
+     * (`scripts/dictionaries/langpack-*.zip`), which this fork does not vendor. Skipped, not
+     * failed — and not silently green: see [UpstreamArtefacts].
+     */
+    @Before
+    fun skipWhenLanguagePacksAreAbsent() {
+        UpstreamArtefacts.require(UpstreamArtefacts.LANGPACK_DIR)
+    }
 
     @get:Rule
     val temp: TemporaryFolder = TemporaryFolder()

@@ -3,6 +3,8 @@ package tribixbite.cleverkeys.swipe.geometric
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
 import org.junit.Test
+import org.junit.Before
+import tribixbite.cleverkeys.UpstreamArtefacts
 
 /**
  * Phase-2 tests for [TemplateGenerator] / [WordTemplate] variant encoding: duplicate
@@ -18,6 +20,16 @@ import org.junit.Test
  * d_shape / d_loc / the length-ratio prior finite downstream.
  */
 class TemplateGeneratorTest {
+
+    /**
+     * 2026-10-31: the checks in this class decode against the SHIPPED language packs
+     * (`scripts/dictionaries/langpack-*.zip`), which this fork does not vendor. Skipped, not
+     * failed — and not silently green: see [UpstreamArtefacts].
+     */
+    @Before
+    fun skipWhenLanguagePacksAreAbsent() {
+        UpstreamArtefacts.require(UpstreamArtefacts.LANGPACK_DIR)
+    }
 
     private val gen = TemplateGenerator(GeometricEngineConfig())
 

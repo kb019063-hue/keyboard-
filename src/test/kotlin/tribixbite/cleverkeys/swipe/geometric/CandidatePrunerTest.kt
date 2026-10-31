@@ -7,6 +7,8 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 import kotlin.math.ln
 import org.junit.Test
+import org.junit.Before
+import tribixbite.cleverkeys.UpstreamArtefacts
 
 /**
  * Phase-3 tests for [TemplateIndex] (SoA build + CSR extremity buckets),
@@ -26,6 +28,16 @@ import org.junit.Test
  *  - structural memory ≤ 2.5 MB / index @ 98k.
  */
 class CandidatePrunerTest {
+
+    /**
+     * 2026-10-31: the checks in this class decode against the SHIPPED language packs
+     * (`scripts/dictionaries/langpack-*.zip`), which this fork does not vendor. Skipped, not
+     * failed — and not silently green: see [UpstreamArtefacts].
+     */
+    @Before
+    fun skipWhenLanguagePacksAreAbsent() {
+        UpstreamArtefacts.require(UpstreamArtefacts.LANGPACK_DIR)
+    }
 
     private val config = GeometricEngineConfig()
     private val gen = TemplateGenerator(config)

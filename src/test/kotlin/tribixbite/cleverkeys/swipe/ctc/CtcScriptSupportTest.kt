@@ -5,6 +5,8 @@ import com.google.common.truth.Truth.assertWithMessage
 import java.io.File
 import org.json.JSONObject
 import org.junit.Test
+import org.junit.Before
+import tribixbite.cleverkeys.UpstreamArtefacts
 
 /**
  * The per-script wiring table's own invariants — the cheap half of the gate that stops a
@@ -25,6 +27,16 @@ import org.junit.Test
  * The third (the fixture row itself: emissions, greedy, top-k) is [CtcParityTest].
  */
 class CtcScriptSupportTest {
+
+    /**
+     * 2026-10-31: the checks in this class decode against the SHIPPED language packs
+     * (`scripts/dictionaries/langpack-*.zip`), which this fork does not vendor. Skipped, not
+     * failed — and not silently green: see [UpstreamArtefacts].
+     */
+    @Before
+    fun skipWhenLanguagePacksAreAbsent() {
+        UpstreamArtefacts.require(UpstreamArtefacts.LANGPACK_DIR)
+    }
 
     private companion object {
         /** Project-root-relative; `runPureTests` runs with cwd = project root. */

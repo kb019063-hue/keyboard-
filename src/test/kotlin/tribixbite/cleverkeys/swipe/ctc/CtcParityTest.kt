@@ -8,6 +8,8 @@ import org.json.JSONObject
 import org.junit.Test
 import tribixbite.cleverkeys.Defaults
 import tribixbite.cleverkeys.swipe.CtcEngineAdapter
+import org.junit.Before
+import tribixbite.cleverkeys.UpstreamArtefacts
 
 /**
  * Golden-trace parity tests for the pure-JVM FUTO-style CTC swipe module.
@@ -30,6 +32,16 @@ import tribixbite.cleverkeys.swipe.CtcEngineAdapter
  * through ORT — is the instrumented `swipe/CtcEmissionModelParityTest`.
  */
 class CtcParityTest {
+
+    /**
+     * 2026-10-31: the checks in this class decode against the SHIPPED language packs
+     * (`scripts/dictionaries/langpack-*.zip`), which this fork does not vendor. Skipped, not
+     * failed — and not silently green: see [UpstreamArtefacts].
+     */
+    @Before
+    fun skipWhenLanguagePacksAreAbsent() {
+        UpstreamArtefacts.require(UpstreamArtefacts.LANGPACK_DIR)
+    }
 
     /**
      * One fixture ↔ model ↔ preset triple: the unit this test iterates.

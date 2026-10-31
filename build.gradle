@@ -536,6 +536,13 @@ android {
     unitTests {
       includeAndroidResources = true
       returnDefaultValues = true
+      // 2026-10-31: the whole suite now runs in CI, and the geometric-engine classes decode
+      // sample grids against the shipped 98,140-word lexicons. The default 512 MB worker heap
+      // turned a dozen of them into `java.lang.OutOfMemoryError: Java heap space` — a failure
+      // that says nothing about the code. 3 GB matches what those suites hold live at once.
+      all {
+        maxHeapSize = '3g'
+      }
     }
   }
 }

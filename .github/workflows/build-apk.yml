@@ -204,6 +204,14 @@ jobs:
                   size += len(seg) + 3
               print('::error::' + esc('FIRST FAILURE PER CLASS: ' + ' | '.join(parts))[:60000])
 
+              # Which cases: names only, so a class with 25 failures does not cost 25 messages.
+              names = {}
+              for name, case, _ in cases:
+                  names.setdefault(name, []).append(case)
+              detail = '; '.join('%s: %s' % (n.split('.')[-1], ', '.join(v[:40]))
+                                 for n, v in sorted(names.items()))
+              print('::error::' + esc('FAILING TESTS: ' + detail)[:60000])
+
               summary = ['### Unit tests', '',
                          '- %d run, **%d failed**, %d skipped, %d classes' % (total, bad, skipped, len(rows)),
                          '', '#### Failing classes', '']

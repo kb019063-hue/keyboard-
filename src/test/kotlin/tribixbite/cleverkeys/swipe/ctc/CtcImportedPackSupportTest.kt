@@ -8,6 +8,8 @@ import tribixbite.cleverkeys.swipe.SwipeEngineRouter
 import tribixbite.cleverkeys.swipe.geometric.CkdtDictionaryReader
 import java.io.File
 import java.util.zip.ZipFile
+import org.junit.Before
+import tribixbite.cleverkeys.UpstreamArtefacts
 
 /**
  * Pins the DYNAMIC half of CTC language membership: which imported language packs the engine may
@@ -26,6 +28,16 @@ import java.util.zip.ZipFile
  *     independent, and only the second one moves when a pack is installed or removed.
  */
 class CtcImportedPackSupportTest {
+
+    /**
+     * 2026-10-31: the checks in this class decode against the SHIPPED language packs
+     * (`scripts/dictionaries/langpack-*.zip`), which this fork does not vendor. Skipped, not
+     * failed — and not silently green: see [UpstreamArtefacts].
+     */
+    @Before
+    fun skipWhenLanguagePacksAreAbsent() {
+        UpstreamArtefacts.require(UpstreamArtefacts.LANGPACK_DIR)
+    }
 
     /**
      * The resolver is PROCESS-GLOBAL state ([CtcImportedPackSupport.installResolver]), so every
