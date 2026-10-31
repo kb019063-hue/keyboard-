@@ -605,6 +605,18 @@ object SettingsRanges {
     val SLIDER_SENSITIVITY_PERCENT: IntRange = 1..100
 
     /**
+     * Swipe distance threshold (`swipe_dist`), stored as a STRING in units of 25 px before the
+     * read site scales it by the screen size (see `swipe_dist_px` in [Config.refresh]).
+     *
+     * The bounds are exactly the settings slider's (5f..30f). This key was the last
+     * slider-backed gesture key with no bound anywhere: the validator accepted any
+     * non-negative float, so an imported `"9999"` produced a threshold the UI could not even
+     * display, and a legacy `"0"` made the threshold zero — every touch then counts as a
+     * swipe, so a tap can never type its own key. R2 carry-over, 2026-10-31.
+     */
+    val SWIPE_DIST: ClosedFloatingPointRange<Float> = 5f..30f
+
+    /**
      * Exponential-smoothing factor for the space slider's speed estimate
      * (`slider_speed_smoothing`). The bounds are the slider's own (0.1–0.95): above 1 the
      * smoothed estimate overshoots and oscillates instead of converging on the finger's
@@ -1328,16 +1340,26 @@ class Config private constructor(
 
         val dpi_ratio = maxOf(dm.xdpi, dm.ydpi) / minOf(dm.xdpi, dm.ydpi)
         val swipe_scaling = minOf(dm.widthPixels, dm.heightPixels) / 10f * dpi_ratio
-        val swipe_dist_value = safeGetString(_prefs, "swipe_dist", Defaults.SWIPE_DIST).toFloatOrNull() ?: Defaults.SWIPE_DIST_FALLBACK
+        // R2: "swipe_dist" is stored as a string and used to be read with
+        // `toFloatOrNull() ?: default`, so a legacy "0" or an imported "9999" was honoured
+        // verbatim (0 makes every tap a swipe; 9999 makes swipes unreachable). Clamped to the
+        // slider's own range; absent/junk/NaN falls back to the default.
+        val swipe_dist_value = clampedFloatPref(
+            safeGetString(_prefs, "swipe_dist", Defaults.SWIPE_DIST),
+            Defaults.SWIPE_DIST_FALLBACK,
+            SettingsRanges.SWIPE_DIST
+        )
         swipe_dist_px = swipe_dist_value / 25f * swipe_scaling
 
         // F-3: floor at 1% (SettingsRanges) — 0 makes slide_step_px 0 and
-        // Pointers.Sliding divides by it (right-swipe emits repeat −1).
-        val slider_sensitivity = (safeGetString(_prefs, "slider_sensitivity", Defaults.SLIDER_SENSITIVITY).toFloatOrNull() ?: Defaults.SLIDER_SENSITIVITY_FALLBACK)
-            .coerceIn(
-                SettingsRanges.SLIDER_SENSITIVITY_PERCENT.first.toFloat(),
+        // Pointers.Sliding divides by it (right-swipe emits repeat −1). R2: NaN is treated
+        // like an absent value here too.
+        val slider_sensitivity = clampedFloatPref(
+            safeGetString(_prefs, "slider_sensitivity", Defaults.SLIDER_SENSITIVITY),
+            Defaults.SLIDER_SENSITIVITY_FALLBACK,
+            SettingsRanges.SLIDER_SENSITIVITY_PERCENT.first.toFloat()..
                 SettingsRanges.SLIDER_SENSITIVITY_PERCENT.last.toFloat()
-            ) / 100f
+        ) / 100f
         slide_step_px = slider_sensitivity * swipe_scaling
 
         vibrate_custom = _prefs.getBoolean("vibrate_custom", Defaults.VIBRATE_CUSTOM)
@@ -2134,6 +2156,20 @@ class Config private constructor(
                     defaultValue
                 }
             }
+        }
+
+        /**
+         * R2 (2026-10-31): read a STRING-stored numeric preference as a Float clamped to [range].
+         *
+         * `toFloatOrNull()` returns null for junk but NaN for the literal "NaN", and `coerceIn`
+         * passes NaN straight through — so the old `toFloatOrNull() ?: default` idiom, followed
+         * by a clamp, still honoured a hostile value verbatim. This is the one place that decides
+         * what such a value means: absent/junk/NaN → [fallback], otherwise clamped into [range].
+         */
+        @JvmStatic
+        fun clampedFloatPref(raw: String?, fallback: Float, range: ClosedFloatingPointRange<Float>): Float {
+            val parsed = raw?.toFloatOrNull()
+            return if (parsed == null || parsed.isNaN()) fallback else parsed.coerceIn(range.start, range.endInclusive)
         }
 
         /**

@@ -420,7 +420,12 @@ class ClipboardHistoryService private constructor(ctx: Context) {
     /** Add clipboard entries to the history, skipping consecutive duplicates and
         empty strings. */
     fun addClip(clip: String?) {
-        if (!Config.globalConfig().clipboardHistoryEffective) return
+        // R2/N5: this runs from the OS clipboard listener, which the service registers in
+        // onCreate — before the IME has built its Config in onStartInput. `globalConfig()`
+        // throws a NullPointerException at that moment, so the first copy after a cold start
+        // was dropped (and the throw landed in the listener). With no Config there is no
+        // preference to consult, so accept the clip: only an EXPLICIT "off" may reject it.
+        if (Config.globalConfigOrNull()?.clipboardHistoryEffective == false) return
         // OS-listener path: sanitize + optionally rewrite the OS clipboard, non-private insert.
         storeClip(clip, rewriteOsClipboard = true, isPrivate = false, sourcePackage = null)
     }

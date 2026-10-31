@@ -449,4 +449,87 @@ class SettingsRangeDriftTest {
         assertThat(SettingsValidation.validate("clipboard_history_limit", PrefValue.Str("50"))).isNull()
         assertThat(SettingsValidation.validate("circle_sensitivity", PrefValue.Str("3"))).isNull()
     }
+
+    // ── R2 (2026-10-31): swipe_dist and slider_sensitivity were the last two slider-backed
+    //    keys whose range was not enforced everywhere. swipe_dist had NO bound at all (the
+    //    validator took any non-negative float: "0" makes every tap a swipe, "9999" puts the
+    //    swipe threshold far off-screen) and slider_sensitivity only checked "digits", so an
+    //    imported "0" was silently rewritten by Config's clamp — Settings then displayed a
+    //    number the keyboard never used.
+
+    @Test
+    fun swipeDist_uiBounds_importCleanly() {
+        for (v in listOf("5", "17.5", "23", "30")) {
+            assertWithMessage("\"$v\" is inside the slider's 5..30 and must import")
+                .that(SettingsValidation.validate("swipe_dist", PrefValue.Str(v)))
+                .isNull()
+        }
+    }
+
+    @Test
+    fun swipeDist_outsideTheSliderRange_isRejectedOnImport() {
+        for (v in listOf("0", "4.9", "31", "9999")) {
+            assertWithMessage("\"$v\" is outside 5..30 and must be rejected on import")
+                .that(SettingsValidation.validate("swipe_dist", PrefValue.Str(v)))
+                .isNotNull()
+        }
+    }
+
+    @Test
+    fun swipeDist_nonNumericNaNAndNegative_areRejectedOnImport() {
+        // toFloatOrNull() accepts "NaN" and "Infinity"; neither is a usable distance.
+        for (v in listOf("abc", "", "NaN", "Infinity", "-3")) {
+            assertWithMessage("\"$v\" is not a usable swipe distance and must be rejected")
+                .that(SettingsValidation.validate("swipe_dist", PrefValue.Str(v)))
+                .isNotNull()
+        }
+    }
+
+    @Test
+    fun sliderSensitivity_isRangeCheckedOnImport() {
+        for (v in listOf("1", "30", "100")) {
+            assertWithMessage("\"$v\" is inside 1..100 and must import")
+                .that(SettingsValidation.validate("slider_sensitivity", PrefValue.Str(v)))
+                .isNull()
+        }
+        for (v in listOf("0", "101", "9999", "-5")) {
+            assertWithMessage("\"$v\" is outside 1..100 and must be rejected (0 divides by zero)")
+                .that(SettingsValidation.validate("slider_sensitivity", PrefValue.Str(v)))
+                .isNotNull()
+        }
+    }
+
+    @Test
+    fun swipeDistAndSliderSensitivity_consumeTheSharedRanges() {
+        assertSiteReferences("ui/settings/sections/InputBehaviorSection.kt", "SWIPE_DIST")
+        assertSiteReferences("Config.kt", "SWIPE_DIST")
+        assertSiteReferences("backup/SettingsValidation.kt", "SWIPE_DIST")
+        assertSiteReferences("ui/settings/SettingsPersistence.kt", "SWIPE_DIST")
+        assertSiteReferences("ui/settings/SettingsPersistence.kt", "SLIDER_SENSITIVITY_PERCENT")
+        assertSiteReferences("backup/SettingsValidation.kt", "SLIDER_SENSITIVITY_PERCENT")
+    }
+
+    @Test
+    fun clampedFloatPref_treatsJunkNaNandInfinityAsIntended() {
+        val r = SettingsRanges.SWIPE_DIST
+        assertWithMessage("absent → fallback").that(Config.clampedFloatPref(null, 23f, r)).isEqualTo(23f)
+        assertWithMessage("unparsable → fallback").that(Config.clampedFloatPref("abc", 23f, r)).isEqualTo(23f)
+        assertWithMessage("NaN → fallback (coerceIn would pass it through)")
+            .that(Config.clampedFloatPref("NaN", 23f, r)).isEqualTo(23f)
+        assertWithMessage("0 → clamped up to the floor").that(Config.clampedFloatPref("0", 23f, r)).isEqualTo(r.start)
+        assertWithMessage("negative → clamped up to the floor").that(Config.clampedFloatPref("-5", 23f, r)).isEqualTo(r.start)
+        assertWithMessage("huge → clamped down to the ceiling").that(Config.clampedFloatPref("9999", 23f, r)).isEqualTo(r.endInclusive)
+        assertWithMessage("Infinity → clamped down to the ceiling")
+            .that(Config.clampedFloatPref("Infinity", 23f, r)).isEqualTo(r.endInclusive)
+        assertWithMessage("in range → untouched").that(Config.clampedFloatPref("17.5", 23f, r)).isEqualTo(17.5f)
+    }
+
+    @Test
+    fun clampedFloatPref_sliderSensitivityCannotReachZero() {
+        val r = SettingsRanges.SLIDER_SENSITIVITY_PERCENT.first.toFloat()..
+            SettingsRanges.SLIDER_SENSITIVITY_PERCENT.last.toFloat()
+        assertThat(Config.clampedFloatPref("0", 30f, r)).isEqualTo(1f)
+        assertThat(Config.clampedFloatPref("250", 30f, r)).isEqualTo(100f)
+        assertThat(Config.clampedFloatPref("30", 30f, r)).isEqualTo(30f)
+    }
 }

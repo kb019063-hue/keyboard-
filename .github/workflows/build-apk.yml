@@ -107,6 +107,12 @@ jobs:
       #
       # It ran on manual dispatch only until 2026-10-31; its first execution found a live defect in
       # split mode (docs/BUG-HUNT-2026-10-31.md). It runs on every build now.
+      #
+      # 2026-10-31 (R2 pass): the three root-package classes named explicitly at the end are the
+      # shared-range, burst-coalescing and log ratchets. They were written like every other
+      # invariant test here but no pattern selected them, so none of them had ever executed —
+      # `SettingsRangeDriftTest` in particular, which the earlier hunts cited as the proof that the
+      # settings ranges cannot drift. A ratchet nobody runs is not a ratchet.
       - name: Unit tests (portable subset, advisory)
         continue-on-error: true
         shell: bash
@@ -120,6 +126,9 @@ jobs:
             --tests 'tribixbite.cleverkeys.clipboard.*' \
             --tests '*FloatingConfigTest' \
             --tests '*Autocapitalisation*' \
+            --tests '*SettingsRangeDriftTest' \
+            --tests '*ConfigurationBurstCoalescingTest' \
+            --tests '*VerboseLogRatchetTest' \
             2>&1 | tee unit-test-output.log
 
       # Reachable summary: per-class counts from the JUnit XML, plus any compiler diagnostic.

@@ -103,7 +103,9 @@ internal fun SettingsActivity.handlePreferenceChanged(sharedPreferences: SharedP
             }
             // Gesture sensitivity settings
             "swipe_dist" -> {
-                swipeDistance = prefs.getSafeString(key, Defaults.SWIPE_DIST).toIntOrNull() ?: Defaults.SWIPE_DIST_FALLBACK.toInt()
+                // R2: clamped like Config's read site (see loadCurrentSettings).
+                swipeDistance = (prefs.getSafeString(key, Defaults.SWIPE_DIST).toIntOrNull() ?: Defaults.SWIPE_DIST_FALLBACK.toInt())
+                    .coerceIn(SettingsRanges.SWIPE_DIST.start.toInt(), SettingsRanges.SWIPE_DIST.endInclusive.toInt())
             }
             "circle_sensitivity" -> {
                 circleSensitivity = prefs.getSafeString(key, Defaults.CIRCLE_SENSITIVITY).toIntOrNull() ?: Defaults.CIRCLE_SENSITIVITY_FALLBACK
@@ -204,7 +206,9 @@ internal fun SettingsActivity.handlePreferenceChanged(sharedPreferences: SharedP
             }
             // Phase 5: Gesture settings listeners
             "slider_sensitivity" -> {
-                sliderSensitivity = prefs.getSafeString(key, Defaults.SLIDER_SENSITIVITY).toIntOrNull() ?: Defaults.SLIDER_SENSITIVITY_FALLBACK.toInt()
+                // R2: clamped like Config's read site (see loadCurrentSettings).
+                sliderSensitivity = (prefs.getSafeString(key, Defaults.SLIDER_SENSITIVITY).toIntOrNull() ?: Defaults.SLIDER_SENSITIVITY_FALLBACK.toInt())
+                    .coerceIn(SettingsRanges.SLIDER_SENSITIVITY_PERCENT.first, SettingsRanges.SLIDER_SENSITIVITY_PERCENT.last)
             }
             "swipe_final_autocorrect_enabled" -> {
                 swipeFinalAutocorrectEnabled = prefs.getBoolean(key, Defaults.SWIPE_FINAL_AUTOCORRECT_ENABLED)
@@ -351,9 +355,13 @@ internal fun SettingsActivity.loadCurrentSettings() {
         capitalizeIWords = prefs.getSafeBoolean("autocapitalize_i_words", Defaults.AUTOCAPITALIZE_I_WORDS)
 
         // Gesture sensitivity settings
-        swipeDistance = prefs.getSafeString("swipe_dist", Defaults.SWIPE_DIST).toIntOrNull() ?: Defaults.SWIPE_DIST_FALLBACK.toInt()
+        // R2: clamp to the same ranges Config uses, so a legacy/imported out-of-range value
+        // cannot leave the slider showing a number the keyboard does not honour.
+        swipeDistance = (prefs.getSafeString("swipe_dist", Defaults.SWIPE_DIST).toIntOrNull() ?: Defaults.SWIPE_DIST_FALLBACK.toInt())
+            .coerceIn(SettingsRanges.SWIPE_DIST.start.toInt(), SettingsRanges.SWIPE_DIST.endInclusive.toInt())
         circleSensitivity = prefs.getSafeString("circle_sensitivity", Defaults.CIRCLE_SENSITIVITY).toIntOrNull() ?: Defaults.CIRCLE_SENSITIVITY_FALLBACK
-        sliderSensitivity = prefs.getSafeString("slider_sensitivity", Defaults.SLIDER_SENSITIVITY).toIntOrNull() ?: Defaults.SLIDER_SENSITIVITY_FALLBACK.toInt()
+        sliderSensitivity = (prefs.getSafeString("slider_sensitivity", Defaults.SLIDER_SENSITIVITY).toIntOrNull() ?: Defaults.SLIDER_SENSITIVITY_FALLBACK.toInt())
+            .coerceIn(SettingsRanges.SLIDER_SENSITIVITY_PERCENT.first, SettingsRanges.SLIDER_SENSITIVITY_PERCENT.last)
 
         // Long press settings
         longPressTimeout = prefs.getSafeInt("longpress_timeout", Defaults.LONGPRESS_TIMEOUT)
