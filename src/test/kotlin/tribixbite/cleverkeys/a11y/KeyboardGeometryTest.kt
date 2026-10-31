@@ -293,16 +293,21 @@ class KeyboardGeometryTest {
             .inOrder()
 
         // Absolute check that pins WHERE the gap went: 'y' is the first key of the top row whose
-        // left edge has reached the midpoint, so its cell starts after five scaled key widths
-        // plus the whole gap. (Tolerance: the walk adds the key width five times, which is not
-        // bit-identical to one multiplication for every scale.)
+        // left edge has reached the midpoint, so the key's own cell starts after five scaled key
+        // widths plus the whole gap. (Tolerance: the walk adds the key width five times, which is
+        // not bit-identical to one multiplication for every scale.)
+        val spans = KeyboardGeometry.rowSpans(topRow, p)
+        assertThat(spans[4].xRight).isWithin(1e-3f).of(50f + 5 * 100f * scale)
+        assertThat(spans[5].xLeft).isWithin(1e-3f).of(50f + 5 * 100f * scale + gap)
+
+        // TalkBack ownership includes the gap *before* a key -- keyAt gives any touch in the
+        // split gap to the key on its right -- so the 'y' node starts where the 't' cell ends
+        // rather than at 'y''s own left edge, and 't' keeps the cell the unsplit walk gave it.
         val yRect = rects.first { it.kv.getChar() == 'y' }
-        assertThat(yRect.bounds.left).isWithin(1e-3f).of(50f + 5 * 100f * scale + gap)
-        // The key before the split stays where the unsplit walk put it, and the gap is the only
-        // thing between the two cells.
         val tRect = rects.first { it.kv.getChar() == 't' }
         assertThat(tRect.bounds.left).isWithin(1e-3f).of(50f + 4 * 100f * scale)
-        assertThat(yRect.bounds.left).isEqualTo(tRect.bounds.right + gap)
+        assertThat(yRect.bounds.left).isEqualTo(tRect.bounds.right)
+        assertThat(yRect.bounds.left).isLessThan(spans[5].xLeft)
 
         // Same every-pixel invariant the unsplit fixture pins: an x resolves to the node whose
         // key [keyAt] returns, so touch exploration never announces a neighbour.
