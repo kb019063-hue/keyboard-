@@ -13,13 +13,27 @@
 # permissions are "Read and write" — which this repo already relies on, since the release
 # step in build-apk.yml publishes with `contents: write`.
 #
-# Deliberately manual and dry by default: run it once with the box UNTICKED to see what it
-# would remove, then run it again with the box TICKED. GitHub recalculates usage every
+# Two ways in:
+#
+# 1. `push` to main, LIMITED to changes of this file. Editing this workflow IS the trigger, so
+#    the pull request that carries it clears the backlog with no further action — which is the
+#    point: the owner works from a phone and the agent's token cannot dispatch either. It runs
+#    with deletion ON, because the merge is the decision.
+# 2. `workflow_dispatch`, dry by default: tick the box to delete, leave it to only count. Use
+#    this to re-check or to clear a different prefix (the smoke evidence, say) later.
+#
+# Neither path can touch anything but the prefix it is given, and the default prefix matches
+# only `keyboard-debug-*`: the rolling `dev-builds` release (the actual APKs) and the smoke
+# evidence are different stores/names and are never deleted. GitHub recalculates usage every
 # 6-12 hours, so the quota frees up on a delay rather than the moment this finishes.
 
 name: Cleanup keyboard-debug artifacts
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/cleanup-artifacts.yml'
   workflow_dispatch:
     inputs:
       delete:
@@ -50,8 +64,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          DO_DELETE: ${{ inputs.delete }}
-          PREFIX: ${{ inputs.prefix }}
+          # A push (i.e. this file landing on main) means "you already decided": delete.
+          # A manual dispatch keeps its checkbox, defaulting to a dry run.
+          DO_DELETE: ${{ github.event_name == 'push' || inputs.delete }}
+          PREFIX: ${{ inputs.prefix || 'keyboard-debug-' }}
+          # Passed through the environment rather than interpolated into the script, so the
+          # script stays runnable outside Actions (where `${{ }}` is not substituted).
+          EVENT: ${{ github.event_name }}
         run: |
           # No `set -e`: a single failed DELETE must not hide the rest of the run, and the
           # summary has to be written even when something goes wrong.
@@ -81,6 +100,7 @@ jobs:
           done <<< "$raw"
           mb=$((bytes / 1048576))
 
+          echo "trigger: $EVENT (delete=$DO_DELETE)"
           echo "prefix: $PREFIX"
           echo "found:  $count artifact(s), ${mb} MB"
 
