@@ -47,6 +47,11 @@ class AutocapitalisationTest {
         // Config fields are @JvmField var — can't mock with every{}, set directly.
         mockConfig = mockk<Config>(relaxed = true)
         mockConfig.autocapitalisation = true
+        // The state machine reads Config.autocapEffective (setting AND incognito), not the raw
+        // `autocapitalisation` flag: a relaxed mock answers `false` for the computed property, so
+        // without this stub every test here ran with auto-cap disabled and three of them failed
+        // on assertions that never executed the code path they name.
+        every { mockConfig.autocapEffective } returns true
         // Set _globalConfig via reflection so Config.globalConfig() returns our mock
         setGlobalConfig(mockConfig)
 
@@ -98,6 +103,7 @@ class AutocapitalisationTest {
     @Test
     fun `started with autocap disabled does not enable`() {
         mockConfig.autocapitalisation = false
+        every { mockConfig.autocapEffective } returns false
 
         val info = createEditorInfo(
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES,
