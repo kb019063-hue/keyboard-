@@ -273,6 +273,67 @@ class KeyboardGeometryTest {
     }
 
     @Test
+    fun accessibilityRectsFollowSplitGapAndScale() {
+        // Split mode (phase 3 part 4): the right half is pushed right by `splitGap` and both
+        // halves are narrowed by `splitScale`. TalkBack's node rectangles have to describe the
+        // cells the finger actually hits, which [keyAt] already models through [rowSpans].
+        // Until 2026-10-31 this walk advanced by `key.width * keyWidth` only -- neither the gap
+        // nor the scale -- so with split on every right-half node owned a region up to one gap
+        // away from the key it named, and its width was the unsplit one.
+        val gap = 210f
+        val scale = (10f * 100f - gap) / (10f * 100f) // a 10-key row of 100px keys
+        val p = params(keyWidth = 100f, marginLeft = 50f).copy(splitGap = gap, splitScale = scale)
+        val hostWidth = 1_200
+
+        val rects = KeyboardGeometry.computeAccessibilityKeyRects(rows, p, hostWidth.toFloat())
+
+        // Cell count and row-major order are unchanged by the split.
+        assertThat(rects.map { it.kv.getChar() })
+            .containsExactlyElementsIn("qwertyuiop".toList() + "asdfghjkl".toList() + "zxcvbnm".toList())
+            .inOrder()
+
+        // Absolute check that pins WHERE the gap went: 'y' is the first key of the top row whose
+        // left edge has reached the midpoint, so the key's own cell starts after five scaled key
+        // widths plus the whole gap. (Tolerance: the walk adds the key width five times, which is
+        // not bit-identical to one multiplication for every scale.)
+        val spans = KeyboardGeometry.rowSpans(topRow, p)
+        assertThat(spans[4].xRight).isWithin(1e-3f).of(50f + 5 * 100f * scale)
+        assertThat(spans[5].xLeft).isWithin(1e-3f).of(50f + 5 * 100f * scale + gap)
+
+        // TalkBack ownership includes the gap *before* a key -- keyAt gives any touch in the
+        // split gap to the key on its right -- so the 'y' node starts where the 't' cell ends
+        // rather than at 'y''s own left edge, and 't' keeps the cell the unsplit walk gave it.
+        val yRect = rects.first { it.kv.getChar() == 'y' }
+        val tRect = rects.first { it.kv.getChar() == 't' }
+        assertThat(tRect.bounds.left).isWithin(1e-3f).of(50f + 4 * 100f * scale)
+        assertThat(yRect.bounds.left).isEqualTo(tRect.bounds.right)
+        assertThat(yRect.bounds.left).isLessThan(spans[5].xLeft)
+
+        // Same every-pixel invariant the unsplit fixture pins: an x resolves to the node whose
+        // key [keyAt] returns, so touch exploration never announces a neighbour.
+        for ((rowIndex, fixtureRow) in rows.withIndex()) {
+            var rowTop = p.marginTop
+            repeat(rowIndex) { i ->
+                rowTop += (rows[i].shift + rows[i].height) * p.rowHeight
+            }
+            val rowBottom = rowTop + (fixtureRow.shift + fixtureRow.height) * p.rowHeight
+            val y = (rowTop + rowBottom) / 2f
+            for (x in 0 until hostWidth) {
+                val expected = KeyboardGeometry.keyAt(rows, p, x.toFloat(), y)
+                    ?.takeIf { it.keys[0] != null }
+                val actual = rects.firstOrNull { rect ->
+                    val bounds = rect.bounds
+                    x >= bounds.left && x < bounds.right &&
+                        y >= bounds.top && y < bounds.bottom
+                }?.key
+                assertWithMessage(
+                    "split geometry: row=$rowIndex x=$x y=$y"
+                ).that(actual).isSameInstanceAs(expected)
+            }
+        }
+    }
+
+    @Test
     fun computeRectsMatchKeyAtForDenseGrid() {
         // Dense parity sweep: every rect center AND a jittered point inside each
         // cell must resolve to that cell's key via keyAt (the two code paths use

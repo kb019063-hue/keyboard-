@@ -79,6 +79,11 @@ class ClipboardCatchUpTest {
         every { context.getSharedPreferences(ClipboardHistoryService.LAST_SEEN_PREFS, any()) } returns prefs
         config = mockk(relaxed = true)
         config.clipboard_history_enabled = true
+        // onKeyboardShown gates the catch-up on Config.clipboardHistoryEffective (setting AND
+        // incognito). A relaxed mock answers `false` for that computed property, which silently
+        // turned every catch-up assertion here into a no-op: the "missed copy" tests failed and
+        // the "no re-read" ones passed without the catch-up ever running.
+        every { config.clipboardHistoryEffective } returns true
         config.clipboard_exclude_password_managers = false
         config.clipboard_respect_sensitive_flag = true
         setGlobalConfig(config)
@@ -165,6 +170,7 @@ class ClipboardCatchUpTest {
     @Test
     fun historyDisabled_readsAndRecordsNothing() {
         config.clipboard_history_enabled = false
+        every { config.clipboardHistoryEffective } returns false
         every { cm.primaryClip } returns clip("off", 1_000)
         service.onKeyboardShown()
         verify(exactly = 0) { cm.primaryClip }

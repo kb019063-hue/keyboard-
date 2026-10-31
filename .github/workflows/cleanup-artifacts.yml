@@ -1,0 +1,148 @@
+# One-off maintenance: clear the stale `keyboard-debug-*` artifact backlog.
+#
+# Why this exists: a private repo gets 500 MB of Actions storage, and 41 three-ABI APK
+# bundles (~94 MB each) put this one 7.8x over it. Every optional upload since has been
+# failing with `Failed to CreateArtifact: Artifact storage quota has been hit` — see
+# docs/CI-STORAGE.md for the full story. The APKs themselves are not at risk: every one of
+# those artifacts is a duplicate of something already published in the rolling `dev-builds`
+# release, which lives in a different store and does not count against this quota.
+#
+# Why a workflow rather than `gh` on a laptop: deleting an artifact needs `actions: write`.
+# The agent's session token does not have it (403 "Resource not accessible by integration"),
+# but a workflow's own `GITHUB_TOKEN` does, as long as the repository's default workflow
+# permissions are "Read and write" — which this repo already relies on, since the release
+# step in build-apk.yml publishes with `contents: write`.
+#
+# Deliberately manual and dry by default: run it once with the box UNTICKED to see what it
+# would remove, then run it again with the box TICKED. GitHub recalculates usage every
+# 6-12 hours, so the quota frees up on a delay rather than the moment this finishes.
+
+name: Cleanup keyboard-debug artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      delete:
+        description: "Tick to really delete. Leave unticked to only count them."
+        type: boolean
+        default: false
+      prefix:
+        description: "Artifact name prefix to clear (keyboard-debug- is the ~3.8 GB of duplicates)."
+        type: string
+        default: "keyboard-debug-"
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: cleanup-artifacts
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Count and optionally delete matching artifacts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DO_DELETE: ${{ inputs.delete }}
+          PREFIX: ${{ inputs.prefix }}
+        run: |
+          # No `set -e`: a single failed DELETE must not hide the rest of the run, and the
+          # summary has to be written even when something goes wrong.
+          set -uo pipefail
+          # Always set inside Actions; defaulting keeps the script runnable (and testable) with
+          # `set -u` outside it.
+          SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+          if [ -z "${PREFIX:-}" ]; then
+            echo "::error::prefix input was empty; refusing to touch every artifact"
+            exit 1
+          fi
+
+          # One line per artifact: "<id> <size_in_bytes>". --paginate applies the filter to
+          # every page, so this also works once the repo has more than 100 artifacts again.
+          raw=$(gh api "repos/$REPO/actions/artifacts?per_page=100" --paginate \
+            --jq ".artifacts[]
+                  | select((.name | startswith(\"$PREFIX\")) and (.expired | not))
+                  | \"\(.id) \(.size_in_bytes)\"")
+
+          count=0
+          bytes=0
+          while read -r id size; do
+            [ -n "${id:-}" ] || continue
+            count=$((count + 1))
+            bytes=$((bytes + ${size:-0}))
+          done <<< "$raw"
+          mb=$((bytes / 1048576))
+
+          echo "prefix: $PREFIX"
+          echo "found:  $count artifact(s), ${mb} MB"
+
+          {
+            echo "### Artifact cleanup"
+            echo ""
+            echo "- prefix: \`$PREFIX\`"
+            echo "- matching artifacts still stored: **$count** (${mb} MB)"
+          } >> "$SUMMARY"
+
+          if [ "$count" -eq 0 ]; then
+            echo "Nothing to do — the backlog is already clear."
+            echo ""
+            echo "Nothing matched, so the backlog is already clear." >> "$SUMMARY"
+            exit 0
+          fi
+
+          if [ "$DO_DELETE" != "true" ]; then
+            echo "Dry run: nothing was deleted. Re-run with the box ticked to delete these."
+            echo "" >> "$SUMMARY"
+            echo "**Dry run — nothing was deleted.** Re-run with the box ticked to delete them." \
+              >> "$SUMMARY"
+            exit 0
+          fi
+
+          deleted=0
+          failed=0
+          refused=""
+          while read -r id size; do
+            [ -n "${id:-}" ] || continue
+            if err=$(gh api -X DELETE "repos/$REPO/actions/artifacts/$id" 2>&1); then
+              deleted=$((deleted + 1))
+              echo "deleted $id"
+            else
+              failed=$((failed + 1))
+              echo "::warning::could not delete $id: $err"
+              case "$err" in
+                *"Resource not accessible"*|*403*) refused="yes" ;;
+              esac
+            fi
+          done <<< "$raw"
+
+          echo "deleted $deleted, failed $failed"
+          {
+            echo ""
+            echo "**Deleted $deleted artifact(s); $failed failed.**"
+            echo ""
+            echo "Usage is recalculated every 6-12 hours, so the quota will not free up instantly."
+          } >> "$SUMMARY"
+
+          if [ -n "$refused" ]; then
+            {
+              echo ""
+              echo "> Deletion was refused with 403. The repository's default workflow"
+              echo "> permissions are probably read-only: Settings → Actions → General →"
+              echo "> *Workflow permissions* → **Read and write**, then re-run with the box ticked."
+            } >> "$SUMMARY"
+            echo "::error::Deletion refused (403) — grant 'Read and write' workflow permissions and re-run."
+            exit 1
+          fi
+
+          if [ "$failed" -gt 0 ]; then
+            echo "::error::$failed of $((deleted + failed)) deletions failed — check the warnings above."
+            exit 1
+          fi

@@ -1454,19 +1454,20 @@ class Keyboard2View @JvmOverloads constructor(
             return keyPositions
         }
 
-        var y = _config.snapshot.marginTop
+        // Same single horizontal walk as hit-testing and drawing: [KeyboardGeometry.rowSpans]
+        // carries the split gap and its compensating scale. The bespoke accumulation this
+        // replaced applied `key.shift` only, so with split mode on the theme editor's sample
+        // trail was drawn against unsplit coordinates -- up to a hanging half-key away.
+        val gp = geometryParams() ?: return keyPositions
+        var y = gp.marginTop
 
         for (row in keyboard.rows) {
-            var x = _marginLeft
+            val yTop = y + row.shift * tc.row_height
+            val yBottom = yTop + row.height * tc.row_height
 
-            for (key in row.keys) {
-                val xLeft = x + key.shift * _keyWidth
-                val xRight = xLeft + key.width * _keyWidth
-                val yTop = y + row.shift * tc.row_height
-                val yBottom = yTop + row.height * tc.row_height
-
-                // Calculate center coordinates
-                val centerX = (xLeft + xRight) / 2f
+            for (span in KeyboardGeometry.rowSpans(row, gp)) {
+                val key = span.key
+                val centerX = (span.xLeft + span.xRight) / 2f
                 val centerY = (yTop + yBottom) / 2f
 
                 // The key's centre letter, by the shared single-letter rule (Locale.ROOT
@@ -1477,8 +1478,6 @@ class Keyboard2View @JvmOverloads constructor(
                 tribixbite.cleverkeys.swipe.KeyLetter.centreLetterOf(key.keys[0])?.let { keyChar ->
                     keyPositions[keyChar] = PointF(centerX, centerY)
                 }
-
-                x = xRight
             }
 
             y += (row.shift + row.height) * tc.row_height
@@ -1815,8 +1814,10 @@ class Keyboard2View @JvmOverloads constructor(
     // startX), all of which only move on a measure, a layout switch or a config change, so the
     // result is memoised against those five values. Referential identity is used for the layout
     // because KeyboardData is immutable: a new layout is a new object, and the same object can
-    // never mean different geometry. Nothing here is on the hit-test path --
-    // KeyboardGeometry.keyAt walks the keys directly and never calls rowSpans.
+    // never mean different geometry. The cache is draw-only, and that is a correctness property,
+    // not a convenience: KeyboardGeometry.keyAt calls rowSpans itself rather than reading this
+    // memo, so a stale cache can only mis-draw a frame -- it can never make a tap hit the wrong
+    // key.
     private var _spansCache: List<List<KeyboardGeometry.KeySpan>>? = null
     private var _spansKeyboard: KeyboardData? = null
     private var _spansStartX = Float.NaN
@@ -2011,10 +2012,15 @@ class Keyboard2View @JvmOverloads constructor(
 
         val paint = _swipeTrailPaint ?: return
 
-        // Handle rainbow effect with cycling colors
+        // Handle rainbow effect with cycling colors. The HSV triple is written into a reused
+        // array: a swipe animates a frame every 16 ms, and this used to allocate three floats per
+        // frame for a value that is recomputed one line later anyway.
         if (effect == "rainbow") {
             val hue = (System.currentTimeMillis() % 3600) / 10f // 0-360 cycling
-            paint.color = android.graphics.Color.HSVToColor(200, floatArrayOf(hue, 0.8f, 1.0f))
+            _hsvScratch[0] = hue
+            _hsvScratch[1] = 0.8f
+            _hsvScratch[2] = 1.0f
+            paint.color = android.graphics.Color.HSVToColor(200, _hsvScratch)
         }
 
         canvas.drawPath(_swipeTrailPath, paint)
@@ -2033,7 +2039,18 @@ class Keyboard2View @JvmOverloads constructor(
             // High density on trail, fading out to create "emanating" effect
             val maxSpread = 40 // Max reach, but heavily concentrated at center
             
-            for (i in 0 until swipePath.size) {
+            // Cost control: three particles per accepted move sample, every frame. A long swipe
+            // is hundreds of samples, so this loop could issue ~1,000 blurred drawCircle calls per
+            // frame -- and blur is the expensive part. Past SPARKLE_MAX_PARTICLES the sampling
+            // stride thins the trail UNIFORMLY (what the eye reads is density along the path, not
+            // dots per sample), which bounds the frame cost without changing the look of a normal
+            // swipe at all.
+            val needed = swipePath.size * SPARKLE_PARTICLES_PER_POINT
+            val step = if (needed <= SPARKLE_MAX_PARTICLES) 1
+            else (needed + SPARKLE_MAX_PARTICLES - 1) / SPARKLE_MAX_PARTICLES
+
+            var i = 0
+            while (i < swipePath.size) {
                 val point = swipePath[i]
                 
                 // Draw 3 particles per point for dense core
@@ -2068,6 +2085,7 @@ class Keyboard2View @JvmOverloads constructor(
                     
                     canvas.drawCircle(point.x + offsetX, point.y + offsetY, size, paint)
                 }
+                i += step
             }
             
             // Restore paint
@@ -2352,6 +2370,9 @@ class Keyboard2View @JvmOverloads constructor(
         private var _currentWhat = 0
         private val _tmpRect = RectF()
 
+        /** Reused HSV triple for the rainbow trail (see [drawSwipeTrail]). */
+        private val _hsvScratch = FloatArray(3)
+
         /**
          * Audit H-8: whether a key cell has nothing to render — all nine slots null and
          * no indication string. Only the #77 pane loc-strip produces such cells (no
@@ -2369,6 +2390,16 @@ class Keyboard2View @JvmOverloads constructor(
          * fake-pointer special-cases around Pointers.kt:506.
          */
         private const val A11Y_POINTER_ID = -2
+
+        /**
+         * Sparkle-trail budget. Three particles per accepted move sample is the shipped look; a
+         * long swipe can carry hundreds of samples, and each particle is a blurred `drawCircle`
+         * every frame (60 Hz for the whole gesture). Capping the count and thinning the sampling
+         * evenly keeps a normal swipe pixel-identical while stopping frame time from growing with
+         * the length of the gesture.
+         */
+        private const val SPARKLE_PARTICLES_PER_POINT = 3
+        private const val SPARKLE_MAX_PARTICLES = 360
 
         /** Horizontal and vertical position of the 9 indexes. */
         val LABEL_POSITION_H = arrayOf(

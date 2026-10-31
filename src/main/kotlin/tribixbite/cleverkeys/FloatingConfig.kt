@@ -11,8 +11,9 @@ package tribixbite.cleverkeys
  * offset from a portrait session would strand the window off a landscape screen, and a width
  * change must never push the window past an edge. The x fraction is a fraction of the window's
  * available horizontal TRAVEL (screen width minus window width), so 0 is flush left, 1 flush
- * right and 0.5 centred at any width; the y fraction places the window's top edge, capped at
- * [MAX_Y_FRACTION] so the keyboard can never be dragged until only its grip shows.
+ * right and 0.5 centred at any width; the y fraction places the window's top edge, capped by
+ * [maxYFraction] at the lowest value that still leaves the whole window on screen, so the keyboard
+ * can never be dragged until only its grip shows.
  */
 object FloatingConfig {
     const val PREF_ENABLED = "floating_enabled"
@@ -40,11 +41,39 @@ object FloatingConfig {
 
     fun clampYFraction(f: Float): Float = f.coerceIn(0f, MAX_Y_FRACTION)
 
+    /**
+     * The largest top-edge fraction that still leaves the WHOLE window on screen.
+     *
+     * [MAX_Y_FRACTION] alone is a fraction of the screen, not of the space the keyboard leaves
+     * over, so on its own it lets a 38 %-tall keyboard sit with its bottom row (space, period,
+     * enter) below the display: `y = 0.9 * 2400` puts the bottom edge at 3070 px on a 2400 px
+     * screen. This caps by the window's own measured height instead, which is what the grip's
+     * documented promise ("can never be dragged until only its grip shows") actually means.
+     *
+     * A [windowHeightPx] of 0 (before the first layout pass) keeps the old cap, so a caller that
+     * has not measured yet can never park the window somewhere layout would have to undo.
+     */
+    fun maxYFraction(screenHeight: Int, windowHeightPx: Int): Float {
+        if (screenHeight <= 0 || windowHeightPx <= 0) return MAX_Y_FRACTION
+        val travel = (screenHeight - windowHeightPx).toFloat() / screenHeight.toFloat()
+        return travel.coerceIn(0f, MAX_Y_FRACTION)
+    }
+
+    /**
+     * Top-edge fraction clamped so [windowHeightPx] fits below it. Shared by the geometry the
+     * window manager is given and by the drag handler that writes the stored fraction, so a drag
+     * cannot bank a value the next layout would have to reject.
+     */
+    fun clampYFraction(f: Float, screenHeight: Int, windowHeightPx: Int): Float =
+        f.coerceIn(0f, maxYFraction(screenHeight, windowHeightPx))
+
     fun xPixels(screenWidth: Int, widthPixels: Int, xFraction: Float): Int =
         ((screenWidth - widthPixels) * clampXFraction(xFraction)).toInt()
 
-    fun yPixels(screenHeight: Int, yFraction: Float): Int =
-        (screenHeight * clampYFraction(yFraction)).toInt()
+    fun yPixels(screenHeight: Int, yFraction: Float, windowHeightPx: Int = 0): Int {
+        val max = maxYFraction(screenHeight, windowHeightPx)
+        return (screenHeight * yFraction.coerceIn(0f, max)).toInt()
+    }
 
     /** The whole window geometry in one call, so callers cannot apply half of it. */
     fun window(
@@ -52,10 +81,15 @@ object FloatingConfig {
         screenHeight: Int,
         widthPercent: Int,
         xFraction: Float,
-        yFraction: Float
+        yFraction: Float,
+        windowHeightPx: Int = 0
     ): FloatingWindow {
         val w = widthPixels(screenWidth, widthPercent)
-        return FloatingWindow(w, xPixels(screenWidth, w, xFraction), yPixels(screenHeight, yFraction))
+        return FloatingWindow(
+            w,
+            xPixels(screenWidth, w, xFraction),
+            yPixels(screenHeight, yFraction, windowHeightPx)
+        )
     }
 }
 

@@ -95,6 +95,90 @@ jobs:
               | while IFS= read -r line; do echo "::error::${line}"; done
           fi
 
+      # Advisory, never gating: `continue-on-error` keeps a red unit test from blocking the APK,
+      # but the per-class summary and every failing assertion still surface as annotations below.
+      #
+      # Why a filtered subset rather than `test`: this fork vendors none of upstream's release
+      # artefacts, and 16 test classes assert on them (`docs/RELEASE_RECORD.md`, `fastlane/`,
+      # `.github/scripts/emulator-ci.sh`, `docs/i18n/glossary.json`, `scripts/dictionaries/*.zip`),
+      # so a full `test` run cannot be green for reasons unrelated to the code. The filter covers
+      # the packages whose invariants are pure JVM and cheap. Gradle still compiles EVERY test
+      # source first, so this also serves as the only compile check that source set gets.
+      #
+      # It ran on manual dispatch only until 2026-10-31; its first execution found a live defect in
+      # split mode (docs/BUG-HUNT-2026-10-31.md). It runs on every build now.
+      - name: Unit tests (portable subset, advisory)
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew testDebugUnitTest \
+            --tests 'tribixbite.cleverkeys.a11y.*' \
+            --tests 'tribixbite.cleverkeys.popover.*' \
+            --tests 'tribixbite.cleverkeys.gesture.*' \
+            --tests 'tribixbite.cleverkeys.prefs.*' \
+            --tests 'tribixbite.cleverkeys.clipboard.*' \
+            --tests '*FloatingConfigTest' \
+            --tests '*Autocapitalisation*' \
+            2>&1 | tee unit-test-output.log
+
+      # Reachable summary: per-class counts from the JUnit XML, plus any compiler diagnostic.
+      - name: Summarise unit-test results as annotations
+        shell: bash
+        run: |
+          esc() { sed -e 's/%/%25/g' -e 's/\r/%0D/g'; }
+          # `|| true`: no compiler diagnostics is the GOOD case, and bash -e would otherwise
+          # fail this step on grep's exit 1 and skip the summary below it.
+          if [ -f unit-test-output.log ]; then
+            grep -E "^e: |: error: |^> Task .* FAILED" unit-test-output.log | head -8 | esc \
+              | while IFS= read -r line; do echo "::error::${line}"; done || true
+          fi
+          python3 - <<'PY'
+          import glob, xml.etree.ElementTree as ET
+          rows = []
+          for f in sorted(glob.glob('build/test-results/testDebugUnitTest/*.xml')):
+              try:
+                  r = ET.parse(f).getroot()
+              except Exception:
+                  continue
+              rows.append((r.get('name', '?'), int(r.get('tests', 0)),
+                           int(r.get('failures', 0)) + int(r.get('errors', 0)),
+                           int(r.get('skipped', 0))))
+          if not rows:
+              print('::warning::no JUnit XML found - the test task did not run')
+              raise SystemExit(0)
+          total = sum(r[1] for r in rows)
+          bad = sum(r[2] for r in rows)
+          print('::notice::unit tests: %d run, %d failed, %d skipped in %d classes'
+                % (total, bad, sum(r[3] for r in rows), len(rows)))
+          for name, tests, failed, _ in rows:
+              if failed:
+                  print('::error::%s: %d of %d failed' % (name, failed, tests))
+
+          # Which cases, and why: the message is the only part of the failure that is reachable
+          # from outside the web UI, so flatten it to one line and keep the assertion head.
+          import glob as _g
+          shown = 0
+          for f in sorted(_g.glob('build/test-results/testDebugUnitTest/*.xml')):
+              try:
+                  root = ET.parse(f).getroot()
+              except Exception:
+                  continue
+              for case in root.iter('testcase'):
+                  for kind in ('failure', 'error'):
+                      node = case.find(kind)
+                      if node is None:
+                          continue
+                      msg = ' '.join((node.get('message') or node.text or '').split())[:300]
+                      print('::error::%s#%s: %s'
+                            % (case.get('classname', '?'), case.get('name', '?'), msg))
+                      shown += 1
+                      if shown >= 10:
+                          raise SystemExit(0)
+          if bad == 0:
+              print('::notice::all selected unit tests passed')
+          PY
+
       - name: Report APK sizes
         run: |
           cd build/outputs/apk/debug
@@ -165,7 +249,12 @@ jobs:
           name: keyboard-debug-${{ steps.meta.outputs.sha }}
           path: build/outputs/apk/debug/*.apk
           if-no-files-found: error
-          retention-days: 3
+          # 1 day, not 3: each of these is ~94 MB, and the rolling `dev-builds` release below
+          # already publishes the same APKs under permanent URLs (release assets do not count
+          # against the Actions artifact quota, artifacts do). One day is enough for the manual
+          # dispatch that asked for an artifact; a pile of them is what exhausted the 500 MB
+          # private-repo quota in October 2026.
+          retention-days: 1
 
       - name: Upload failure reports
         if: failure()
