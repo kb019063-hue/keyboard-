@@ -129,9 +129,11 @@ jobs:
         shell: bash
         run: |
           esc() { sed -e 's/%/%25/g' -e 's/\r/%0D/g'; }
+          # `|| true`: no compiler diagnostics is the GOOD case, and bash -e would otherwise
+          # fail this step on grep's exit 1 and skip the summary below it.
           if [ -f unit-test-output.log ]; then
             grep -E "^e: |: error: |^> Task .* FAILED" unit-test-output.log | head -8 | esc \
-              | while IFS= read -r line; do echo "::error::${line}"; done
+              | while IFS= read -r line; do echo "::error::${line}"; done || true
           fi
           python3 - <<'PY'
           import glob, xml.etree.ElementTree as ET
