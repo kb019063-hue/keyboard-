@@ -6,6 +6,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import tribixbite.cleverkeys.swipe.ctc.CtcLanguageSupport
+import org.junit.Before
 
 /**
  * Pins the release-facing copy (root `RELEASE_NOTES.md` + the three per-ABI fastlane
@@ -22,6 +23,15 @@ import tribixbite.cleverkeys.swipe.ctc.CtcLanguageSupport
  *     files fails here (missing file) instead of shipping stale notes.
  */
 class ReleaseMetadataDriftTest {
+
+    /**
+     * 2026-10-31: this class verifies upstream release bookkeeping, none of which is
+     * vendored here (see [UpstreamArtefacts]). Skipped, not failed — and not silently green.
+     */
+    @Before
+    fun skipWhenUpstreamArtefactsAreAbsent() {
+        UpstreamArtefacts.require(UpstreamArtefacts.RELEASE_NOTES, UpstreamArtefacts.FASTLANE)
+    }
 
     private val buildGradle = File("build.gradle")
 

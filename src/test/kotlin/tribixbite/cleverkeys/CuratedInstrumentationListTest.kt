@@ -3,6 +3,7 @@ package tribixbite.cleverkeys
 import com.google.common.truth.Truth.assertWithMessage
 import org.junit.Test
 import java.io.File
+import org.junit.Before
 
 /**
  * Pins the curated instrumented gate in `.github/scripts/emulator-ci.sh`.
@@ -27,6 +28,15 @@ import java.io.File
  * pure tests ([SourceTextHygieneTest], `TestRunnerListDriftTest`): project root as CWD.
  */
 class CuratedInstrumentationListTest {
+
+    /**
+     * 2026-10-31: this class verifies upstream release bookkeeping, none of which is
+     * vendored here (see [UpstreamArtefacts]). Skipped, not failed — and not silently green.
+     */
+    @Before
+    fun skipWhenUpstreamArtefactsAreAbsent() {
+        UpstreamArtefacts.require(UpstreamArtefacts.EMULATOR_CI)
+    }
 
     /**
      * The curated gate, as agreed. Adding a class here without adding it to

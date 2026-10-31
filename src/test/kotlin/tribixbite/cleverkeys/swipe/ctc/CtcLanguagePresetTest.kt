@@ -3,6 +3,8 @@ package tribixbite.cleverkeys.swipe.ctc
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
 import org.junit.Test
+import org.junit.Before
+import tribixbite.cleverkeys.UpstreamArtefacts
 
 /**
  * The per-language CTC preset table — the app-side half of the λ sweep recorded in
@@ -16,6 +18,16 @@ import org.junit.Test
  * that NOTHING ELSE in the ship preset moves per language.
  */
 class CtcLanguagePresetTest {
+
+    /**
+     * 2026-10-31: the checks in this class decode against the SHIPPED language packs
+     * (`scripts/dictionaries/langpack-*.zip`), which this fork does not vendor. Skipped, not
+     * failed — and not silently green: see [UpstreamArtefacts].
+     */
+    @Before
+    fun skipWhenLanguagePacksAreAbsent() {
+        UpstreamArtefacts.require(UpstreamArtefacts.LANGPACK_DIR)
+    }
 
     // ── λ selection ────────────────────────────────────────────────────────────────
 

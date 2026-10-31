@@ -536,6 +536,10 @@ android {
     unitTests {
       includeAndroidResources = true
       returnDefaultValues = true
+      // 2026-10-31, measured: raising this to 3 GB so the dozen geometric-engine classes that
+      // died with `OutOfMemoryError` could finish pushed the whole-suite run past 70 minutes
+      // without completing — they trade a fast OOM for minutes of GC. Memory for those classes
+      // is a separate job (see docs/BUG-HUNT-2026-10-31.md), not a global flag.
     }
   }
 }

@@ -1,0 +1,151 @@
+# Whole unit-test suite — nightly, and on any change to this file.
+#
+# Why not in `build-apk.yml`: measured 2026-10-31, the whole suite needs ~20 minutes on a good
+# run, and once the test JVM was given 3 GB (so a dozen `OutOfMemoryError` classes could finish)
+# it ran past 70 minutes without completing. That is a budget problem, not a correctness one, so
+# it gets its own job and its own timeout instead of taxing every push.
+#
+# Why it exists at all: `build-apk.yml` runs a FILTER (`--tests` patterns), and a filter silently
+# skips whatever it does not name. `SettingsRangeDriftTest` — which two earlier reports cited as
+# the proof that the settings ranges cannot drift — had therefore never executed, and the first
+# time it did (2026-10-31) it immediately found a real divergence: `sound_volume`'s 0..100 bound
+# restated in three places, one of which the keyboard ignored. This job is what stops that
+# happening again: everything runs at least once a day, and a failure means something in THIS
+# repository is wrong.
+#
+# Classes that assert on upstream artefacts this fork does not vendor (`docs/RELEASE_RECORD.md`,
+# `fastlane/`, `docs/i18n/glossary.json`, `.github/scripts/emulator-ci.sh`,
+# `scripts/dictionaries/*.zip`) report SKIPPED via `UpstreamArtefacts`, not passed and not failed.
+#
+# Triggered without a terminal: editing and committing this file to `main` runs it (that is how
+# the first run after a change happens); otherwise the nightly schedule does. `workflow_dispatch`
+# is there for anyone with a working CLI.
+
+name: Full unit-test suite
+
+on:
+  schedule:
+    # 03:17 UTC — off the hour, so it does not queue behind everyone else's cron.
+    - cron: '17 3 * * *'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/full-test-suite.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-test-suite
+  cancel-in-progress: false
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # No `--tests` filter: this job's whole point is that nothing is skipped for being
+      # unlisted. `--continue` is not needed (Gradle runs every test in the task), and the task
+      # is allowed to fail so the summary below still runs and reports.
+      - name: Unit tests (whole suite)
+        id: tests
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew testDebugUnitTest --stacktrace 2>&1 | tee unit-test-output.log
+
+      - name: Report results as annotations and a job summary
+        shell: bash
+        run: |
+          esc() { sed -e 's/%/%25/g' -e 's/\r/%0D/g'; }
+          if [ -f unit-test-output.log ]; then
+            grep -E "^e: |: error: |^> Task .* FAILED" unit-test-output.log | head -3 | esc \
+              | while IFS= read -r line; do echo "::error::${line}"; done || true
+          fi
+          python3 - <<'PY'
+          import glob, os, xml.etree.ElementTree as ET
+
+          def esc(t):
+              return t.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+
+          rows, cases = [], []
+          for f in sorted(glob.glob('build/test-results/testDebugUnitTest/*.xml')):
+              try:
+                  r = ET.parse(f).getroot()
+              except Exception:
+                  continue
+              name = r.get('name', '?')
+              tests, skipped = int(r.get('tests', 0)), int(r.get('skipped', 0))
+              failed = int(r.get('failures', 0)) + int(r.get('errors', 0))
+              rows.append((name, tests, failed, skipped))
+              for case in r.iter('testcase'):
+                  for kind in ('failure', 'error'):
+                      node = case.find(kind)
+                      if node is None:
+                          continue
+                      msg = ' '.join((node.get('message') or node.text or '').split())
+                      cases.append((name, case.get('name', '?'), msg))
+                      break
+
+          if not rows:
+              print('::warning::no JUnit XML found - the test task did not run')
+              raise SystemExit(0)
+
+          total = sum(r[1] for r in rows)
+          bad = sum(r[2] for r in rows)
+          skipped = sum(r[3] for r in rows)
+          bad_classes = sorted([r for r in rows if r[2]], key=lambda r: (-r[2], r[0]))
+          print('::notice::unit tests: %d run, %d failed, %d skipped in %d classes'
+                % (total, bad, skipped, len(rows)))
+
+          skipped_classes = [r for r in rows if r[3] and not r[2]]
+          if skipped_classes:
+              print('::notice::%d class(es) skipped their checks (upstream artefacts absent): %s'
+                    % (len(skipped_classes),
+                       ', '.join(r[0].split('.')[-1] for r in skipped_classes)[:1000]))
+
+          if bad_classes:
+              short = '; '.join('%s %d/%d' % (n.split('.')[-1], f, t) for n, t, f, _ in bad_classes)
+              print('::error::' + esc('FAILING CLASSES (%d): %s' % (len(bad_classes), short))[:60000])
+
+              names = {}
+              for name, case, _ in cases:
+                  names.setdefault(name, []).append(case)
+              detail = '; '.join('%s: %s' % (n.split('.')[-1], ', '.join(v[:40]))
+                                 for n, v in sorted(names.items()))
+              print('::error::' + esc('FAILING TESTS: ' + detail)[:60000])
+
+              summary = ['### Unit tests', '',
+                         '- %d run, **%d failed**, %d skipped, %d classes' % (total, bad, skipped, len(rows)),
+                         '', '#### Failing classes', '']
+              summary += ['- `%s` — %d of %d' % (n, f, t) for n, t, f, _ in bad_classes]
+              summary += ['', '#### Failures (first 80)', '']
+              for name, case, msg in cases[:80]:
+                  summary.append('- `%s#%s`: %s' % (name.split('.')[-1], case, msg[:300]))
+              path = os.environ.get('GITHUB_STEP_SUMMARY')
+              if path:
+                  with open(path, 'a') as fh:
+                      fh.write('\n'.join(summary) + '\n')
+          else:
+              print('::notice::all %d unit tests passed' % total)
+          PY
+
+      # Make the job result mean what it says: the test task is advisory above only so the report
+      # always runs; the verdict is applied here.
+      - name: Fail the job when tests failed
+        if: steps.tests.outcome == 'failure'
+        run: |
+          echo "::error::the whole suite is not green - see the annotations and the job summary"
+          exit 1

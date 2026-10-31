@@ -24,6 +24,8 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import java.util.zip.ZipFile
+import org.junit.Before
+import tribixbite.cleverkeys.UpstreamArtefacts
 
 /**
  * On-demand MEASUREMENT (not a regression test) for
@@ -57,6 +59,16 @@ import java.util.zip.ZipFile
  * configuration.
  */
 class ChannelRankingEval {
+
+    /**
+     * 2026-10-31: the checks in this class decode against the SHIPPED language packs
+     * (`scripts/dictionaries/langpack-*.zip`), which this fork does not vendor. Skipped, not
+     * failed — and not silently green: see [UpstreamArtefacts].
+     */
+    @Before
+    fun skipWhenLanguagePacksAreAbsent() {
+        UpstreamArtefacts.require(UpstreamArtefacts.LANGPACK_DIR)
+    }
 
     /** One misspelling → intended-word pair (both lowercase); [occ] = distinct commits (GTC). */
     private data class P(val typed: String, val target: String, val occ: Int = 1)

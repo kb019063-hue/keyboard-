@@ -5,6 +5,7 @@ import java.security.MessageDigest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.Before
 
 /**
  * Integrity guard for `docs/RELEASE_RECORD.md` — the append-only book that maps every
@@ -59,6 +60,15 @@ import org.junit.Test
  * the backlog of shipped promises nothing defends.
  */
 class ReleaseRecordDriftTest {
+
+    /**
+     * 2026-10-31: this class verifies upstream release bookkeeping, none of which is
+     * vendored here (see [UpstreamArtefacts]). Skipped, not failed — and not silently green.
+     */
+    @Before
+    fun skipWhenUpstreamArtefactsAreAbsent() {
+        UpstreamArtefacts.require(UpstreamArtefacts.RELEASE_RECORD, UpstreamArtefacts.FASTLANE)
+    }
 
     // ---------------------------------------------------------------- parsing
 

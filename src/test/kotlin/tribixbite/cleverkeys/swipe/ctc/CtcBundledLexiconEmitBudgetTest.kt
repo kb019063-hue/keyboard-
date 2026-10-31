@@ -8,6 +8,8 @@ import org.junit.Test
 import tribixbite.cleverkeys.swipe.geometric.CkdtDictionaryReader
 import java.io.File
 import java.util.zip.ZipFile
+import org.junit.Before
+import tribixbite.cleverkeys.UpstreamArtefacts
 
 /**
  * The 32-frame emission budget, swept over every lexicon the app SHIPS.
@@ -114,6 +116,16 @@ import java.util.zip.ZipFile
  * reachable by relative `File` paths (same convention as [CtcCkdtLexiconTest]).
  */
 class CtcBundledLexiconEmitBudgetTest {
+
+    /**
+     * 2026-10-31: the checks in this class decode against the SHIPPED language packs
+     * (`scripts/dictionaries/langpack-*.zip`), which this fork does not vendor. Skipped, not
+     * failed — and not silently green: see [UpstreamArtefacts].
+     */
+    @Before
+    fun skipWhenLanguagePacksAreAbsent() {
+        UpstreamArtefacts.require(UpstreamArtefacts.LANGPACK_DIR)
+    }
 
     /**
      * One lexicon's emission surfaces measured against the budget.

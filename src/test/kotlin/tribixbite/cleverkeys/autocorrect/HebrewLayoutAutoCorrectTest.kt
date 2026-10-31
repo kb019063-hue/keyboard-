@@ -20,6 +20,8 @@ import tribixbite.cleverkeys.WordPredictor
 import java.io.File
 import java.util.concurrent.atomic.AtomicReference
 import java.util.zip.ZipFile
+import org.junit.Before
+import tribixbite.cleverkeys.UpstreamArtefacts
 
 /**
  * Neighbour-key typos on a Hebrew board (Saga report, 2026-10-08: Hebrew pack bound to the
@@ -42,6 +44,16 @@ import java.util.zip.ZipFile
  * of the typos is itself a dictionary word.
  */
 class HebrewLayoutAutoCorrectTest {
+
+    /**
+     * 2026-10-31: the checks in this class decode against the SHIPPED language packs
+     * (`scripts/dictionaries/langpack-*.zip`), which this fork does not vendor. Skipped, not
+     * failed — and not silently green: see [UpstreamArtefacts].
+     */
+    @Before
+    fun skipWhenLanguagePacksAreAbsent() {
+        UpstreamArtefacts.require(UpstreamArtefacts.LANGPACK_DIR)
+    }
 
     companion object {
         private lateinit var predictor: WordPredictor

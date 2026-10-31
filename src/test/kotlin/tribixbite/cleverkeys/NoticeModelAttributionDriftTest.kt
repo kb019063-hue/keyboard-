@@ -6,6 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import tribixbite.cleverkeys.swipe.ctc.CtcPackModel
 import tribixbite.cleverkeys.swipe.ctc.CtcScriptSupport
+import org.junit.Before
 
 /**
  * Pins the root `NOTICE` against the set of ONNX models CleverKeys actually ships.
@@ -39,6 +40,15 @@ import tribixbite.cleverkeys.swipe.ctc.CtcScriptSupport
  * Runs with the project root as CWD (same convention as [ReleaseMetadataDriftTest]).
  */
 class NoticeModelAttributionDriftTest {
+
+    /**
+     * 2026-10-31: this class verifies upstream release bookkeeping, none of which is
+     * vendored here (see [UpstreamArtefacts]). Skipped, not failed — and not silently green.
+     */
+    @Before
+    fun skipWhenUpstreamArtefactsAreAbsent() {
+        UpstreamArtefacts.require(UpstreamArtefacts.LANGPACK_DIR)
+    }
 
     private val modelsDir = File("src/main/assets/models")
     private val packDir = File("scripts/dictionaries")

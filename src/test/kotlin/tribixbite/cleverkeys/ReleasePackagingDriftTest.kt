@@ -4,6 +4,7 @@ import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
 import java.io.File
 import org.junit.Test
+import org.junit.Before
 
 /**
  * Pins the packaging-level promises CleverKeys has published in release notes — the ones
@@ -36,10 +37,24 @@ import org.junit.Test
  */
 class ReleasePackagingDriftTest {
 
+    /**
+     * 2026-10-31: this class verifies upstream release bookkeeping, none of which is
+     * vendored here (see [UpstreamArtefacts]). Skipped, not failed — and not silently green.
+     */
+    @Before
+    fun skipWhenUpstreamArtefactsAreAbsent() {
+        UpstreamArtefacts.require(
+            UpstreamArtefacts.FASTLANE,
+            UpstreamArtefacts.FDROID_RECIPE
+        )
+    }
+
     private val buildGradle = readRequired("build.gradle")
     private val manifest = readRequired("AndroidManifest.xml")
     private val proguard = readRequired("proguard-rules.pro")
-    private val fdroidRecipe = readRequired("metadata/fdroid/tribixbite.cleverkeys.yml")
+    // Lazy: this file is not vendored here, and property initialisers run BEFORE `@Before`, so a
+    // direct read would throw at construction and the skip guard would never get the chance.
+    private val fdroidRecipe by lazy { readRequired("metadata/fdroid/tribixbite.cleverkeys.yml") }
 
     private fun readRequired(path: String): String {
         val file = File(path)
