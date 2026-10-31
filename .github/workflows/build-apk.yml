@@ -35,17 +35,6 @@ on:
       # a change there cannot alter an APK or a smoke verdict.
       - 'scripts/ci/offline/**'
   workflow_dispatch:
-    inputs:
-      # Off by default. `testDebugUnitTest` compiles EVERY test source before running anything,
-      # and this fork's release-record drift classes assert on files it does not vendor, so the
-      # task cannot be green today -- see docs/BUG-HUNT-2026-10-31.md F5. A manual dispatch with
-      # this on answers two questions the push builds cannot: do the test sources still COMPILE,
-      # and does the portable subset pass? The answer arrives as annotations, because the raw
-      # logs on results-receiver are unreachable outside the web UI (docs/CI-STORAGE.md).
-      unit_tests:
-        description: 'Also run the portable unit-test subset (advisory, does not gate the APK)'
-        type: boolean
-        default: false
 
 permissions:
   contents: write
@@ -106,12 +95,19 @@ jobs:
               | while IFS= read -r line; do echo "::error::${line}"; done
           fi
 
-      # Opt-in only (manual dispatch, `unit_tests: true`). The filter keeps the known-broken
-      # release-record classes out of the verdict; Gradle still compiles all of src/test first, so
-      # this doubles as the only compile check that source set has ever had. `continue-on-error`
-      # means an advisory red here never blocks the APK, which is what the push path builds.
-      - name: Unit tests (opt-in, portable subset)
-        if: github.event_name == 'workflow_dispatch' && inputs.unit_tests
+      # Advisory, never gating: `continue-on-error` keeps a red unit test from blocking the APK,
+      # but the per-class summary and every failing assertion still surface as annotations below.
+      #
+      # Why a filtered subset rather than `test`: this fork vendors none of upstream's release
+      # artefacts, and 16 test classes assert on them (`docs/RELEASE_RECORD.md`, `fastlane/`,
+      # `.github/scripts/emulator-ci.sh`, `docs/i18n/glossary.json`, `scripts/dictionaries/*.zip`),
+      # so a full `test` run cannot be green for reasons unrelated to the code. The filter covers
+      # the packages whose invariants are pure JVM and cheap. Gradle still compiles EVERY test
+      # source first, so this also serves as the only compile check that source set gets.
+      #
+      # It ran on manual dispatch only until 2026-10-31; its first execution found a live defect in
+      # split mode (docs/BUG-HUNT-2026-10-31.md). It runs on every build now.
+      - name: Unit tests (portable subset, advisory)
         continue-on-error: true
         shell: bash
         run: |
@@ -121,11 +117,13 @@ jobs:
             --tests 'tribixbite.cleverkeys.popover.*' \
             --tests 'tribixbite.cleverkeys.gesture.*' \
             --tests 'tribixbite.cleverkeys.prefs.*' \
+            --tests 'tribixbite.cleverkeys.clipboard.*' \
+            --tests '*FloatingConfigTest' \
+            --tests '*Autocapitalisation*' \
             2>&1 | tee unit-test-output.log
 
       # Reachable summary: per-class counts from the JUnit XML, plus any compiler diagnostic.
       - name: Summarise unit-test results as annotations
-        if: github.event_name == 'workflow_dispatch' && inputs.unit_tests
         shell: bash
         run: |
           esc() { sed -e 's/%/%25/g' -e 's/\r/%0D/g'; }
@@ -251,7 +249,12 @@ jobs:
           name: keyboard-debug-${{ steps.meta.outputs.sha }}
           path: build/outputs/apk/debug/*.apk
           if-no-files-found: error
-          retention-days: 3
+          # 1 day, not 3: each of these is ~94 MB, and the rolling `dev-builds` release below
+          # already publishes the same APKs under permanent URLs (release assets do not count
+          # against the Actions artifact quota, artifacts do). One day is enough for the manual
+          # dispatch that asked for an artifact; a pile of them is what exhausted the 500 MB
+          # private-repo quota in October 2026.
+          retention-days: 1
 
       - name: Upload failure reports
         if: failure()

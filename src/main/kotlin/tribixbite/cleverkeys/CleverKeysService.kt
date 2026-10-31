@@ -597,14 +597,6 @@ class CleverKeysService : InputMethodService(),
     }
 
     /**
-     * Gets InputMethodManager.
-     * (v1.32.365: Delegated to SubtypeManager)
-     */
-    fun get_imm(): InputMethodManager {
-        return _subtypeManager!!.getInputMethodManager()
-    }
-
-    /**
      * Refreshes IME subtype settings and initializes managers.
      * (v1.32.365: Simplified by delegating to SubtypeManager)
      * (v1.32.409: extracted to SubtypeLayoutInitializer; ARC-072: absorbed into the graph)
@@ -986,6 +978,17 @@ class CleverKeysService : InputMethodService(),
         fr.onDragEnd = { persistFloatingPosition() }
         fr.onResize = { dx -> resizeFloating(dx) }
         fr.onResizeEnd = { persistFloatingWidth() }
+        // The window is WRAP_CONTENT around this root, so the height the y clamp needs only exists
+        // after the first layout pass -- and changes when the suggestion strip, toolbar or a
+        // rotation changes it. Re-resolve the geometry when that happens, otherwise a stored
+        // fraction that was legal at the old height would stay where it is until some unrelated
+        // event re-applied the layout. Terminates: applyFloatingWindowLayoutParams only assigns
+        // when a value actually changed, so re-entering with the same height is a no-op.
+        fr.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+            if (bottom - top > 0 && bottom - top != oldBottom - oldTop && floatingActive()) {
+                updateSoftInputWindowLayoutParams()
+            }
+        }
         _floatingRoot = fr
     }
 
@@ -1004,7 +1007,22 @@ class CleverKeysService : InputMethodService(),
         if (!floatingActive()) return null
         val dm = resources.displayMetrics
         return FloatingConfig.window(dm.widthPixels, dm.heightPixels,
-            cfg.floating_width_percent, cfg.floating_x_fraction, cfg.floating_y_fraction)
+            cfg.floating_width_percent, cfg.floating_x_fraction, cfg.floating_y_fraction,
+            floatingWindowHeightPx())
+    }
+
+    /**
+     * The height the floating window occupies, or 0 before its first layout pass.
+     *
+     * Measured rather than derived: the window is WRAP_CONTENT around this wrapper, so its height
+     * is whatever the keyboard, suggestion strip and toolbar currently add up to. Used to keep the
+     * window's bottom edge on screen ([FloatingConfig.maxYFraction]); before layout there is
+     * nothing to measure and the fraction keeps its old [FloatingConfig.MAX_Y_FRACTION] cap.
+     */
+    private fun floatingWindowHeightPx(): Int {
+        val fromRoot = _floatingRoot?.height ?: 0
+        if (fromRoot > 0) return fromRoot
+        return _inputViewContainer?.height ?: 0
     }
 
     /** Grip dragged: fold the pixel delta back into the stored fractions and relayout now. */
@@ -1015,7 +1033,14 @@ class CleverKeysService : InputMethodService(),
         if (travel > 0) {
             cfg.floating_x_fraction = FloatingConfig.clampXFraction(cfg.floating_x_fraction + dx.toFloat() / travel)
         }
-        cfg.floating_y_fraction = FloatingConfig.clampYFraction(cfg.floating_y_fraction + dy.toFloat() / dm.heightPixels)
+        // Clamped against the measured window height, not just the screen: an unclamped drag can
+        // otherwise bank a fraction that leaves the bottom row below the display, and the stored
+        // value survives a restart.
+        cfg.floating_y_fraction = FloatingConfig.clampYFraction(
+            cfg.floating_y_fraction + dy.toFloat() / dm.heightPixels,
+            dm.heightPixels,
+            floatingWindowHeightPx()
+        )
         updateSoftInputWindowLayoutParams()
     }
 
@@ -1032,6 +1057,12 @@ class CleverKeysService : InputMethodService(),
     /** Grip released: the position it ended at becomes the stored position. */
     private fun persistFloatingPosition() {
         val cfg = _config ?: return
+        val dm = resources.displayMetrics
+        // Never bank a fraction the window would have to clamp anyway: a value imported from an
+        // older build (or one edited by hand) is normalised here, on the only path that writes it.
+        cfg.floating_y_fraction = FloatingConfig.clampYFraction(
+            cfg.floating_y_fraction, dm.heightPixels, floatingWindowHeightPx()
+        )
         DirectBootAwarePreferences.get_shared_preferences(this).edit()
             .putFloat(FloatingConfig.PREF_X_FRACTION, cfg.floating_x_fraction)
             .putFloat(FloatingConfig.PREF_Y_FRACTION, cfg.floating_y_fraction)

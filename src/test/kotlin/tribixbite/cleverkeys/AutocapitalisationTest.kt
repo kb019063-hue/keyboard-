@@ -229,6 +229,26 @@ class AutocapitalisationTest {
         verify { mockCallback.update_shift_state(false, any()) }
     }
 
+    @Test
+    fun `event_sent with a meta modifier publishes the cleared shift state`() {
+        enableAutocap()
+
+        // Shift is on at a sentence start, then a modified key is sent.
+        every { mockIc.getCursorCapsMode(any()) } returns InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        autocap.typed(".")
+        runCapturedCallback()
+        clearMocks(mockCallback, mockIc, answers = false)
+
+        autocap.event_sent(KeyEvent.KEYCODE_DEL, KeyEvent.META_SHIFT_ON)
+        runCapturedCallback()
+
+        // The decision must reach the keyboard now, not on the next unmodified key: shift off,
+        // and no re-arm (a modified key is not a sentence boundary, so the caps mode must not be
+        // consulted again here).
+        verify { mockCallback.update_shift_state(false, true) }
+        verify(exactly = 0) { mockIc.getCursorCapsMode(any()) }
+    }
+
     // =========================================================================
     // pause() / unpause() tests
     // =========================================================================

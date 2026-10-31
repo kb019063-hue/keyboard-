@@ -137,14 +137,40 @@ class ClipboardHistoryService private constructor(ctx: Context) {
     }
 
     init {
-        // Handle expired entries based on current user setting
+        // Housekeeping is IO, and this constructor runs on the IME main thread
+        // (CleverKeysService.onCreate -> on_startup). It used to open the database, scan and
+        // delete the expired rows and then File.delete() each expired clip's media BEFORE the
+        // keyboard could draw for the first time -- unbounded work on the startup path, on a
+        // store whose default policy is "keep everything forever". Both jobs now run in order in
+        // one IO coroutine: expiry first, then the orphan sweep, so the sweep sees the
+        // post-cleanup table. Reads filter on `expiry_timestamp` themselves
+        // (ClipboardDatabase.getActiveClipboardEntries), so the only visible difference is that
+        // rows the cleanup is about to remove can be listed for the few milliseconds until it
+        // runs.
+        serviceScope.launch(Dispatchers.IO) {
+            reconcileExpiredEntries()
+            val referencedPaths = _database.getAllReferencedMediaPaths()
+            _mediaManager.cleanupOrphans(referencedPaths)
+        }
+
+        // Note: Listener registration is deferred to attemptToRegisterListener()
+        // which will be called from on_startup() and can be retried when keyboard gains focus
+    }
+
+    /**
+     * Expiry policy for the current setting, applied by the startup job below:
+     * - "never expire": rescue rows that still carry the old 7-day default's timestamps
+     *   instead of deleting anything by time;
+     * - a finite duration: delete the expired rows and their media files.
+     *
+     * IO-only. The database is thread-safe (it is SQLite's own connection pool behind
+     * [ClipboardDatabase]), and the media deletes are plain file operations.
+     */
+    private fun reconcileExpiredEntries() {
         val ttlMs = getHistoryTtlMs()
         if (ttlMs == Long.MAX_VALUE) {
-            // User has "never expire" — rescue entries with stale expiry timestamps
-            // from when the default was 7 days. Don't delete anything by time.
             _database.rescueExpiredEntries()
         } else {
-            // User has a finite duration — clean up expired entries and orphaned media
             val (_, expiredMediaPaths) = _database.cleanupExpiredEntries()
             for (path in expiredMediaPaths) {
                 if (!_database.isMediaPathReferenced(path)) {
@@ -152,15 +178,6 @@ class ClipboardHistoryService private constructor(ctx: Context) {
                 }
             }
         }
-
-        // Reconcile media files with DB on startup — delete orphan files not in any table
-        serviceScope.launch(Dispatchers.IO) {
-            val referencedPaths = _database.getAllReferencedMediaPaths()
-            _mediaManager.cleanupOrphans(referencedPaths)
-        }
-
-        // Note: Listener registration is deferred to attemptToRegisterListener()
-        // which will be called from on_startup() and can be retried when keyboard gains focus
     }
 
     /**

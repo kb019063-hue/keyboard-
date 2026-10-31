@@ -113,7 +113,11 @@ object EmojiKeywordIndex {
 
         val root = rootNode
         if (root == null) {
-            Log.w(TAG, "Search called before index loaded")
+            // Not a warning: the user can type into the emoji search box before the background
+            // load finishes, and the old Log.w here fired once per keystroke while that lasted.
+            // The UI already gates on isReady(), so this is the expected race, logged only under
+            // the opt-in verbose flag (BuildConfig.ENABLE_VERBOSE_LOGGING).
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "Search called before index loaded")
             return emptyList()
         }
 

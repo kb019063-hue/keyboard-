@@ -61,8 +61,15 @@ class Autocapitalisation(
 
     fun event_sent(code: Int, meta: Int) {
         if (meta != 0) {
+            // A key sent with a modifier (Ctrl/Alt, or a Shift+key combination this keyboard
+            // synthesised): never re-arm shift for it -- the next character is not a new
+            // sentence just because a modified key went by -- but DO publish that decision.
+            // Returning here without [callback] left both flags set for a callback that never
+            // ran, so the visual shift state stayed exactly as it was until the next unmodified
+            // key, i.e. one key too long.
             shouldEnableShift = false
             shouldUpdateCapsMode = false
+            callback(true)
             return
         }
         when (code) {
