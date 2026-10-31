@@ -98,38 +98,31 @@ jobs:
       # Advisory, never gating: `continue-on-error` keeps a red unit test from blocking the APK,
       # but the per-class summary and every failing assertion still surface as annotations below.
       #
-      # Why a filtered subset rather than `test`: this fork vendors none of upstream's release
-      # artefacts, and 16 test classes assert on them (`docs/RELEASE_RECORD.md`, `fastlane/`,
-      # `.github/scripts/emulator-ci.sh`, `docs/i18n/glossary.json`, `scripts/dictionaries/*.zip`),
-      # so a full `test` run cannot be green for reasons unrelated to the code. The filter covers
-      # the packages whose invariants are pure JVM and cheap. Gradle still compiles EVERY test
-      # source first, so this also serves as the only compile check that source set gets.
+      # Why this runs the WHOLE suite (2026-10-31, R2 follow-up): it used to run a hand-picked
+      # subset, because 16 classes assert on upstream artefacts this fork does not vendor
+      # (`docs/RELEASE_RECORD.md`, `fastlane/`, `.github/scripts/emulator-ci.sh`,
+      # `docs/i18n/glossary.json`, `scripts/dictionaries/*.zip`) and so could never pass here.
       #
-      # It ran on manual dispatch only until 2026-10-31; its first execution found a live defect in
-      # split mode (docs/BUG-HUNT-2026-10-31.md). It runs on every build now.
+      # A filter has a cost that is easy to miss: anything not named in it silently never runs.
+      # `SettingsRangeDriftTest` — cited by two earlier reports as the proof that the settings
+      # ranges cannot drift — had therefore never executed, and the moment it was switched on it
+      # found a real divergence (sound_volume's 0..100 bound restated in three places). Those 16
+      # classes now SKIP themselves when their artefact is absent (`Assume.assumeTrue`), which is
+      # what a skipped test means: "not checkable in this checkout", not "passed".
       #
-      # 2026-10-31 (R2 pass): the three root-package classes named explicitly at the end are the
-      # shared-range, burst-coalescing and log ratchets. They were written like every other
-      # invariant test here but no pattern selected them, so none of them had ever executed —
-      # `SettingsRangeDriftTest` in particular, which the earlier hunts cited as the proof that the
-      # settings ranges cannot drift. A ratchet nobody runs is not a ratchet.
-      - name: Unit tests (portable subset, advisory)
+      # So the whole suite runs, and a failure now means something in THIS repository is wrong.
+      # Still advisory (`continue-on-error`) while the first full runs settle; the annotations
+      # carry per-class counts and the first ten failure messages, which is enough to work from
+      # without a terminal.
+      #
+      # Gradle also compiles EVERY test source before running, so this doubles as the only
+      # compile check that source set gets.
+      - name: Unit tests (whole suite, advisory)
         continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
-          ./gradlew testDebugUnitTest \
-            --tests 'tribixbite.cleverkeys.a11y.*' \
-            --tests 'tribixbite.cleverkeys.popover.*' \
-            --tests 'tribixbite.cleverkeys.gesture.*' \
-            --tests 'tribixbite.cleverkeys.prefs.*' \
-            --tests 'tribixbite.cleverkeys.clipboard.*' \
-            --tests '*FloatingConfigTest' \
-            --tests '*Autocapitalisation*' \
-            --tests '*SettingsRangeDriftTest' \
-            --tests '*ConfigurationBurstCoalescingTest' \
-            --tests '*VerboseLogRatchetTest' \
-            2>&1 | tee unit-test-output.log
+          ./gradlew testDebugUnitTest 2>&1 | tee unit-test-output.log
 
       # Reachable summary: per-class counts from the JUnit XML, plus any compiler diagnostic.
       - name: Summarise unit-test results as annotations
