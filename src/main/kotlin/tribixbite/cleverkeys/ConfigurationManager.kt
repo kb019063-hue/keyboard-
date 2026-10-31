@@ -3,6 +3,8 @@ package tribixbite.cleverkeys
 import android.content.Context
 import android.content.SharedPreferences
 import android.content.res.Resources
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 
 /**
@@ -29,6 +31,37 @@ class ConfigurationManager(
 ) : SharedPreferences.OnSharedPreferenceChangeListener {
 
     private val listeners = mutableListOf<ConfigChangeListener>()
+
+    // ── R2/N2: coalesced preference refreshes ────────────────────────────────────────────────
+    // Every preference write used to rebuild the whole Config and fan out to every listener,
+    // on the caller's (usually main) thread. A slider drag writes once per increment, so
+    // dragging the keyboard height slider rebuilt the Config ~60x a second, between the frames
+    // the finger was moving through. Now the FIRST write of a burst applies immediately (a
+    // lone setting change behaves exactly as before, theme notification included) and writes
+    // that follow within BURST_WINDOW_MS are merged into one trailing refresh.
+    //
+    // Trade-off, stated plainly: the second and later writes of a burst become visible ~100 ms
+    // after the writes stop instead of instantly. Nothing reads a pref back between the writes
+    // of a drag, and 100 ms is below the threshold where a settings change looks unresponsive.
+
+    /** Monotonic millis of the write that started the current burst; 0 = no burst. */
+    private var burstStartedAt = 0L
+
+    /** `null` when the process has no main Looper (plain-JVM tests): no coalescing then. */
+    private val handler: Handler? by lazy {
+        try {
+            Looper.getMainLooper()?.let { Handler(it) }
+        } catch (t: Throwable) {
+            Log.w(TAG, "No main Looper available — preference bursts refresh synchronously", t)
+            null
+        }
+    }
+
+    /** Runs the one trailing refresh for a burst, then re-arms the leading edge. */
+    private val trailingRefresh = Runnable {
+        burstStartedAt = 0L
+        refreshNow(null)
+    }
 
     init {
         // Set up fold state callback to refresh config when device is folded/unfolded
@@ -128,7 +161,26 @@ class ConfigurationManager(
      * @param key Key of the preference that changed (may be null)
      */
     override fun onSharedPreferenceChanged(prefs: SharedPreferences, key: String?) {
-        // Refresh config and notify listeners
+        val now = System.nanoTime() / 1_000_000L
+        if (shouldRefreshImmediately(burstStartedAt, now)) {
+            // First change of a burst: apply it synchronously, exactly as before.
+            burstStartedAt = now
+            handler?.removeCallbacks(trailingRefresh)
+            refreshNow(key)
+        } else {
+            // Still inside a burst (a slider drag writes on every increment, and a multi-key
+            // editor commit fires once per key): collapse the rest into one trailing refresh.
+            val h = handler
+            if (h == null) {
+                refreshNow(key)
+            } else {
+                h.removeCallbacks(trailingRefresh)
+                h.postDelayed(trailingRefresh, TRAILING_DELAY_MS)
+            }
+        }
+    }
+
+    private fun refreshNow(key: String?) {
         try {
             refresh(context.resources)
         } catch (t: Throwable) {
@@ -148,5 +200,21 @@ class ConfigurationManager(
 
     companion object {
         private const val TAG = "ConfigurationManager"
+
+        /** Consecutive preference writes closer together than this count as one burst. */
+        private const val BURST_WINDOW_MS = 150L
+
+        /**
+         * `true` when a write at [now] (monotonic ms) starts a new burst and must be applied
+         * synchronously — i.e. no burst is in progress (`lastBurstStart == 0`) or the previous
+         * one began more than [BURST_WINDOW_MS] ago.
+         *
+         * Public only so the timing rule can be unit-tested without a Looper.
+         */
+        fun shouldRefreshImmediately(lastBurstStart: Long, now: Long): Boolean =
+            lastBurstStart == 0L || now - lastBurstStart > BURST_WINDOW_MS
+
+        /** How long after the last write of a burst the single trailing refresh runs. */
+        private const val TRAILING_DELAY_MS = 100L
     }
 }

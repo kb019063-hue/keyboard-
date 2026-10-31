@@ -386,7 +386,9 @@ internal fun SettingsActivity.InputBehaviorSection() {
                     title = stringResource(R.string.input_swipe_distance_threshold_title),
                     description = stringResource(R.string.input_swipe_distance_threshold_desc),
                     value = swipeDistance.toFloat(),
-                    valueRange = 5f..30f,
+                    // R2: the shared range — the Config read-site clamp and the backup validator
+                    // use the same bounds, so the slider cannot offer a value the others reject.
+                    valueRange = SettingsRanges.SWIPE_DIST,
                     increment = 1f,
                     onValueChange = {
                         swipeDistance = it.roundToInt()

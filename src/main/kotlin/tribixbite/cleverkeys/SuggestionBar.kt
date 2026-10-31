@@ -607,7 +607,7 @@ class SuggestionBar : LinearLayout {
 
         // v1.2.6: Don't overwrite temporary messages (e.g., "Added to dictionary")
         if (isShowingTemporaryMessage) {
-            Log.d(TAG, "setSuggestionsWithScores: skipped - temporary message is showing")
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "setSuggestionsWithScores: skipped - temporary message is showing")
             return
         }
 
@@ -685,7 +685,7 @@ class SuggestionBar : LinearLayout {
 
         // v1.2.6: Don't clear if showing temporary message (e.g., "Added to dictionary")
         if (isShowingTemporaryMessage) {
-            Log.d(TAG, "clearSuggestions: skipped - temporary message is showing")
+            if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "clearSuggestions: skipped - temporary message is showing")
             return
         }
 
@@ -694,7 +694,7 @@ class SuggestionBar : LinearLayout {
 
         // ALWAYS show empty suggestions instead of hiding - prevents UI disappearing
         setSuggestions(emptyList())
-        Log.d(TAG, "clearSuggestions called - showing empty list instead of hiding")
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "clearSuggestions called - showing empty list instead of hiding")
     }
 
     /**

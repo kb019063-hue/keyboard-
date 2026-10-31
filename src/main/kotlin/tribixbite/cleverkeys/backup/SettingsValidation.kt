@@ -328,7 +328,7 @@ object SettingsValidation {
 
         // Phase 3-4 integer settings: reject out-of-range backups before a corrupt value can
         // reach a slider or the floating/split geometry maths.
-        put("sound_volume", 0..100)
+        put("sound_volume", SettingsRanges.SOUND_VOLUME_PERCENT)
         put(OneHandedConfig.PREF_SCALE, OneHandedConfig.MIN_SCALE..OneHandedConfig.MAX_SCALE)
         put(FloatingConfig.PREF_WIDTH_PERCENT, FloatingConfig.MIN_WIDTH_PERCENT..FloatingConfig.MAX_WIDTH_PERCENT)
         put(SplitConfig.PREF_GAP_PERCENT, SplitConfig.MIN_GAP_PERCENT..SplitConfig.MAX_GAP_PERCENT)
@@ -544,8 +544,12 @@ object SettingsValidation {
             // Circle sensitivity (string representation)
             "circle_sensitivity" -> value.matches(Regex("[1-5]"))
 
-            // Slider sensitivity (string representation)
-            "slider_sensitivity" -> value.matches(Regex("[0-9]+"))
+            // R2: the range was never checked, only digits — Config's read-site clamp then
+            // silently rewrote the value, so Settings showed one number while the space slider
+            // used another. Reject out-of-range imports instead (same treatment as
+            // clipboard_history_limit below). 1..100 is SettingsRanges.SLIDER_SENSITIVITY_PERCENT.
+            "slider_sensitivity" ->
+                value.toIntOrNull()?.let { it in SettingsRanges.SLIDER_SENSITIVITY_PERCENT } == true
 
             // G-5: clipboard_history_limit is STORED as a String (see the isIntKey
             // note below), so real exports carry the string form — which used to
@@ -555,8 +559,11 @@ object SettingsValidation {
             "clipboard_history_limit" ->
                 value.toIntOrNull()?.let { it in SettingsRanges.CLIPBOARD_HISTORY_LIMIT } == true
 
-            // Swipe distance (string representation)
-            "swipe_dist" -> value.matches(Regex("[0-9]+(\\.[0-9]+)?"))
+            // R2: any non-negative float used to pass, including "0" (every tap becomes a
+            // swipe) and "9999" (far past the slider's 30 maximum). Check the shared range;
+            // toFloatOrNull also accepts "NaN"/"Infinity", which isFinite() rejects.
+            "swipe_dist" ->
+                value.toFloatOrNull()?.let { it.isFinite() && it in SettingsRanges.SWIPE_DIST } == true
 
             // Swipe engine mode. Deliberately NOT strict: SwipeEngineRouter.fromPref maps any
             // unrecognised value (including the removed "neural"/"hybrid") onto the ctc default

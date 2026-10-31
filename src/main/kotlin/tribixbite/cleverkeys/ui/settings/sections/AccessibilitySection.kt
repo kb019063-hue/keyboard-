@@ -90,7 +90,9 @@ internal fun SettingsActivity.AccessibilitySection() {
                         title = stringResource(R.string.settings_key_sound_volume_title),
                         description = stringResource(R.string.settings_key_sound_volume_desc),
                         value = soundVolume,
-                        valueRange = 0f..100f,
+                        // Shared range: the import validator and the Config read clamp use it too.
+                        valueRange = SettingsRanges.SOUND_VOLUME_PERCENT.first.toFloat()..
+                            SettingsRanges.SOUND_VOLUME_PERCENT.last.toFloat(),
                         increment = 5f,
                         onValueChange = {
                             soundVolume = it
