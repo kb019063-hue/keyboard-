@@ -114,3 +114,23 @@ are the product.
 
 98.4% of the problem is the APK bundles, so clearing those alone is sufficient — and no
 `keyboard-debug-*` artifact needs to be kept, because every one of them is already on the release.
+
+## Still true on 2026-10-31
+
+Re-measured, and nothing had been cleared: **81 artifacts, 3,896 MB**, none of them expired, all
+created 2026-10-21..23. The backlog above is not historical, it is the current state — so the quota
+has stayed blown for over a week and every optional upload since has failed silently
+(`continue-on-error`, which is also why it looks like nothing is wrong).
+
+What actually broke this time was the *failure-report* upload, triggered by a step that failed on a
+`grep` exit code rather than a real error (`docs/BUG-HUNT-2026-10-31.md`, F5). The APK build and the
+rolling release were unaffected, exactly as the "trap" section above predicts.
+
+Two changes came out of that run:
+
+- the dispatch-only APK artifact now uses **`retention-days: 1`** instead of 3. It is the one
+  upload that is multi-megabyte (94 MB), and it exists only so a manual dispatch yields a
+  downloadable artifact — the release is the durable copy. Worst case is one day of dispatches
+  (~94 MB each) rather than three.
+- the unit-test summary is emitted as **annotations**, never as an artifact, for the same reason:
+  whatever fails, the reason must still be readable when the quota is full.
