@@ -328,7 +328,7 @@ object SettingsValidation {
 
         // Phase 3-4 integer settings: reject out-of-range backups before a corrupt value can
         // reach a slider or the floating/split geometry maths.
-        put("sound_volume", 0..100)
+        put("sound_volume", SettingsRanges.SOUND_VOLUME_PERCENT)
         put(OneHandedConfig.PREF_SCALE, OneHandedConfig.MIN_SCALE..OneHandedConfig.MAX_SCALE)
         put(FloatingConfig.PREF_WIDTH_PERCENT, FloatingConfig.MIN_WIDTH_PERCENT..FloatingConfig.MAX_WIDTH_PERCENT)
         put(SplitConfig.PREF_GAP_PERCENT, SplitConfig.MIN_GAP_PERCENT..SplitConfig.MAX_GAP_PERCENT)

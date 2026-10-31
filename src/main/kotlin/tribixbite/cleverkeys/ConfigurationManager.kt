@@ -206,13 +206,13 @@ class ConfigurationManager(
 
         /**
          * `true` when a write at [now] (monotonic ms) starts a new burst and must be applied
-         * synchronously — i.e. the previous burst began more than [BURST_WINDOW_MS] ago. A zero
-         * [lastBurstStart] (nothing seen yet) always refreshes immediately.
+         * synchronously — i.e. no burst is in progress (`lastBurstStart == 0`) or the previous
+         * one began more than [BURST_WINDOW_MS] ago.
          *
          * Public only so the timing rule can be unit-tested without a Looper.
          */
         fun shouldRefreshImmediately(lastBurstStart: Long, now: Long): Boolean =
-            now - lastBurstStart > BURST_WINDOW_MS
+            lastBurstStart == 0L || now - lastBurstStart > BURST_WINDOW_MS
 
         /** How long after the last write of a burst the single trailing refresh runs. */
         private const val TRAILING_DELAY_MS = 100L

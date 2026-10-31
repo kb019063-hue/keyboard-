@@ -287,7 +287,8 @@ internal fun SettingsActivity.loadCurrentSettings() {
         // Input behavior settings
         vibrationEnabled = prefs.getSafeBoolean("vibration_enabled", Defaults.HAPTIC_ENABLED)
         soundEnabled = prefs.getSafeBoolean("sound_enabled", Defaults.SOUND_ENABLED)
-        soundVolume = prefs.getSafeInt("sound_volume", Defaults.SOUND_VOLUME).toFloat()
+        soundVolume = prefs.getSafeInt("sound_volume", Defaults.SOUND_VOLUME)
+            .coerceIn(SettingsRanges.SOUND_VOLUME_PERCENT).toFloat()
         clipboardHistoryEnabled = prefs.getSafeBoolean("clipboard_history_enabled", Defaults.CLIPBOARD_HISTORY_ENABLED)
         incognitoEnabled = prefs.getSafeBoolean("incognito_enabled", Defaults.INCOGNITO_ENABLED)
         floatingEnabled = prefs.getSafeBoolean(FloatingConfig.PREF_ENABLED, Defaults.FLOATING_ENABLED)
@@ -424,7 +425,8 @@ internal fun SettingsActivity.loadCurrentSettings() {
         vibrationDuration = prefs.getSafeInt("vibrate_duration", Defaults.VIBRATE_DURATION)
         vibrateCustom = prefs.getSafeBoolean("vibrate_custom", Defaults.VIBRATE_CUSTOM)
         soundEnabled = prefs.getSafeBoolean("sound_enabled", Defaults.SOUND_ENABLED)
-        soundVolume = prefs.getSafeInt("sound_volume", Defaults.SOUND_VOLUME).toFloat()
+        soundVolume = prefs.getSafeInt("sound_volume", Defaults.SOUND_VOLUME)
+            .coerceIn(SettingsRanges.SOUND_VOLUME_PERCENT).toFloat()
         // Per-event haptic feedback
         hapticKeyPress = prefs.getSafeBoolean("haptic_key_press", Defaults.HAPTIC_KEY_PRESS)
         hapticPredictionTap = prefs.getSafeBoolean("haptic_prediction_tap", Defaults.HAPTIC_PREDICTION_TAP)

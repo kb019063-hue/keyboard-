@@ -687,6 +687,14 @@ object SettingsRanges {
      */
     val CLIPBOARD_PANE_HEIGHT_PERCENT: IntRange = 10..50
 
+    /**
+     * Key-press sound volume, percent (`sound_volume`). Promoted from a literal `0..100` that had
+     * accumulated in three places (the slider, the import validator and the read site) — the
+     * never-run `SettingsRangeDriftTest.movedRanges_haveNoLiteralCopyLeft` flagged the slider copy
+     * the moment that test finally executed (2026-10-31).
+     */
+    val SOUND_VOLUME_PERCENT: IntRange = 0..100
+
     /** GIF picker grid columns (`gif_thumbnail_columns`). Missing from validation before M8. */
     val GIF_THUMBNAIL_COLUMNS: IntRange = 2..5
 
@@ -1370,6 +1378,7 @@ class Config private constructor(
         // same Config.refresh() that carries the haptic flags.
         sound_enabled = _prefs.getBoolean("sound_enabled", Defaults.SOUND_ENABLED)
         sound_volume = safeGetInt(_prefs, "sound_volume", Defaults.SOUND_VOLUME)
+            .coerceIn(SettingsRanges.SOUND_VOLUME_PERCENT)
         // Per-event haptic feedback toggles (only matter if haptic_enabled is true)
         haptic_key_press = _prefs.getBoolean("haptic_key_press", Defaults.HAPTIC_KEY_PRESS)
         haptic_prediction_tap = _prefs.getBoolean("haptic_prediction_tap", Defaults.HAPTIC_PREDICTION_TAP)
