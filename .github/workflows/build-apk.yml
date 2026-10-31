@@ -101,31 +101,40 @@ jobs:
       # Advisory, never gating: `continue-on-error` keeps a red unit test from blocking the APK,
       # but the per-class summary and every failing assertion still surface as annotations below.
       #
-      # Why this runs the WHOLE suite (2026-10-31, R2 follow-up): it used to run a hand-picked
-      # subset, because 16 classes assert on upstream artefacts this fork does not vendor
-      # (`docs/RELEASE_RECORD.md`, `fastlane/`, `.github/scripts/emulator-ci.sh`,
-      # `docs/i18n/glossary.json`, `scripts/dictionaries/*.zip`) and so could never pass here.
+      # Per-push signal: a hand-picked subset that is pure JVM and cheap (~3 min).
       #
-      # A filter has a cost that is easy to miss: anything not named in it silently never runs.
-      # `SettingsRangeDriftTest` — cited by two earlier reports as the proof that the settings
-      # ranges cannot drift — had therefore never executed, and the moment it was switched on it
-      # found a real divergence (sound_volume's 0..100 bound restated in three places). Those 16
-      # classes now SKIP themselves when their artefact is absent (`Assume.assumeTrue`), which is
-      # what a skipped test means: "not checkable in this checkout", not "passed".
+      # The WHOLE suite runs nightly and on demand in `.github/workflows/full-test-suite.yml`.
+      # Measured 2026-10-31: the whole suite takes ~20 min on a good run and, with the test JVM
+      # given 3 GB so a dozen `OutOfMemoryError` classes could finish, it blew past 70 minutes
+      # without completing — the heavier geometric-engine sweeps trade a fast OOM for minutes of
+      # GC. That is a budget question, not a correctness one, so it lives in its own job with its
+      # own timeout instead of blocking every push.
       #
-      # So the whole suite runs, and a failure now means something in THIS repository is wrong.
-      # Still advisory (`continue-on-error`) while the first full runs settle; the annotations
-      # carry per-class counts and the first ten failure messages, which is enough to work from
-      # without a terminal.
+      # The subset is a FILTER, and a filter silently skips whatever it does not name: that is how
+      # `SettingsRangeDriftTest` — cited by two earlier reports as proof that the settings ranges
+      # cannot drift — sat unexecuted until 2026-10-31, when it immediately found a real
+      # divergence (sound_volume's 0..100 bound restated in three places). The nightly run is what
+      # makes the filter safe: nothing can hide there forever.
       #
-      # Gradle also compiles EVERY test source before running, so this doubles as the only
-      # compile check that source set gets.
-      - name: Unit tests (whole suite, advisory)
+      # Gradle compiles EVERY test source before running, so this also serves as the compile check
+      # for the whole test source set on every push.
+      - name: Unit tests (fast subset, advisory)
         continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
-          ./gradlew testDebugUnitTest 2>&1 | tee unit-test-output.log
+          ./gradlew testDebugUnitTest \
+            --tests 'tribixbite.cleverkeys.a11y.*' \
+            --tests 'tribixbite.cleverkeys.popover.*' \
+            --tests 'tribixbite.cleverkeys.gesture.*' \
+            --tests 'tribixbite.cleverkeys.prefs.*' \
+            --tests 'tribixbite.cleverkeys.clipboard.*' \
+            --tests '*FloatingConfigTest' \
+            --tests '*Autocapitalisation*' \
+            --tests '*SettingsRangeDriftTest' \
+            --tests '*ConfigurationBurstCoalescingTest' \
+            --tests '*VerboseLogRatchetTest' \
+            2>&1 | tee unit-test-output.log
 
       # Reachable summary: per-class counts from the JUnit XML, plus any compiler diagnostic.
       - name: Summarise unit-test results as annotations
