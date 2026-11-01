@@ -28,7 +28,11 @@ on:
     # 03:17 UTC — off the hour, so it does not queue behind everyone else's cron.
     - cron: '17 3 * * *'
   push:
-    branches: [main]
+    branches:
+      - main
+      # A change to this file must be exercised on the branch that made it, not only after the
+      # merge. Only this file is listed under `paths`, so ordinary pushes never run the suite.
+      - 'arena/**'
     paths:
       - '.github/workflows/full-test-suite.yml'
   workflow_dispatch:
@@ -141,6 +145,17 @@ jobs:
           else:
               print('::notice::all %d unit tests passed' % total)
           PY
+
+      # The annotations truncate; this keeps the full JUnit XML (every message and stack trace) for
+      # a day, which is the difference between "some test failed" and a diagnosis.
+      - name: Upload unit-test XML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-suite-xml
+          path: build/test-results/testDebugUnitTest/*.xml
+          if-no-files-found: ignore
+          retention-days: 1
 
       # Make the job result mean what it says: the test task is advisory above only so the report
       # always runs; the verdict is applied here.
