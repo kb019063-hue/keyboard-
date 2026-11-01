@@ -317,6 +317,18 @@ jobs:
           # private-repo quota in October 2026.
           retention-days: 1
 
+      # The JUnit XML is the only place a full failure message and its stack trace survive:
+      # annotations are truncated near 400 characters, and the runner log is not reachable from
+      # the development sandbox. Tiny (a few tens of KB), kept for a day.
+      - name: Upload unit-test XML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-xml-${{ steps.meta.outputs.sha }}
+          path: build/test-results/testDebugUnitTest/*.xml
+          if-no-files-found: ignore
+          retention-days: 1
+
       - name: Upload failure reports
         if: failure()
         uses: actions/upload-artifact@v4
