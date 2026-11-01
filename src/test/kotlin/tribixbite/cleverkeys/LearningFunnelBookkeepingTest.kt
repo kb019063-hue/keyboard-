@@ -182,11 +182,9 @@ class LearningFunnelBookkeepingTest {
             val raw = firstArg<CharSequence?>()
             commits += raw?.toString() ?: "<null-CharSequence>"
             commitSites += "{" + Throwable().stackTrace
-                    .filter { it.className.startsWith("tribixbite") }
+                    .filter { it.className.startsWith("tribixbite") && !it.className.contains("Test") }
                     .take(3)
-                    .joinToString(" <- ") {
-                        "${it.className.substringAfterLast('.')}.${it.methodName}(${it.fileName}:${it.lineNumber})"
-                    } + "}"
+                    .joinToString("<-") { "${it.fileName}:${it.lineNumber}" } + "}"
             if (raw != null) editor.append(raw)
             true
         }
