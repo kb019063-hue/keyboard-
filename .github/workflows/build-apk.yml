@@ -145,6 +145,12 @@ jobs:
         shell: bash
         run: |
           esc() { sed -e 's/%/%25/g' -e 's/\r/%0D/g'; }
+          # A null CharSequence reaching InputConnection.commitText cannot be located from the
+          # truncated assertion message, so the harnesses record the project frames that made the
+          # call. Surfaced here while this is being diagnosed.
+          if [ -f null-commit-sites.txt ]; then
+            head -3 null-commit-sites.txt | esc | while IFS= read -r line; do echo "::error::NULL COMMIT $line"; done
+          fi
           # `|| true`: no compiler diagnostics is the GOOD case, and bash -e would otherwise
           # fail this step on grep's exit 1 and skip the summary below it.
           if [ -f unit-test-output.log ]; then

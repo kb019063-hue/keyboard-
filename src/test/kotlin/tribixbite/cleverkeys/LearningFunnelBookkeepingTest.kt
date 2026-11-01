@@ -177,6 +177,18 @@ class LearningFunnelBookkeepingTest {
         every { ic.commitText(any(), any()) } answers {
             val raw = firstArg<CharSequence?>()
             commits += raw?.toString() ?: "<null>"
+            if (raw == null) {
+                // A null CharSequence here means production handed the editor nothing. The call
+                // site is not visible from a truncated CI annotation, so record it in a file the
+                // workflow turns into its own annotation.
+                val frames = Throwable().stackTrace
+                    .filter { it.className.startsWith("tribixbite") }
+                    .take(4)
+                    .joinToString(" <- ") {
+                        "${it.className.substringAfterLast('.')}.${it.methodName}(${it.fileName}:${it.lineNumber})"
+                    }
+                java.io.File("null-commit-sites.txt").appendText("LearningFunnelBookkeepingTest: $frames\n")
+            }
             if (raw != null) editor.append(raw)
             true
         }

@@ -116,7 +116,20 @@ class SwipeAutocapCommitTest {
             // ``null`` is possible here: the span decoration is Android framework code, and a
             // stubbed framework call can hand production a null CharSequence. Recording it as a
             // marker rather than crashing keeps the assertion message readable.
-            commits += firstArg<CharSequence?>()?.toString() ?: "<null>"
+            val raw = firstArg<CharSequence?>()
+            commits += raw?.toString() ?: "<null>"
+            if (raw == null) {
+                // A null CharSequence here means production handed the editor nothing. The call
+                // site is not visible from a truncated CI annotation, so record it in a file the
+                // workflow turns into its own annotation.
+                val frames = Throwable().stackTrace
+                    .filter { it.className.startsWith("tribixbite") }
+                    .take(4)
+                    .joinToString(" <- ") {
+                        "${it.className.substringAfterLast('.')}.${it.methodName}(${it.fileName}:${it.lineNumber})"
+                    }
+                java.io.File("null-commit-sites.txt").appendText("SwipeAutocapCommitTest: $frames\n")
+            }
             true
         }
         every { ic.getTextBeforeCursor(any(), any()) } returns ""
