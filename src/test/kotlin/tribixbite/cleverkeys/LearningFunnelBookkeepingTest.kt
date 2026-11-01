@@ -119,6 +119,14 @@ class LearningFunnelBookkeepingTest {
         // incognito_enabled)); a relaxed mock answers it false, so a test that only set the raw
         // field would silently run with learning OFF. Mirror the production fold here.
         every { config.learningEffective } answers { config.on_device_learning_enabled }
+        // The span decoration hands `commitText` an android.text.SpannableString. In a plain JVM
+        // unit test that class comes from the mockable android.jar, where every method is a stub:
+        // its characters cannot be read back, so a String assertion can never match it (the value
+        // prints as null). The span itself is covered by SuggestionSpanPolicyTest and
+        // SuggestionSpanCommitTest; these classes are about WHICH characters and casing get
+        // committed, so the decoration is switched off here instead of weakening the assertion.
+        mockkObject(SuggestionSpanPolicy)
+        every { SuggestionSpanPolicy.plan(any(), any(), any()) } returns null
 
         tracker = PredictionContextTracker()
 
@@ -179,7 +187,7 @@ class LearningFunnelBookkeepingTest {
         }
         every { ic.getTextAfterCursor(any(), any()) } returns ""
         every { ic.commitText(any(), any()) } answers {
-            val raw = args.getOrNull(0) as? CharSequence
+            val raw = args.getOrNull(0)
             commits += raw?.toString()
                 ?: "<null arg=" + args.joinToString(",") { it?.javaClass?.simpleName ?: "null" } + ">"
             commitSites += "{" + Throwable().stackTrace

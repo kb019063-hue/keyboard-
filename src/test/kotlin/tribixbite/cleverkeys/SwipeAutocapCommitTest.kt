@@ -82,6 +82,14 @@ class SwipeAutocapCommitTest {
         config.auto_space_after_suggestion = true
         // The commit path reads the incognito-folded getter, which a relaxed mock answers false.
         every { config.autocapEffective } answers { config.autocapitalisation }
+        // The span decoration hands `commitText` an android.text.SpannableString. In a plain JVM
+        // unit test that class comes from the mockable android.jar, where every method is a stub:
+        // its characters cannot be read back, so a String assertion can never match it (the value
+        // prints as null). The span itself is covered by SuggestionSpanPolicyTest and
+        // SuggestionSpanCommitTest; these classes are about WHICH characters and casing get
+        // committed, so the decoration is switched off here instead of weakening the assertion.
+        mockkObject(SuggestionSpanPolicy)
+        every { SuggestionSpanPolicy.plan(any(), any(), any()) } returns null
         every { Config.globalConfig() } returns config
 
         dictionary = mockk(relaxed = true)
@@ -120,7 +128,7 @@ class SwipeAutocapCommitTest {
             // `null` reaches here: some caller hands the editor nothing. Keep the value verbatim
             // (never `toString()` blindly) and remember WHO asked, because the call site is the
             // only thing that explains it.
-            val raw = args.getOrNull(0) as? CharSequence
+            val raw = args.getOrNull(0)
             commits += raw?.toString()
                 ?: "<null arg=" + args.joinToString(",") { it?.javaClass?.simpleName ?: "null" } + ">"
             commitSites += "{" + Throwable().stackTrace
