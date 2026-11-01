@@ -1940,7 +1940,7 @@ class SuggestionHandler(
                 if (committedText == null) {
                     error(
                         "NULL COMMIT tti=$textToInsert iw=$insertedWord cw=$capitalizedWord " +
-                            "mode=$trailingSpaceMode pw=$passwordField ta=$terminalAppend"
+                            "mode=$trailingSpaceMode pw=$inPasswordField ta=$terminalAppend"
                     )
                 }
                 if ((commitGuard != null && !commitGuard.prepare(inputConnection)) ||
