@@ -150,6 +150,13 @@ class LearningFunnelBookkeepingTest {
         every { bar.setSuggestionsWithScores(any(), any(), any(), any()) } answers {
             barWords = firstArg<List<String>>().toList()
         }
+        // Production calls the 3-argument form (metas only, highlight defaulted). Stubbing the
+        // 4-argument signature alone left `barWords` empty, so `getTopSuggestion()` answered null
+        // and no auto-insert ever ran -- which is exactly what the three failing funnel tests
+        // reported (the editor never received the swiped word).
+        every { bar.setSuggestionsWithScores(any(), any(), any()) } answers {
+            barWords = firstArg<List<String>>().toList()
+        }
         every { bar.getTopSuggestion() } answers { barWords.firstOrNull() }
 
         inputCoordinator = mockk(relaxed = true)
