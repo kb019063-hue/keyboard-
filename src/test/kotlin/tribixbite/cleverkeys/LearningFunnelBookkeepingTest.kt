@@ -75,6 +75,9 @@ class LearningFunnelBookkeepingTest {
 
     /** Every insertion the handler asked the editor for, in order (diagnostics only). */
     private val commits = mutableListOf<String>()
+
+    /** Call site of each insertion, for when the value alone does not explain the failure. */
+    private val commitSites = mutableListOf<String>()
     private lateinit var ic: InputConnection
 
     /** Words the handler last pushed to the bar; `getTopSuggestion` answers from it. */
@@ -168,6 +171,7 @@ class LearningFunnelBookkeepingTest {
 
         editor.setLength(0)
         commits.clear()
+        commitSites.clear()
         ic = mockk(relaxed = true)
         every { ic.getTextBeforeCursor(any(), any()) } answers {
             val n = firstArg<Int>()
@@ -176,19 +180,14 @@ class LearningFunnelBookkeepingTest {
         every { ic.getTextAfterCursor(any(), any()) } returns ""
         every { ic.commitText(any(), any()) } answers {
             val raw = firstArg<CharSequence?>()
-            commits += raw?.toString() ?: "<null>"
-            if (raw == null) {
-                // A null CharSequence here means production handed the editor nothing. The call
-                // site is not visible from a truncated CI annotation, so record it in a file the
-                // workflow turns into its own annotation.
-                val frames = Throwable().stackTrace
+            commits += raw?.toString() ?: "<null-CharSequence>"
+            commitSites += "{" + Throwable().stackTrace
                     .filter { it.className.startsWith("tribixbite") }
-                    .take(4)
+                    .take(3)
                     .joinToString(" <- ") {
                         "${it.className.substringAfterLast('.')}.${it.methodName}(${it.fileName}:${it.lineNumber})"
                     }
-                java.io.File("null-commit-sites.txt").appendText("LearningFunnelBookkeepingTest: $frames\n")
-            }
+                    + "}"
             if (raw != null) editor.append(raw)
             true
         }
@@ -491,7 +490,9 @@ class LearningFunnelBookkeepingTest {
      * not say which side had the stray space.
      */
     private fun assertEditor(message: String, expected: String) {
-        val inserted = commits.joinToString(" | ") { "<${it.visible()}>" }.ifEmpty { "(none)" }
+        val inserted = commits.zip(commitSites)
+            .joinToString(" | ") { (text, site) -> "<${text.visible()}>$site" }
+            .ifEmpty { "(none)" }
         val slate = barWords.joinToString(",").ifEmpty { "(empty)" }
         assertWithMessage(
             "$message — expected <${expected.visible()}> actual <${editor.toString().visible()}>" +

@@ -63,6 +63,9 @@ class SwipeAutocapCommitTest {
      */
     private val commits = mutableListOf<String>()
 
+    /** Call site of each insertion, for when the value alone does not explain the failure. */
+    private val commitSites = mutableListOf<String>()
+
     @Before
     fun setup() {
         mockkStatic(Log::class)
@@ -111,25 +114,21 @@ class SwipeAutocapCommitTest {
         every { inputCoordinator.getCurrentSwipeData() } returns null
 
         commits.clear()
+        commitSites.clear()
         ic = mockk(relaxed = true)
         every { ic.commitText(any(), any()) } answers {
-            // ``null`` is possible here: the span decoration is Android framework code, and a
-            // stubbed framework call can hand production a null CharSequence. Recording it as a
-            // marker rather than crashing keeps the assertion message readable.
+            // `null` reaches here: some caller hands the editor nothing. Keep the value verbatim
+            // (never `toString()` blindly) and remember WHO asked, because the call site is the
+            // only thing that explains it.
             val raw = firstArg<CharSequence?>()
-            commits += raw?.toString() ?: "<null>"
-            if (raw == null) {
-                // A null CharSequence here means production handed the editor nothing. The call
-                // site is not visible from a truncated CI annotation, so record it in a file the
-                // workflow turns into its own annotation.
-                val frames = Throwable().stackTrace
+            commits += raw?.toString() ?: "<null-CharSequence>"
+            commitSites += "{" + Throwable().stackTrace
                     .filter { it.className.startsWith("tribixbite") }
-                    .take(4)
+                    .take(3)
                     .joinToString(" <- ") {
                         "${it.className.substringAfterLast('.')}.${it.methodName}(${it.fileName}:${it.lineNumber})"
                     }
-                java.io.File("null-commit-sites.txt").appendText("SwipeAutocapCommitTest: $frames\n")
-            }
+                    + "}"
             true
         }
         every { ic.getTextBeforeCursor(any(), any()) } returns ""
@@ -251,7 +250,8 @@ class SwipeAutocapCommitTest {
      * invisible in `expected:<fix got > but was:<fix got>` — `·` makes it obvious.
      */
     private fun assertCommitted(expected: String) {
-        val shown = commits.joinToString(" | ") { "<${it.replace(" ", "·")}>" }
+        val shown = commits.zip(commitSites)
+            .joinToString(" | ") { (text, site) -> "<${text.replace(" ", "·")}>$site" }
         assertWithMessage("editor insertions (spaces shown as ·): $shown")
             .that(commits).containsExactly(expected)
     }
