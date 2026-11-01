@@ -35,10 +35,9 @@ on:
   workflow_dispatch:
   push:
     branches:
-      # `main` only since 2026-10-31: the emulator run costs ~13 Actions minutes per push, and a
-      # private repo gets 2,000 a month. Branch pushes still compile the APK and run the unit
-      # subset in build-apk.yml, which is where a broken push is normally caught; this gate runs
-      # on the merge that matters, on a weekly schedule, and on demand.
+      # Every Arena session works on its own branch; the old single-branch list meant a new
+      # session's pushes built nothing at all, so its first green build was a surprise merge.
+      - 'arena/**'
       - main
     # A docs-only change cannot alter an APK, and each push costs a ~6 min build plus a ~9 min
     # emulator run. workflow_dispatch still always runs, so nothing becomes unbuildable silently.
@@ -48,9 +47,6 @@ on:
       # The offline harness runs section 7d against a fake adb on a laptop; CI never invokes it, so
       # a change there cannot alter an APK or a smoke verdict.
       - 'scripts/ci/offline/**'
-  schedule:
-    # Tuesday 04:07 UTC: once a week is enough to catch an emulator-image or launcher regression.
-    - cron: '7 4 * * 2'
 
 permissions:
   contents: read

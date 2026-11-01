@@ -25,11 +25,8 @@ name: Full unit-test suite
 
 on:
   schedule:
-    # 03:17 UTC on Mondays — off the hour, so it does not queue behind everyone else's cron.
-    # Nightly at ~29 minutes a run is 870 Actions minutes a month on a private repo whose whole
-    # allowance is 2,000; weekly is the affordable version of "everything runs, nothing hides",
-    # and a change to this file or a manual dispatch still runs it immediately.
-    - cron: '17 3 * * 1'
+    # 03:17 UTC — off the hour, so it does not queue behind everyone else's cron.
+    - cron: '17 3 * * *'
   push:
     branches: [main]
     paths:
