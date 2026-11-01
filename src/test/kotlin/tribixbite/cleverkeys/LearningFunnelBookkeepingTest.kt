@@ -119,6 +119,9 @@ class LearningFunnelBookkeepingTest {
         // incognito_enabled)); a relaxed mock answers it false, so a test that only set the raw
         // field would silently run with learning OFF. Mirror the production fold here.
         every { config.learningEffective } answers { config.on_device_learning_enabled }
+        // Same fold for the other incognito-gated getters this class flips raw prefs for.
+        every { config.autocorrectEffective } answers { config.autocorrect_enabled }
+        every { config.swipeFinalAutocorrectEffective } answers { config.swipe_final_autocorrect_enabled }
         // The span decoration hands `commitText` an android.text.SpannableString. In a plain JVM
         // unit test that class comes from the mockable android.jar, where every method is a stub:
         // its characters cannot be read back, so a String assertion can never match it (the value
