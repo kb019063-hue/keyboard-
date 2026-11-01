@@ -42,7 +42,9 @@ permissions:
 
 concurrency:
   group: full-test-suite
-  cancel-in-progress: false
+  # A stale run is worthless once a newer commit exists, and this suite can occupy a runner for
+  # tens of minutes: supersede instead of queueing behind it.
+  cancel-in-progress: true
 
 jobs:
   unit-tests:

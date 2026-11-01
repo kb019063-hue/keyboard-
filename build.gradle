@@ -544,6 +544,15 @@ android {
   }
 }
 
+// A wedged test must not eat the whole job. Measured 2026-11-01: one full-suite run sat inside
+// `testDebugUnitTest` for 90 minutes and produced no result at all, and the job's 180-minute
+// timeout then discarded the entire report (no annotations, no XML). Gradle writes one JUnit XML
+// per class the moment that class finishes, so with a bound in place everything completed is
+// still reported and the missing XML names the class that stalled.
+tasks.withType(Test).configureEach {
+  timeout = java.time.Duration.ofMinutes(45)
+}
+
 // REPRODUCIBILITY: Apply deterministic compilation settings
 // Note: sourceInformation is now set via composeCompiler {} block for Kotlin 2.0+
 tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
