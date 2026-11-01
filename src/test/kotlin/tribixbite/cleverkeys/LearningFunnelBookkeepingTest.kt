@@ -186,8 +186,7 @@ class LearningFunnelBookkeepingTest {
                     .take(3)
                     .joinToString(" <- ") {
                         "${it.className.substringAfterLast('.')}.${it.methodName}(${it.fileName}:${it.lineNumber})"
-                    }
-                    + "}"
+                    } + "}"
             if (raw != null) editor.append(raw)
             true
         }

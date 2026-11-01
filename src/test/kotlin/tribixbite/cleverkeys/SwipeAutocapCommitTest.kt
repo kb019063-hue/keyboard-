@@ -127,8 +127,7 @@ class SwipeAutocapCommitTest {
                     .take(3)
                     .joinToString(" <- ") {
                         "${it.className.substringAfterLast('.')}.${it.methodName}(${it.fileName}:${it.lineNumber})"
-                    }
-                    + "}"
+                    } + "}"
             true
         }
         every { ic.getTextBeforeCursor(any(), any()) } returns ""
