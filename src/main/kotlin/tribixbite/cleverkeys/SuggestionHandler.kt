@@ -1935,14 +1935,6 @@ class SuggestionHandler(
                     textToInsert, insertedWord, spanCandidates, editorInfo,
                     excluded = inTermuxApp || terminalAppend != null || inPasswordField,
                 )
-                // PROBE (temporary): a null here means the editor is asked to insert nothing.
-                // The values behind it are invisible from the test's failure message otherwise.
-                if (committedText == null) {
-                    error(
-                        "NULL COMMIT tti=$textToInsert iw=$insertedWord cw=$capitalizedWord " +
-                            "mode=$trailingSpaceMode pw=$inPasswordField ta=$terminalAppend"
-                    )
-                }
                 if ((commitGuard != null && !commitGuard.prepare(inputConnection)) ||
                     !inputConnection.commitText(committedText, 1) ||
                     (commitGuard != null && !commitGuard.accepted(inputConnection, textToInsert))) {

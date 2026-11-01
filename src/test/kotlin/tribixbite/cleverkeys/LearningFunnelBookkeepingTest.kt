@@ -179,8 +179,9 @@ class LearningFunnelBookkeepingTest {
         }
         every { ic.getTextAfterCursor(any(), any()) } returns ""
         every { ic.commitText(any(), any()) } answers {
-            val raw = firstArg<CharSequence?>()
-            commits += raw?.toString() ?: "<null-CharSequence>"
+            val raw = args.getOrNull(0) as? CharSequence
+            commits += raw?.toString()
+                ?: "<null arg=" + args.joinToString(",") { it?.javaClass?.simpleName ?: "null" } + ">"
             commitSites += "{" + Throwable().stackTrace
                     .filter { it.className.startsWith("tribixbite") && !it.className.contains("Test") }
                     .take(3)
