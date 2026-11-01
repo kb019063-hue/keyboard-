@@ -53,6 +53,16 @@ class SwipeAutocapCommitTest {
     /** The words the handler last pushed to the bar; getTopSuggestion answers from it. */
     private var barWords: List<String> = emptyList()
 
+    /**
+     * Every text the handler asked the editor to insert, in order, flattened to plain characters.
+     *
+     * The production commit is a SuggestionSpan-carrying CharSequence (`withSuggestionSpan`), not a
+     * String: mockk's `eq("Bowie ")` never matches it, whatever the characters are. Comparing
+     * `toString()` is what the editor itself sees, and it keeps the span decoration from turning a
+     * casing regression into a wall of `Verification failed` noise.
+     */
+    private val commits = mutableListOf<String>()
+
     @Before
     fun setup() {
         mockkStatic(Log::class)
@@ -92,12 +102,20 @@ class SwipeAutocapCommitTest {
         every { bar.setSuggestionsWithScores(any(), any(), any(), any()) } answers {
             barWords = firstArg<List<String>>().toList()
         }
+        every { bar.setSuggestionsWithScores(any(), any(), any()) } answers {
+            barWords = firstArg<List<String>>().toList()
+        }
         every { bar.getTopSuggestion() } answers { barWords.firstOrNull() }
 
         inputCoordinator = mockk(relaxed = true)
         every { inputCoordinator.getCurrentSwipeData() } returns null
 
+        commits.clear()
         ic = mockk(relaxed = true)
+        every { ic.commitText(any(), any()) } answers {
+            commits += firstArg<CharSequence>().toString()
+            true
+        }
         every { ic.getTextBeforeCursor(any(), any()) } returns ""
         every { ic.getTextAfterCursor(any(), any()) } returns ""
         resources = mockk(relaxed = true)
@@ -158,7 +176,7 @@ class SwipeAutocapCommitTest {
 
         swipe(capSentencesField())
 
-        verify { ic.commitText("Bowie ", 1) }
+        assertCommitted("Bowie ")
         assertWithMessage("the bar must show the same casing the commit used")
             .that(barWords.first()).isEqualTo("Bowie")
     }
@@ -169,7 +187,7 @@ class SwipeAutocapCommitTest {
 
         swipe(capSentencesField())
 
-        verify { ic.commitText("bowie ", 1) }
+        assertCommitted("bowie ")
     }
 
     @Test
@@ -179,7 +197,7 @@ class SwipeAutocapCommitTest {
 
         swipe(capSentencesField())
 
-        verify { ic.commitText("bowie ", 1) }
+        assertCommitted("bowie ")
     }
 
     @Test
@@ -189,7 +207,7 @@ class SwipeAutocapCommitTest {
         swipe(noCapsField())
 
         verify(exactly = 0) { ic.getCursorCapsMode(any()) }
-        verify { ic.commitText("bowie ", 1) }
+        assertCommitted("bowie ")
     }
 
     // ------------------------------------------------- explicit shift still wins
@@ -200,14 +218,26 @@ class SwipeAutocapCommitTest {
 
         swipe(capSentencesField(), shiftLocked = true)
 
-        verify { ic.commitText("BOWIE ", 1) }
+        assertCommitted("BOWIE ")
     }
 
     @Test
     fun aLatchedShiftStillCapitalizesWithoutConsultingTheCursor() {
         swipe(capSentencesField(), shiftActive = true)
 
-        verify { ic.commitText("Bowie ", 1) }
+        assertCommitted("Bowie ")
+    }
+
+    /**
+     * The editor was asked to insert exactly [expected].
+     *
+     * Failure message is short on purpose: CI annotations are truncated, and a trailing space is
+     * invisible in `expected:<fix got > but was:<fix got>` — `·` makes it obvious.
+     */
+    private fun assertCommitted(expected: String) {
+        val shown = commits.joinToString(" | ") { "<${it.replace(' ', '·')}>" }
+        assertWithMessage("editor insertions (spaces shown as ·): $shown")
+            .that(commits).containsExactly(expected)
     }
 
     // ------------------------------------------------------------------ reflection

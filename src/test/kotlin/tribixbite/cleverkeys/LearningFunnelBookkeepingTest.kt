@@ -457,6 +457,21 @@ class LearningFunnelBookkeepingTest {
         handler.onSuggestionSelected(word, ic, field, resources, isManualSelection = true)
     }
 
+    /**
+     * The fake editor holds exactly [expected].
+     *
+     * Spaces are rendered as `·` in the message, which stays one short line: a CI annotation is
+     * truncated, and `expected:<fix got > but was:<fix got>` hides the very difference that
+     * matters. This helper exists because three funnel tests failed that way and the report could
+     * not say which side had the stray space.
+     */
+    private fun assertEditor(message: String, expected: String) {
+        assertWithMessage("$message — expected <${expected.visible()}> actual <${editor.toString().visible()}>")
+            .that(editor.toString()).isEqualTo(expected)
+    }
+
+    private fun String.visible() = replace(" ", "·")
+
     /** Learned bigram frequency of (w1 → w2) in the real store; 0 when absent. */
     private fun bigram(w1: String, w2: String): Int =
         bigramStore.getAllBigrams("en", w1).firstOrNull { it.word2 == w2 }?.frequency ?: 0
@@ -502,14 +517,14 @@ class LearningFunnelBookkeepingTest {
     fun rejectedSwipeCommitDoesNotLearnOwnOrCapturePrediction() {
         every { ic.commitText(any(), any()) } returns false
         assertRejectedSwipe(ic)
-        assertWithMessage("rejected editor content").that(editor.toString()).isEqualTo("fix ")
+        assertEditor("rejected editor content", "fix ")
     }
 
     @Test
     fun throwingSwipeCommitDoesNotLearnOwnOrCapturePrediction() {
         every { ic.commitText(any(), any()) } throws IllegalStateException("Editor unavailable")
         assertRejectedSwipe(ic)
-        assertWithMessage("throwing editor content").that(editor.toString()).isEqualTo("fix ")
+        assertEditor("throwing editor content", "fix ")
     }
 
     @Test
@@ -532,8 +547,7 @@ class LearningFunnelBookkeepingTest {
         type("kids'toy")
         every { ic.commitText(" ", 1) } returns false
         swipe("toys")
-        assertWithMessage("separator rejection must not append the prediction")
-            .that(editor.toString()).isEqualTo("kids'toy")
+        assertEditor("separator rejection must not append the prediction", "kids'toy")
         assertWithMessage("no completed typed word without its accepted separator")
             .that(learnWindow()).isEmpty()
         assertWithMessage("no uncommitted swipe ownership").that(tracker.getLastAutoInsertedWord()).isNull()
@@ -547,8 +561,7 @@ class LearningFunnelBookkeepingTest {
         editor.append("fix ")
         swipe("got", "git")
 
-        assertWithMessage("the auto-insert must still reach the editor")
-            .that(editor.toString()).isEqualTo("fix got ")
+        assertEditor("the auto-insert must still reach the editor", "fix got ")
         verify(exactly = 0) { adaptation.recordSelection(any()) }
     }
 
@@ -557,8 +570,7 @@ class LearningFunnelBookkeepingTest {
         editor.append("fix ")
         tap("git")
 
-        assertWithMessage("manual selection must actually reach the editor")
-            .that(editor.toString()).isEqualTo("fix git ")
+        assertEditor("manual selection must actually reach the editor", "fix git ")
         verify(exactly = 1) { adaptation.recordSelection("git") }
     }
 
@@ -567,7 +579,7 @@ class LearningFunnelBookkeepingTest {
         type("Bo")
         val committed = handler.onSuggestionSelected("bowie", ic, textField(), resources, true)
         assertWithMessage("acknowledged spelling").that(committed).isEqualTo("Bowie")
-        assertWithMessage("editor spelling").that(editor.toString()).isEqualTo("Bowie ")
+        assertEditor("editor spelling", "Bowie ")
         assertWithMessage("whole normalized word learned once").that(learnWindow()).containsExactly("bowie")
         verify(exactly = 1) { adaptation.recordSelection("Bowie") }
     }
@@ -587,7 +599,7 @@ class LearningFunnelBookkeepingTest {
         swipe("got", "git")
         tap("git")
 
-        assertWithMessage("editor").that(editor.toString()).isEqualTo("fix git ")
+        assertEditor("editor", "fix git ")
         assertWithMessage("fix→git must be learned once").that(bigram("fix", "git")).isEqualTo(1)
         assertWithMessage("the rejected fix→got must be rolled back").that(bigram("fix", "got")).isEqualTo(0)
         assertWithMessage("the replacement must not chain onto the rejected word")
@@ -607,7 +619,7 @@ class LearningFunnelBookkeepingTest {
         type("we")
         swipe("think")
 
-        assertWithMessage("editor").that(editor.toString()).isEqualTo("so we think ")
+        assertEditor("editor", "so we think ")
         assertWithMessage("so→we").that(bigram("so", "we")).isEqualTo(1)
         assertWithMessage("we→think").that(bigram("we", "think")).isEqualTo(1)
     }
@@ -730,7 +742,7 @@ class LearningFunnelBookkeepingTest {
         editor.append("fix ")
         handler.updateContext("fix")
         type("teh ")
-        assertWithMessage("autocorrect ran").that(editor.toString()).isEqualTo("fix the ")
+        assertEditor("autocorrect ran", "fix the ")
         assertWithMessage("fix→the learned by the correction").that(bigram("fix", "the")).isEqualTo(1)
 
         // KeyEventHandler.handleBackspaceUndoAutocorrect restores "teh " and reports it.
@@ -882,8 +894,7 @@ class LearningFunnelBookkeepingTest {
 
         swipe("hunter", "hunted", field = passwordField())
 
-        assertWithMessage("the swipe still commits (user opted in)")
-            .that(editor.toString()).isEqualTo("hunter ")
+        assertEditor("the swipe still commits (user opted in)", "hunter ")
         assertWithMessage("learn window").that(learnWindow()).isEmpty()
         assertWithMessage("session context").that(tracker.getContextWords()).isEmpty()
         verify(exactly = 0) { personalization.recordWordTyped(any(), any()) }
