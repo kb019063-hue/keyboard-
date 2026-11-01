@@ -102,7 +102,20 @@ jobs:
                       if node is None:
                           continue
                       msg = ' '.join((node.get('message') or node.text or '').split())
-                      cases.append((name, case.get('name', '?'), msg))
+                      # Two project frames: the message alone cannot say WHICH line, and the
+                      # runner log is not reachable outside the web UI.
+                      frames = []
+                      for line in (node.text or '').splitlines():
+                          if 'tribixbite.cleverkeys' not in line or 'Test' in line:
+                              continue
+                          at = line.strip()
+                          if at.startswith('at '):
+                              at = at[3:]
+                          head, _, tail = at.partition('(')
+                          frames.append(head.split('.')[-1] + '(' + tail)
+                          if len(frames) == 2:
+                              break
+                      cases.append((name, case.get('name', '?'), msg, frames))
                       break
 
           if not rows:
@@ -123,11 +136,27 @@ jobs:
                        ', '.join(r[0].split('.')[-1] for r in skipped_classes)[:1000]))
 
           if bad_classes:
+              # Order matters: GitHub drops annotations past its per-run cap, and the first
+              # failure of each class is what makes the rest diagnosable. Emit it before the
+              # class list and the per-test names.
+              parts, size = [], 0
+              for name, tests, failed, _ in bad_classes:
+                  first = next((c for c in cases if c[0] == name), None)
+                  if first is None:
+                      continue
+                  trace = (' <' + ' '.join(first[3]) + '>') if first[3] else ''
+                  seg = '%s#%s: %s%s' % (name.split('.')[-1], first[1], first[2][:110], trace)
+                  if size + len(seg) > 3000:
+                      break
+                  parts.append(seg)
+                  size += len(seg) + 2
+              print('::error::' + esc('FIRST FAILURE PER CLASS (top): ' + ' || '.join(parts))[:3000])
+
               short = '; '.join('%s %d/%d' % (n.split('.')[-1], f, t) for n, t, f, _ in bad_classes)
-              print('::error::' + esc('FAILING CLASSES (%d): %s' % (len(bad_classes), short))[:60000])
+              print('::error::' + esc('FAILING CLASSES (%d): %s' % (len(bad_classes), short))[:3000])
 
               names = {}
-              for name, case, _ in cases:
+              for name, case, _, _ in cases:
                   names.setdefault(name, []).append(case)
               detail = '; '.join('%s: %s' % (n.split('.')[-1], ', '.join(v[:40]))
                                  for n, v in sorted(names.items()))
@@ -138,8 +167,9 @@ jobs:
                          '', '#### Failing classes', '']
               summary += ['- `%s` — %d of %d' % (n, f, t) for n, t, f, _ in bad_classes]
               summary += ['', '#### Failures (first 80)', '']
-              for name, case, msg in cases[:80]:
-                  summary.append('- `%s#%s`: %s' % (name.split('.')[-1], case, msg[:300]))
+              for name, case, msg, frames in cases[:80]:
+                  summary.append('- `%s#%s`: %s%s' % (name.split('.')[-1], case, msg[:300],
+                                                     (' <' + ' '.join(frames) + '>') if frames else ''))
               path = os.environ.get('GITHUB_STEP_SUMMARY')
               if path:
                   with open(path, 'a') as fh:
