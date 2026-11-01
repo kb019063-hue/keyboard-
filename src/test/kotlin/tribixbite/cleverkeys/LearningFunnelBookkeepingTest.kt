@@ -72,6 +72,9 @@ class LearningFunnelBookkeepingTest {
 
     /** The fake editor's content; the cursor is always at the end. */
     private val editor = StringBuilder()
+
+    /** Every insertion the handler asked the editor for, in order (diagnostics only). */
+    private val commits = mutableListOf<String>()
     private lateinit var ic: InputConnection
 
     /** Words the handler last pushed to the bar; `getTopSuggestion` answers from it. */
@@ -164,6 +167,7 @@ class LearningFunnelBookkeepingTest {
         resources = mockk(relaxed = true)
 
         editor.setLength(0)
+        commits.clear()
         ic = mockk(relaxed = true)
         every { ic.getTextBeforeCursor(any(), any()) } answers {
             val n = firstArg<Int>()
@@ -171,7 +175,9 @@ class LearningFunnelBookkeepingTest {
         }
         every { ic.getTextAfterCursor(any(), any()) } returns ""
         every { ic.commitText(any(), any()) } answers {
-            editor.append(firstArg<CharSequence>())
+            val raw = firstArg<CharSequence?>()
+            commits += raw?.toString() ?: "<null>"
+            if (raw != null) editor.append(raw)
             true
         }
         every { ic.deleteSurroundingText(any(), any()) } answers {
@@ -473,8 +479,12 @@ class LearningFunnelBookkeepingTest {
      * not say which side had the stray space.
      */
     private fun assertEditor(message: String, expected: String) {
-        assertWithMessage("$message — expected <${expected.visible()}> actual <${editor.toString().visible()}>")
-            .that(editor.toString()).isEqualTo(expected)
+        val inserted = commits.joinToString(" | ") { "<${it.visible()}>" }.ifEmpty { "(none)" }
+        val slate = barWords.joinToString(",").ifEmpty { "(empty)" }
+        assertWithMessage(
+            "$message — expected <${expected.visible()}> actual <${editor.toString().visible()}>" +
+                " insertions=$inserted slate=$slate"
+        ).that(editor.toString()).isEqualTo(expected)
     }
 
     private fun String.visible() = replace(" ", "·")

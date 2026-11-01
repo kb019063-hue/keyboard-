@@ -113,7 +113,10 @@ class SwipeAutocapCommitTest {
         commits.clear()
         ic = mockk(relaxed = true)
         every { ic.commitText(any(), any()) } answers {
-            commits += firstArg<CharSequence>().toString()
+            // ``null`` is possible here: the span decoration is Android framework code, and a
+            // stubbed framework call can hand production a null CharSequence. Recording it as a
+            // marker rather than crashing keeps the assertion message readable.
+            commits += firstArg<CharSequence?>()?.toString() ?: "<null>"
             true
         }
         every { ic.getTextBeforeCursor(any(), any()) } returns ""
@@ -235,7 +238,7 @@ class SwipeAutocapCommitTest {
      * invisible in `expected:<fix got > but was:<fix got>` — `·` makes it obvious.
      */
     private fun assertCommitted(expected: String) {
-        val shown = commits.joinToString(" | ") { "<${it.replace(' ', '·')}>" }
+        val shown = commits.joinToString(" | ") { "<${it.replace(" ", "·")}>" }
         assertWithMessage("editor insertions (spaces shown as ·): $shown")
             .that(commits).containsExactly(expected)
     }
