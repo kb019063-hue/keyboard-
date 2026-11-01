@@ -49,7 +49,11 @@ concurrency:
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    # Measured 2026-11-01: a normal whole-suite run takes 11-12 minutes; one run sat inside the
+    # test task for 90+ minutes with no progress. The Gradle test task is now bounded at 45
+    # minutes (build.gradle), so 75 leaves room for checkout, setup, the report step and the
+    # upload, and none of it can be spent sitting on a wedged class.
+    timeout-minutes: 75
 
     steps:
       - uses: actions/checkout@v4
