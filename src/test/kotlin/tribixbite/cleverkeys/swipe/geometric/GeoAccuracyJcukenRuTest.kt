@@ -35,12 +35,18 @@ class GeoAccuracyJcukenRuTest {
 
     private val layout by lazy { GeoLayoutFixtures.loadShipped("cyrl_jcuken_ru") }
     private val dict by lazy { GeoTestFixtures.russianCkdt() }
-    private val harness = GeoAccuracyHarness(layout, dict, "ru/JCUKEN")
+    // LAZY, not eager: `harness` reads `dict`, which reads the Russian pack — and field
+    // initialisers run BEFORE @Before. An eager harness therefore threw FileNotFound during
+    // construction and reported six failures, while the guard above never got the chance to skip
+    // the class. Same for anything derived from it.
+    private val harness by lazy { GeoAccuracyHarness(layout, dict, "ru/JCUKEN") }
 
-    private val sampleSize =
+    private val sampleSize by lazy {
         if (harness.geoFull()) GeoAccuracyHarness.FULL_SAMPLE_SIZE else GeoAccuracyHarness.DEFAULT_SAMPLE_SIZE
-    private val seeds =
+    }
+    private val seeds by lazy {
         if (harness.geoFull()) GeoAccuracyHarness.FULL_SEEDS else GeoAccuracyHarness.DEFAULT_SEEDS
+    }
     private val sample by lazy { harness.stratifiedSample(sampleSize) }
 
     // Non-QWERTY floors: the QWERTY FINAL floors minus the dense-layout penalty.
