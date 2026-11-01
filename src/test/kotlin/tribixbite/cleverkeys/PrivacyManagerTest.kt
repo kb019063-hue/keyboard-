@@ -47,6 +47,13 @@ class PrivacyManagerTest {
         // Build.VERSION.SDK_INT = 0 from android.jar stubs, so constructor takes
         // the else branch: context.getSharedPreferences("privacy_settings", MODE_PRIVATE)
         context = mockk<Context>(relaxed = true)
+        // PrivacyManager takes the device-protected branch when Build.VERSION.SDK_INT >= 24, and the
+        // stub jar does not report 0 (the assumption this file was written under). A relaxed mock
+        // then answers createDeviceProtectedStorageContext() with a DIFFERENT mock whose prefs are
+        // a fresh relaxed mock -- so grantConsent() wrote into a store nothing ever read back and
+        // every "defaults to true" assertion saw a relaxed false. Both branches now resolve to the
+        // same store, whatever the stub reports.
+        every { context.createDeviceProtectedStorageContext() } returns context
         every { context.getSharedPreferences("privacy_settings", Context.MODE_PRIVATE) } returns privacyPrefs
 
         // Mock DirectBootAwarePreferences @JvmStatic method — must use mockkStatic with
