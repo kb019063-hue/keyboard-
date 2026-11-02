@@ -169,6 +169,7 @@ jobs:
             --tests '*TestKeyboardSectionTest' \
             --tests '*DefaultsSingleDefinitionDriftTest' \
             --tests '*TestRunnerListDriftTest' \
+            --tests '*HapticsBehaviorDriftTest' \
             2>&1 | tee unit-test-output.log
 
       # Reachable summary: per-class counts from the JUnit XML, plus any compiler diagnostic.
