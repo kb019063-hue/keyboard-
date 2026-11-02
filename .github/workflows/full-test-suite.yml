@@ -17,6 +17,10 @@
 # default 2 GB test heap with the heavy classes split into a second invocation. That is the number
 # the 75-minute job timeout is sized against; a run that approaches it is a signal, not noise.
 #
+# State at the end of the 2026-11-01 pass: 4,650 run, 0 failed, 204 skipped — the skips are the 22
+# upstream-artefact classes reporting SKIPPED rather than passing. From here a red run means a real
+# problem in this repository, which is the whole purpose of running everything.
+#
 # Classes that assert on upstream artefacts this fork does not vendor (`docs/RELEASE_RECORD.md`,
 # `fastlane/`, `docs/i18n/glossary.json`, `.github/scripts/emulator-ci.sh`,
 # `scripts/dictionaries/*.zip`) report SKIPPED via `UpstreamArtefacts`, not passed and not failed.
