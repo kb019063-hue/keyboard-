@@ -75,6 +75,12 @@ jobs:
         run: |
           set -o pipefail
           ./gradlew testDebugUnitTest -PskipHeavy=true --stacktrace 2>&1 | tee unit-test-output.log
+          # Gradle deletes a re-run task's previous outputs, and the heavy invocation below is a
+          # re-run of this same task: without this copy its XML vanished and the report covered
+          # 7 classes instead of 423 (first attempt, run 41366549694).
+          rm -rf build/full-suite-xml
+          mkdir -p build/full-suite-xml
+          cp -r build/test-results/testDebugUnitTest/. build/full-suite-xml/ 2>/dev/null || true
 
       # The engine accuracy/benchmark classes hold the whole 98k-word lexicon (some hold several)
       # and die with OutOfMemoryError on the default heap. They are not slow, they are hungry: a
@@ -106,7 +112,7 @@ jobs:
               return t.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
 
           rows, cases = [], []
-          for f in sorted(glob.glob('build/test-results/testDebugUnitTest/*.xml') +
+          for f in sorted(glob.glob('build/full-suite-xml/*.xml') +
                           glob.glob('build/test-results/heavy/*.xml')):
               try:
                   r = ET.parse(f).getroot()
@@ -206,7 +212,7 @@ jobs:
         with:
           name: full-suite-xml
           path: |
-            build/test-results/testDebugUnitTest/*.xml
+            build/full-suite-xml/*.xml
             build/test-results/heavy/*.xml
           if-no-files-found: ignore
           retention-days: 1
