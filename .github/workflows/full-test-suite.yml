@@ -77,7 +77,11 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          ./gradlew testDebugUnitTest -PskipHeavy=true --stacktrace 2>&1 | tee unit-test-output.log
+          # `|| true` is deliberate: these steps exist to PRODUCE the XML, and the verdict is
+          # decided by the report step below. Without it, `bash -e` aborts at the first failing
+          # test and the copy never happens (attempt 3: "no JUnit XML found" while Gradle was
+          # happily reporting failing tests).
+          ./gradlew testDebugUnitTest -PskipHeavy=true --stacktrace 2>&1 | tee unit-test-output.log || true
           # Gradle deletes a re-run task's previous outputs, and the heavy invocation below is a
           # re-run of this same task: without this copy its XML vanished and the report covered
           # 7 classes instead of 423 (first attempt, run 41366549694).
@@ -98,7 +102,7 @@ jobs:
         run: |
           set -o pipefail
           ./gradlew testDebugUnitTest -PonlyHeavy=true -PtestMaxHeap=3g \
-            -PjunitXmlDir=build/test-results/heavy --stacktrace 2>&1 | tee heavy-test-output.log
+            -PjunitXmlDir=build/test-results/heavy --stacktrace 2>&1 | tee heavy-test-output.log || true
 
       - name: Report results as annotations and a job summary
         shell: bash
