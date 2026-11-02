@@ -571,16 +571,10 @@ tasks.withType(Test).configureEach {
   }
   // Which half of the split this invocation is.
   if (findProperty('onlyHeavy') == 'true') {
-    filter {
-      isFailOnNoMatchingTests = false
-      heavyEngineTests.each { includeTestsMatching it }
-    }
+    filter { heavyEngineTests.each { includeTestsMatching it } }
   }
   if (findProperty('skipHeavy') == 'true') {
-    filter {
-      isFailOnNoMatchingTests = false
-      heavyEngineTests.each { excludeTestsMatching it }
-    }
+    filter { heavyEngineTests.each { excludeTestsMatching it } }
   }
   // A second invocation in the same job must not overwrite the first one's JUnit XML.
   if (findProperty('junitXmlDir')) {
