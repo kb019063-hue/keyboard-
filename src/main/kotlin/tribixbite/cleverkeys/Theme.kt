@@ -19,9 +19,16 @@ import kotlin.math.min
  * (255 × opacity / 255 == opacity) and lets a translucent theme stay translucent.
  */
 internal object KeyFillAlpha {
-    /** [color]'s own alpha scaled by [userOpacity] (0..255). Fully transparent stays transparent. */
+    /**
+     * [color]'s own alpha scaled by [userOpacity] (0..255). Fully transparent stays transparent.
+     *
+     * The alpha byte is shifted out by hand rather than through `android.graphics.Color.alpha`:
+     * that is a pure ARGB bit operation with nothing Android-specific about it, and the platform
+     * stub in the JVM test suite answers every method with its default (0), which made this
+     * function — and the glass theme it exists for — untestable off-device.
+     */
     fun of(color: Int, userOpacity: Int): Int {
-        val base = android.graphics.Color.alpha(color)
+        val base = (color ushr 24) and 0xFF
         if (base == 0) return 0
         return (base * userOpacity.coerceIn(0, 255) / 255).coerceIn(0, 255)
     }

@@ -1219,6 +1219,28 @@ tasks.register('runPureTests', JavaExec) {
     'tribixbite.cleverkeys.BigramModelStaticLmTest',
     'tribixbite.cleverkeys.StaticLmAssetDriftTest',
     'tribixbite.cleverkeys.StaticLmTapEvalTest',
+    // 2026-10-30/11-01 bug hunt: the fourteen classes below were written for the audit and
+    // never registered here, so the Termux runners could not execute them at all. They are
+    // policy/arithmetic/file-scanning tests whose subjects import no android.* classes
+    // (CornerLabelPolicy, MoreToolsSheet, OneHandedConfig, SuggestionStripPolicy,
+    // ToolbarCompactPolicy, IncognitoPolicy, FloatingConfig, VoiceTypingConfig, DictationPolicy,
+    // KeyboardGeometry-free geometry, and the two file readers), so they run in the PURE JVM
+    // runner. TestRunnerListDriftTest is what caught the omission.
+    'tribixbite.cleverkeys.CornerLabelPolicyTest',
+    'tribixbite.cleverkeys.IncognitoPolicyTest',
+    'tribixbite.cleverkeys.MoreToolsSheetTest',
+    'tribixbite.cleverkeys.OneHandedConfigTest',
+    'tribixbite.cleverkeys.SuggestionStripPolicyTest',
+    'tribixbite.cleverkeys.ToolbarCompactPolicyTest',
+    'tribixbite.cleverkeys.FloatingConfigTest',
+    'tribixbite.cleverkeys.ThemeDefaultMigrationTest',
+    'tribixbite.cleverkeys.voice.VoiceTypingConfigTest',
+    'tribixbite.cleverkeys.voice.DictationPolicyTest',
+    'tribixbite.cleverkeys.ui.settings.SettingsDrawerItemsTest',
+    'tribixbite.cleverkeys.VerboseLogRatchetTest',
+    // KeyFillAlpha is a pure ARGB bit operation (2026-11-01: it no longer calls
+    // android.graphics.Color, which the stub answers with 0 in a JVM test).
+    'tribixbite.cleverkeys.KeyFillAlphaTest',
   ]
 
   mainClass = 'org.junit.runner.JUnitCore'
@@ -1589,6 +1611,14 @@ tasks.register('runMockTests', JavaExec) {
     // Roadmap §4.1 (2026-10-08): every one of the 17 editable theme-creator colours reaches
     // exactly its renderer field (or the trail colour) in the theme-editor preview.
     'tribixbite.cleverkeys.theme.ThemeEditorPreviewMappingTest',
+    // 2026-10-30/11-01 bug hunt: unregistered since they were written (see the note on the pure
+    // list). These five build android-backed subjects — a mocked Context/SharedPreferences, the
+    // Pointers touch model, or KeyboardData/KeyValue keys — so they need the android.jar stubs.
+    'tribixbite.cleverkeys.GboardDefaultLayoutMigrationTest',
+    'tribixbite.cleverkeys.ConfigurationBurstCoalescingTest',
+    'tribixbite.cleverkeys.PointersSliderSpeedTest',
+    'tribixbite.cleverkeys.ModifiersValueSemanticsTest',
+    'tribixbite.cleverkeys.a11y.SplitKeyboardGeometryTest',
   ]
 
   mainClass = 'org.junit.runner.JUnitCore'
