@@ -109,7 +109,11 @@ class PointersSliderSpeedTest {
      */
     @Test
     fun aDeadZonePastTheHalfDiagonal_stillNormalisesUpward() {
-        for (threshold in 70..80) {
+        // The dead zone is 70% of a key height that is 0.7 × the diagonal, i.e. 0.49 × the
+        // diagonal against a maxDistance of 0.5 × — so it only overtakes maxDistance from 71.4%
+        // up. Starting the sweep at 72 is where the negative span the bug report describes
+        // actually begins; 0..71 keep a positive span and are covered by the test above.
+        for (threshold in 72..80) {
             val deadZone = deadZoneFor(threshold)
             assertWithMessage("threshold $threshold% puts the dead zone past maxDistance")
                 .that(deadZone).isGreaterThan(maxDistance)

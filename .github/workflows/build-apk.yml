@@ -123,6 +123,12 @@ jobs:
       # directly and assert that every command-palette string exists in all 21 locales and fits its
       # length budget. They are pure file parsing (no JVM/Android dependency), so they belong in the
       # per-push set: a missing translation is a shipping bug that otherwise only surfaced at night.
+      #
+      # The ten `*Test` entries listed below are the drift pins this audit kept rediscovering: each
+      # one scans sources or resources, or drives pure arithmetic, so none needs a device and each
+      # finishes in well under a second. They rot silently by nature (a renamed constant, a moved
+      # composable, an unregistered class), which is why they belong on every push.
+      #
       - name: Unit tests (fast subset, advisory)
         continue-on-error: true
         shell: bash
@@ -153,6 +159,16 @@ jobs:
             --tests '*WindowLayoutUtilsTest' \
             --tests '*CommandCatalogLocalizationTest' \
             --tests '*TranslationLengthTest' \
+            --tests '*CornerLabelPolicyTest' \
+            --tests '*KeyFillAlphaTest' \
+            --tests '*PointersSliderSpeedTest' \
+            --tests '*PointersShortSwipeCustomOverrideTest' \
+            --tests '*TypedBarHighlightHandlerTest' \
+            --tests '*DebugLoggingManagerTest' \
+            --tests '*StyleLayoutsTest' \
+            --tests '*TestKeyboardSectionTest' \
+            --tests '*DefaultsSingleDefinitionDriftTest' \
+            --tests '*TestRunnerListDriftTest' \
             2>&1 | tee unit-test-output.log
 
       # Reachable summary: per-class counts from the JUnit XML, plus any compiler diagnostic.

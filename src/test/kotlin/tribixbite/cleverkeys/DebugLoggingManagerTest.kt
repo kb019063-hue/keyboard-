@@ -59,7 +59,11 @@ class DebugLoggingManagerTest {
     fun `getLogFilePath returns correct path`() {
         val path = manager.getLogFilePath()
         assertThat(path).contains("swipe_log.txt")
-        assertThat(path).startsWith("/data/")
+        // The invariant is "under the app's private files dir", not the literal `/data/` of a
+        // device: this fixture stubs `filesDir` to a temp dir (a relaxed mock's File has a null
+        // path), so asserting the device prefix made the test red for a reason the app never had.
+        // DebugLoggingManager builds exactly `File(context.filesDir, "swipe_log.txt")`.
+        assertThat(path).startsWith(mockContext.filesDir.absolutePath)
     }
 
     // =========================================================================

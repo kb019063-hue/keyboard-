@@ -129,6 +129,13 @@ class PointersShortSwipeCustomOverrideTest {
         tmpDir = File(tmpRoot, "short-swipe-override-${System.nanoTime()}").apply { mkdirs() }
         context = mockk(relaxed = true)
         every { context.filesDir } returns tmpDir
+        // ShortSwipeCustomizationManager resolves its file through
+        // createDeviceProtectedStorageContext() (direct-boot storage). A relaxed mock answers that
+        // with a brand-new child mock whose filesDir has no path, so the writing instance persisted
+        // to one phantom path and the cold instance read another — the #145 cold-load pin failed
+        // with the mapping perfectly well on disk. Point direct-boot storage back at this context;
+        // PrivacyManagerTest stubs the same call for the same reason.
+        every { context.createDeviceProtectedStorageContext() } returns context
         manager = newManagerInstance(context)
 
         handler = RecordingHandler()
