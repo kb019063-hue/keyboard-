@@ -17,7 +17,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import java.util.Locale
-import tribixbite.cleverkeys.Config
 import tribixbite.cleverkeys.R
 import tribixbite.cleverkeys.SettingsActivity
 import tribixbite.cleverkeys.SettingsRanges
@@ -65,7 +64,7 @@ internal fun SettingsActivity.AutoCorrectionSection() {
                         onCheckedChange = {
                             backspaceUndoAutocorrect = it
                             saveSetting("backspace_undo_autocorrect", it)
-                            Config.globalConfig()?.backspace_undo_autocorrect = it
+                            config.edit { backspace_undo_autocorrect = it }
                         }
                     )
 

@@ -7,7 +7,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
-import tribixbite.cleverkeys.Config
 import tribixbite.cleverkeys.FloatingConfig
 import tribixbite.cleverkeys.SplitConfig
 import tribixbite.cleverkeys.FoldStateTracker
@@ -49,7 +48,7 @@ internal fun SettingsActivity.AppearanceSection() {
                         saveSetting(FloatingConfig.PREF_ENABLED, enabled)
                         // Immediate, like the other live switches: the open keyboard re-wraps and
                         // the window relayouts through the service's preference handler.
-                        Config.globalConfig()?.floating_enabled = enabled
+                        config.edit { floating_enabled = enabled }
                     }
                 )
                 // ── SPLIT KEYBOARD (phase 3 part 4) ───────────────────────
@@ -68,7 +67,7 @@ internal fun SettingsActivity.AppearanceSection() {
                     onCheckedChange = { enabled ->
                         splitEnabled = enabled
                         saveSetting(SplitConfig.PREF_ENABLED, enabled)
-                        Config.globalConfig()?.split_enabled = enabled
+                        config.edit { split_enabled = enabled }
                     }
                 )
                 if (splitEnabled) {
@@ -81,7 +80,7 @@ internal fun SettingsActivity.AppearanceSection() {
                         onValueChange = {
                             splitGapPercent = it
                             saveSetting(SplitConfig.PREF_GAP_PERCENT, it.toInt())
-                            Config.globalConfig()?.split_gap_percent = it.toInt()
+                            config.edit { split_gap_percent = it.toInt() }
                         },
                         displayValue = "${splitGapPercent.toInt()}%"
                     )
@@ -96,7 +95,7 @@ internal fun SettingsActivity.AppearanceSection() {
                         onValueChange = {
                             floatingWidthPercent = it
                             saveSetting(FloatingConfig.PREF_WIDTH_PERCENT, it.toInt())
-                            Config.globalConfig()?.floating_width_percent = it.toInt()
+                            config.edit { floating_width_percent = it.toInt() }
                         },
                         displayValue = "${floatingWidthPercent.toInt()}%"
                     )

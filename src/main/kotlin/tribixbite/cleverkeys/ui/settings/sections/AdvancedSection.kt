@@ -114,7 +114,7 @@ internal fun SettingsActivity.AdvancedSection() {
                     onCheckedChange = {
                         suggestionProvenanceMarkers = it
                         saveSetting("suggestion_provenance_markers", it)
-                        tribixbite.cleverkeys.Config.globalConfig()?.suggestion_provenance_markers = it
+                        config.edit { suggestion_provenance_markers = it }
                     }
                 )
 

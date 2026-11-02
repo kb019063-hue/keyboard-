@@ -51,12 +51,17 @@ class ConfigSnapshotRatchetTest {
      *
      * History: 33 at the ARC-072 plan (`3f92dfe0`), 31 after slice 1 migrated
      * `Gesture.kt` + `GestureClassifier.kt`, 30 after slice 2 took `Pointers.kt` off it
-     * (its two `@JvmStatic` slider-speed helpers were the last static reads there).
+     * (its two `@JvmStatic` slider-speed helpers were the last static reads there),
+     * **24 after the seven settings-section files stopped reaching for the global**
+     * (2026-11-01): a section is a `SettingsActivity` extension, and the Activity already
+     * holds the live instance in `config`, so `config.edit { … }` is both the snapshot-safe
+     * write and one fewer static consumer. That took the count 31 → 24 and the ceiling
+     * with it, which is the direction this pin exists to enforce.
      * **Only ever lower this number.** If a new consumer legitimately needs live config
      * (a settings screen writing back, say), that is a signal to thread a snapshot
      * instead — raising the ceiling defeats it.
      */
-    private val MAX_GLOBAL_CONFIG_FILES = 30
+    private val MAX_GLOBAL_CONFIG_FILES = 24
 
     /** Files a landed slice has migrated off the mutable global. Grows per slice. */
     private val migratedHotPathFiles = listOf(
@@ -117,7 +122,7 @@ class ConfigSnapshotRatchetTest {
      * names and so do not match.
      */
     private val directConfigFieldWrite =
-        Regex("""\b(?:_?config|Config\.globalConfig\(\))\s*\??\.\s*(\w+)\s*=(?!=)""")
+        Regex("""\b(?:_?config|Config\.globalConfig(?:OrNull)?\(\))\s*\??\.\s*(\w+)\s*=(?!=)""")
 
     private fun source(relative: String): String {
         val f = File(mainKotlin, relative)
