@@ -104,6 +104,10 @@ jobs:
           if [ -f unit-test-output.log ]; then
             grep -E "^e: |: error: |^> Task .* FAILED" unit-test-output.log | head -3 | esc \
               | while IFS= read -r line; do echo "::error::${line}"; done || true
+            # A task that fails before producing any XML says WHY only in this block; without it
+            # the report is "no JUnit XML found", which names nothing.
+            sed -n '/What went wrong/,/^\* Try/p' unit-test-output.log | head -6 | esc \
+              | while IFS= read -r line; do echo "::error::GRADLE ${line}"; done || true
           fi
           python3 - <<'PY'
           import glob, os, xml.etree.ElementTree as ET
