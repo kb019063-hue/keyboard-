@@ -549,8 +549,37 @@ android {
 // timeout then discarded the entire report (no annotations, no XML). Gradle writes one JUnit XML
 // per class the moment that class finishes, so with a bound in place everything completed is
 // still reported and the missing XML names the class that stalled.
+// Memory-hungry engine classes. They decode against the full 98k-word lexicon (and, for the CtC
+// sweeps, every bundled lexicon at once), which the default test heap cannot hold: they fail with
+// `OutOfMemoryError` while the rest of the suite runs in seconds. Giving the whole suite 3 GB was
+// measured on 2026-10-31 to turn it into a 70-minute GC crawl, so these run as a SECOND, budgeted
+// Gradle invocation with their own heap instead (see .github/workflows/full-test-suite.yml).
+def heavyEngineTests = [
+  '*GeoBenchmarkTest',
+  '*GeoShortWordTest',
+  '*GeoConfusablesTest',
+  '*UserSwipePriorityReplayTest',
+  '*CtcBundledLexiconEmitBudgetTest',
+  '*CtcContractionDisplayTest',
+  '*CtcContractionRankingTest',
+]
+
 tasks.withType(Test).configureEach {
   timeout = java.time.Duration.ofMinutes(45)
+  if (findProperty('testMaxHeap')) {
+    maxHeapSize = findProperty('testMaxHeap').toString()
+  }
+  // Which half of the split this invocation is.
+  if (findProperty('onlyHeavy') == 'true') {
+    filter { heavyEngineTests.each { includeTestsMatching it } }
+  }
+  if (findProperty('skipHeavy') == 'true') {
+    filter { heavyEngineTests.each { excludeTestsMatching it } }
+  }
+  // A second invocation in the same job must not overwrite the first one's JUnit XML.
+  if (findProperty('junitXmlDir')) {
+    reports.junitXml.outputLocation = file(findProperty('junitXmlDir').toString())
+  }
 }
 
 // REPRODUCIBILITY: Apply deterministic compilation settings

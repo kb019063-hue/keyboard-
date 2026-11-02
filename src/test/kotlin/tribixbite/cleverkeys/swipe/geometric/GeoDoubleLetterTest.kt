@@ -50,8 +50,11 @@ class GeoDoubleLetterTest {
     private val en by lazy { GeoTestFixtures.englishCkdt() }
     private val ru by lazy { GeoTestFixtures.russianCkdt() }
 
-    private val engineEn = GeometricSwipeEngine(config).also { it.warmUp(qwerty, en) }
-    private val engineRu = GeometricSwipeEngine(config).also { it.warmUp(jcuken, ru) }
+    // LAZY: both engines warm up from a dictionary, and the Russian one reads the pack this fork
+    // does not vendor. Eager initialisers run BEFORE @Before, so the guard above could never skip
+    // the class -- it reported four failures instead of skipping.
+    private val engineEn by lazy { GeometricSwipeEngine(config).also { it.warmUp(qwerty, en) } }
+    private val engineRu by lazy { GeometricSwipeEngine(config).also { it.warmUp(jcuken, ru) } }
 
     // ── LOOP mode: the doubled word wins over its single-letter collision partner ──
 

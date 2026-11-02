@@ -141,6 +141,10 @@ jobs:
             --tests '*PrivacyManagerTest' \
             --tests '*SwipeCorrectionOfferTest' \
             --tests '*GeoAccuracyJcukenRuTest' \
+            --tests '*GeoDoubleLetterTest' \
+            --tests '*HebrewLayoutAutoCorrectTest' \
+            --tests '*ChannelRankingEval' \
+            --tests '*NeighbourTiebreakEval' \
             --tests '*WindowLayoutUtilsTest' \
             2>&1 | tee unit-test-output.log
 

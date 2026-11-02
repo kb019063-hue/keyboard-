@@ -68,13 +68,28 @@ jobs:
       # No `--tests` filter: this job's whole point is that nothing is skipped for being
       # unlisted. `--continue` is not needed (Gradle runs every test in the task), and the task
       # is allowed to fail so the summary below still runs and reports.
-      - name: Unit tests (whole suite)
+      - name: Unit tests (whole suite, minus the memory-hungry engine classes)
         id: tests
         continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
-          ./gradlew testDebugUnitTest --stacktrace 2>&1 | tee unit-test-output.log
+          ./gradlew testDebugUnitTest -PskipHeavy=true --stacktrace 2>&1 | tee unit-test-output.log
+
+      # The engine accuracy/benchmark classes hold the whole 98k-word lexicon (some hold several)
+      # and die with OutOfMemoryError on the default heap. They are not slow, they are hungry: a
+      # 3 GB heap for the ENTIRE suite was measured on 2026-10-31 to turn a 12-minute run into a
+      # 70-minute GC crawl, so they get their own invocation, their own heap, their own 45-minute
+      # bound (build.gradle) and their own JUnit XML directory, which the report step below reads
+      # alongside the main one.
+      - name: Unit tests (memory-hungry engine classes, 3g heap)
+        id: heavy
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew testDebugUnitTest -PonlyHeavy=true -PtestMaxHeap=3g \
+            -PjunitXmlDir=build/test-results/heavy --stacktrace 2>&1 | tee heavy-test-output.log
 
       - name: Report results as annotations and a job summary
         shell: bash
@@ -91,7 +106,8 @@ jobs:
               return t.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
 
           rows, cases = [], []
-          for f in sorted(glob.glob('build/test-results/testDebugUnitTest/*.xml')):
+          for f in sorted(glob.glob('build/test-results/testDebugUnitTest/*.xml') +
+                          glob.glob('build/test-results/heavy/*.xml')):
               try:
                   r = ET.parse(f).getroot()
               except Exception:
@@ -189,14 +205,16 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: full-suite-xml
-          path: build/test-results/testDebugUnitTest/*.xml
+          path: |
+            build/test-results/testDebugUnitTest/*.xml
+            build/test-results/heavy/*.xml
           if-no-files-found: ignore
           retention-days: 1
 
       # Make the job result mean what it says: the test task is advisory above only so the report
       # always runs; the verdict is applied here.
       - name: Fail the job when tests failed
-        if: steps.tests.outcome == 'failure'
+        if: steps.tests.outcome == 'failure' || steps.heavy.outcome == 'failure'
         run: |
           echo "::error::the whole suite is not green - see the annotations and the job summary"
           exit 1
