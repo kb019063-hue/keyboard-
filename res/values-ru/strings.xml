@@ -2562,4 +2562,22 @@
     <string name="layout_theme_search_hint">Поиск тем</string>
     <string name="layout_theme_no_results">Подходящих тем нет</string>
     <string name="import_preview_layout_theme_change">%1$s: тема %2$s → %3$s</string>
+
+    <!-- Command palette: incognito / floating / split / one-handed / GIF / more tools.
+         Added 2026-11-01 so every catalog string exists in every locale; wording should
+         get a native-speaker pass. -->
+    <string name="cmd_incognito_toggle">Режим инкогнито</string>
+    <string name="cmd_incognito_toggle_desc">Включить или выключить режим инкогнито</string>
+    <string name="cmd_floating_toggle">Плавающая клавиатура</string>
+    <string name="cmd_floating_toggle_desc">Включить или выключить плавающую клавиатуру</string>
+    <string name="cmd_split_toggle">Разделённая клавиатура</string>
+    <string name="cmd_split_toggle_desc">Включить или выключить разделённую клавиатуру</string>
+    <string name="cmd_more_tools">Другие инструменты</string>
+    <string name="cmd_more_tools_desc">Открыть панель инструментов: инкогнито, плавающая, разделённая, одной рукой, звук клавиш, тема и настройки</string>
+    <string name="cmd_switch_gif">GIF</string>
+    <string name="cmd_switch_gif_desc">Открыть панель GIF</string>
+    <string name="cmd_one_handed_toggle">Режим одной руки</string>
+    <string name="cmd_one_handed_toggle_desc">Уменьшает клавиатуру и сдвигает её в сторону, чтобы до неё достал большой палец</string>
+    <string name="cmd_one_handed_side">Сменить сторону для одной руки</string>
+    <string name="cmd_one_handed_side_desc">Переносит уменьшенную клавиатуру на другую сторону экрана</string>
 </resources>

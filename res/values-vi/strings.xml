@@ -2450,4 +2450,22 @@
     <string name="layout_theme_search_hint">Tìm chủ đề</string>
     <string name="layout_theme_no_results">Không có chủ đề phù hợp</string>
     <string name="import_preview_layout_theme_change">%1$s: chủ đề %2$s → %3$s</string>
+
+    <!-- Command palette: incognito / floating / split / one-handed / GIF / more tools.
+         Added 2026-11-01 so every catalog string exists in every locale; wording should
+         get a native-speaker pass. -->
+    <string name="cmd_incognito_toggle">Chế độ ẩn danh</string>
+    <string name="cmd_incognito_toggle_desc">Bật hoặc tắt chế độ ẩn danh</string>
+    <string name="cmd_floating_toggle">Bàn phím nổi</string>
+    <string name="cmd_floating_toggle_desc">Bật hoặc tắt bàn phím nổi</string>
+    <string name="cmd_split_toggle">Bàn phím chia đôi</string>
+    <string name="cmd_split_toggle_desc">Bật hoặc tắt bàn phím chia đôi</string>
+    <string name="cmd_more_tools">Công cụ khác</string>
+    <string name="cmd_more_tools_desc">Mở bảng công cụ: ẩn danh, nổi, chia đôi, một tay, âm thanh phím, giao diện và cài đặt</string>
+    <string name="cmd_switch_gif">GIF</string>
+    <string name="cmd_switch_gif_desc">Mở bảng GIF</string>
+    <string name="cmd_one_handed_toggle">Chế độ một tay</string>
+    <string name="cmd_one_handed_toggle_desc">Thu nhỏ bàn phím và dồn về một bên để một ngón cái với tới</string>
+    <string name="cmd_one_handed_side">Đổi bên cho chế độ một tay</string>
+    <string name="cmd_one_handed_side_desc">Di chuyển bàn phím thu nhỏ sang bên kia màn hình</string>
 </resources>

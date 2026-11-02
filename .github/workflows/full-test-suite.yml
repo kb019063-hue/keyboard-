@@ -17,6 +17,10 @@
 # `fastlane/`, `docs/i18n/glossary.json`, `.github/scripts/emulator-ci.sh`,
 # `scripts/dictionaries/*.zip`) report SKIPPED via `UpstreamArtefacts`, not passed and not failed.
 #
+# The per-push job in `build-apk.yml` also runs the two resource-parsing classes
+# (`CommandCatalogLocalizationTest`, `TranslationLengthTest`), so a missing translation is caught
+# on the push that introduces it; this nightly job is what catches everything else.
+#
 # Triggered without a terminal: editing and committing this file to `main` runs it (that is how
 # the first run after a change happens); otherwise the nightly schedule does. `workflow_dispatch`
 # is there for anyone with a working CLI.

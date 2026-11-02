@@ -2557,4 +2557,22 @@
     <string name="layout_theme_search_hint">Hledat motivy</string>
     <string name="layout_theme_no_results">Žádné odpovídající motivy</string>
     <string name="import_preview_layout_theme_change">%1$s: motiv %2$s → %3$s</string>
+
+    <!-- Command palette: incognito / floating / split / one-handed / GIF / more tools.
+         Added 2026-11-01 so every catalog string exists in every locale; wording should
+         get a native-speaker pass. -->
+    <string name="cmd_incognito_toggle">Režim inkognito</string>
+    <string name="cmd_incognito_toggle_desc">Zapnout nebo vypnout režim inkognito</string>
+    <string name="cmd_floating_toggle">Plovoucí klávesnice</string>
+    <string name="cmd_floating_toggle_desc">Zapnout nebo vypnout plovoucí klávesnici</string>
+    <string name="cmd_split_toggle">Rozdělená klávesnice</string>
+    <string name="cmd_split_toggle_desc">Zapnout nebo vypnout rozdělenou klávesnici</string>
+    <string name="cmd_more_tools">Další nástroje</string>
+    <string name="cmd_more_tools_desc">Otevřít panel nástrojů: inkognito, plovoucí, rozdělená, jednou rukou, zvuk kláves, motiv a nastavení</string>
+    <string name="cmd_switch_gif">GIF</string>
+    <string name="cmd_switch_gif_desc">Otevřít panel GIF</string>
+    <string name="cmd_one_handed_toggle">Režim pro jednu ruku</string>
+    <string name="cmd_one_handed_toggle_desc">Zmenší klávesnici a přisune ji k jedné straně, aby na ni dosáhl jeden palec</string>
+    <string name="cmd_one_handed_side">Přepnout stranu pro jednu ruku</string>
+    <string name="cmd_one_handed_side_desc">Přesune zmenšenou klávesnici na druhou stranu obrazovky</string>
 </resources>

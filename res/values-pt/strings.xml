@@ -2512,4 +2512,22 @@
     <string name="layout_theme_search_hint">Pesquisar temas</string>
     <string name="layout_theme_no_results">Nenhum tema corresponde</string>
     <string name="import_preview_layout_theme_change">%1$s: tema %2$s → %3$s</string>
+
+    <!-- Command palette: incognito / floating / split / one-handed / GIF / more tools.
+         Added 2026-11-01 so every catalog string exists in every locale; wording should
+         get a native-speaker pass. -->
+    <string name="cmd_incognito_toggle">Modo incógnito</string>
+    <string name="cmd_incognito_toggle_desc">Ativar ou desativar o modo incógnito</string>
+    <string name="cmd_floating_toggle">Teclado flutuante</string>
+    <string name="cmd_floating_toggle_desc">Ativar ou desativar o teclado flutuante</string>
+    <string name="cmd_split_toggle">Teclado dividido</string>
+    <string name="cmd_split_toggle_desc">Ativar ou desativar o teclado dividido</string>
+    <string name="cmd_more_tools">Mais ferramentas</string>
+    <string name="cmd_more_tools_desc">Abrir o painel de ferramentas: incógnito, flutuante, dividido, uma mão, som das teclas, tema e definições</string>
+    <string name="cmd_switch_gif">GIF</string>
+    <string name="cmd_switch_gif_desc">Abrir o painel de GIF</string>
+    <string name="cmd_one_handed_toggle">Modo de uma mão</string>
+    <string name="cmd_one_handed_toggle_desc">Reduz o teclado e encosta-o a um lado para que um polegar o alcance</string>
+    <string name="cmd_one_handed_side">Mudar o lado de uma mão</string>
+    <string name="cmd_one_handed_side_desc">Move o teclado reduzido para o outro lado do ecrã</string>
 </resources>

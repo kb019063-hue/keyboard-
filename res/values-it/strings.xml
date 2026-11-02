@@ -2552,4 +2552,22 @@
     <string name="layout_theme_search_hint">Cerca temi</string>
     <string name="layout_theme_no_results">Nessun tema corrispondente</string>
     <string name="import_preview_layout_theme_change">%1$s: tema %2$s → %3$s</string>
+
+    <!-- Command palette: incognito / floating / split / one-handed / GIF / more tools.
+         Added 2026-11-01 so every catalog string exists in every locale; wording should
+         get a native-speaker pass. -->
+    <string name="cmd_incognito_toggle">Modalità incognito</string>
+    <string name="cmd_incognito_toggle_desc">Attiva o disattiva la modalità incognito</string>
+    <string name="cmd_floating_toggle">Tastiera flottante</string>
+    <string name="cmd_floating_toggle_desc">Attiva o disattiva la tastiera flottante</string>
+    <string name="cmd_split_toggle">Tastiera divisa</string>
+    <string name="cmd_split_toggle_desc">Attiva o disattiva la tastiera divisa</string>
+    <string name="cmd_more_tools">Altri strumenti</string>
+    <string name="cmd_more_tools_desc">Apri il pannello degli strumenti: incognito, flottante, divisa, una mano, suono dei tasti, tema e impostazioni</string>
+    <string name="cmd_switch_gif">GIF</string>
+    <string name="cmd_switch_gif_desc">Apri il pannello GIF</string>
+    <string name="cmd_one_handed_toggle">Modalità a una mano</string>
+    <string name="cmd_one_handed_toggle_desc">Rimpicciolisce la tastiera e la accosta a un lato così che un pollice la raggiunga</string>
+    <string name="cmd_one_handed_side">Cambia lato a una mano</string>
+    <string name="cmd_one_handed_side_desc">Sposta la tastiera ridotta sull\'altro lato dello schermo</string>
 </resources>

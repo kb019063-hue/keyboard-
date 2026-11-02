@@ -118,6 +118,11 @@ jobs:
       #
       # Gradle compiles EVERY test source before running, so this also serves as the compile check
       # for the whole test source set on every push.
+      #
+      # `CommandCatalogLocalizationTest` and `TranslationLengthTest` read `res/values*/strings.xml`
+      # directly and assert that every command-palette string exists in all 21 locales and fits its
+      # length budget. They are pure file parsing (no JVM/Android dependency), so they belong in the
+      # per-push set: a missing translation is a shipping bug that otherwise only surfaced at night.
       - name: Unit tests (fast subset, advisory)
         continue-on-error: true
         shell: bash
@@ -146,6 +151,8 @@ jobs:
             --tests '*ChannelRankingEval' \
             --tests '*NeighbourTiebreakEval' \
             --tests '*WindowLayoutUtilsTest' \
+            --tests '*CommandCatalogLocalizationTest' \
+            --tests '*TranslationLengthTest' \
             2>&1 | tee unit-test-output.log
 
       # Reachable summary: per-class counts from the JUnit XML, plus any compiler diagnostic.

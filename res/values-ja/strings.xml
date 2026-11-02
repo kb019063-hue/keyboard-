@@ -2421,4 +2421,22 @@
     <string name="layout_theme_search_hint">テーマを検索</string>
     <string name="layout_theme_no_results">一致するテーマはありません</string>
     <string name="import_preview_layout_theme_change">%1$s: テーマ %2$s → %3$s</string>
+
+    <!-- Command palette: incognito / floating / split / one-handed / GIF / more tools.
+         Added 2026-11-01 so every catalog string exists in every locale; wording should
+         get a native-speaker pass. -->
+    <string name="cmd_incognito_toggle">シークレットモード</string>
+    <string name="cmd_incognito_toggle_desc">シークレットモードをオンまたはオフにする</string>
+    <string name="cmd_floating_toggle">フローティングキーボード</string>
+    <string name="cmd_floating_toggle_desc">フローティングキーボードをオンまたはオフにする</string>
+    <string name="cmd_split_toggle">分割キーボード</string>
+    <string name="cmd_split_toggle_desc">分割キーボードをオンまたはオフにする</string>
+    <string name="cmd_more_tools">その他のツール</string>
+    <string name="cmd_more_tools_desc">ツールパネルを開く: シークレット、フローティング、分割、片手、キー音、テーマ、設定</string>
+    <string name="cmd_switch_gif">GIF</string>
+    <string name="cmd_switch_gif_desc">GIF パネルを開く</string>
+    <string name="cmd_one_handed_toggle">片手モード</string>
+    <string name="cmd_one_handed_toggle_desc">キーボードを小さくして片側に寄せ、片手の親指で届くようにします</string>
+    <string name="cmd_one_handed_side">片手モードの側を切り替え</string>
+    <string name="cmd_one_handed_side_desc">小さくしたキーボードを画面の反対側へ移動します</string>
 </resources>
