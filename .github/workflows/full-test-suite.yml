@@ -35,6 +35,9 @@ on:
       - 'arena/**'
     paths:
       - '.github/workflows/full-test-suite.yml'
+      # The test task's configuration (heap, filters, timeout) lives here: a change to it can
+      # change every verdict below, so it must be exercised on the branch that made it.
+      - 'build.gradle'
   workflow_dispatch:
 
 permissions:
