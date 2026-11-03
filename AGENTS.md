@@ -29,8 +29,18 @@ below is here because it already cost someone a day.
 - **The dev sandbox cannot build.** No Android SDK, no Gradle distribution, no Maven Central.
   GitHub Actions is the compiler: push and read the run. Never claim a Kotlin change is correct
   because it "looks right"; say it is unverified until a green build says otherwise.
-- **CI runs `assembleDebug` only, not `test`.** Upstream drift tests assert on files this fork
-  does not vendor and would fail for reasons unrelated to correctness.
+- **CI runs the tests too.** `build-apk.yml` runs a ~65-class / ~770-test subset on every push;
+  `.github/workflows/full-test-suite.yml` runs **all 413 classes / 4,650 tests** nightly, on demand,
+  and whenever that file or `build.gradle` changes. Both are green as of run 41374157846
+  (`4,650 run, 0 failed, 204 skipped`), so **a red run now means a real problem in this
+  repository** — do not explain one away as "upstream drift". The 204 skips are 22 classes that
+  assert on artefacts this fork does not vendor; they report SKIPPED through `UpstreamArtefacts`,
+  not failed and not passed.
+- **When a test is red, read [`docs/TEST-PITFALLS.md`](docs/TEST-PITFALLS.md) before "fixing" it.**
+  That file is the catalogue of the twelve ways tests in this repo have lied — entire classes
+  passing with the feature switched off, assertions on a device path a stub cannot produce, source
+  scans that cannot see a wrapped call. Most reds here have been the test, not the app; a few were
+  the app, and telling them apart is the whole job.
 - Python 3 is required at build time (`build.gradle` execs six stdlib-only generators). No pip.
 
 ## The installed build is the DEBUG variant
