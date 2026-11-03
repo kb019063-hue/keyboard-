@@ -27,7 +27,9 @@
 #
 # The per-push job in `build-apk.yml` also runs the two resource-parsing classes
 # (`CommandCatalogLocalizationTest`, `TranslationLengthTest`), so a missing translation is caught
-# on the push that introduces it; this nightly job is what catches everything else.
+# on the push that introduces it; since 2026-11-03 it also runs `DictationPolicyTest`, because a
+# wrong verdict from the dictation table is a behaviour change the user feels immediately and the
+# policy class is pure. This nightly job is what catches everything else.
 #
 # Triggered without a terminal: editing and committing this file to `main` runs it (that is how
 # the first run after a change happens); otherwise the nightly schedule does. `workflow_dispatch`
