@@ -51,6 +51,16 @@ internal class DictationController(private val context: Context) {
     private var sink: Sink? = null
 
     /**
+     * The microphone permission has been asked for at least once and has not been granted since.
+     *
+     * Android shows the system prompt twice and then answers `denied` immediately, so a key that
+     * asks on every press becomes a panel that can never succeed — which is what the old code did
+     * while its denial message promised the key had switched to a voice keyboard. Cleared as soon
+     * as the permission is actually held, so a later revoke asks properly once more.
+     */
+    private var askedForPermission = false
+
+    /**
      * Audio focus, held for the length of one session.
      *
      * Without it the recogniser can open the microphone and still receive silence: on OEM builds
@@ -120,20 +130,22 @@ internal class DictationController(private val context: Context) {
     ): DictationPolicy.Press {
         val recognizerAvailable = recognizerAvailable()
         val permissionGranted = permissionGranted()
+        if (permissionGranted) askedForPermission = false
         val decision = DictationPolicy.onPress(
             mode = mode,
             selfTest = selfTest,
             listening = sessionActive,
             recognizerAvailable = recognizerAvailable,
             permissionGranted = permissionGranted,
-            voiceImeAvailable = voiceImeAvailable
+            voiceImeAvailable = voiceImeAvailable,
+            permissionRefused = askedForPermission
         )
         // The single most useful line this feature logs: it says why the key did what it did.
         Log.i(
             TAG,
             "press mode=$mode selfTest=$selfTest listening=$sessionActive " +
                 "recognizer=$recognizerAvailable permission=$permissionGranted " +
-                "voiceIme=$voiceImeAvailable decision=$decision"
+                "askedBefore=$askedForPermission voiceIme=$voiceImeAvailable decision=$decision"
         )
         this.sink = sink
         when (decision) {
@@ -142,7 +154,10 @@ internal class DictationController(private val context: Context) {
                 main.post { startListening() }
             }
             DictationPolicy.Press.STOP_LISTENING -> main.post { stopListening() }
-            DictationPolicy.Press.REQUEST_PERMISSION -> requestPermission()
+            DictationPolicy.Press.REQUEST_PERMISSION -> {
+                askedForPermission = true
+                requestPermission()
+            }
             DictationPolicy.Press.COMMIT_SELF_TEST -> commitSelfTest()
             // Both handed back to the caller: it owns the voice-IME switch and the config flag.
             DictationPolicy.Press.SWITCH_TO_VOICE_IME,
@@ -346,7 +361,8 @@ internal class DictationController(private val context: Context) {
             DictationPolicy.Failure.NOTHING_HEARD -> R.string.voice_typing_nothing_heard
             DictationPolicy.Failure.PERMISSION -> R.string.voice_typing_permission_needed
             DictationPolicy.Failure.BUSY -> R.string.voice_typing_busy
-            DictationPolicy.Failure.UNAVAILABLE -> R.string.voice_typing_unavailable
+            DictationPolicy.Failure.SERVICE_UNREACHABLE -> R.string.voice_typing_service_unreachable
+            DictationPolicy.Failure.MICROPHONE -> R.string.voice_typing_microphone
             DictationPolicy.Failure.UNKNOWN -> R.string.voice_typing_failed
         }
         sink?.showMessage(context.getString(message))

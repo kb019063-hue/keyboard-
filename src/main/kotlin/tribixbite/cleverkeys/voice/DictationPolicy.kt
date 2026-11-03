@@ -18,7 +18,10 @@ package tribixbite.cleverkeys.voice
  *     commit path on a device that has no recogniser at all (the CI emulator is exactly that);
  *  3. no recogniser means asking for the microphone is pointless, so fall back to the legacy IME
  *     switch instead of stranding the key behind a permission dialog that leads nowhere;
- *  4. only then permission, and only then listening.
+ *  4. permission that was already refused once is NOT asked for again: Android stops showing the
+ *     system prompt after two denials, so a second ask would be a panel that can never succeed.
+ *     The key does what the denial message promises and hands the field to a voice IME;
+ *  5. only then permission, and only then listening.
  */
 object DictationPolicy {
 
@@ -63,8 +66,16 @@ object DictationPolicy {
         /** The recogniser was already busy with someone else. A retry usually works. */
         BUSY,
 
-        /** Network, server or audio plumbing. Retrying may not help. */
-        UNAVAILABLE,
+        /**
+         * The recogniser could not reach its speech service: no network, the network timed out, or
+         * the server refused. The recogniser exists — the earlier wording ("no speech recogniser
+         * is available on this device") was simply false, and told an offline user to look for a
+         * missing app instead of a missing connection or an un-downloaded offline language.
+         */
+        SERVICE_UNREACHABLE,
+
+        /** The microphone itself would not open: another app is recording, or the input is dead. */
+        MICROPHONE,
 
         /** Anything the table does not recognise; reported generically rather than swallowed. */
         UNKNOWN
@@ -82,19 +93,29 @@ object DictationPolicy {
     const val ERROR_RECOGNIZER_BUSY = 8
     const val ERROR_INSUFFICIENT_PERMISSIONS = 9
 
+    /**
+     * @param permissionRefused the microphone was already asked for once and is still not granted,
+     *   so asking again cannot produce a working session (Android stops showing the system prompt
+     *   after two denials and answers "denied" immediately after that).
+     */
     fun onPress(
         mode: VoiceTypingConfig.Mode,
         selfTest: Boolean,
         listening: Boolean,
         recognizerAvailable: Boolean,
         permissionGranted: Boolean,
-        voiceImeAvailable: Boolean
+        voiceImeAvailable: Boolean,
+        permissionRefused: Boolean = false
     ): Press {
         if (listening) return Press.STOP_LISTENING
         if (selfTest && mode == VoiceTypingConfig.Mode.DICTATION) return Press.COMMIT_SELF_TEST
         if (mode == VoiceTypingConfig.Mode.SWITCH_IME) return switchOrFail(voiceImeAvailable)
         if (!recognizerAvailable) return switchOrFail(voiceImeAvailable)
-        if (!permissionGranted) return Press.REQUEST_PERMISSION
+        if (!permissionGranted) {
+            // Refused once: stop asking and do what the denial message says the key now does.
+            if (permissionRefused) return switchOrFail(voiceImeAvailable)
+            return Press.REQUEST_PERMISSION
+        }
         return Press.START_LISTENING
     }
 
@@ -129,8 +150,10 @@ object DictationPolicy {
         ERROR_SPEECH_TIMEOUT, ERROR_NO_MATCH -> Failure.NOTHING_HEARD
         ERROR_INSUFFICIENT_PERMISSIONS -> Failure.PERMISSION
         ERROR_RECOGNIZER_BUSY -> Failure.BUSY
-        ERROR_NETWORK_TIMEOUT, ERROR_NETWORK, ERROR_AUDIO, ERROR_SERVER, ERROR_CLIENT ->
-            Failure.UNAVAILABLE
+        // Offline is the common case of these three, and it is NOT "no recogniser installed".
+        ERROR_NETWORK_TIMEOUT, ERROR_NETWORK, ERROR_SERVER -> Failure.SERVICE_UNREACHABLE
+        ERROR_AUDIO -> Failure.MICROPHONE
+        // ERROR_CLIENT and anything a future framework adds: report it, never swallow it.
         else -> Failure.UNKNOWN
     }
 }

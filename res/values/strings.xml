@@ -208,6 +208,10 @@
     <string name="voice_typing_busy">The speech recogniser is busy. Try again in a moment.</string>
     <string name="voice_typing_unavailable">No speech recogniser is available on this device</string>
     <string name="voice_typing_failed">Voice input could not start</string>
+    <!-- Offline / server failures are NOT "no recogniser installed": the recogniser exists and
+         could not reach its service. Telling an offline user to look for a missing app was wrong. -->
+    <string name="voice_typing_service_unreachable">Couldn\'t reach the speech service. Check your connection, or download this language for offline dictation.</string>
+    <string name="voice_typing_microphone">The microphone is not available — another app may be using it.</string>
     <string name="voice_typing_nothing_available">No voice input on this device: no speech recogniser and no voice keyboard enabled</string>
     <string name="voice_typing_permission_needed">Dictation needs microphone permission</string>
     <string name="voice_typing_permission_rationale">Mr. Brown\'s Keyboard needs the microphone to type what you say. Audio is only captured while a dictation session is running.</string>

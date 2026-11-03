@@ -22,14 +22,16 @@ class DictationPolicyTest {
         listening: Boolean = false,
         recognizerAvailable: Boolean = true,
         permissionGranted: Boolean = true,
-        voiceImeAvailable: Boolean = true
+        voiceImeAvailable: Boolean = true,
+        permissionRefused: Boolean = false
     ): Press = DictationPolicy.onPress(
         mode = mode,
         selfTest = selfTest,
         listening = listening,
         recognizerAvailable = recognizerAvailable,
         permissionGranted = permissionGranted,
-        voiceImeAvailable = voiceImeAvailable
+        voiceImeAvailable = voiceImeAvailable,
+        permissionRefused = permissionRefused
     )
 
     @Test
@@ -57,6 +59,38 @@ class DictationPolicyTest {
         assertEquals(
             Press.SWITCH_TO_VOICE_IME,
             press(recognizerAvailable = false, permissionGranted = false, voiceImeAvailable = true)
+        )
+    }
+
+    /**
+     * The denial path is a promise the UI makes: `voice_typing_permission_denied` tells the user the
+     * mic key "switches to a voice keyboard instead of dictating here". Before this row existed the
+     * key asked again instead, and once Android had stopped showing the system prompt (two denials)
+     * that was a panel that could never succeed — the key was effectively dead while telling the
+     * user it had done something else.
+     */
+    @Test
+    fun `a permission refused once is not asked for again, it falls back to the voice ime`() {
+        assertEquals(
+            Press.SWITCH_TO_VOICE_IME,
+            press(permissionGranted = false, permissionRefused = true, voiceImeAvailable = true)
+        )
+    }
+
+    @Test
+    fun `a refused permission with no voice ime says so instead of re-asking`() {
+        assertEquals(
+            Press.REPORT_NO_VOICE_INPUT,
+            press(permissionGranted = false, permissionRefused = true, voiceImeAvailable = false)
+        )
+    }
+
+    /** A refusal is irrelevant once the permission is actually held (a later grant or a restore). */
+    @Test
+    fun `a granted permission listens even if it was refused earlier`() {
+        assertEquals(
+            Press.START_LISTENING,
+            press(permissionGranted = true, permissionRefused = true)
         )
     }
 
@@ -146,8 +180,22 @@ class DictationPolicyTest {
             DictationPolicy.onFailure(DictationPolicy.ERROR_INSUFFICIENT_PERMISSIONS)
         )
         assertEquals(DictationPolicy.Failure.BUSY, DictationPolicy.onFailure(DictationPolicy.ERROR_RECOGNIZER_BUSY))
-        assertEquals(DictationPolicy.Failure.UNAVAILABLE, DictationPolicy.onFailure(DictationPolicy.ERROR_NETWORK))
-        assertEquals(DictationPolicy.Failure.UNAVAILABLE, DictationPolicy.onFailure(DictationPolicy.ERROR_AUDIO))
+        // Offline is not "no recogniser installed": these three are the connection, and the user is
+        // told so. Mistaking one for the other sent an offline user looking for a missing app.
+        assertEquals(
+            DictationPolicy.Failure.SERVICE_UNREACHABLE,
+            DictationPolicy.onFailure(DictationPolicy.ERROR_NETWORK)
+        )
+        assertEquals(
+            DictationPolicy.Failure.SERVICE_UNREACHABLE,
+            DictationPolicy.onFailure(DictationPolicy.ERROR_NETWORK_TIMEOUT)
+        )
+        assertEquals(
+            DictationPolicy.Failure.SERVICE_UNREACHABLE,
+            DictationPolicy.onFailure(DictationPolicy.ERROR_SERVER)
+        )
+        assertEquals(DictationPolicy.Failure.MICROPHONE, DictationPolicy.onFailure(DictationPolicy.ERROR_AUDIO))
+        assertEquals(DictationPolicy.Failure.UNKNOWN, DictationPolicy.onFailure(DictationPolicy.ERROR_CLIENT))
         assertEquals(DictationPolicy.Failure.UNKNOWN, DictationPolicy.onFailure(999))
     }
 }

@@ -59,6 +59,25 @@ cooperative it is a dead key.
   its description. The existing `voice_typing_chooser` command stays for people who want the old
   behaviour deliberately.
 
+### Offline, and a refused microphone (2026-11-03)
+
+Recognition is the platform's, not ours: `createSpeechRecognizer()` returns whatever recogniser the
+phone installs (Google's, normally), so **dictation works offline exactly when that recogniser has
+the language's on-device model**. The keyboard neither forces offline mode nor hides the
+dependency; what it owes the user is the truth about which of the two failed.
+
+- `ERROR_NETWORK` / `ERROR_NETWORK_TIMEOUT` / `ERROR_SERVER` used to be reported as *"No speech
+  recogniser is available on this device"* — false, and it sends an offline user looking for a
+  missing app. They now say the speech service could not be reached and suggest checking the
+  connection or downloading the language for offline dictation. `ERROR_AUDIO` likewise has its own
+  line (the microphone itself did not open) instead of being folded into the same message.
+- A **refused** microphone is no longer asked for again. Android shows the system prompt twice and
+  then answers `denied` immediately, so the old behaviour (ask on every press) was a panel that
+  could never succeed, while the denial copy promised the key had switched to a voice keyboard.
+  Now the first press asks, and every press after a refusal does what the message says: switch to a
+  voice IME, or say there is none. The flag clears the moment the permission is actually held, so a
+  later revoke asks properly once more.
+
 ## 3. The new tools are one key away, not ten settings away
 
 The toolbar defaults are ten commands (`ToolbarConfig.kt:50`):
