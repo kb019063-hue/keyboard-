@@ -75,8 +75,10 @@ dependency; what it owes the user is the truth about which of the two failed.
   then answers `denied` immediately, so the old behaviour (ask on every press) was a panel that
   could never succeed, while the denial copy promised the key had switched to a voice keyboard.
   Now the first press asks, and every press after a refusal does what the message says: switch to a
-  voice IME, or say there is none. The flag clears the moment the permission is actually held, so a
-  later revoke asks properly once more.
+  voice IME, or — when there is none — say that microphone access is off and where to turn it back
+  on (`REPORT_PERMISSION_REFUSED`). It must not borrow the "no recogniser" line for that case: the
+  recogniser is installed, and the user can unblock it without installing anything. The flag clears
+  the moment the permission is actually held, so a later revoke asks properly once more.
 
 ## 3. The new tools are one key away, not ten settings away
 

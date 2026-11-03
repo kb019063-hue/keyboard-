@@ -161,7 +161,8 @@ internal class DictationController(private val context: Context) {
             DictationPolicy.Press.COMMIT_SELF_TEST -> commitSelfTest()
             // Both handed back to the caller: it owns the voice-IME switch and the config flag.
             DictationPolicy.Press.SWITCH_TO_VOICE_IME,
-            DictationPolicy.Press.REPORT_NO_VOICE_INPUT -> Unit
+            DictationPolicy.Press.REPORT_NO_VOICE_INPUT,
+            DictationPolicy.Press.REPORT_PERMISSION_REFUSED -> Unit
         }
         return decision
     }
