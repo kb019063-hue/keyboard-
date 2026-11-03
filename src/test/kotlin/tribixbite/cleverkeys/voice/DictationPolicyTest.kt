@@ -77,10 +77,14 @@ class DictationPolicyTest {
         )
     }
 
+    /**
+     * With no voice IME to hand over to, the message must be about the permission — the recogniser
+     * exists, and `REPORT_NO_VOICE_INPUT` would send the user looking for a missing app.
+     */
     @Test
-    fun `a refused permission with no voice ime says so instead of re-asking`() {
+    fun `a refused permission with no voice ime reports the permission, not a missing recogniser`() {
         assertEquals(
-            Press.REPORT_NO_VOICE_INPUT,
+            Press.REPORT_PERMISSION_REFUSED,
             press(permissionGranted = false, permissionRefused = true, voiceImeAvailable = false)
         )
     }

@@ -20,7 +20,8 @@ package tribixbite.cleverkeys.voice
  *     switch instead of stranding the key behind a permission dialog that leads nowhere;
  *  4. permission that was already refused once is NOT asked for again: Android stops showing the
  *     system prompt after two denials, so a second ask would be a panel that can never succeed.
- *     The key does what the denial message promises and hands the field to a voice IME;
+ *     The key does what the denial message promises and hands the field to a voice IME, or — with
+ *     no voice IME installed — says the permission is off and where to turn it back on;
  *  5. only then permission, and only then listening.
  */
 object DictationPolicy {
@@ -41,6 +42,13 @@ object DictationPolicy {
 
         /** Neither a recogniser nor a voice IME exists. The key must say so, not do nothing. */
         REPORT_NO_VOICE_INPUT,
+
+        /**
+         * Handed back to the caller: the microphone was refused and no voice IME can take over,
+         * so the key says permission is off and where to turn it back on. It must NOT claim there
+         * is no speech recogniser — there is one, and the user can unblock it in ten seconds.
+         */
+        REPORT_PERMISSION_REFUSED,
 
         /** Self-test: commit the fixed transcript through the real commit path. */
         COMMIT_SELF_TEST
@@ -112,8 +120,11 @@ object DictationPolicy {
         if (mode == VoiceTypingConfig.Mode.SWITCH_IME) return switchOrFail(voiceImeAvailable)
         if (!recognizerAvailable) return switchOrFail(voiceImeAvailable)
         if (!permissionGranted) {
-            // Refused once: stop asking and do what the denial message says the key now does.
-            if (permissionRefused) return switchOrFail(voiceImeAvailable)
+            // Refused once: stop asking, and do what the denial message says the key now does.
+            if (permissionRefused) {
+                return if (voiceImeAvailable) Press.SWITCH_TO_VOICE_IME
+                else Press.REPORT_PERMISSION_REFUSED
+            }
             return Press.REQUEST_PERMISSION
         }
         return Press.START_LISTENING

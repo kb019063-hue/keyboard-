@@ -698,6 +698,14 @@ class KeyboardReceiver(
                     keyboard2.getConfig()?.shouldOfferVoiceTyping = false
                 }
             }
+            DictationPolicy.Press.REPORT_PERMISSION_REFUSED -> {
+                // The recogniser is fine; the microphone permission is off. Say that, and where to
+                // fix it: this is the one case the user can unblock themselves in ten seconds. The
+                // voice-typing offer stays on, because granting it makes the key work again.
+                keyboard2.showSuggestionBarMessage(
+                    context.getString(R.string.voice_typing_permission_off)
+                )
+            }
             DictationPolicy.Press.REPORT_NO_VOICE_INPUT -> {
                 // The point of this branch: no voice input at all is a message, not a dead key.
                 keyboard2.showSuggestionBarMessage(
