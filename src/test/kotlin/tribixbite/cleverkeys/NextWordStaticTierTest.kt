@@ -87,6 +87,10 @@ class NextWordStaticTierTest {
         config = mockk(relaxed = true)
         // The v2.0 fresh-install learning posture: learning OFF. Feature pref at its DEFAULT.
         config.on_device_learning_enabled = false
+        // Config.learningEffective is a GETTER (IncognitoPolicy.allows(on_device_learning_enabled,
+        // incognito_enabled)); a relaxed mock answers it false, so a test that only set the raw
+        // field would silently run with learning OFF. Mirror the production fold here.
+        every { config.learningEffective } answers { config.on_device_learning_enabled }
         config.context_aware_predictions_enabled = true
         config.personalized_learning_enabled = true
         config.next_word_prediction_enabled = Defaults.NEXT_WORD_PREDICTION_ENABLED

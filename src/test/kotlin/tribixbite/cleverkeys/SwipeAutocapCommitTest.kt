@@ -53,6 +53,19 @@ class SwipeAutocapCommitTest {
     /** The words the handler last pushed to the bar; getTopSuggestion answers from it. */
     private var barWords: List<String> = emptyList()
 
+    /**
+     * Every text the handler asked the editor to insert, in order, flattened to plain characters.
+     *
+     * The production commit is a SuggestionSpan-carrying CharSequence (`withSuggestionSpan`), not a
+     * String: mockk's `eq("Bowie ")` never matches it, whatever the characters are. Comparing
+     * `toString()` is what the editor itself sees, and it keeps the span decoration from turning a
+     * casing regression into a wall of `Verification failed` noise.
+     */
+    private val commits = mutableListOf<String>()
+
+    /** Call site of each insertion, for when the value alone does not explain the failure. */
+    private val commitSites = mutableListOf<String>()
+
     @Before
     fun setup() {
         mockkStatic(Log::class)
@@ -67,6 +80,16 @@ class SwipeAutocapCommitTest {
         config = mockk(relaxed = true)
         config.autocapitalisation = true
         config.auto_space_after_suggestion = true
+        // The commit path reads the incognito-folded getter, which a relaxed mock answers false.
+        every { config.autocapEffective } answers { config.autocapitalisation }
+        // The span decoration hands `commitText` an android.text.SpannableString. In a plain JVM
+        // unit test that class comes from the mockable android.jar, where every method is a stub:
+        // its characters cannot be read back, so a String assertion can never match it (the value
+        // prints as null). The span itself is covered by SuggestionSpanPolicyTest and
+        // SuggestionSpanCommitTest; these classes are about WHICH characters and casing get
+        // committed, so the decoration is switched off here instead of weakening the assertion.
+        mockkObject(SuggestionSpanPolicy)
+        every { SuggestionSpanPolicy.plan(any(), any(), any()) } returns null
         every { Config.globalConfig() } returns config
 
         dictionary = mockk(relaxed = true)
@@ -90,12 +113,30 @@ class SwipeAutocapCommitTest {
         every { bar.setSuggestionsWithScores(any(), any(), any(), any()) } answers {
             barWords = firstArg<List<String>>().toList()
         }
+        every { bar.setSuggestionsWithScores(any(), any(), any()) } answers {
+            barWords = firstArg<List<String>>().toList()
+        }
         every { bar.getTopSuggestion() } answers { barWords.firstOrNull() }
 
         inputCoordinator = mockk(relaxed = true)
         every { inputCoordinator.getCurrentSwipeData() } returns null
 
+        commits.clear()
+        commitSites.clear()
         ic = mockk(relaxed = true)
+        every { ic.commitText(any(), any()) } answers {
+            // `null` reaches here: some caller hands the editor nothing. Keep the value verbatim
+            // (never `toString()` blindly) and remember WHO asked, because the call site is the
+            // only thing that explains it.
+            val raw = args.getOrNull(0)
+            commits += raw?.toString()
+                ?: "<null arg=" + args.joinToString(",") { it?.javaClass?.simpleName ?: "null" } + ">"
+            commitSites += "{" + Throwable().stackTrace
+                    .filter { it.className.startsWith("tribixbite") && !it.className.contains("Test") }
+                    .take(3)
+                    .joinToString("<-") { "${it.fileName}:${it.lineNumber}" } + "}"
+            true
+        }
         every { ic.getTextBeforeCursor(any(), any()) } returns ""
         every { ic.getTextAfterCursor(any(), any()) } returns ""
         resources = mockk(relaxed = true)
@@ -115,6 +156,10 @@ class SwipeAutocapCommitTest {
         handler.setField("contractionManager", mockk<ContractionManager>(relaxed = true))
         handler.setField("keyeventhandler", mockk<KeyEventHandler>(relaxed = true))
         handler.setField("predictionTasks", mockk<PredictionTaskRunner>(relaxed = true))
+        // Objenesis skips field initialisers: production's non-null defaults must exist.
+        handler.setField("autocorrectMemo", tribixbite.cleverkeys.autocorrect.AutocorrectMemo())
+        handler.setField("fieldAllowsPersonalizedLearning", true)
+        handler.setField("mainHandler", mockk<android.os.Handler>(relaxed = true))
         return handler
     }
 
@@ -152,7 +197,7 @@ class SwipeAutocapCommitTest {
 
         swipe(capSentencesField())
 
-        verify { ic.commitText("Bowie ", 1) }
+        assertCommitted("Bowie ")
         assertWithMessage("the bar must show the same casing the commit used")
             .that(barWords.first()).isEqualTo("Bowie")
     }
@@ -163,7 +208,7 @@ class SwipeAutocapCommitTest {
 
         swipe(capSentencesField())
 
-        verify { ic.commitText("bowie ", 1) }
+        assertCommitted("bowie ")
     }
 
     @Test
@@ -173,7 +218,7 @@ class SwipeAutocapCommitTest {
 
         swipe(capSentencesField())
 
-        verify { ic.commitText("bowie ", 1) }
+        assertCommitted("bowie ")
     }
 
     @Test
@@ -183,7 +228,7 @@ class SwipeAutocapCommitTest {
         swipe(noCapsField())
 
         verify(exactly = 0) { ic.getCursorCapsMode(any()) }
-        verify { ic.commitText("bowie ", 1) }
+        assertCommitted("bowie ")
     }
 
     // ------------------------------------------------- explicit shift still wins
@@ -194,14 +239,27 @@ class SwipeAutocapCommitTest {
 
         swipe(capSentencesField(), shiftLocked = true)
 
-        verify { ic.commitText("BOWIE ", 1) }
+        assertCommitted("BOWIE ")
     }
 
     @Test
     fun aLatchedShiftStillCapitalizesWithoutConsultingTheCursor() {
         swipe(capSentencesField(), shiftActive = true)
 
-        verify { ic.commitText("Bowie ", 1) }
+        assertCommitted("Bowie ")
+    }
+
+    /**
+     * The editor was asked to insert exactly [expected].
+     *
+     * Failure message is short on purpose: CI annotations are truncated, and a trailing space is
+     * invisible in `expected:<fix got > but was:<fix got>` — `·` makes it obvious.
+     */
+    private fun assertCommitted(expected: String) {
+        val shown = commits.zip(commitSites)
+            .joinToString(" | ") { (text, site) -> "<${text.replace(" ", "·")}>$site" }
+        assertWithMessage("editor insertions (spaces shown as ·): $shown")
+            .that(commits).containsExactly(expected)
     }
 
     // ------------------------------------------------------------------ reflection

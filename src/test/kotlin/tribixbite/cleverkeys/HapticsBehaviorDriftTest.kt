@@ -244,8 +244,12 @@ class HapticsBehaviorDriftTest {
             .that(block).contains("checked = !vibrateCustom")
         assertWithMessage("Switch must persist vibrate_custom = !useSystem")
             .that(block).contains("saveSetting(\"vibrate_custom\", !useSystem)")
+        // The live write goes through Config.edit, which is what re-publishes the ConfigSnapshot
+        // the touch path captured (2026-11-01). A raw field write left the snapshot on the old
+        // value, so the buzz path kept the previous mode until the preference refresh landed —
+        // the very staleness this assertion exists to prevent.
         assertWithMessage("Switch must update the live Config so VibratorCompat changes path at once")
-            .that(block).contains("Config.globalConfig().vibrate_custom = !useSystem")
+            .that(block).contains("config.edit { vibrate_custom = !useSystem }")
     }
 
     /**

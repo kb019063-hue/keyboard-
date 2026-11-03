@@ -2473,4 +2473,22 @@
     <string name="layout_theme_search_hint">Témák keresése</string>
     <string name="layout_theme_no_results">Nincs egyező téma</string>
     <string name="import_preview_layout_theme_change">%1$s: téma %2$s → %3$s</string>
+
+    <!-- Command palette: incognito / floating / split / one-handed / GIF / more tools.
+         Added 2026-11-01 so every catalog string exists in every locale; wording should
+         get a native-speaker pass. -->
+    <string name="cmd_incognito_toggle">Inkognitó mód</string>
+    <string name="cmd_incognito_toggle_desc">Inkognitó mód be- vagy kikapcsolása</string>
+    <string name="cmd_floating_toggle">Lebegő billentyűzet</string>
+    <string name="cmd_floating_toggle_desc">Lebegő billentyűzet be- vagy kikapcsolása</string>
+    <string name="cmd_split_toggle">Osztott billentyűzet</string>
+    <string name="cmd_split_toggle_desc">Osztott billentyűzet be- vagy kikapcsolása</string>
+    <string name="cmd_more_tools">További eszközök</string>
+    <string name="cmd_more_tools_desc">Eszköztár megnyitása: inkognitó, lebegő, osztott, egykezes, gombhang, téma és beállítások</string>
+    <string name="cmd_switch_gif">GIF</string>
+    <string name="cmd_switch_gif_desc">GIF panel megnyitása</string>
+    <string name="cmd_one_handed_toggle">Egykezes mód</string>
+    <string name="cmd_one_handed_toggle_desc">Lekicsinyíti a billentyűzetet és az egyik oldalra tolja, hogy egy hüvelykujjal elérhető legyen</string>
+    <string name="cmd_one_handed_side">Egykezes oldal váltása</string>
+    <string name="cmd_one_handed_side_desc">A lekicsinyített billentyűzetet a képernyő másik oldalára mozgatja</string>
 </resources>

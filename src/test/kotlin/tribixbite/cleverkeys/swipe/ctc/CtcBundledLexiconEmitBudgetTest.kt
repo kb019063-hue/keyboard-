@@ -247,6 +247,9 @@ class CtcBundledLexiconEmitBudgetTest {
         @JvmStatic
         @BeforeClass
         fun sweepEveryBundledLexicon() {
+            // FIRST: the sweep reads langpack-<code>.zip, which this fork does not vendor, and
+            // @BeforeClass runs before the @Before guard below.
+            UpstreamArtefacts.require(UpstreamArtefacts.LANGPACK_DIR)
             val lexicons = LinkedHashMap<String, Sweep>()
             lexicons["en"] = sweep("en", enSurfaces())
             for (lang in CKDT_LANGUAGES) lexicons[lang] = sweep(lang, ckdtAzSurfaces(lang))

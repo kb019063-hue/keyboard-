@@ -2479,4 +2479,22 @@
     <string name="layout_theme_search_hint">Maghanap ng tema</string>
     <string name="layout_theme_no_results">Walang tumutugmang tema</string>
     <string name="import_preview_layout_theme_change">%1$s: tema %2$s → %3$s</string>
+
+    <!-- Command palette: incognito / floating / split / one-handed / GIF / more tools.
+         Added 2026-11-01 so every catalog string exists in every locale; wording should
+         get a native-speaker pass. -->
+    <string name="cmd_incognito_toggle">Incognito Mode</string>
+    <string name="cmd_incognito_toggle_desc">I-on o i-off ang incognito mode</string>
+    <string name="cmd_floating_toggle">Lumulutang na Keyboard</string>
+    <string name="cmd_floating_toggle_desc">I-on o i-off ang lumulutang na keyboard</string>
+    <string name="cmd_split_toggle">Hatiang Keyboard</string>
+    <string name="cmd_split_toggle_desc">I-on o i-off ang hatiang keyboard</string>
+    <string name="cmd_more_tools">Iba Pang Kasangkapan</string>
+    <string name="cmd_more_tools_desc">Buksan ang panel ng kasangkapan: incognito, lumulutang, hati, isang kamay, tunog ng key, tema at mga setting</string>
+    <string name="cmd_switch_gif">GIF</string>
+    <string name="cmd_switch_gif_desc">Buksan ang panel ng GIF</string>
+    <string name="cmd_one_handed_toggle">Mode na Isang Kamay</string>
+    <string name="cmd_one_handed_toggle_desc">Paliitin ang keyboard at isandal sa isang gilid para maabot ng isang hinlalaki</string>
+    <string name="cmd_one_handed_side">Ilipat ang Gilid ng Isang Kamay</string>
+    <string name="cmd_one_handed_side_desc">Ilipat ang pinaliit na keyboard sa kabilang gilid ng screen</string>
 </resources>

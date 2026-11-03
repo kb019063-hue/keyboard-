@@ -76,8 +76,15 @@ class TestKeyboardSectionTest {
     @Test
     fun panelIsRenderedInSettings() {
         val screen = read("src/main/kotlin/tribixbite/cleverkeys/ui/settings/SettingsScreen.kt")
+        // The section is dispatched from the drawer's `when`, as `"testKeyboard" -> TestKeyboardSection()`
+        // (SettingsDrawerItems.ORDER is the closed key vocabulary). Requiring the call to sit alone on
+        // its own line pinned the layout of this file rather than the wiring, so it went red the day
+        // the section moved into the dispatch — with the panel still composed and still reachable.
         assertWithMessage("the panel must actually be composed into the settings screen")
-            .that(Regex("""(?m)^\s*TestKeyboardSection\(\)""").containsMatchIn(screen)).isTrue()
+            .that(
+                Regex("""(?m)^\s*(?:"[^"]+"\s*->\s*)?TestKeyboardSection\(\s*\)\s*$""")
+                    .containsMatchIn(screen)
+            ).isTrue()
 
         assertWithMessage("the field must show and edit the persisted practice text")
             .that(sectionSource).contains("value = testKeyboardText")

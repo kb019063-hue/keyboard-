@@ -454,7 +454,12 @@ class SettingsActivity : ComponentActivity(), SharedPreferences.OnSharedPreferen
     // Toolbar (HeliBoard gap analysis phase 1). The list holds CommandRegistry names; ToolbarConfig
     // owns the serialized form and drops names the registry no longer knows.
     internal var toolbarEnabled by mutableStateOf(Defaults.TOOLBAR_ENABLED)
-    internal var toolbarKeys by mutableStateOf(ToolbarConfig.DEFAULT_KEYS)
+    // Initialised through the SAME read the loader performs (`ToolbarConfig.parse(Defaults.TOOLBAR_KEYS)`
+    // in SettingsPersistence.loadCurrentSettings), not from the sibling constant: before this, the
+    // screen's first frame and its first reload could disagree about where the toolbar list comes
+    // from, which is exactly the second-definition drift audit M5 pins. Same value either way —
+    // parse(DEFAULT_KEYS_STRING) is DEFAULT_KEYS.
+    internal var toolbarKeys by mutableStateOf(ToolbarConfig.parse(Defaults.TOOLBAR_KEYS))
 
     // One-handed mode (HeliBoard gap analysis phase 2). oneHandedSide holds the persisted spelling
     // ("left"/"right"), not the Side enum: OneHandedConfig.parseSide is the single place that turns

@@ -11,7 +11,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import tribixbite.cleverkeys.Config
 import tribixbite.cleverkeys.R
 import tribixbite.cleverkeys.SettingsActivity
 import tribixbite.cleverkeys.SettingsRanges
@@ -61,7 +60,7 @@ internal fun SettingsActivity.AccessibilitySection() {
                         // explicitly drags the duration slider. Setting it on toggle was the
                         // root cause of #154: it forced the slow Vibrator.createOneShot path
                         // for all users, bypassing the low-latency performHapticFeedback path.
-                        Config.globalConfig().haptic_enabled = it
+                        config.edit { haptic_enabled = it }
                     }
                 )
 
@@ -82,7 +81,7 @@ internal fun SettingsActivity.AccessibilitySection() {
                         saveSetting("sound_enabled", it)
                         // Same immediate write the vibration switch makes, so the next
                         // keystroke hears the change without waiting for a Config reload.
-                        Config.globalConfig().sound_enabled = it
+                        config.edit { sound_enabled = it }
                     }
                 )
                 if (soundEnabled) {
@@ -97,7 +96,7 @@ internal fun SettingsActivity.AccessibilitySection() {
                         onValueChange = {
                             soundVolume = it
                             saveSetting("sound_volume", it.toInt())
-                            Config.globalConfig().sound_volume = it.toInt()
+                            config.edit { sound_volume = it.toInt() }
                         },
                         displayValue = "${soundVolume.toInt()}%"
                     )
@@ -116,7 +115,7 @@ internal fun SettingsActivity.AccessibilitySection() {
                         onCheckedChange = { useSystem ->
                             vibrateCustom = !useSystem
                             saveSetting("vibrate_custom", !useSystem)
-                            Config.globalConfig().vibrate_custom = !useSystem
+                            config.edit { vibrate_custom = !useSystem }
                         }
                     )
 
@@ -137,8 +136,8 @@ internal fun SettingsActivity.AccessibilitySection() {
                             // is the way back to the system pattern (#154).
                             vibrateCustom = true
                             saveSetting("vibrate_custom", true)
-                            Config.globalConfig().vibrate_custom = true
-                            Config.globalConfig().vibrate_duration = vibrationDuration.toLong()
+                            config.edit { vibrate_custom = true }
+                            config.edit { vibrate_duration = vibrationDuration.toLong() }
                         },
                         displayValue = "${vibrationDuration}ms"
                     )
@@ -159,7 +158,7 @@ internal fun SettingsActivity.AccessibilitySection() {
                         onCheckedChange = {
                             hapticKeyPress = it
                             saveSetting("haptic_key_press", it)
-                            Config.globalConfig().haptic_key_press = it
+                            config.edit { haptic_key_press = it }
                         }
                     )
 
@@ -170,7 +169,7 @@ internal fun SettingsActivity.AccessibilitySection() {
                         onCheckedChange = {
                             hapticPredictionTap = it
                             saveSetting("haptic_prediction_tap", it)
-                            Config.globalConfig().haptic_prediction_tap = it
+                            config.edit { haptic_prediction_tap = it }
                         }
                     )
 
@@ -181,7 +180,7 @@ internal fun SettingsActivity.AccessibilitySection() {
                         onCheckedChange = {
                             hapticTrackpointActivate = it
                             saveSetting("haptic_trackpoint_activate", it)
-                            Config.globalConfig().haptic_trackpoint_activate = it
+                            config.edit { haptic_trackpoint_activate = it }
                         }
                     )
 
@@ -192,7 +191,7 @@ internal fun SettingsActivity.AccessibilitySection() {
                         onCheckedChange = {
                             hapticLongPress = it
                             saveSetting("haptic_long_press", it)
-                            Config.globalConfig().haptic_long_press = it
+                            config.edit { haptic_long_press = it }
                         }
                     )
 
@@ -203,7 +202,7 @@ internal fun SettingsActivity.AccessibilitySection() {
                         onCheckedChange = {
                             hapticSwipeComplete = it
                             saveSetting("haptic_swipe_complete", it)
-                            Config.globalConfig().haptic_swipe_complete = it
+                            config.edit { haptic_swipe_complete = it }
                         }
                     )
                 }

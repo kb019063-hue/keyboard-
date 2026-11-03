@@ -19,7 +19,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import tribixbite.cleverkeys.Config
 import tribixbite.cleverkeys.R
 import tribixbite.cleverkeys.SettingsActivity
 import tribixbite.cleverkeys.SettingsRanges
@@ -123,7 +122,7 @@ internal fun SettingsActivity.InputBehaviorSection() {
                         onCheckedChange = { enabled ->
                             suggestionStripAlwaysVisible = enabled
                             saveSetting("suggestion_strip_always_visible", enabled)
-                            Config.globalConfig()?.suggestion_strip_always_visible = enabled
+                            config.edit { suggestion_strip_always_visible = enabled }
                         }
                     )
 
@@ -135,7 +134,7 @@ internal fun SettingsActivity.InputBehaviorSection() {
                         onCheckedChange = {
                             autoSpaceAfterSuggestion = it
                             saveSetting("auto_space_after_suggestion", it)
-                            Config.globalConfig()?.auto_space_after_suggestion = it
+                            config.edit { auto_space_after_suggestion = it }
                         }
                     )
 
@@ -147,7 +146,7 @@ internal fun SettingsActivity.InputBehaviorSection() {
                         onCheckedChange = {
                             autoSpaceBeforeSuggestion = it
                             saveSetting("auto_space_before_suggestion", it)
-                            Config.globalConfig()?.auto_space_before_suggestion = it
+                            config.edit { auto_space_before_suggestion = it }
                         }
                     )
 
@@ -160,7 +159,7 @@ internal fun SettingsActivity.InputBehaviorSection() {
                         onCheckedChange = {
                             showExactTypedWord = it
                             saveSetting("show_exact_typed_word", it)
-                            Config.globalConfig()?.show_exact_typed_word = it
+                            config.edit { show_exact_typed_word = it }
                         }
                     )
 
@@ -174,7 +173,7 @@ internal fun SettingsActivity.InputBehaviorSection() {
                             onCheckedChange = {
                                 backspaceUndoSwipe = it
                                 saveSetting("backspace_undo_swipe", it)
-                                Config.globalConfig()?.backspace_undo_swipe = it
+                                config.edit { backspace_undo_swipe = it }
                             }
                         )
                     }
@@ -221,7 +220,7 @@ internal fun SettingsActivity.InputBehaviorSection() {
                                 onCheckedChange = {
                                     nextWordPredictionEnabled = it
                                     saveSetting("next_word_prediction_enabled", it)
-                                    Config.globalConfig()?.next_word_prediction_enabled = it
+                                    config.edit { next_word_prediction_enabled = it }
                                 }
                             )
 
@@ -247,7 +246,7 @@ internal fun SettingsActivity.InputBehaviorSection() {
                                         else -> "both"
                                     }
                                     saveSetting("context_source", contextSource)
-                                    Config.globalConfig()?.context_source = contextSource
+                                    config.edit { context_source = contextSource }
                                 }
                             )
 
@@ -277,7 +276,7 @@ internal fun SettingsActivity.InputBehaviorSection() {
                                 onValueChange = {
                                     personalizationWeight = it
                                     saveSetting("personalization_weight", personalizationWeight)
-                                    Config.globalConfig()?.personalization_weight = personalizationWeight
+                                    config.edit { personalization_weight = personalizationWeight }
                                 },
                                 displayValue = "%.1fx".format(personalizationWeight)
                             )
@@ -351,7 +350,7 @@ internal fun SettingsActivity.InputBehaviorSection() {
                         autoCapitalizationEnabled = it
                         saveSetting("autocapitalisation", it)
                         // Update Config immediately so change takes effect without restart
-                        Config.globalConfig()?.autocapitalisation = it
+                        config.edit { autocapitalisation = it }
                     }
                 )
 
@@ -364,7 +363,7 @@ internal fun SettingsActivity.InputBehaviorSection() {
                         capitalizeIWords = it
                         saveSetting("autocapitalize_i_words", it)
                         // Update Config immediately
-                        Config.globalConfig()?.autocapitalize_i_words = it
+                        config.edit { autocapitalize_i_words = it }
                     }
                 )
 
@@ -376,7 +375,7 @@ internal fun SettingsActivity.InputBehaviorSection() {
                         smartPunctuationEnabled = it
                         saveSetting("smart_punctuation", it)
                         // Update Config immediately
-                        Config.globalConfig().smart_punctuation = it
+                        config.edit { smart_punctuation = it }
                     }
                 )
 
@@ -478,7 +477,7 @@ internal fun SettingsActivity.InputBehaviorSection() {
                             // raw field write would leave every gesture running on the old
                             // value until the preference listener's refresh landed. edit{}
                             // applies the write and re-publishes the read-model together.
-                            Config.globalConfig()?.edit {
+                            config.edit {
                                 keyrepeat_backspace_only = backspaceOnly
                             }
                         }
@@ -556,7 +555,7 @@ internal fun SettingsActivity.InputBehaviorSection() {
                         saveSetting("print_all_key_symbols", enabled)
                         // Immediate, like the other live switches: the open keyboard redraws with
                         // the corner labels back (or gone) without a restart.
-                        Config.globalConfig()?.print_all_key_symbols = enabled
+                        config.edit { print_all_key_symbols = enabled }
                     }
                 )
 

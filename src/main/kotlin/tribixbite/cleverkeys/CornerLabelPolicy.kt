@@ -37,9 +37,16 @@ object CornerLabelPolicy {
      * is where the layouts put the digits on the top row -- the hint people actually look for --
      * and where most punctuation sits elsewhere; the southern corners hold the rarer and the
      * `loc`-materialised symbols, so they are the first to go quiet.
+     *
+     * The four edge slots come after the four corners, west and east before north and south: a
+     * side label shares the row with its key, while a north/south label sits on top of the row
+     * above/below (and the south edge is also where the space bar's cursor arrows live), so the
+     * southern edge is the very last thing calm mode keeps. No shipped layout gives a character
+     * key a west/east/north/south label today, so this tail is a pinned tie-break rather than a
+     * rendering change -- `CornerLabelPolicyTest` is what holds it.
      */
     private val PRIORITY = intArrayOf(
-        NORTH_EAST, NORTH_WEST, SOUTH_EAST, SOUTH_WEST, NORTH, SOUTH, EAST, WEST
+        NORTH_EAST, NORTH_WEST, SOUTH_EAST, SOUTH_WEST, WEST, EAST, NORTH, SOUTH
     )
 
     /**

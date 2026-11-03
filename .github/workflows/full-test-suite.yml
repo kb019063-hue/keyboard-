@@ -13,9 +13,21 @@
 # happening again: everything runs at least once a day, and a failure means something in THIS
 # repository is wrong.
 #
+# Measured 2026-11-01 (run 41369205687): 4,650 tests in 413 classes, 22 minutes wall clock on the
+# default 2 GB test heap with the heavy classes split into a second invocation. That is the number
+# the 75-minute job timeout is sized against; a run that approaches it is a signal, not noise.
+#
+# State at the end of the 2026-11-01 pass: 4,650 run, 0 failed, 204 skipped — the skips are the 22
+# upstream-artefact classes reporting SKIPPED rather than passing. From here a red run means a real
+# problem in this repository, which is the whole purpose of running everything.
+#
 # Classes that assert on upstream artefacts this fork does not vendor (`docs/RELEASE_RECORD.md`,
 # `fastlane/`, `docs/i18n/glossary.json`, `.github/scripts/emulator-ci.sh`,
 # `scripts/dictionaries/*.zip`) report SKIPPED via `UpstreamArtefacts`, not passed and not failed.
+#
+# The per-push job in `build-apk.yml` also runs the two resource-parsing classes
+# (`CommandCatalogLocalizationTest`, `TranslationLengthTest`), so a missing translation is caught
+# on the push that introduces it; this nightly job is what catches everything else.
 #
 # Triggered without a terminal: editing and committing this file to `main` runs it (that is how
 # the first run after a change happens); otherwise the nightly schedule does. `workflow_dispatch`
@@ -28,9 +40,16 @@ on:
     # 03:17 UTC — off the hour, so it does not queue behind everyone else's cron.
     - cron: '17 3 * * *'
   push:
-    branches: [main]
+    branches:
+      - main
+      # A change to this file must be exercised on the branch that made it, not only after the
+      # merge. Only this file is listed under `paths`, so ordinary pushes never run the suite.
+      - 'arena/**'
     paths:
       - '.github/workflows/full-test-suite.yml'
+      # The test task's configuration (heap, filters, timeout) lives here: a change to it can
+      # change every verdict below, so it must be exercised on the branch that made it.
+      - 'build.gradle'
   workflow_dispatch:
 
 permissions:
@@ -38,12 +57,18 @@ permissions:
 
 concurrency:
   group: full-test-suite
-  cancel-in-progress: false
+  # A stale run is worthless once a newer commit exists, and this suite can occupy a runner for
+  # tens of minutes: supersede instead of queueing behind it.
+  cancel-in-progress: true
 
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    # Measured 2026-11-01: a normal whole-suite run takes 11-12 minutes; one run sat inside the
+    # test task for 90+ minutes with no progress. The Gradle test task is now bounded at 45
+    # minutes (build.gradle), so 75 leaves room for checkout, setup, the report step and the
+    # upload, and none of it can be spent sitting on a wedged class.
+    timeout-minutes: 75
 
     steps:
       - uses: actions/checkout@v4
@@ -58,13 +83,38 @@ jobs:
       # No `--tests` filter: this job's whole point is that nothing is skipped for being
       # unlisted. `--continue` is not needed (Gradle runs every test in the task), and the task
       # is allowed to fail so the summary below still runs and reports.
-      - name: Unit tests (whole suite)
+      - name: Unit tests (whole suite, minus the memory-hungry engine classes)
         id: tests
         continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
-          ./gradlew testDebugUnitTest --stacktrace 2>&1 | tee unit-test-output.log
+          # `|| true` is deliberate: these steps exist to PRODUCE the XML, and the verdict is
+          # decided by the report step below. Without it, `bash -e` aborts at the first failing
+          # test and the copy never happens (attempt 3: "no JUnit XML found" while Gradle was
+          # happily reporting failing tests).
+          ./gradlew testDebugUnitTest -PskipHeavy=true --stacktrace 2>&1 | tee unit-test-output.log || true
+          # Gradle deletes a re-run task's previous outputs, and the heavy invocation below is a
+          # re-run of this same task: without this copy its XML vanished and the report covered
+          # 7 classes instead of 423 (first attempt, run 41366549694).
+          rm -rf build/full-suite-xml
+          mkdir -p build/full-suite-xml
+          cp -r build/test-results/testDebugUnitTest/. build/full-suite-xml/ 2>/dev/null || true
+
+      # The engine accuracy/benchmark classes hold the whole 98k-word lexicon (some hold several)
+      # and die with OutOfMemoryError on the default heap. They are not slow, they are hungry: a
+      # 3 GB heap for the ENTIRE suite was measured on 2026-10-31 to turn a 12-minute run into a
+      # 70-minute GC crawl, so they get their own invocation, their own heap, their own 45-minute
+      # bound (build.gradle) and their own JUnit XML directory, which the report step below reads
+      # alongside the main one.
+      - name: Unit tests (memory-hungry engine classes, 3g heap)
+        id: heavy
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew testDebugUnitTest -PonlyHeavy=true -PtestMaxHeap=3g \
+            -PjunitXmlDir=build/test-results/heavy --stacktrace 2>&1 | tee heavy-test-output.log || true
 
       - name: Report results as annotations and a job summary
         shell: bash
@@ -73,6 +123,10 @@ jobs:
           if [ -f unit-test-output.log ]; then
             grep -E "^e: |: error: |^> Task .* FAILED" unit-test-output.log | head -3 | esc \
               | while IFS= read -r line; do echo "::error::${line}"; done || true
+            # A task that fails before producing any XML says WHY only in this block; without it
+            # the report is "no JUnit XML found", which names nothing.
+            sed -n '/What went wrong/,/^\* Try/p' unit-test-output.log | head -6 | esc \
+              | while IFS= read -r line; do echo "::error::GRADLE ${line}"; done || true
           fi
           python3 - <<'PY'
           import glob, os, xml.etree.ElementTree as ET
@@ -81,7 +135,8 @@ jobs:
               return t.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
 
           rows, cases = [], []
-          for f in sorted(glob.glob('build/test-results/testDebugUnitTest/*.xml')):
+          for f in sorted(glob.glob('build/full-suite-xml/*.xml') +
+                          glob.glob('build/test-results/heavy/*.xml')):
               try:
                   r = ET.parse(f).getroot()
               except Exception:
@@ -96,7 +151,20 @@ jobs:
                       if node is None:
                           continue
                       msg = ' '.join((node.get('message') or node.text or '').split())
-                      cases.append((name, case.get('name', '?'), msg))
+                      # Two project frames: the message alone cannot say WHICH line, and the
+                      # runner log is not reachable outside the web UI.
+                      frames = []
+                      for line in (node.text or '').splitlines():
+                          if 'tribixbite.cleverkeys' not in line or 'Test' in line:
+                              continue
+                          at = line.strip()
+                          if at.startswith('at '):
+                              at = at[3:]
+                          head, _, tail = at.partition('(')
+                          frames.append(head.split('.')[-1] + '(' + tail)
+                          if len(frames) == 2:
+                              break
+                      cases.append((name, case.get('name', '?'), msg, frames))
                       break
 
           if not rows:
@@ -117,11 +185,27 @@ jobs:
                        ', '.join(r[0].split('.')[-1] for r in skipped_classes)[:1000]))
 
           if bad_classes:
+              # Order matters: GitHub drops annotations past its per-run cap, and the first
+              # failure of each class is what makes the rest diagnosable. Emit it before the
+              # class list and the per-test names.
+              parts, size = [], 0
+              for name, tests, failed, _ in bad_classes:
+                  first = next((c for c in cases if c[0] == name), None)
+                  if first is None:
+                      continue
+                  trace = (' <' + ' '.join(first[3]) + '>') if first[3] else ''
+                  seg = '%s#%s: %s%s' % (name.split('.')[-1], first[1], first[2][:110], trace)
+                  if size + len(seg) > 3000:
+                      break
+                  parts.append(seg)
+                  size += len(seg) + 2
+              print('::error::' + esc('FIRST FAILURE PER CLASS (top): ' + ' || '.join(parts))[:3000])
+
               short = '; '.join('%s %d/%d' % (n.split('.')[-1], f, t) for n, t, f, _ in bad_classes)
-              print('::error::' + esc('FAILING CLASSES (%d): %s' % (len(bad_classes), short))[:60000])
+              print('::error::' + esc('FAILING CLASSES (%d): %s' % (len(bad_classes), short))[:3000])
 
               names = {}
-              for name, case, _ in cases:
+              for name, case, _, _ in cases:
                   names.setdefault(name, []).append(case)
               detail = '; '.join('%s: %s' % (n.split('.')[-1], ', '.join(v[:40]))
                                  for n, v in sorted(names.items()))
@@ -132,8 +216,9 @@ jobs:
                          '', '#### Failing classes', '']
               summary += ['- `%s` — %d of %d' % (n, f, t) for n, t, f, _ in bad_classes]
               summary += ['', '#### Failures (first 80)', '']
-              for name, case, msg in cases[:80]:
-                  summary.append('- `%s#%s`: %s' % (name.split('.')[-1], case, msg[:300]))
+              for name, case, msg, frames in cases[:80]:
+                  summary.append('- `%s#%s`: %s%s' % (name.split('.')[-1], case, msg[:300],
+                                                     (' <' + ' '.join(frames) + '>') if frames else ''))
               path = os.environ.get('GITHUB_STEP_SUMMARY')
               if path:
                   with open(path, 'a') as fh:
@@ -142,10 +227,23 @@ jobs:
               print('::notice::all %d unit tests passed' % total)
           PY
 
+      # The annotations truncate; this keeps the full JUnit XML (every message and stack trace) for
+      # a day, which is the difference between "some test failed" and a diagnosis.
+      - name: Upload unit-test XML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-suite-xml
+          path: |
+            build/full-suite-xml/*.xml
+            build/test-results/heavy/*.xml
+          if-no-files-found: ignore
+          retention-days: 1
+
       # Make the job result mean what it says: the test task is advisory above only so the report
       # always runs; the verdict is applied here.
       - name: Fail the job when tests failed
-        if: steps.tests.outcome == 'failure'
+        if: steps.tests.outcome == 'failure' || steps.heavy.outcome == 'failure'
         run: |
           echo "::error::the whole suite is not green - see the annotations and the job summary"
           exit 1

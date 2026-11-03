@@ -27,7 +27,6 @@ import androidx.compose.ui.unit.sp
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import tribixbite.cleverkeys.Config
 import tribixbite.cleverkeys.SwipeCorrectionStore
 import tribixbite.cleverkeys.SwipePerformanceStats
 import tribixbite.cleverkeys.R
@@ -106,7 +105,7 @@ internal fun SettingsActivity.PrivacySection() {
                         saveSetting("incognito_enabled", enabled)
                         // Immediate, like the learning switch below: the open keyboard's next
                         // keystroke honours it without waiting for a Config refresh round-trip.
-                        Config.globalConfig()?.incognito_enabled = enabled
+                        config.edit { incognito_enabled = enabled }
                     }
                 )
 
@@ -130,7 +129,7 @@ internal fun SettingsActivity.PrivacySection() {
                     onCheckedChange = { enabled ->
                         onDeviceLearningEnabled = enabled
                         saveSetting("on_device_learning_enabled", enabled)
-                        Config.globalConfig()?.on_device_learning_enabled = enabled
+                        config.edit { on_device_learning_enabled = enabled }
                         if (!enabled) {
                             // Offer a one-tap "and forget what's already learned"
                             showForgetLearnedDialog = true

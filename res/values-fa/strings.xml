@@ -2505,4 +2505,22 @@
     <string name="layout_theme_search_hint">جستجوی تم‌ها</string>
     <string name="layout_theme_no_results">هیچ تمی مطابقت ندارد</string>
     <string name="import_preview_layout_theme_change">%1$s: تم %2$s → %3$s</string>
+
+    <!-- Command palette: incognito / floating / split / one-handed / GIF / more tools.
+         Added 2026-11-01 so every catalog string exists in every locale; wording should
+         get a native-speaker pass. -->
+    <string name="cmd_incognito_toggle">حالت ناشناس</string>
+    <string name="cmd_incognito_toggle_desc">روشن یا خاموش کردن حالت ناشناس</string>
+    <string name="cmd_floating_toggle">صفحه‌کلید شناور</string>
+    <string name="cmd_floating_toggle_desc">روشن یا خاموش کردن صفحه‌کلید شناور</string>
+    <string name="cmd_split_toggle">صفحه‌کلید تقسیم‌شده</string>
+    <string name="cmd_split_toggle_desc">روشن یا خاموش کردن صفحه‌کلید تقسیم‌شده</string>
+    <string name="cmd_more_tools">ابزارهای بیشتر</string>
+    <string name="cmd_more_tools_desc">باز کردن تابلوی ابزارها: ناشناس، شناور، تقسیم‌شده، یک‌دستی، صدای کلید، پوسته و تنظیمات</string>
+    <string name="cmd_switch_gif">GIF</string>
+    <string name="cmd_switch_gif_desc">باز کردن تابلوی GIF</string>
+    <string name="cmd_one_handed_toggle">حالت یک‌دستی</string>
+    <string name="cmd_one_handed_toggle_desc">صفحه‌کلید را کوچک می‌کند و به یک طرف می‌چسباند تا با یک انگشت برسد</string>
+    <string name="cmd_one_handed_side">تغییر طرف حالت یک‌دستی</string>
+    <string name="cmd_one_handed_side_desc">صفحه‌کلید کوچک‌شده را به طرف دیگر صفحه می‌برد</string>
 </resources>

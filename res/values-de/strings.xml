@@ -2487,4 +2487,22 @@
     <string name="layout_theme_search_hint">Themes suchen</string>
     <string name="layout_theme_no_results">Keine passenden Themes</string>
     <string name="import_preview_layout_theme_change">%1$s: Theme %2$s → %3$s</string>
+
+    <!-- Command palette: incognito / floating / split / one-handed / GIF / more tools.
+         Added 2026-11-01 so every catalog string exists in every locale; wording should
+         get a native-speaker pass. -->
+    <string name="cmd_incognito_toggle">Inkognito-Modus</string>
+    <string name="cmd_incognito_toggle_desc">Inkognito-Modus ein- oder ausschalten</string>
+    <string name="cmd_floating_toggle">Schwebende Tastatur</string>
+    <string name="cmd_floating_toggle_desc">Schwebende Tastatur ein- oder ausschalten</string>
+    <string name="cmd_split_toggle">Geteilte Tastatur</string>
+    <string name="cmd_split_toggle_desc">Geteilte Tastatur ein- oder ausschalten</string>
+    <string name="cmd_more_tools">Weitere Werkzeuge</string>
+    <string name="cmd_more_tools_desc">Werkzeugleiste öffnen: Inkognito, schwebend, geteilt, einhändig, Tastenton, Design und Einstellungen</string>
+    <string name="cmd_switch_gif">GIF</string>
+    <string name="cmd_switch_gif_desc">GIF-Bereich öffnen</string>
+    <string name="cmd_one_handed_toggle">Einhandmodus</string>
+    <string name="cmd_one_handed_toggle_desc">Tastatur verkleinern und an eine Seite rücken, damit ein Daumen sie erreicht</string>
+    <string name="cmd_one_handed_side">Einhandseite wechseln</string>
+    <string name="cmd_one_handed_side_desc">Verschiebt die verkleinerte Tastatur auf die andere Bildschirmseite</string>
 </resources>

@@ -2422,4 +2422,22 @@
     <string name="layout_theme_search_hint">테마 검색</string>
     <string name="layout_theme_no_results">일치하는 테마가 없습니다</string>
     <string name="import_preview_layout_theme_change">%1$s: 테마 %2$s → %3$s</string>
+
+    <!-- Command palette: incognito / floating / split / one-handed / GIF / more tools.
+         Added 2026-11-01 so every catalog string exists in every locale; wording should
+         get a native-speaker pass. -->
+    <string name="cmd_incognito_toggle">시크릿 모드</string>
+    <string name="cmd_incognito_toggle_desc">시크릿 모드를 켜거나 끕니다</string>
+    <string name="cmd_floating_toggle">떠 있는 키보드</string>
+    <string name="cmd_floating_toggle_desc">떠 있는 키보드를 켜거나 끕니다</string>
+    <string name="cmd_split_toggle">분할 키보드</string>
+    <string name="cmd_split_toggle_desc">분할 키보드를 켜거나 끕니다</string>
+    <string name="cmd_more_tools">더 많은 도구</string>
+    <string name="cmd_more_tools_desc">도구 패널 열기: 시크릿, 떠 있는, 분할, 한 손, 키 소리, 테마, 설정</string>
+    <string name="cmd_switch_gif">GIF</string>
+    <string name="cmd_switch_gif_desc">GIF 패널 열기</string>
+    <string name="cmd_one_handed_toggle">한 손 모드</string>
+    <string name="cmd_one_handed_toggle_desc">키보드를 줄여 한쪽으로 붙여 엄지 하나로 닿게 합니다</string>
+    <string name="cmd_one_handed_side">한 손 모드 방향 전환</string>
+    <string name="cmd_one_handed_side_desc">줄어든 키보드를 화면 반대쪽으로 옮깁니다</string>
 </resources>

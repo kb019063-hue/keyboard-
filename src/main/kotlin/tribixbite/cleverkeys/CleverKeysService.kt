@@ -1102,7 +1102,11 @@ class CleverKeysService : InputMethodService(),
         DirectBootAwarePreferences.get_shared_preferences(this).edit()
             .putBoolean(SplitConfig.PREF_ENABLED, enabled)
             .apply()
-        _config?.split_enabled = enabled
+        // `split_enabled` is mirrored into the ConfigSnapshot the draw and touch paths capture,
+        // so a raw write would leave the open keyboard in the old mode until the preference
+        // listener's refresh landed — the user taps the tools-sheet toggle and nothing moves.
+        // `edit` applies the write and re-publishes the read-model together.
+        _config?.edit { split_enabled = enabled }
         Toast.makeText(this, getString(if (enabled) R.string.split_toast_on else R.string.split_toast_off),
             Toast.LENGTH_SHORT).show()
     }

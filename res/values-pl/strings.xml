@@ -2567,4 +2567,22 @@
     <string name="layout_theme_search_hint">Szukaj motywów</string>
     <string name="layout_theme_no_results">Brak pasujących motywów</string>
     <string name="import_preview_layout_theme_change">%1$s: motyw %2$s → %3$s</string>
+
+    <!-- Command palette: incognito / floating / split / one-handed / GIF / more tools.
+         Added 2026-11-01 so every catalog string exists in every locale; wording should
+         get a native-speaker pass. -->
+    <string name="cmd_incognito_toggle">Tryb incognito</string>
+    <string name="cmd_incognito_toggle_desc">Włącz lub wyłącz tryb incognito</string>
+    <string name="cmd_floating_toggle">Pływająca klawiatura</string>
+    <string name="cmd_floating_toggle_desc">Włącz lub wyłącz pływającą klawiaturę</string>
+    <string name="cmd_split_toggle">Dzielona klawiatura</string>
+    <string name="cmd_split_toggle_desc">Włącz lub wyłącz dzieloną klawiaturę</string>
+    <string name="cmd_more_tools">Więcej narzędzi</string>
+    <string name="cmd_more_tools_desc">Otwórz panel narzędzi: incognito, pływająca, dzielona, jedną ręką, dźwięk klawiszy, motyw i ustawienia</string>
+    <string name="cmd_switch_gif">GIF</string>
+    <string name="cmd_switch_gif_desc">Otwórz panel GIF</string>
+    <string name="cmd_one_handed_toggle">Tryb jednej ręki</string>
+    <string name="cmd_one_handed_toggle_desc">Zmniejsza klawiaturę i przysuwa ją do jednej strony, by dosięgnął jej jeden kciuk</string>
+    <string name="cmd_one_handed_side">Przełącz stronę jednej ręki</string>
+    <string name="cmd_one_handed_side_desc">Przenosi zmniejszoną klawiaturę na drugą stronę ekranu</string>
 </resources>

@@ -19,7 +19,6 @@ import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
 import io.mockk.verify
 import org.junit.After
-import org.junit.Assert.assertThrows
 import org.junit.Before
 import org.junit.Test
 
@@ -184,20 +183,27 @@ class WindowLayoutUtilsTest {
     /** One [WindowLayoutUtils.configureEdgeToEdge] run at a forced API level. */
     private class Probe(
         val window: Window,
-        val attrs: WindowManager.LayoutParams,
-        val error: RuntimeException
+        val attrs: WindowManager.LayoutParams
     )
 
+    /**
+     * The method runs to completion here.
+     *
+     * This class used to wrap the call in `assertThrows`: the old stub `android.jar` threw
+     * `Stub!` from `ColorDrawable`'s constructor, and several tests read that exception as proof
+     * the method had reached the background clear. `testOptions.unitTests.returnDefaultValues` is
+     * true now, so stubs return defaults instead of throwing and nothing throws at all — nine
+     * tests failed on that alone. Every branch is observable through the mocked window and
+     * layout params, which is what the assertions actually care about.
+     */
     private fun configureAt(sdkInt: Int): Probe {
         setSdkInt(sdkInt)
         val attrs = mockk<WindowManager.LayoutParams>(relaxed = true)
         attrs.layoutInDisplayCutoutMode = CUTOUT_UNSET
         val window = mockk<Window>(relaxed = true)
         every { window.attributes } returns attrs
-        val error = assertThrows(RuntimeException::class.java) {
-            WindowLayoutUtils.configureEdgeToEdge(window)
-        }
-        return Probe(window, attrs, error)
+        WindowLayoutUtils.configureEdgeToEdge(window)
+        return Probe(window, attrs)
     }
 
     @Test
@@ -300,15 +306,12 @@ class WindowLayoutUtilsTest {
         // pre-29 one that changes nothing else.
         for (sdk in listOf(24, Build.VERSION_CODES.Q, 34, 35)) {
             val probe = configureAt(sdk)
-            assertThat(probe.error).hasMessageThat().isEqualTo("Stub!")
-            // android.jar's stub bodies throw from the constructor itself (Drawable's, via
-            // ColorDrawable's super call), so these two frames ARE the
-            // `ColorDrawable(Color.TRANSPARENT)` allocation inside configureEdgeToEdge.
-            val frames = probe.error.stackTrace.map { it.className + "." + it.methodName }
-            assertThat(frames).contains("android.graphics.drawable.ColorDrawable.<init>")
-            assertThat(frames).contains(
-                "tribixbite.cleverkeys.WindowLayoutUtils.configureEdgeToEdge"
-            )
+            // The clear is observed on the window itself: the stub jar no longer throws, so the
+            // old stack-trace reading of the `ColorDrawable` allocation is not available. Both
+            // clears must happen on EVERY branch, including the pre-29 one that changes nothing
+            // else.
+            verify(exactly = 1) { probe.window.setBackgroundDrawable(any()) }
+            verify(exactly = 1) { probe.window.decorView.setBackgroundColor(any()) }
         }
     }
 

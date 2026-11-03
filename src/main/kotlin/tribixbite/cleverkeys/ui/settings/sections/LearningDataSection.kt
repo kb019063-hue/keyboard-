@@ -30,7 +30,6 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import tribixbite.cleverkeys.Config
 import tribixbite.cleverkeys.R
 import tribixbite.cleverkeys.SettingsActivity
 import tribixbite.cleverkeys.contextaware.BigramStore
@@ -188,7 +187,7 @@ internal fun SettingsActivity.LearningDataManagerBlock() {
                 if (snapped != personalizationMaxWords) {
                     personalizationMaxWords = snapped
                     saveSetting("personalization_max_words", snapped)
-                    Config.globalConfig()?.personalization_max_words = snapped
+                    config.edit { personalization_max_words = snapped }
                 }
             },
             displayValue = pluralStringResource(

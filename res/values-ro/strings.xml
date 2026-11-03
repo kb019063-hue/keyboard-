@@ -2539,4 +2539,22 @@
     <string name="layout_theme_search_hint">Caută teme</string>
     <string name="layout_theme_no_results">Nicio temă potrivită</string>
     <string name="import_preview_layout_theme_change">%1$s: temă %2$s → %3$s</string>
+
+    <!-- Command palette: incognito / floating / split / one-handed / GIF / more tools.
+         Added 2026-11-01 so every catalog string exists in every locale; wording should
+         get a native-speaker pass. -->
+    <string name="cmd_incognito_toggle">Mod incognito</string>
+    <string name="cmd_incognito_toggle_desc">Activează sau dezactivează modul incognito</string>
+    <string name="cmd_floating_toggle">Tastatură flotantă</string>
+    <string name="cmd_floating_toggle_desc">Activează sau dezactivează tastatura flotantă</string>
+    <string name="cmd_split_toggle">Tastatură divizată</string>
+    <string name="cmd_split_toggle_desc">Activează sau dezactivează tastatura divizată</string>
+    <string name="cmd_more_tools">Mai multe instrumente</string>
+    <string name="cmd_more_tools_desc">Deschide panoul de instrumente: incognito, flotantă, divizată, o mână, sunet taste, temă și setări</string>
+    <string name="cmd_switch_gif">GIF</string>
+    <string name="cmd_switch_gif_desc">Deschide panoul GIF</string>
+    <string name="cmd_one_handed_toggle">Mod cu o singură mână</string>
+    <string name="cmd_one_handed_toggle_desc">Micșorează tastatura și o lipește de o parte ca să ajungă un deget mare</string>
+    <string name="cmd_one_handed_side">Schimbă partea pentru o mână</string>
+    <string name="cmd_one_handed_side_desc">Mută tastatura micșorată în cealaltă parte a ecranului</string>
 </resources>

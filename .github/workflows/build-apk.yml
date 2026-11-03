@@ -118,6 +118,17 @@ jobs:
       #
       # Gradle compiles EVERY test source before running, so this also serves as the compile check
       # for the whole test source set on every push.
+      #
+      # `CommandCatalogLocalizationTest` and `TranslationLengthTest` read `res/values*/strings.xml`
+      # directly and assert that every command-palette string exists in all 21 locales and fits its
+      # length budget. They are pure file parsing (no JVM/Android dependency), so they belong in the
+      # per-push set: a missing translation is a shipping bug that otherwise only surfaced at night.
+      #
+      # The ten `*Test` entries listed below are the drift pins this audit kept rediscovering: each
+      # one scans sources or resources, or drives pure arithmetic, so none needs a device and each
+      # finishes in well under a second. They rot silently by nature (a renamed constant, a moved
+      # composable, an unregistered class), which is why they belong on every push.
+      #
       - name: Unit tests (fast subset, advisory)
         continue-on-error: true
         shell: bash
@@ -134,6 +145,31 @@ jobs:
             --tests '*SettingsRangeDriftTest' \
             --tests '*ConfigurationBurstCoalescingTest' \
             --tests '*VerboseLogRatchetTest' \
+            --tests '*LearningFunnelBookkeepingTest' \
+            --tests '*LearningWiringDriftTest' \
+            --tests '*NextWordStaticTierTest' \
+            --tests '*SwipeAutocapCommitTest' \
+            --tests '*PrivacyManagerTest' \
+            --tests '*SwipeCorrectionOfferTest' \
+            --tests '*GeoAccuracyJcukenRuTest' \
+            --tests '*GeoDoubleLetterTest' \
+            --tests '*HebrewLayoutAutoCorrectTest' \
+            --tests '*ChannelRankingEval' \
+            --tests '*NeighbourTiebreakEval' \
+            --tests '*WindowLayoutUtilsTest' \
+            --tests '*CommandCatalogLocalizationTest' \
+            --tests '*TranslationLengthTest' \
+            --tests '*CornerLabelPolicyTest' \
+            --tests '*KeyFillAlphaTest' \
+            --tests '*PointersSliderSpeedTest' \
+            --tests '*PointersShortSwipeCustomOverrideTest' \
+            --tests '*TypedBarHighlightHandlerTest' \
+            --tests '*DebugLoggingManagerTest' \
+            --tests '*StyleLayoutsTest' \
+            --tests '*TestKeyboardSectionTest' \
+            --tests '*DefaultsSingleDefinitionDriftTest' \
+            --tests '*TestRunnerListDriftTest' \
+            --tests '*HapticsBehaviorDriftTest' \
             2>&1 | tee unit-test-output.log
 
       # Reachable summary: per-class counts from the JUnit XML, plus any compiler diagnostic.
@@ -169,7 +205,24 @@ jobs:
                       if node is None:
                           continue
                       msg = ' '.join((node.get('message') or node.text or '').split())
-                      cases.append((name, case.get('name', '?'), msg))
+                      # The frames matter as much as the message: an NPE says nothing about
+                      # WHICH line. Two project frames are enough to name the file and line,
+                      # and they still fit the ~400-character annotation budget.
+                      stack = node.text or ''
+                      frames = []
+                      for line in stack.splitlines():
+                          if 'tribixbite.cleverkeys' not in line:
+                              continue
+                          at = line.strip()
+                          if at.startswith('at '):
+                              at = at[3:]
+                          # 'pkg.Class.method(File.kt:123)' -> 'Class.method(File.kt:123)'
+                          head, _, tail = at.partition('(')
+                          frames.append(head.split('.')[-2:] and '.'.join(head.split('.')[-2:]) +
+                                        '(' + tail)
+                          if len(frames) == 2:
+                              break
+                      cases.append((name, case.get('name', '?'), msg, frames))
                       break
 
           if not rows:
@@ -206,7 +259,8 @@ jobs:
                   first = next((c for c in cases if c[0] == name), None)
                   if first is None:
                       continue
-                  seg = '%s#%s: %s' % (name.split('.')[-1], first[1], first[2][:180])
+                  trace = (' ⟵ ' + '; '.join(first[3])) if first[3] else ''
+                  seg = '%s#%s: %s%s' % (name.split('.')[-1], first[1], first[2][:120], trace)
                   if size + len(seg) > 55000:
                       break
                   parts.append(seg)
@@ -215,7 +269,7 @@ jobs:
 
               # Which cases: names only, so a class with 25 failures does not cost 25 messages.
               names = {}
-              for name, case, _ in cases:
+              for name, case, _, _ in cases:
                   names.setdefault(name, []).append(case)
               detail = '; '.join('%s: %s' % (n.split('.')[-1], ', '.join(v[:40]))
                                  for n, v in sorted(names.items()))
@@ -226,8 +280,9 @@ jobs:
                          '', '#### Failing classes', '']
               summary += ['- `%s` — %d of %d' % (n, f, t) for n, t, f, _ in bad_classes]
               summary += ['', '#### Failures (first 60)', '']
-              for name, case, msg in cases[:60]:
-                  summary.append('- `%s#%s`: %s' % (name.split('.')[-1], case, msg[:300]))
+              for name, case, msg, frames in cases[:60]:
+                  summary.append('- `%s#%s`: %s%s' % (name.split('.')[-1], case, msg[:300],
+                                                     (' ⟵ ' + '; '.join(frames)) if frames else ''))
               path = os.environ.get('GITHUB_STEP_SUMMARY')
               if path:
                   with open(path, 'a') as fh:
@@ -311,6 +366,18 @@ jobs:
           # against the Actions artifact quota, artifacts do). One day is enough for the manual
           # dispatch that asked for an artifact; a pile of them is what exhausted the 500 MB
           # private-repo quota in October 2026.
+          retention-days: 1
+
+      # The JUnit XML is the only place a full failure message and its stack trace survive:
+      # annotations are truncated near 400 characters, and the runner log is not reachable from
+      # the development sandbox. Tiny (a few tens of KB), kept for a day.
+      - name: Upload unit-test XML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-xml-${{ steps.meta.outputs.sha }}
+          path: build/test-results/testDebugUnitTest/*.xml
+          if-no-files-found: ignore
           retention-days: 1
 
       - name: Upload failure reports

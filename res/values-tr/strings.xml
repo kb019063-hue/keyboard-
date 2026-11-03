@@ -2478,4 +2478,22 @@
     <string name="layout_theme_search_hint">Tema ara</string>
     <string name="layout_theme_no_results">Eşleşen tema yok</string>
     <string name="import_preview_layout_theme_change">%1$s: tema %2$s → %3$s</string>
+
+    <!-- Command palette: incognito / floating / split / one-handed / GIF / more tools.
+         Added 2026-11-01 so every catalog string exists in every locale; wording should
+         get a native-speaker pass. -->
+    <string name="cmd_incognito_toggle">Gizli mod</string>
+    <string name="cmd_incognito_toggle_desc">Gizli modu aç veya kapat</string>
+    <string name="cmd_floating_toggle">Yüzen klavye</string>
+    <string name="cmd_floating_toggle_desc">Yüzen klavyeyi aç veya kapat</string>
+    <string name="cmd_split_toggle">Bölünmüş klavye</string>
+    <string name="cmd_split_toggle_desc">Bölünmüş klavyeyi aç veya kapat</string>
+    <string name="cmd_more_tools">Daha fazla araç</string>
+    <string name="cmd_more_tools_desc">Araç panelini aç: gizli, yüzen, bölünmüş, tek elle, tuş sesi, tema ve ayarlar</string>
+    <string name="cmd_switch_gif">GIF</string>
+    <string name="cmd_switch_gif_desc">GIF panelini aç</string>
+    <string name="cmd_one_handed_toggle">Tek elle mod</string>
+    <string name="cmd_one_handed_toggle_desc">Klavyeyi küçültüp bir yana yanaştırır, böylece bir başparmakla erişilir</string>
+    <string name="cmd_one_handed_side">Tek elle tarafını değiştir</string>
+    <string name="cmd_one_handed_side_desc">Küçültülmüş klavyeyi ekranın diğer yanına taşır</string>
 </resources>

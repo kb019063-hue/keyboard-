@@ -2467,4 +2467,22 @@
     <string name="layout_theme_search_hint">Thema\'s zoeken</string>
     <string name="layout_theme_no_results">Geen overeenkomende thema\'s</string>
     <string name="import_preview_layout_theme_change">%1$s: thema %2$s → %3$s</string>
+
+    <!-- Command palette: incognito / floating / split / one-handed / GIF / more tools.
+         Added 2026-11-01 so every catalog string exists in every locale; wording should
+         get a native-speaker pass. -->
+    <string name="cmd_incognito_toggle">Incognitomodus</string>
+    <string name="cmd_incognito_toggle_desc">Incognitomodus in- of uitschakelen</string>
+    <string name="cmd_floating_toggle">Zwevend toetsenbord</string>
+    <string name="cmd_floating_toggle_desc">Zwevend toetsenbord in- of uitschakelen</string>
+    <string name="cmd_split_toggle">Gesplitst toetsenbord</string>
+    <string name="cmd_split_toggle_desc">Gesplitst toetsenbord in- of uitschakelen</string>
+    <string name="cmd_more_tools">Meer hulpmiddelen</string>
+    <string name="cmd_more_tools_desc">Open het hulpmiddelenpaneel: incognito, zwevend, gesplitst, één hand, toetsgeluid, thema en instellingen</string>
+    <string name="cmd_switch_gif">GIF</string>
+    <string name="cmd_switch_gif_desc">GIF-paneel openen</string>
+    <string name="cmd_one_handed_toggle">Eénhandige modus</string>
+    <string name="cmd_one_handed_toggle_desc">Verkleint het toetsenbord en schuift het naar één kant zodat één duim het bereikt</string>
+    <string name="cmd_one_handed_side">Eénhandige kant wisselen</string>
+    <string name="cmd_one_handed_side_desc">Verplaatst het verkleinde toetsenbord naar de andere kant van het scherm</string>
 </resources>

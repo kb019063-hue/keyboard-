@@ -174,16 +174,22 @@ class SettingsSurfaceDriftTest {
         check(typedKeyNames.isNotEmpty()) {
             "Resolved zero AutocorrectTuning.Keys declarations — the typed-key scan is broken."
         }
+        // Every pattern tolerates whitespace — including a newline — between the call and its
+        // argument. Kotlin format wraps long calls, so `saveSetting(\n VoiceTypingConfig.PREF_MODE,`
+        // is a real writer that the previous single-line patterns could not see: `voice_typing_mode`
+        // was reported writerless while its dropdown had been writing it all along
+        // (InputBehaviorSection, phase 4 part 1). The pin's DECISION is untouched — the set below
+        // still says only privacy_collect_errors may be writerless.
         fun hasWriter(key: String): Boolean {
             val constRefs = constNames[key].orEmpty()
             val typedRefs = typedKeyNames[key].orEmpty()
             return texts.any { t ->
-                typedRefs.any { n -> Regex("""saveSetting\((?:\w+\.)*$n\.key[,)]""").containsMatchIn(t) } ||
-                t.contains("saveSetting(\"$key\"") ||
-                    Regex("""\.put(?:Boolean|Int|Float|Long|String)\(\s*"$key"""").containsMatchIn(t) ||
+                typedRefs.any { n -> Regex("""saveSetting\(\s*(?:\w+\.)*$n\.key\s*[,)]""").containsMatchIn(t) } ||
+                Regex("""saveSetting\(\s*"$key"\s*[,)]""").containsMatchIn(t) ||
+                    Regex("""\.put(?:Boolean|Int|Float|Long|String)\(\s*"$key"\s*[,)]""").containsMatchIn(t) ||
                     constRefs.any { c ->
-                        Regex("""saveSetting\((?:\w+\.)?$c[,)]""").containsMatchIn(t) ||
-                            Regex("""\.put(?:Boolean|Int|Float|Long|String)\(\s*(?:\w+\.)?$c[,)]""").containsMatchIn(t)
+                        Regex("""saveSetting\(\s*(?:\w+\.)?$c\s*[,)]""").containsMatchIn(t) ||
+                            Regex("""\.put(?:Boolean|Int|Float|Long|String)\(\s*(?:\w+\.)?$c\s*[,)]""").containsMatchIn(t)
                     }
             }
         }

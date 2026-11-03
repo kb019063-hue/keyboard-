@@ -72,6 +72,21 @@ class TypedBarHighlightHandlerTest {
         config.primary_language = "en"
         every { Config.globalConfig() } returns config
         every { Config.globalConfigOrNull() } returns config
+        // `SuggestionHandler` reads the incognito-FOLDED getter (`autocorrectEffective`, which is
+        // `autocorrect_enabled` unless incognito mode is on), not the raw pref. A relaxed mock
+        // answers every Boolean getter false, so without this line the handler believes autocorrect
+        // is off, resolves KEEP for "helo", and highlights nothing — the exact failure this class
+        // reports. Production reads the raw pref nowhere on this path; the test's `autocorrect_`
+        // stubs pins above stay, this only mirrors what production actually asks for.
+        every { config.autocorrectEffective } answers { config.autocorrect_enabled }
+        // The autocorrect commit decorates its text with an android.text.SpannableString via
+        // SuggestionSpanPolicy/SuggestionSpanCommit; in a JVM test SpannableString is a stub whose
+        // characters cannot be read back, so the editor would "receive" an empty string and this
+        // class would fail on text the app committed correctly. Plan `null` = commit plain text
+        // (SwipeCorrectionOfferTest stubs the same seam for the same reason); span behaviour has
+        // its own tests.
+        mockkObject(SuggestionSpanPolicy)
+        every { SuggestionSpanPolicy.plan(any(), any(), any()) } returns null
 
         tracker = PredictionContextTracker()
 

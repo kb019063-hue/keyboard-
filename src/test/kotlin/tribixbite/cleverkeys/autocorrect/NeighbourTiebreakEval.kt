@@ -190,6 +190,10 @@ class NeighbourTiebreakEval {
         @JvmStatic
         @BeforeClass
         fun setUpClass() {
+            // FIRST, because @BeforeClass runs before every @Before: without this the fixture
+            // below reads an absent language pack and the whole class reports failures instead of
+            // skipping (the @Before guard never gets a turn).
+            UpstreamArtefacts.require(UpstreamArtefacts.LANGPACK_DIR)
             mockkStatic(Log::class, Trace::class, Xml::class)
             every { Log.d(any(), any()) } returns 0
             every { Log.d(any(), any(), any()) } returns 0

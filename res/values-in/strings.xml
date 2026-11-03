@@ -2434,4 +2434,22 @@
     <string name="layout_theme_search_hint">Cari tema</string>
     <string name="layout_theme_no_results">Tidak ada tema yang cocok</string>
     <string name="import_preview_layout_theme_change">%1$s: tema %2$s → %3$s</string>
+
+    <!-- Command palette: incognito / floating / split / one-handed / GIF / more tools.
+         Added 2026-11-01 so every catalog string exists in every locale; wording should
+         get a native-speaker pass. -->
+    <string name="cmd_incognito_toggle">Mode penyamaran</string>
+    <string name="cmd_incognito_toggle_desc">Nyalakan atau matikan mode penyamaran</string>
+    <string name="cmd_floating_toggle">Keyboard mengambang</string>
+    <string name="cmd_floating_toggle_desc">Nyalakan atau matikan keyboard mengambang</string>
+    <string name="cmd_split_toggle">Keyboard terbelah</string>
+    <string name="cmd_split_toggle_desc">Nyalakan atau matikan keyboard terbelah</string>
+    <string name="cmd_more_tools">Alat lainnya</string>
+    <string name="cmd_more_tools_desc">Buka panel alat: penyamaran, mengambang, terbelah, satu tangan, suara tombol, tema, dan pengaturan</string>
+    <string name="cmd_switch_gif">GIF</string>
+    <string name="cmd_switch_gif_desc">Buka panel GIF</string>
+    <string name="cmd_one_handed_toggle">Mode satu tangan</string>
+    <string name="cmd_one_handed_toggle_desc">Memperkecil keyboard dan menempelkannya ke satu sisi agar terjangkau satu jempol</string>
+    <string name="cmd_one_handed_side">Ganti sisi satu tangan</string>
+    <string name="cmd_one_handed_side_desc">Memindahkan keyboard yang diperkecil ke sisi layar lainnya</string>
 </resources>

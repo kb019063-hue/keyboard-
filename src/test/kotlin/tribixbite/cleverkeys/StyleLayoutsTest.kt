@@ -201,10 +201,12 @@ class StyleLayoutsTest {
                 numeric("123", 1.25f), Slot(key("switch_emoji"), 1.25f),
                 Slot(key("space"), 5f), Slot(key("enter"), 2.5f),
             ),
-            // Gboard: ?123 | , | space | . | enter (emoji is the comma's hint)
+            // Gboard: ?123 | , | emoji | space | . | enter. Phase 4 part 6 moved the emoji off the
+            // comma's corner onto its own key (the owner could not find it there), which costs the
+            // space bar one width — Gboard itself also gives the emoji a key and the space 4.
             GBOARD to listOf(
-                numeric("?123", 1.5f), Slot(key(","), 1f), Slot(key("space"), 5f),
-                Slot(key("."), 1f), Slot(key("enter"), 1.5f),
+                numeric("?123", 1.5f), Slot(key(","), 1f), Slot(key("switch_emoji"), 1f),
+                Slot(key("space"), 4f), Slot(key("."), 1f), Slot(key("enter"), 1.5f),
             ),
             // SwiftKey: 123 | emoji | , | space | . | enter
             SWIFTKEY to listOf(
@@ -340,9 +342,18 @@ class StyleLayoutsTest {
 
         // Phase 4 part 6: the emoji key is its OWN key in Gboard's bottom row, not a hint on
         // the comma. Hiding it on a corner is why the owner could not find it.
+        //
+        // Compared as KeyValue identities, not as `getString()` labels: `getString()` is the symbol
+        // the key DRAWS ("?123"), and an event key that draws an icon (`space`, `enter`,
+        // `switch_emoji`) has an empty payload, so a label-based assertion cannot tell those three
+        // apart from each other or from a typo.
         val bottom = kw.rows.last().keys
-        assertThat(bottom.mapNotNull { it.getKeyValue(0)?.getString() })
-            .containsExactly("?123:switch_numeric", ",", "switch_emoji", "space", ".", "enter")
+        assertWithMessage("Gboard's bottom row, in Gboard's order")
+            .that(bottom.map { it.getKeyValue(0) })
+            .containsExactly(
+                key("?123:switch_numeric"), key(","), key("switch_emoji"),
+                key("space"), key("."), key("enter"),
+            ).inOrder()
         // Gboard's widths: ?123 1.5 | , 1 | emoji 1 | space 4 | . 1 | enter 1.5
         assertThat(bottom.map { it.width }).containsExactly(1.5f, 1f, 1f, 4f, 1f, 1.5f).inOrder()
     }

@@ -104,6 +104,16 @@ class SwipeCorrectionOfferTest {
         config.swipe_on_password_fields = false
         config.backspace_undo_swipe = true
         every { Config.globalConfig() } returns config
+        // Config exposes incognito-folded getters that production reads; a relaxed mock answers
+        // them false whatever the raw pref says, which silently disables learning/autocorrect.
+        every { config.learningEffective } answers { config.on_device_learning_enabled }
+        every { config.autocorrectEffective } answers { config.autocorrect_enabled }
+        every { config.swipeFinalAutocorrectEffective } answers { config.swipe_final_autocorrect_enabled }
+        // The span decoration hands commitText an android.text.SpannableString; in a JVM test that
+        // class is a stub whose characters cannot be read back. Span behaviour has its own tests
+        // (SuggestionSpanPolicyTest, SuggestionSpanCommitTest); this class is about corrections.
+        mockkObject(SuggestionSpanPolicy)
+        every { SuggestionSpanPolicy.plan(any(), any(), any()) } returns null
 
         tracker = PredictionContextTracker()
 
@@ -145,6 +155,12 @@ class SwipeCorrectionOfferTest {
         every { bar.setSuggestionsWithScores(any(), any()) } answers {
             barWords = firstArg<List<String>>().toList()
         }
+        // Production calls the 3-argument form (metas only, highlight defaulted). Without this
+        // stub `barWords` stayed empty, `getTopSuggestion()` answered null and no swipe was ever
+        // auto-inserted -- every test in this class then failed on a missing editor word.
+        every { bar.setSuggestionsWithScores(any(), any(), any()) } answers {
+            barWords = firstArg<List<String>>().toList()
+        }
         every { bar.clearSuggestions() } answers { barWords = emptyList() }
         every { bar.getTopSuggestion() } answers { barWords.firstOrNull() }
         undoConfirmation.clear()
@@ -162,7 +178,8 @@ class SwipeCorrectionOfferTest {
         }
         every { ic.getTextAfterCursor(any(), any()) } returns ""
         every { ic.commitText(any(), any()) } answers {
-            editor.append(firstArg<CharSequence>())
+            val raw = args.getOrNull(0) as? CharSequence
+            if (raw != null) editor.append(raw)
             true
         }
         every { ic.deleteSurroundingText(any(), any()) } answers {

@@ -116,6 +116,24 @@ press/accent colour, drawn so the accent is visible. On device the enter key use
 resting colour as the other keys until it is pressed, except Ember and Signal, whose
 coloured edges are real borders.
 
+## English is the only language that matters (2026-11-01)
+
+The owner said it plainly: *"the only language I care about is English. So don't bother wasting your
+time on anything not on English."*
+
+What that does and does not mean:
+
+- **Stop work on translations.** No native-speaker review pass, no re-translating, no researching
+  register or terminology per locale. The 21 `res/values-<locale>/` files are **best-effort machine
+  translation** and that is their intended standard; each block added for the command palette says so
+  in its own XML comment.
+- **The tests still have to pass**, because they are what stops a *missing* English string from
+  reaching the UI as a blank button. `CommandCatalogLocalizationTest` requires every catalog string to
+  exist in every locale, and `TranslationLengthTest` caps length. When one of them goes red, the fix
+  is "put a sensible string there", not "learn the language".
+- **Never let a locale story block English work**, and never spend a CI run on it.
+- If the owner ever adds a language, that is when a speaker gets involved — not before.
+
 ## Bugs already fixed — do not reintroduce
 
 Full write-up: [`BUG-AUDIT-2026-10-25.md`](BUG-AUDIT-2026-10-25.md).

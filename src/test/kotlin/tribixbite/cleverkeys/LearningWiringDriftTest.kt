@@ -59,7 +59,7 @@ class LearningWiringDriftTest {
         val predictor = readSource("WordPredictor.kt")
         // The gate helper exists and is fail-closed on null config.
         assertThat(predictor).contains(
-            "LearningGate.canUseAdaptation(config?.on_device_learning_enabled ?: false)"
+            "LearningGate.canUseAdaptation(config?.learningEffective ?: false)"
         )
         // Every getAdaptationMultiplier READ site is inside a canUseAdaptation()
         // guard (the helper's own definition is the single ungated reference).
@@ -187,7 +187,7 @@ class LearningWiringDriftTest {
         assertThat(handler).contains("addWordToContext(word, fieldAllowsPersonalizedLearning)")
         // … gates adaptation recording …
         assertThat(handler).containsMatch(
-            """LearningGate\.canLearnAdaptation\(config\.on_device_learning_enabled\)\s*&&\s*fieldAllowsPersonalizedLearning"""
+            """LearningGate\.canLearnAdaptation\(config\.learningEffective\)\s*&&\s*fieldAllowsPersonalizedLearning"""
         )
         // … and the single next-word tier decision (2026-09-26: `nextWordTiers` is the only
         // place SuggestionHandler builds a next-word gate, so wiring the flag there covers the
@@ -220,7 +220,7 @@ class LearningWiringDriftTest {
         val handler = readSource("SuggestionHandler.kt")
         val tiersFn = handler.substringAfter("private fun nextWordTiers(")
             .substringBefore("\n    /**")
-        assertThat(tiersFn).contains("onDeviceLearningEnabled = config.on_device_learning_enabled")
+        assertThat(tiersFn).contains("onDeviceLearningEnabled = config.learningEffective")
         assertThat(tiersFn).contains("contextAwareEnabled = config.context_aware_predictions_enabled")
         assertThat(tiersFn).contains("featureEnabled = config.next_word_prediction_enabled")
 

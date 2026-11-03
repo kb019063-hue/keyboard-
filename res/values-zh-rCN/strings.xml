@@ -2420,4 +2420,22 @@
     <string name="layout_theme_search_hint">搜索主题</string>
     <string name="layout_theme_no_results">没有匹配的主题</string>
     <string name="import_preview_layout_theme_change">%1$s：主题 %2$s → %3$s</string>
+
+    <!-- Command palette: incognito / floating / split / one-handed / GIF / more tools.
+         Added 2026-11-01 so every catalog string exists in every locale; wording should
+         get a native-speaker pass. -->
+    <string name="cmd_incognito_toggle">无痕模式</string>
+    <string name="cmd_incognito_toggle_desc">开启或关闭无痕模式</string>
+    <string name="cmd_floating_toggle">悬浮键盘</string>
+    <string name="cmd_floating_toggle_desc">开启或关闭悬浮键盘</string>
+    <string name="cmd_split_toggle">分体键盘</string>
+    <string name="cmd_split_toggle_desc">开启或关闭分体键盘</string>
+    <string name="cmd_more_tools">更多工具</string>
+    <string name="cmd_more_tools_desc">打开工具面板：无痕、悬浮、分体、单手、按键音、主题和设置</string>
+    <string name="cmd_switch_gif">GIF</string>
+    <string name="cmd_switch_gif_desc">打开 GIF 面板</string>
+    <string name="cmd_one_handed_toggle">单手模式</string>
+    <string name="cmd_one_handed_toggle_desc">缩小键盘并靠向一侧，方便单手拇指操作</string>
+    <string name="cmd_one_handed_side">切换单手方向</string>
+    <string name="cmd_one_handed_side_desc">将缩小的键盘移到屏幕另一侧</string>
 </resources>
