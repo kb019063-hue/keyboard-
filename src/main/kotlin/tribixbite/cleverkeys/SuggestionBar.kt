@@ -406,7 +406,7 @@ class SuggestionBar : LinearLayout {
                 if (look.drawPill) {
                     view.background = GradientDrawable().apply {
                         shape = GradientDrawable.RECTANGLE
-                        cornerRadius = dpToPx(context, PILL_RADIUS_DP)
+                        cornerRadius = dpToPx(context, PILL_RADIUS_DP).toFloat()
                         setColor(look.fill)
                     }
                     // The pill owns the chip's height: Gboard insets it from the row edges.
