@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
+import android.graphics.drawable.GradientDrawable
 import android.text.InputType
 import android.util.AttributeSet
 import android.util.Log
@@ -162,6 +163,13 @@ class SuggestionBar : LinearLayout {
         initialize(context)
     }
 
+    /**
+     * The press ripple every suggestion chip carries at rest. Held here (not only applied at
+     * creation) because the Gboard-style highlighted chip replaces its background with an accent
+     * pill and a recycled view has to get the ripple back when it stops being the highlight.
+     */
+    private var chipRipple: Drawable? = null
+
     private fun initialize(context: Context) {
         orientation = HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
@@ -196,11 +204,12 @@ class SuggestionBar : LinearLayout {
 
             // Audit H-4: themed press feedback — the Theme-Creator's Ripple colour.
             // 0 = unset (XML themes): keep the default (no chip ripple), as before.
-            theme?.rippleColor?.takeIf { it != 0 }?.let { ripple ->
-                background = android.graphics.drawable.RippleDrawable(
+            chipRipple = theme?.rippleColor?.takeIf { it != 0 }?.let { ripple ->
+                android.graphics.drawable.RippleDrawable(
                     android.content.res.ColorStateList.valueOf(ripple), null, null
                 )
             }
+            background = chipRipple
 
             setPadding(dpToPx(context, 12), 0, dpToPx(context, 12), 0)
             maxLines = 2
@@ -293,6 +302,8 @@ class SuggestionBar : LinearLayout {
         suggestion: Suggestion,
         isCenteredPrompt: Boolean
     ) {
+        resetChip(view)
+
         // Display text derived from the typed suggestion.
         val baseText: CharSequence = when (suggestion) {
             is Suggestion.AddToDictionary ->
@@ -381,8 +392,32 @@ class SuggestionBar : LinearLayout {
             index == currentHighlightIndex -> {
                 view.layoutParams = defaultSuggestionLayoutParams()
                 view.gravity = Gravity.CENTER
-                view.setTypeface(Typeface.DEFAULT_BOLD, Typeface.NORMAL)
-                view.setTextColor(theme?.suggestionHighConfidenceColor?.takeIf { it != 0 } ?: Color.CYAN)
+                // Gboard's commit suggestion is BOLD, and on the Gboard themes it sits on a pill
+                // filled with the return-key accent in white. Tinting the text alone (the old
+                // behaviour) is invisible there: the borrowed highlight colour is the same ink
+                // as the other three words, which is exactly what the owner's screenshot shows.
+                view.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD)
+                val look = SuggestionPillPolicy.look(
+                    accent = theme?.colorKeyEnter ?: 0,
+                    barBackground = theme?.suggestionBackgroundColor ?: 0,
+                    fallbackText = theme?.suggestionHighConfidenceColor?.takeIf { it != 0 } ?: Color.CYAN,
+                    barText = theme?.suggestionTextColor?.takeIf { it != 0 } ?: Color.WHITE
+                )
+                if (look.drawPill) {
+                    view.background = GradientDrawable().apply {
+                        shape = GradientDrawable.RECTANGLE
+                        cornerRadius = dpToPx(context, PILL_RADIUS_DP)
+                        setColor(look.fill)
+                    }
+                    // The pill owns the chip's height: Gboard insets it from the row edges.
+                    view.setPadding(
+                        dpToPx(context, 12),
+                        dpToPx(context, PILL_PADDING_V_DP),
+                        dpToPx(context, 12),
+                        dpToPx(context, PILL_PADDING_V_DP)
+                    )
+                }
+                view.setTextColor(look.text)
             }
             else -> {
                 view.layoutParams = defaultSuggestionLayoutParams()
@@ -393,6 +428,21 @@ class SuggestionBar : LinearLayout {
             }
         }
         view.visibility = VISIBLE
+    }
+
+    /**
+     * Reset a pooled chip to its resting look before a bind decides how to paint it: the chip
+     * ripple back, the standard 12 dp horizontal padding, no pill, default text size. Without
+     * this a view that was the highlighted suggestion kept its accent pill after the highlight
+     * moved (views are pooled in `[createSuggestionView]` and reused).
+     */
+    private fun resetChip(view: TextView) {
+        view.background = chipRipple
+        view.setPadding(
+            dpToPx(context, 12), 0, dpToPx(context, 12), 0
+        )
+        view.setTypeface(Typeface.DEFAULT, Typeface.NORMAL)
+        view.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
     }
 
     /**
@@ -1036,6 +1086,12 @@ class SuggestionBar : LinearLayout {
 
     companion object {
         private const val TAG = "SuggestionBar"
+
+        /** Corner radius of the highlighted chip's pill, dp. Half of a ~34 dp chip = a pill. */
+        private const val PILL_RADIUS_DP = 18
+
+        /** Vertical padding inside that pill, dp: Gboard insets the fill from the row edges. */
+        private const val PILL_PADDING_V_DP = 4
 
         /**
          * Check if the given EditorInfo indicates a password or PIN field.
