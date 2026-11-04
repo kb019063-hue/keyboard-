@@ -279,6 +279,7 @@ internal class DictationController(private val context: Context) {
         Log.i(
             TAG,
             "startListening language=${forcedLanguage ?: "service default"} " +
+                "offered=${supportedLanguages.size} preference=${serviceLanguagePreference ?: "none"} " +
                 "retriedWithDefault=$retriedWithDefault"
         )
         try {
@@ -337,11 +338,6 @@ internal class DictationController(private val context: Context) {
                         ?: emptyList()
                     serviceLanguagePreference =
                         broadcast?.getStringExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE)
-                    Log.i(
-                        TAG,
-                        "recogniser advertises ${supportedLanguages.size} languages, prefers " +
-                            "${serviceLanguagePreference ?: "none"}"
-                    )
                     onDone()
                 }
             }
@@ -463,8 +459,9 @@ internal class DictationController(private val context: Context) {
             )
         ) {
             retriedWithDefault = true
-            Log.i(TAG, "first attempt failed with a forced language=$forcedLanguage: retrying " +
-                "once with the service default")
+            // No extra log line: the startListening line that follows carries language="service
+            // default" and retriedWithDefault=true, and this file sits exactly on the repo's
+            // unguarded-log ceiling (VerboseLogRatchetTest, 246).
             abandonAudioFocus()
             main.post { startListeningWithNegotiatedLanguage(forceDefault = true) }
             return

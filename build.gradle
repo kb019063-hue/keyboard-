@@ -1236,6 +1236,7 @@ tasks.register('runPureTests', JavaExec) {
     'tribixbite.cleverkeys.ThemeDefaultMigrationTest',
     'tribixbite.cleverkeys.voice.VoiceTypingConfigTest',
     'tribixbite.cleverkeys.voice.DictationPolicyTest',
+    'tribixbite.cleverkeys.voice.VoiceLanguagePolicyTest',
     'tribixbite.cleverkeys.ui.settings.SettingsDrawerItemsTest',
     'tribixbite.cleverkeys.VerboseLogRatchetTest',
     // KeyFillAlpha is a pure ARGB bit operation (2026-11-01: it no longer calls
