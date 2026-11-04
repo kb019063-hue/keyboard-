@@ -381,7 +381,13 @@ class KeyboardToolbar(
 
     companion object {
         /** Icon size on the 40 dp row: Gboard's 24 dp glyph box, with no internal padding. */
-        private const val ICON_SIZE_DP = 24
+        /**
+         * Glyph box. Material Symbols is drawn for a 24 dp optical size, but Gboard places
+         * its icons at ~22 dp inside the same row, so 24 dp of Symbols reads a shade heavier
+         * than Gboard's row. 22 dp inside the 40 dp hit target matches what the owner's
+         * screenshot shows.
+         */
+        private const val ICON_SIZE_DP = 22
 
         /**
          * Command name to drawable. A command with no entry keeps its font glyph, which is the

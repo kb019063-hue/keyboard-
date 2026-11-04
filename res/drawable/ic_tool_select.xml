@@ -1,17 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Toolbar glyph, drawn as a vector rather than a character from the key font.
-     Phase 4 part 6: the toolbar used to paint registry symbols through special_font.ttf,
-     which for commands with no glyph of their own fell back to the first four characters
-     of the command id — `[w]` for select_word, `GIF` as loose text, and generally an
-     uneven baseline against the 24 dp icon grid Gboard uses. A real path draws the same at
-     every density and takes the theme's text colour through an ImageView tint.
-     Source: Material Icons (Apache-2.0), 24x24 viewport. -->
+<!-- Toolbar glyph: text editing / select word.
+     Hand-drawn to Gboard's shape — an I-beam with a triangle on each side — because
+     Material Symbols has no equivalent: the nearest, text_select_move_forward_character,
+     is an I-beam with ONE arrow, and text_select_start/end put a dotted selection box
+     around it. The owner's Gboard, photographed next to ours, shows both triangles.
+     Geometry only (rectangles and two triangles on the 960-unit Symbols grid), so this is
+     our own drawing, not Google artwork. Coordinates are the Symbols convention: y runs
+     upwards from -960 to 0, and the group below flips them into the viewport. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M2.5,4v3h5v12h3V7h5V4h-13zM21.5,9h-9v3h3v7h3v-7h3V9z" />
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <group android:translateY="960">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M420,-760h120v560h-120z M360,-760h240v84h-240z M360,-284h240v84h-240z M300,-420v120l-100,-60z M660,-420v120l100,-60z" />
+    </group>
 </vector>
