@@ -199,10 +199,18 @@
     </activity>
   </application>
 
-  <!-- To query enabled input methods for voice IME detection -->
+  <!-- Package visibility (API 30+). Two systems services this app binds to or asks about by
+       intent, and a targetSdk 30+ app that does not name the intent gets "not found" back:
+         * InputMethod, to find a voice keyboard for the mic key's fallback;
+         * RecognitionService, which SpeechRecognizer resolves before every session. Without it
+           createSpeechRecognizer can return a recogniser that never binds, and every dictation
+           attempt ends in ERROR_CLIENT — the 2026-11-04 "couldn't catch that" report. -->
   <queries>
     <intent>
       <action android:name="android.view.InputMethod" />
+    </intent>
+    <intent>
+      <action android:name="android.speech.RecognitionService" />
     </intent>
   </queries>
 </manifest>
