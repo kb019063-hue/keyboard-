@@ -117,7 +117,7 @@ class Keyboard2View @JvmOverloads constructor(
 
     private var _mods: Pointers.Modifiers = Pointers.Modifiers.EMPTY
 
-    private lateinit var _config
+    private lateinit var _config: Config
 
     /** Language tag the space bar's label was rendered for, and its rendered text. */
     private var _spaceLabelTag: String? = null
