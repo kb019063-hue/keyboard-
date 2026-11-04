@@ -98,7 +98,7 @@ time, so turning that preference on cannot produce two rows of digits on this la
        Gboard: a value may appear only once in a whole layout (Key.getKeys is keyed by value), so
        corners here would either duplicate the comma's own commands or shadow them. -->
   <row height="0.95">
-    <key width="1.5" c="?123:switch_numeric" nw="ctrl" ne="fn" sw="loc switch_greekmath" se="loc meta" n="loc alt" s="loc compose"/>
+    <key width="1.5" c="?123:switch_numeric" nw="ctrl" ne="fn" sw="loc switch_greekmath" se="loc config" n="loc alt" s="loc compose"/>
     <key c="," nw="loc change_method" sw="loc switch_clipboard" se="switch_gif" s="switch_back_clipboard"/>
     <key c="switch_emoji"/>
     <key width="4" c="space" n="loc switch_forward" s="loc switch_backward" w="cursor_left" e="cursor_right"/>

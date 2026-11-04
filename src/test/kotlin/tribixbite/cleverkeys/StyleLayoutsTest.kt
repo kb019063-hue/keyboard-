@@ -359,10 +359,14 @@ class StyleLayoutsTest {
             assertWithMessage("$ch hint sits north-east")
                 .that(k.getKeyValue(CornerLabelPolicy.NORTH_EAST)?.getString())
                 .isEqualTo(expected[ch])
-            for (slot in listOf(CornerLabelPolicy.NORTH_WEST, CornerLabelPolicy.SOUTH_WEST,
-                                CornerLabelPolicy.SOUTH_EAST)) {
-                assertWithMessage("$ch has nothing in slot $slot")
-                    .that(k.getKeyValue(slot)).isNull()
+            // Every other slot is either empty or a `loc` placement marker (the `loc €` on
+            // E, `loc ß` on S and `loc †` on X that the inherited layout already had), and a
+            // placement marker is never drawn.
+            for (slot in 1..8) {
+                if (slot == CornerLabelPolicy.NORTH_EAST) continue
+                val kv = k.getKeyValue(slot)
+                assertWithMessage("$ch has a printed symbol in slot $slot")
+                    .that(kv == null || k.keyHasFlag(slot, KeyboardData.Key.F_LOC)).isTrue()
             }
         }
 
