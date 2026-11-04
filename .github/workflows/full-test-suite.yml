@@ -29,29 +29,36 @@
 # (`CommandCatalogLocalizationTest`, `TranslationLengthTest`), so a missing translation is caught
 # on the push that introduces it; since 2026-11-03 it also runs `DictationPolicyTest`, because a
 # wrong verdict from the dictation table is a behaviour change the user feels immediately and the
-# policy class is pure. This nightly job is what catches everything else.
+# policy class is pure. This job is what catches everything else.
 #
-# Triggered without a terminal: editing and committing this file to `main` runs it (that is how
-# the first run after a change happens); otherwise the nightly schedule does. `workflow_dispatch`
-# is there for anyone with a working CLI.
+# When it runs: every merge to `main`, every push to an open pull request that targets `main`, the
+# nightly schedule, and on demand. `workflow_dispatch` is there for anyone with a working CLI (the
+# dev sandbox's token gets 403 on it, so in practice: push).
 
 name: Full unit-test suite
 
 on:
   schedule:
-    # 03:17 UTC — off the hour, so it does not queue behind everyone else's cron.
+    # 03:17 UTC — off the hour, so it does not queue behind everyone else's cron. GitHub's
+    # scheduler is best-effort: the 2026-11-01..03 runs actually started 05:24-07:42 after the
+    # cron, which is normal and is why the nightly is the backstop, not the guarantee.
     - cron: '17 3 * * *'
+  # EVERY merge to main, with no `paths` filter. Until 2026-11-04 this job only ran on a main
+  # push that touched this file or `build.gradle`, so a normal code merge reached main verified by
+  # the ~770-test subset and the emulator smoke alone, and the merge commit that people install
+  # was never checked in full until the next nightly — which had already been red twice for
+  # exactly that reason (runs 41433088889, 41622389696). The whole suite is 12 minutes; a merge to
+  # main is the one commit where that is unconditionally worth spending.
   push:
     branches:
       - main
-      # A change to this file must be exercised on the branch that made it, not only after the
-      # merge. Only this file is listed under `paths`, so ordinary pushes never run the suite.
-      - 'arena/**'
-    paths:
-      - '.github/workflows/full-test-suite.yml'
-      # The test task's configuration (heap, filters, timeout) lives here: a change to it can
-      # change every verdict below, so it must be exercised on the branch that made it.
-      - 'build.gradle'
+  # A pull request gets the full suite too, on its own branch, so a red class shows up before the
+  # merge rather than the morning after it. `synchronize` covers later pushes; `concurrency`
+  # cancels the superseded run, so only the newest commit of a branch actually finishes.
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions:
