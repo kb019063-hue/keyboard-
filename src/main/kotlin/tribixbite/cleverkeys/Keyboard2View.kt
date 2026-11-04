@@ -2398,7 +2398,7 @@ class Keyboard2View @JvmOverloads constructor(
         // another half-gap by `drawKeyFrame`, so a hint drawn at 2 dp straddled the tile's top
         // corner and read as floating above the key (owner screenshots, 2026-11-04). Add the
         // tile's own inset so the hint sits inside the shape it belongs to.
-        val subPadding = snap.keyPadding + tc.gap / 2f
+        val subPadding = snap.keyPadding + tc_key.gap / 2f
         // Limit label length for display, then keep it inside its slot (never over the main label)
         val displayLen = minOf(label.length, 4)
         paint.textSize = SubLabelSizing.fitToWidth(
