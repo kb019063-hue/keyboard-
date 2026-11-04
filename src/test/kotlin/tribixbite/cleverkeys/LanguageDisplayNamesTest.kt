@@ -25,6 +25,23 @@ class LanguageDisplayNamesTest {
         assertEquals("German (Deutsch)", LanguageDisplayNames.displayName("de", Locale.ENGLISH))
     }
 
+    /**
+     * The space bar label (2026-11-04). Gboard prints the bare language name there — "English" —
+     * not the `"Spanish (Español)"` form the settings menus want and not a region code. This is
+     * what fills the blank space bar in the owner's screenshots.
+     */
+    @Test fun spaceBarLabelIsTheBareLanguageName() {
+        assertEquals("English", LanguageDisplayNames.languageLabel("en", Locale.ENGLISH))
+        assertEquals("English", LanguageDisplayNames.languageLabel("en_GB", Locale.ENGLISH))
+        assertEquals("English", LanguageDisplayNames.languageLabel("en-GH", Locale.ENGLISH))
+        assertEquals("Spanish", LanguageDisplayNames.languageLabel("es", Locale.ENGLISH))
+        // The UI language gets its own spelling, and nothing is parenthesised.
+        assertFalse(LanguageDisplayNames.languageLabel("fr", hu).contains("("))
+        // `none` and blanks draw nothing at all.
+        assertEquals("", LanguageDisplayNames.languageLabel(LanguageDisplayNames.NONE, Locale.ENGLISH))
+        assertEquals("", LanguageDisplayNames.languageLabel("", Locale.ENGLISH))
+    }
+
     @Test fun uiLanguageItselfIsNamedOnce() {
         assertEquals("English", LanguageDisplayNames.displayName("en", Locale.ENGLISH))
         assertEquals("Magyar", LanguageDisplayNames.displayName("hu", hu))

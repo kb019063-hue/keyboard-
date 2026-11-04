@@ -267,8 +267,8 @@ class ReleasePackagingDriftTest {
             }
         }
         assertWithMessage(
-            "production Kotlin must not reference a network API — CleverKeys ships with no " +
-                "INTERNET permission and the release notes promise no network access"
+            "production Kotlin must not reference a network API — the INTERNET permission is " +
+                "for the system speech recogniser, not for a client in this app"
         ).that(offenders).isEmpty()
     }
 
@@ -546,8 +546,14 @@ class ReleasePackagingDriftTest {
         // one drifting without the other is a published lie.
         assertWithMessage("the store listing must keep claiming offline/local operation")
             .that(full.lowercase()).contains("offline")
-        assertWithMessage("the store listing must not promise a network feature")
-            .that(declaredPermissions(manifest)).doesNotContain("android.permission.INTERNET")
+        // INTERNET is declared since 2026-11-04 for speech recognition only. What the listing
+        // must not do is imply that the KEYBOARD itself talks to the network; the offline claim
+        // above still has to hold, and no other network permission may appear.
+        assertWithMessage("only INTERNET may be declared as a network permission")
+            .that(declaredPermissions(manifest)).containsNoneOf(
+                "android.permission.ACCESS_NETWORK_STATE",
+                "android.permission.ACCESS_WIFI_STATE",
+            )
     }
 
     private companion object {
@@ -566,8 +572,14 @@ class ReleasePackagingDriftTest {
          */
         val PREFIX_BOOST_ERA_VERSIONS = listOf("1.2.2", "1.2.5", "1.2.8")
 
+        /**
+         * 2026-11-04: `android.permission.INTERNET` left this list by owner decision — the mic
+         * key hands audio to the device's speech recogniser, and a recogniser that proxies
+         * recognition under the caller's UID needs it. The app's own sources still open no
+         * socket (pinned by [productionSourcesCallNoNetworkApi]), and the network-STATE
+         * permissions stay forbidden: nothing here enumerates or observes connectivity.
+         */
         val FORBIDDEN_PERMISSIONS = listOf(
-            "android.permission.INTERNET",
             "android.permission.ACCESS_NETWORK_STATE",
             "android.permission.ACCESS_WIFI_STATE",
         )

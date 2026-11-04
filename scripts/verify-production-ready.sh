@@ -157,12 +157,21 @@ else
     fail "Hardware acceleration not enabled"
 fi
 
-# No INTERNET permission — a hard product invariant (GIF/dict packs are SAF imports).
+# Network surface. Since 2026-11-04 the app declares INTERNET (owner decision: the mic key hands
+# audio to the device's speech recogniser, which may need the caller's permission). The invariant
+# that survives is narrower and still testable here: no OTHER network permission is declared, and
+# no production source opens a socket of its own (pinned by ReleasePackagingDriftTest).
 if grep -q 'android.permission.INTERNET' AndroidManifest.xml; then
-    fail "INTERNET permission present — the app must stay offline"
+    pass "INTERNET declared for speech recognition only"
 else
-    pass "No INTERNET permission (offline invariant holds)"
+    fail "INTERNET permission missing — voice typing cannot reach a cloud recogniser"
 fi
+for forbidden in android.permission.ACCESS_NETWORK_STATE android.permission.ACCESS_WIFI_STATE; do
+    if grep -q "$forbidden" AndroidManifest.xml; then
+        fail "$forbidden present — only INTERNET (speech) may be declared"
+    fi
+done
+pass "No network-state permissions beyond INTERNET"
 
 if grep -q 'tribixbite.cleverkeys.CleverKeysService' AndroidManifest.xml; then
     pass "IME service declared (tribixbite.cleverkeys.CleverKeysService)"

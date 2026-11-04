@@ -127,7 +127,20 @@ object CommandRouting {
      */
     private fun isTypedCommandKey(commandName: String, kv: KeyValue): Boolean = when (kv.getKind()) {
         KeyValue.Kind.Char -> true
-        KeyValue.Kind.String -> kv.getString() != commandName
+        KeyValue.Kind.String -> !isOwnNameFallback(commandName, kv)
         else -> false
     }
+
+    /**
+     * True when [kv] is [KeyValue.getKeyByName]'s "unknown name" fallback rather than a real key:
+     * a String key that spells [commandName] itself.
+     *
+     * `getKeyByName` is total — an unrecognised name parses back as a String key holding that
+     * name — so anything that TYPES a resolved String key must ask this first. It did not, and
+     * tapping the toolbar's four-dot button typed the literal text `more_tools` into the owner's
+     * editor (screenshots 2026-11-04, twice in a row). A command with no implementation must
+     * become a no-op handed back to `Keyboard2View`, never text in the user's document.
+     */
+    fun isOwnNameFallback(commandName: String, kv: KeyValue): Boolean =
+        kv.getKind() == KeyValue.Kind.String && kv.getString() == commandName
 }

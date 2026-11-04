@@ -117,7 +117,11 @@ class Keyboard2View @JvmOverloads constructor(
 
     private var _mods: Pointers.Modifiers = Pointers.Modifiers.EMPTY
 
-    private lateinit var _config: Config
+    private lateinit var _config
+
+    /** Language tag the space bar's label was rendered for, and its rendered text. */
+    private var _spaceLabelTag: String? = null
+    private var _spaceLabelText: String = ""
 
     private var _swipeRecognizer: EnhancedSwipeGestureRecognizer? = null
     private var _swipeTrailPaint: Paint? = null
@@ -1910,14 +1914,26 @@ class Keyboard2View @JvmOverloads constructor(
                     _pointers.getKeyFlags(kv0).let {
                         it != -1 && (it and Pointers.FLAG_P_LOCKED) != 0
                     }
+                // Gboard's enter key is its own colour (blue) and its own shape (a disc), not
+                // just another action key: `colorKeyEnter` defaults to the SPECIAL fill for
+                // every theme that does not ask for one, so this stays pixel-identical there.
+                val isEnterKeyValue = isEnterKey(kv0)
                 val tc_key = tc.keyForRole(
-                    Theme.Computed.roleOf(kv0?.getKind(), isKeyDown, isLocked)
+                    Theme.Computed.roleOf(kv0?.getKind(), isKeyDown, isLocked, isEnterKeyValue)
                 )
 
-                drawKeyFrame(canvas, x, y, keyW, keyH, tc_key)
+                // A disc, like Gboard's: the frame's corner radius is capped at half the shorter
+                // side for the enter role only, so a square cell renders as a circle and a wide
+                // one as a pill. Every other key keeps the theme's radius.
+                val frameRadius =
+                    if (tc_key === tc.key_enter) minOf(keyW, keyH) / 2f else tc_key.border_radius
+                drawKeyFrame(canvas, x, y, keyW, keyH, tc_key, frameRadius)
                 // The main label's drawn width bounds the W/E sublabel slots (SubLabelSizing).
                 val mainLabelW = if (k.keys[0] != null)
-                    drawLabel(canvas, k.keys[0]!!, keyW / 2f + x, y, keyH, isKeyDown, tc_key)
+                    if (isSpaceKey(k.keys[0]!!))
+                        drawSpaceLanguageLabel(canvas, x, y, keyW, keyH, tc_key)
+                    else
+                        drawLabel(canvas, k.keys[0]!!, keyW / 2f + x, y, keyH, isKeyDown, tc_key)
                 else 0f
                 // #171: a custom short-swipe mapping REPLACES the default sublabel in its
                 // slot — suppress the default glyph wherever a mapping covers the slot, or
@@ -2128,8 +2144,17 @@ class Keyboard2View @JvmOverloads constructor(
     }
 
     /** Draw borders and background of the key. */
-    private fun drawKeyFrame(canvas: Canvas, x: Float, y: Float, keyW: Float, keyH: Float, tc: Theme.Computed.Key) {
-        val r = tc.border_radius
+    private fun drawKeyFrame(
+        canvas: Canvas,
+        x: Float,
+        y: Float,
+        keyW: Float,
+        keyH: Float,
+        tc: Theme.Computed.Key,
+        /** Corner radius override; -1 keeps the theme's own. */
+        radiusOverride: Float = -1f
+    ) {
+        val r = if (radiusOverride >= 0f) radiusOverride else tc.border_radius
         val w = tc.border_width
         // The border is drawn INSIDE the rect (hence half its width), and a theme's `keyGap`
         // shrinks the tile on all four sides so neighbouring keys read as separate tiles the way
@@ -2145,7 +2170,48 @@ class Keyboard2View @JvmOverloads constructor(
         }
     }
 
+    /** True for the space bar (a Char key holding a space). */
+    private fun isSpaceKey(kv: KeyValue?): Boolean =
+        kv != null && kv.getKind() == KeyValue.Kind.Char && kv.getChar() == ' '
+
+    /**
+     * Gboard's space bar is not blank: it prints the language it is typing — "English" — in the
+     * sub-label grey. Ours drew nothing at all, which read as a missing key in the owner's
+     * screenshots (2026-11-04). The name is cached per language tag because this runs every
+     * frame and `Locale.getDisplayLanguage` walks CLDR data.
+     */
+    private fun drawSpaceLanguageLabel(
+        canvas: Canvas,
+        x: Float,
+        y: Float,
+        keyW: Float,
+        keyH: Float,
+        tc: Theme.Computed.Key
+    ): Float {
+        val tag = _config.layout_bound_language ?: _config.primary_language
+        if (tag != _spaceLabelTag) {
+            _spaceLabelTag = tag
+            _spaceLabelText = LanguageDisplayNames.languageLabel(
+                tag, resources.configuration.locales[0] ?: java.util.Locale.getDefault()
+            )
+        }
+        val text = _spaceLabelText
+        if (text.isEmpty()) return 0f
+        val p = tc.label_paint(false, _theme.subLabelColor, _subLabelSize * 1.25f)
+        canvas.drawText(text, x + keyW / 2f, (keyH - p.ascent() - p.descent()) / 2f + y, p)
+        return p.measureText(text)
+    }
+
+    /** True for the enter key itself (`enter`, and numeric's `numpad_enter`). */
+    private fun isEnterKey(kv: KeyValue?): Boolean =
+        kv != null && kv.getKind() == KeyValue.Kind.Keyevent &&
+            (kv.getKeyevent() == KeyEvent.KEYCODE_ENTER ||
+                kv.getKeyevent() == KeyEvent.KEYCODE_NUMPAD_ENTER)
+
     private fun labelColor(k: KeyValue, isKeyDown: Boolean, sublabel: Boolean): Int {
+        // White on Gboard's blue fill. The pressed state still wins, because the pressed frame
+        // is a different (darker) fill and keeping the rest colour would drop contrast.
+        if (!sublabel && !isKeyDown && isEnterKey(k)) return _theme.colorLabelEnter
         if (isKeyDown) {
             val flags = _pointers.getKeyFlags(k)
             if (flags != -1) {
@@ -2184,7 +2250,11 @@ class Keyboard2View @JvmOverloads constructor(
         // FLAG_SMALLER_FONT / colour-emoji scale, then shrink-to-fit the slot's width.
         val textSize = _subLabelSize * SubLabelSizing.scaleFor(modifiedKv)
         val p = tc.sublabel_paint(modifiedKv.hasFlagsAny(KeyValue.FLAG_KEY_FONT), labelColor(modifiedKv, isKeyDown, true), textSize, a)
-        val subPadding = snap.keyPadding
+        // `keyPadding` alone is 2 dp, which is measured from the CELL edge. The tile is inset
+        // another half-gap by `drawKeyFrame`, so a hint drawn at 2 dp straddled the tile's top
+        // corner and read as floating above the key (owner screenshots, 2026-11-04). Add the
+        // tile's own inset so the hint sits inside the shape it belongs to.
+        val subPadding = snap.keyPadding + tc.gap / 2f
         val label = modifiedKv.getString()
         var label_len = label.length
         // Limit the label of string keys to 3 characters
@@ -2324,7 +2394,11 @@ class Keyboard2View @JvmOverloads constructor(
         // Use the theme's sublabel_paint for consistent font selection
         val paint = tc_key.sublabel_paint(useKeyFont, color, textSize, a)
 
-        val subPadding = snap.keyPadding
+        // `keyPadding` alone is 2 dp, which is measured from the CELL edge. The tile is inset
+        // another half-gap by `drawKeyFrame`, so a hint drawn at 2 dp straddled the tile's top
+        // corner and read as floating above the key (owner screenshots, 2026-11-04). Add the
+        // tile's own inset so the hint sits inside the shape it belongs to.
+        val subPadding = snap.keyPadding + tc.gap / 2f
         // Limit label length for display, then keep it inside its slot (never over the main label)
         val displayLen = minOf(label.length, 4)
         paint.textSize = SubLabelSizing.fitToWidth(

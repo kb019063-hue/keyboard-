@@ -1,7 +1,9 @@
 # Mr. Brown's Keyboard
 
-A personal, **GPL-3.0** Android keyboard (IME). 100% offline — the manifest declares no
-`INTERNET` permission, so nothing can phone home by construction.
+A personal, **GPL-3.0** Android keyboard (IME). The keyboard itself is offline: no source file
+opens a socket, and the only declared network permission is `INTERNET`, used solely so the mic key
+can hand audio to the device's speech recogniser (which may be a cloud service — use an on-device
+recogniser to keep audio local).
 
 Built on top of [CleverKeys](https://github.com/tribixbite/CleverKeys), with a planned set of
 feature ports from [HeliBoard](https://github.com/HeliBorg/HeliBoard). See

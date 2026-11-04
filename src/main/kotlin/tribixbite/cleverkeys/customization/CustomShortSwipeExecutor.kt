@@ -405,7 +405,20 @@ class CustomShortSwipeExecutor(private val context: Context) {
                                 inputConnection.commitText(keyValue.getChar().toString(), 1)
                             }
                             KeyValue.Kind.String -> {
-                                inputConnection.commitText(keyValue.getString(), 1)
+                                // Never type the command's own name: getKeyByName is total, so
+                                // an unimplemented command comes back as a String key spelling
+                                // itself, and committing it put "more_tools" in the owner's
+                                // editor. Defer instead — Keyboard2View's custom-command block
+                                // owns the service-level ones (more_tools, the one-handed /
+                                // floating / split toggles, language toggles …) and an unknown
+                                // name becomes a no-op rather than corruption.
+                                if (CommandRouting.isOwnNameFallback(command.name, keyValue)) {
+                                    Log.w(TAG, "No executor implementation for command " +
+                                        "${command.name}; deferring to the keyboard view")
+                                    false
+                                } else {
+                                    inputConnection.commitText(keyValue.getString(), 1)
+                                }
                             }
                             KeyValue.Kind.Keyevent -> {
                                 sendKeyEvent(inputConnection, keyValue.getKeyevent())
