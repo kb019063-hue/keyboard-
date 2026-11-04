@@ -63,7 +63,7 @@ STRIP_PAD_DP = 8.0         # SuggestionBar padding
 CHIP_PAD_DP = 12.0         # suggestion TextView horizontal padding
 CHIP_MARGIN_DP = 4.0
 SUGGESTION_SP = 16.0
-TOOLBAR_ICON_DP = 24.0
+TOOLBAR_ICON_DP = 22.0
 # Label metrics, from Keyboard2View.onMeasure + Config.Defaults: labelBaseSize is
 # min(row height - vertical margin, (key width - horizontal margin) * 3/2) * CHARACTER_SIZE,
 # then the main label is labelBaseSize * LABEL_TEXT_SIZE_FACTOR and a corner hint is
@@ -188,6 +188,11 @@ class Canvas:
         self.raw("-fill", fill, "-stroke", "none",
                  "-draw", "circle %.1f,%.1f %.1f,%.1f" % (cx, cy, cx + r, cy))
 
+    def overlay(self, png, cx, cy, size):
+        """Composite a prepared transparent PNG centred on (cx, cy)."""
+        self.raw("(", png, "-geometry", "+%d+%d" % (int(cx - size / 2), int(cy - size / 2)),
+                 ")", "-composite")
+
     def line(self, x0, y0, x1, y1, colour, width):
         self.raw("-fill", "none", "-stroke", colour, "-strokewidth", "%.1f" % width,
                  "-draw", "line %.1f,%.1f %.1f,%.1f" % (x0, y0, x1, y1))
@@ -221,9 +226,56 @@ def blur_band(src, band_path, out_path, x, y, w, h, sigma):
                            "-composite", out_path])
 
 
-# ---------------------------------------------------------------- icons (stand-ins)
+# ---------------------------------------------------------------- icons
 
-def draw_icon(canvas, name, cx, cy, size, colour):
+# The shipped toolbar glyphs, drawn from the same path data the app draws (see
+# res/drawable/ic_tool_*.xml, Material Symbols Rounded). Keeping the stand-ins below for
+# any command without a vector keeps this tool working for custom toolbars.
+_ICON_CACHE = {}
+_ICON_FILES = {
+    "more_tools": "ic_tool_more", "undo": "ic_tool_undo", "redo": "ic_tool_redo",
+    "select_word": "ic_tool_select", "switch_clipboard": "ic_tool_clipboard",
+    "config": "ic_tool_settings", "switch_gif": "ic_tool_gif",
+    "voice_typing": "ic_tool_mic",
+}
+
+
+def vector_icon_png(name, size_px, colour, out_dir):
+    """Rasterise the command's shipped VectorDrawable path to a transparent PNG."""
+    base = _ICON_FILES.get(name)
+    if base is None:
+        return None
+    key = (base, int(size_px), colour)
+    if key in _ICON_CACHE:
+        return _ICON_CACHE[key]
+    path = os.path.join("res", "drawable", base + ".xml")
+    if not os.path.exists(path):
+        return None
+    import re
+    with open(path) as fh:
+        data = re.search(r'android:pathData="([^"]+)"', fh.read())
+    if data is None:
+        return None
+    out = os.path.join(out_dir, "icon_%s_%d.png" % (base, int(size_px)))
+    # 960-unit Symbols grid, y running upwards, so the group translate becomes MVG's.
+    subprocess.check_call(
+        ["convert", "-size", "960x960", "xc:none", "-fill", colour, "-stroke", "none",
+         "-draw", "translate 0,960 path '%s'" % data.group(1),
+         "-resize", "%dx%d" % (int(size_px), int(size_px)), out],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    _ICON_CACHE[key] = out
+    return out
+
+
+def draw_icon(canvas, name, cx, cy, size, colour, out_dir=None):
+    png = vector_icon_png(name, size, colour, out_dir) if out_dir else None
+    if png:
+        canvas.overlay(png, cx, cy, size)
+        return
+    _draw_standin_icon(canvas, name, cx, cy, size, colour)
+
+
+def _draw_standin_icon(canvas, name, cx, cy, size, colour):
     """A geometric stand-in for the command's vector. NOT Google's artwork."""
     s = size / 2.0
     w = max(1.6, size * 0.09)
@@ -395,7 +447,7 @@ def main(argv):
     cell = width / float(len(TOOLBAR_COMMANDS))
     for i, name in enumerate(TOOLBAR_COMMANDS):
         draw_icon(kb, name, cell * (i + 0.5), kb_top + toolbar_h * 0.5,
-                  TOOLBAR_ICON_DP * dp, icon_tint)
+                  TOOLBAR_ICON_DP * dp, icon_tint, work)
 
     sx = STRIP_PAD_DP * dp
     sy = kb_top + toolbar_h

@@ -1,17 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Toolbar glyph, drawn as a vector rather than a character from the key font.
-     Phase 4 part 6: the toolbar used to paint registry symbols through special_font.ttf,
-     which for commands with no glyph of their own fell back to the first four characters
-     of the command id — `[w]` for select_word, `GIF` as loose text, and generally an
-     uneven baseline against the 24 dp icon grid Gboard uses. A real path draws the same at
-     every density and takes the theme's text colour through an ImageView tint.
-     Source: Material Icons (Apache-2.0), 24x24 viewport. -->
+<!-- Toolbar glyph: Undo from Material Symbols Rounded (Google, Apache-2.0),
+     24 px optical size, drawn on the 960-unit grid the Symbols font uses.
+     Replaces the chunky Material Icons (v1) path this file used to carry: the owner put
+     his own Gboard next to ours and the toolbar was the clearest tell, because Gboard
+     draws exactly this set — rounded, ~2.5 % stroke, optical-size 24 — and v1 draws a
+     heavier, squarer icon at the same size.
+     Gboard itself has no shippable artwork for us to copy (it is neither open source nor
+     redistributable), but its icons are Material Symbols, which is: google/
+     material-design-icons, Apache-2.0, attribution in NOTICE. Same source Gboard uses,
+     so "similar" here is the real thing, not a lookalike.
+     Source: https://github.com/google/material-design-icons/blob/master/symbols/web/undo/materialsymbolsrounded/undo_24px.svg -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M12.5,8c-2.65,0 -5.05,0.99 -6.9,2.6L2,7v9h9l-3.62,-3.62c1.39,-1.16 3.16,-1.88 5.12,-1.88 3.54,0 6.55,2.31 7.6,5.5l2.37,-0.78C21.08,11.03 17.15,8 12.5,8z" />
+    android:viewportWidth="960"
+    android:viewportHeight="960"
+    android:autoMirrored="true">
+    <group android:translateY="960">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M320-200q-17 0-28.5-11.5T280-240q0-17 11.5-28.5T320-280h244q63 0 109.5-40T720-420q0-60-46.5-100T564-560H312l76 76q11 11 11 28t-11 28q-11 11-28 11t-28-11L188-572q-6-6-8.5-13t-2.5-15q0-8 2.5-15t8.5-13l144-144q11-11 28-11t28 11q11 11 11 28t-11 28l-76 76h252q97 0 166.5 63T800-420q0 94-69.5 157T564-200H320Z" />
+    </group>
 </vector>

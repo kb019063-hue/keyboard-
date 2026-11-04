@@ -270,3 +270,23 @@ files generated with each model:
   scripts/data/tatoeba-contributors-fr.txt
   scripts/data/tatoeba-contributors-it.txt
   scripts/data/tatoeba-contributors-sv.txt
+
+================================================================================
+Material Symbols / Material Icons — toolbar and key artwork
+================================================================================
+The toolbar glyphs (res/drawable/ic_tool_*.xml — grid, undo, redo, text editing,
+clipboard, settings, GIF, mic) and several dialog icons (ic_content_copy,
+ic_delete, ic_clipboard_*.xml, ic_check_box_*.xml, ic_expand_more, ic_clear_all,
+ic_media_*) are paths taken from Google's Material Symbols / Material Icons.
+
+  https://github.com/google/material-design-icons
+  Copyright Google LLC
+  License: Apache License, Version 2.0
+  https://www.apache.org/licenses/LICENSE-2.0
+
+They are distributed unmodified as vector path data (only the 960-unit Symbols
+grid is re-expressed as an Android VectorDrawable viewport, and the mic glyph is
+knocked out of a filled circle with fillType evenOdd). No Material font file,
+stylesheet or Gboard asset is redistributed. "Gboard-style" in this project
+names an arrangement and a look; it does not imply affiliation with, or
+endorsement by, Google, and no Google application's own artwork is copied.

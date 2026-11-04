@@ -1,17 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Toolbar glyph, drawn as a vector rather than a character from the key font.
-     Phase 4 part 6: the toolbar used to paint registry symbols through special_font.ttf,
-     which for commands with no glyph of their own fell back to the first four characters
-     of the command id — `[w]` for select_word, `GIF` as loose text, and generally an
-     uneven baseline against the 24 dp icon grid Gboard uses. A real path draws the same at
-     every density and takes the theme's text colour through an ImageView tint.
-     Source: Material Icons (Apache-2.0), 24x24 viewport. -->
+<!-- Toolbar glyph: voice typing, drawn the way Gboard draws it — the `mic` glyph from
+     Material Symbols Rounded (Google, Apache-2.0) knocked out of a filled circle. Gboard
+     puts its dictation button in a filled disc at the right end of the toolbar; a bare
+     outline mic among six outline icons was the one button that did not read as "the
+     Gboard one". The knock-out is one path with fillType evenOdd: the disc fills where only
+     the disc covers, and the mic strokes (one more crossing) fall through as holes.
+     Source: https://github.com/google/material-design-icons/blob/master/symbols/web/mic/materialsymbolsrounded/mic_24px.svg -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M12,14c1.66,0 2.99,-1.34 2.99,-3L15,5c0,-1.66 -1.34,-3 -3,-3S9,3.34 9,5v6c0,1.66 1.34,3 3,3zM17.3,11c0,3 -2.54,5.1 -5.3,5.1S6.7,14 6.7,11H5c0,3.41 2.72,6.23 6,6.72V21h2v-3.28c3.28,-0.48 6,-3.3 6,-6.72h-1.7z" />
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <group android:translateY="960">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:fillType="evenOdd"
+            android:pathData="M480,-840a360,360 0 1,0 0,720a360,360 0 1,0 0,-720Z M480-400q-50 0-85-35t-35-85v-240q0-50 35-85t85-35q50 0 85 35t35 85v240q0 50-35 85t-85 35Zm0-240Zm-40 480v-83q-92-13-157.5-78T203-479q-2-17 9-29t28-12q17 0 28.5 11.5T284-480q14 70 69.5 115T480-320q72 0 127-45.5T676-480q4-17 15.5-28.5T720-520q17 0 28 12t9 29q-14 91-79 157t-158 79v83q0 17-11.5 28.5T480-120q-17 0-28.5-11.5T440-160Zm40-320q17 0 28.5-11.5T520-520v-240q0-17-11.5-28.5T480-800q-17 0-28.5 11.5T440-760v240q0 17 11.5 28.5T480-480Z" />
+    </group>
 </vector>
