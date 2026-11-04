@@ -105,6 +105,28 @@ internal class DictationController(private val context: Context) {
     @Volatile
     private var sessionActive = false
 
+    /**
+     * What the recogniser says it can handle, asked once per process
+     * (`RecognizerIntent.ACTION_GET_LANGUAGE_DETAILS`). Empty until the answer arrives; empty
+     * forever on a recogniser that does not answer at all, which is why [VoiceLanguagePolicy.pick]
+     * falls back to the wanted tag in that case.
+     */
+    private var supportedLanguages: List<String> = emptyList()
+    private var serviceLanguagePreference: String? = null
+    private var languagesQueried = false
+
+    /** The tag this session put in EXTRA_LANGUAGE, or null when the service chose for itself. */
+    private var forcedLanguage: String? = null
+    private var retriedWithDefault = false
+
+    /**
+     * Sticky, per process: once even the service-default retry has failed, stop forcing a
+     * language on every later press. A recogniser that cannot decode the tag we negotiate
+     * (or that ignores negotiation entirely) is better served by its own preference than by
+     * repeating the same failing request every time the user taps the mic.
+     */
+    private var languageOverrideEnabled = true
+
     fun isListening(): Boolean = sessionActive
 
     fun recognizerAvailable(): Boolean = try {
@@ -151,6 +173,8 @@ internal class DictationController(private val context: Context) {
         when (decision) {
             DictationPolicy.Press.START_LISTENING -> {
                 sessionActive = true
+                retriedWithDefault = false
+                forcedLanguage = null
                 main.post { startListening() }
             }
             DictationPolicy.Press.STOP_LISTENING -> main.post { stopListening() }
@@ -204,6 +228,18 @@ internal class DictationController(private val context: Context) {
     }
 
     private fun startListening() {
+        // The first press of a process asks the recogniser what it supports before listening, so
+        // the very first session already asks in a language the service can decode. Every later
+        // press (and the retry path) goes straight through.
+        queryLanguagesOnce { startListeningWithNegotiatedLanguage() }
+    }
+
+    /**
+     * @param forceDefault skip language negotiation and let the service use its own preference.
+     *   Used by the one automatic retry: the service's preferred language is, by definition, one
+     *   it has a model for.
+     */
+    private fun startListeningWithNegotiatedLanguage(forceDefault: Boolean = false) {
         val active = obtainRecognizer()
         if (active == null) {
             // Recogniser vanished between the availability check and here.
@@ -227,15 +263,25 @@ internal class DictationController(private val context: Context) {
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
-            // End the utterance promptly after the speaker stops instead of waiting for the
-            // recogniser's default timeout, which is what turns a good attempt into NO_MATCH.
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1000L)
-            // Dictate in the language the user is typing, not the service default.
-            localeLanguageTag()?.let { putExtra(RecognizerIntent.EXTRA_LANGUAGE, it) }
+            // 2026-11-04: the three *_SPEECH_INPUT_*_MILLIS extras are GONE. They asked the
+            // recogniser to end the utterance after 1.0 s of speech and 1.5 s of silence, which
+            // is shorter than a normal dictated sentence takes; a session cut off mid-sentence
+            // ends in ERROR_NO_MATCH, i.e. "couldn't catch that" while the speaker was talking.
+            // The recogniser's own endpointing is the behaviour Gboard gets, so use it.
+            //
+            // Dictate in the language the user is typing -- negotiated against what the service
+            // advertises, so an unsupported region (en-GH) becomes a tag it can actually decode.
+            val language =
+                if (forceDefault || !languageOverrideEnabled) null else negotiateLanguage()
+            forcedLanguage = language
+            language?.let { putExtra(RecognizerIntent.EXTRA_LANGUAGE, it) }
         }
-        Log.i(TAG, "startListening language=${localeLanguageTag() ?: "default"}")
+        Log.i(
+            TAG,
+            "startListening language=${forcedLanguage ?: "service default"} " +
+                "offered=${supportedLanguages.size} preference=${serviceLanguagePreference ?: "none"} " +
+                "retriedWithDefault=$retriedWithDefault"
+        )
         try {
             active.startListening(intent)
             sink?.showMessage(context.getString(R.string.voice_typing_listening))
@@ -259,6 +305,55 @@ internal class DictationController(private val context: Context) {
             abandonAudioFocus()
         }
     }
+
+    /**
+     * Ask the recogniser which language tags it advertises, once.
+     *
+     * `ACTION_GET_LANGUAGE_DETAILS` is an ordered broadcast the recognition service answers with
+     * `EXTRA_SUPPORTED_LANGUAGES` and `EXTRA_LANGUAGE_PREFERENCE`. It is best-effort by design: a
+     * service that ignores it leaves both fields empty, and [VoiceLanguagePolicy.pick] then passes
+     * the wanted tag straight through, exactly as before this fix.
+     */
+    private fun queryLanguagesOnce(onDone: () -> Unit) {
+        if (languagesQueried) {
+            onDone()
+            return
+        }
+        languagesQueried = true
+        try {
+            val intent = Intent(RecognizerIntent.ACTION_GET_LANGUAGE_DETAILS).apply {
+                putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
+            }
+            val receiver = object : android.content.BroadcastReceiver() {
+                override fun onReceive(ctx: Context?, broadcast: Intent?) {
+                    try {
+                        context.unregisterReceiver(this)
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "unregister language receiver threw: $t")
+                    }
+                    val list = broadcast?.getStringArrayListExtra(
+                        RecognizerIntent.EXTRA_SUPPORTED_LANGUAGES
+                    )
+                    supportedLanguages = list?.mapNotNull { VoiceLanguagePolicy.normalise(it) }
+                        ?: emptyList()
+                    serviceLanguagePreference =
+                        broadcast?.getStringExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE)
+                    onDone()
+                }
+            }
+            context.sendOrderedBroadcast(intent, null, receiver, main, 0, null, null)
+        } catch (t: Throwable) {
+            Log.w(TAG, "language query threw: $t")
+            onDone()
+        }
+    }
+
+    /** The tag to ask for right now: negotiated against what the service advertises. */
+    private fun negotiateLanguage(): String? = VoiceLanguagePolicy.pick(
+        wanted = localeLanguageTag(),
+        supported = supportedLanguages,
+        preference = serviceLanguagePreference
+    )
 
     private fun obtainRecognizer(): SpeechRecognizer? {
         recognizer?.let { return it }
@@ -356,6 +451,28 @@ internal class DictationController(private val context: Context) {
     private fun reportFailure(errorCode: Int) {
         val failure = DictationPolicy.onFailure(errorCode)
         Log.w(TAG, "recognition error=$errorCode (${errorName(errorCode)}) failure=$failure")
+        // One silent retry, only when a language tag was forced AND the failure is one a language
+        // mismatch produces. The microphone stays open from the user's point of view: the bar
+        // keeps saying "Listening…" rather than failing a session they can see.
+        if (VoiceLanguagePolicy.shouldRetryWithDefault(
+                errorCode, languageWasForced = forcedLanguage != null, alreadyRetried = retriedWithDefault
+            )
+        ) {
+            retriedWithDefault = true
+            // No extra log line: the startListening line that follows carries language="service
+            // default" and retriedWithDefault=true, and this file sits exactly on the repo's
+            // unguarded-log ceiling (VerboseLogRatchetTest, 246).
+            abandonAudioFocus()
+            main.post { startListeningWithNegotiatedLanguage(forceDefault = true) }
+            return
+        }
+        if (retriedWithDefault && languageOverrideEnabled) {
+            // The service-default retry failed too: the language override is not the answer on
+            // this device. Stop sending one for the rest of the process.
+            languageOverrideEnabled = false
+            Log.w(TAG, "service-default retry failed as well; language override disabled " +
+                "for this session's lifetime")
+        }
         sessionActive = false
         abandonAudioFocus()
         val message = when (failure) {
@@ -366,7 +483,23 @@ internal class DictationController(private val context: Context) {
             DictationPolicy.Failure.MICROPHONE -> R.string.voice_typing_microphone
             DictationPolicy.Failure.UNKNOWN -> R.string.voice_typing_failed
         }
-        sink?.showMessage(context.getString(message))
+        // The reason travels with the message: "Didn't catch that" alone cannot tell a language
+        // mismatch from a dead microphone, and the owner had exactly that report to make twice.
+        sink?.showMessage(context.getString(message) + " (" + reasonName(errorCode) + ")")
+    }
+
+    /** Plain words for the status line, matching [errorName] one for one. */
+    private fun reasonName(code: Int): String = when (code) {
+        SpeechRecognizer.ERROR_AUDIO -> "microphone"
+        SpeechRecognizer.ERROR_CLIENT -> "client error"
+        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "permission"
+        SpeechRecognizer.ERROR_NETWORK -> "network"
+        SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "network timeout"
+        SpeechRecognizer.ERROR_NO_MATCH -> "no match"
+        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "busy"
+        SpeechRecognizer.ERROR_SERVER -> "service error"
+        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "nothing heard"
+        else -> "error $code"
     }
 
     private val listener = object : RecognitionListener {
