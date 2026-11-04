@@ -39,11 +39,12 @@ object SuggestionPillPolicy {
         if (SuggestionBarPalette.contrastRatio(accent, barBackground) < MIN_FILL_CONTRAST) {
             return Look(false, 0, fallbackText)
         }
+        // Gboard puts WHITE on its blue pill even though black scores marginally better against
+        // #1A73E8; white is the look, and "most contrast wins" turned it black. White while it
+        // clears the threshold, black only when it does not (pale accents).
         val white = 0xFFFFFFFF.toInt()
         val black = 0xFF000000.toInt()
-        val onPill = if (SuggestionBarPalette.contrastRatio(white, accent) >=
-            SuggestionBarPalette.contrastRatio(black, accent)
-        ) {
+        val onPill = if (SuggestionBarPalette.contrastRatio(white, accent) >= MIN_TEXT_CONTRAST) {
             white
         } else {
             black
