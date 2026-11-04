@@ -13,14 +13,18 @@ on-device observation (Gboard 16, portrait, number row enabled, one corner hint 
 What is mimicked, top to bottom:
 - a full-width number row, ten equal keys, digits only — Gboard prints no symbol hints
   next to them (the symbols are on the ?123 pane and behind long-press);
-- three letter rows with NO corner hints on the letters at all. Gboard prints one hint on
-  some keys; "no hints" is the calmer end of the same idea and this keyboard's default
-  rendering already prints at most one. The digits are NOT hinted on the top row any more,
-  because the number row above already shows them (that is what Gboard does when its own
-  number row is switched on);
+- three letter rows, each letter carrying ONE small symbol in its north-east corner, which
+  is what Gboard prints (`%` above Q, `@` above A, and so on). The set below was transcribed
+  from the owner's own Gboard 16 in shift state; the two letters whose Gboard hint duplicates
+  another key's (`f`/`h` both dash, `e`/`c` both apostrophe) carry the nearest distinct symbol
+  instead, because `KeyboardData.getKeys()` is keyed by value and a repeat would silently drop
+  a position. The digits are NOT hinted on the top row: the number row above already shows
+  them, which is what Gboard does when its own number row is switched on;
 - the second row indented by half a key; Shift and Delete 1.5 keys wide;
-- bottom row "?123 | , | space | . | enter" at 1.5 / 1 / 5 / 1 / 1.5 key widths, with the
-  emoji key as the comma's top hint, where Gboard draws it.
+- bottom row "?123 | , | emoji | space | . | enter" at 1.5 / 1 / 1 / 4 / 1 / 1.5 key widths, the
+  emoji key standing on its own where Gboard draws it, and a bare comma and period: Gboard
+  prints nothing on those two, so their old corner hints moved onto the letters above
+  (? on M, ! on N, : on V, - on F, apostrophe on E).
 
 How the Gboard features map onto CleverKeys keys:
 - ?123 is `switch_numeric` with a "?123" label. It opens CleverKeys' own number pane; the
@@ -54,37 +58,37 @@ time, so turning that preference on cannot produce two rows of digits on this la
     <key c="0"/>
   </row>
   <row>
-    <key c="q"/>
-    <key c="w"/>
-    <key c="e" sw="loc €"/>
-    <key c="r"/>
-    <key c="t"/>
-    <key c="y"/>
-    <key c="u"/>
-    <key c="i"/>
-    <key c="o"/>
-    <key c="p"/>
+    <key c="q" ne="%"/>
+    <key c="w" ne="`"/>
+    <key c="e" ne="'" sw="loc €"/>
+    <key c="r" ne="="/>
+    <key c="t" ne="|"/>
+    <key c="y" ne="]"/>
+    <key c="u" ne="&lt;"/>
+    <key c="i" ne="&gt;"/>
+    <key c="o" ne="{"/>
+    <key c="p" ne="}"/>
   </row>
   <row>
-    <key shift="0.5" c="a"/>
-    <key c="s" sw="loc ß"/>
-    <key c="d"/>
-    <key c="f"/>
-    <key c="g"/>
-    <key c="h"/>
-    <key c="j"/>
-    <key c="k"/>
-    <key c="l"/>
+    <key shift="0.5" c="a" ne="@"/>
+    <key c="s" ne="#" sw="loc ß"/>
+    <key c="d" ne="$"/>
+    <key c="f" ne="-"/>
+    <key c="g" ne="&amp;"/>
+    <key c="h" ne="_"/>
+    <key c="j" ne="+"/>
+    <key c="k" ne="("/>
+    <key c="l" ne=")"/>
   </row>
   <row>
     <key width="1.5" c="shift" nw="home" ne="end" se="loc tab" sw="loc capslock"/>
-    <key c="z"/>
-    <key c="x" ne="loc †"/>
-    <key c="c"/>
-    <key c="v"/>
-    <key c="b"/>
-    <key c="n"/>
-    <key c="m"/>
+    <key c="z" ne="*"/>
+    <key c="x" ne="&quot;" se="loc †"/>
+    <key c="c" ne="/"/>
+    <key c="v" ne=":"/>
+    <key c="b" ne=";"/>
+    <key c="n" ne="!"/>
+    <key c="m" ne="?"/>
     <key width="1.5" c="backspace" nw="delete_last_word" ne="delete" sw="loc esc" se="loc menu" n="loc page_up" s="loc page_down"/>
   </row>
   <!-- Gboard's bottom row, in Gboard's order and widths: ?123 (1.5) | , (1) | emoji (1) |
@@ -95,10 +99,10 @@ time, so turning that preference on cannot produce two rows of digits on this la
        corners here would either duplicate the comma's own commands or shadow them. -->
   <row height="0.95">
     <key width="1.5" c="?123:switch_numeric" nw="ctrl" ne="fn" sw="loc switch_greekmath" se="loc meta" n="loc alt" s="loc compose"/>
-    <key c="," ne="config" nw="loc change_method" sw="loc switch_clipboard" se="switch_gif" s="switch_back_clipboard"/>
+    <key c="," nw="loc change_method" sw="loc switch_clipboard" se="switch_gif" s="switch_back_clipboard"/>
     <key c="switch_emoji"/>
     <key width="4" c="space" n="loc switch_forward" s="loc switch_backward" w="cursor_left" e="cursor_right"/>
-    <key c="." nw="'" n="\?" ne="!" sw="-" se=":"/>
+    <key c="."/>
     <key width="1.5" c="enter" nw="loc voice_typing" ne="action" n="up" s="down" w="left" e="right" sw="doc_home" se="doc_end"/>
   </row>
 </keyboard>

@@ -81,6 +81,24 @@ class CornerLabelPolicyTest {
     }
 
     @Test
+    fun `a corner is printed only when it types something, not when it runs a command`() {
+        // Gboard prints symbols on keys, never a gear / scissors / undo picture. The corners
+        // this keyboard materialises for commands (config on the comma, undo/cut/copy/paste on
+        // Z/X/C/V, the cursor sliders on the space bar) therefore stay invisible by default;
+        // print_all_key_symbols still draws every one of them.
+        assertEquals(true, CornerLabelPolicy.isPrintableCornerKind(KeyValue.Kind.Char))
+        assertEquals(true, CornerLabelPolicy.isPrintableCornerKind(KeyValue.Kind.String))
+        assertEquals(true, CornerLabelPolicy.isPrintableCornerKind(KeyValue.Kind.Compose_pending))
+        assertEquals(false, CornerLabelPolicy.isPrintableCornerKind(KeyValue.Kind.Editing))
+        assertEquals(false, CornerLabelPolicy.isPrintableCornerKind(KeyValue.Kind.Modifier))
+        assertEquals(false, CornerLabelPolicy.isPrintableCornerKind(KeyValue.Kind.Event))
+        assertEquals(false, CornerLabelPolicy.isPrintableCornerKind(KeyValue.Kind.Keyevent))
+        assertEquals(false, CornerLabelPolicy.isPrintableCornerKind(KeyValue.Kind.Slider))
+        assertEquals(false, CornerLabelPolicy.isPrintableCornerKind(KeyValue.Kind.Macro))
+        assertEquals(false, CornerLabelPolicy.isPrintableCornerKind(null))
+    }
+
+    @Test
     fun `only the kinds that put a glyph in the field count as characters`() {
         assertEquals(true, CornerLabelPolicy.isCharacterKind(KeyValue.Kind.Char))
         assertEquals(true, CornerLabelPolicy.isCharacterKind(KeyValue.Kind.Compose_pending))

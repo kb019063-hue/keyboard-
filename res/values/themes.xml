@@ -387,9 +387,18 @@
        dark variant by the system's night mode, the way `monet` does. -->
   <style name="GboardLight" parent="BaseTheme">
     <item name="android:isLightTheme" tools:targetApi="29">true</item>
-    <item name="colorKeyboard">#CCF1F3F4</item>
-    <item name="colorKey">#B3FFFFFF</item>
-    <item name="colorKeyActivated">#FFFFFFFF</item>
+    <!-- 2026-11-04 (owner screenshot: "still looks ass" over Google Keep): the old field
+         #CCF1F3F4 over a white app resolved to #F4F5F6 and the old key #B3FFFFFF resolved
+         to plain white, so a 70 %-white key on a white field left the whole keyboard
+         featureless. Gboard's light keyboard is a clearly grey field with white tiles on
+         it. #F2 keeps a little of the app visible through the scrim (still "glass", the
+         owner's chosen default) while landing on #E8EBEF over white, which is grey enough
+         for an opaque white tile to read as a tile. -->
+    <item name="colorKeyboard">#F2E7EAEE</item>
+    <item name="colorKey">#FFFFFFFF</item>
+    <!-- Pressed/activated was #FFFFFFFF = the resting tile, so a tap produced no visible
+         change at all in light mode. Gboard darkens the tile it presses. -->
+    <item name="colorKeyActivated">#FFDCDFE3</item>
     <item name="keyBorderWidth">0dp</item>
     <item name="keyBorderWidthActivated">0dp</item>
     <item name="keyBorderColorLeft">#00000000</item>
@@ -407,8 +416,8 @@
     <item name="colorSubLabel">#FF5F6368</item>
     <!-- The strip multiplies this by the user's suggestion-bar opacity (default 80 %), so the
          attribute is chosen to LAND on the field's #CC once that multiplication happens. -->
-    <item name="colorSuggestionBar">#FFF1F3F4</item>
-    <item name="emoji_button_bg">#B3FFFFFF</item>
+    <item name="colorSuggestionBar">#FFE7EAEE</item>
+    <item name="emoji_button_bg">#FFFFFFFF</item>
     <item name="emoji_color">#FF1F1F1F</item>
     <item name="clipboard_divider_color">#33000000</item>
   </style>

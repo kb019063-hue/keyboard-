@@ -61,6 +61,26 @@ object CornerLabelPolicy {
             kind == KeyValue.Kind.Hangul_medial
 
     /**
+     * Whether a CORNER label is a symbol Gboard would print, as opposed to a command's icon.
+     *
+     * Gboard's keys carry small symbols (`%` above Q, `@` above A): things you could also
+     * type. It never prints a gear, a scissors or a "copy" picture on a key. This keyboard
+     * does carry those as corner swipes -- `config` on the comma, `undo`/`cut`/`copy`/`paste`
+     * materialised by the extra-keys defaults onto Z/X/C/V, the cursor sliders on the space
+     * bar -- and calm mode used to draw them, which is how the owner's screenshot ended up
+     * with a gear on the comma, a scissors on X and two empty "tofu" boxes on C and V (those
+     * command labels are private-use icon glyphs from `special_font.ttf`, and the sub-label
+     * paint was not using that font).
+     *
+     * So the calm default prints a corner only when it types something: a character, a
+     * compose/hangul jamo, or a string. Every command keeps working exactly as before by
+     * corner swipe; it just stops being decoration. `print_all_key_symbols` still overrides
+     * this -- the dense rendering is one tap away, unchanged.
+     */
+    fun isPrintableCornerKind(kind: KeyValue.Kind?): Boolean =
+        isCharacterKind(kind) || kind == KeyValue.Kind.String
+
+    /**
      * The set of corner slots to draw, as a bit mask over the slot indices above.
      *
      * @param printAll the "print every symbol on keys" preference. True is the pre-phase-4

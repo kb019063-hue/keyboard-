@@ -64,6 +64,15 @@ CHIP_PAD_DP = 12.0         # suggestion TextView horizontal padding
 CHIP_MARGIN_DP = 4.0
 SUGGESTION_SP = 16.0
 TOOLBAR_ICON_DP = 24.0
+# Label metrics, from Keyboard2View.onMeasure + Config.Defaults: labelBaseSize is
+# min(row height - vertical margin, (key width - horizontal margin) * 3/2) * CHARACTER_SIZE,
+# then the main label is labelBaseSize * LABEL_TEXT_SIZE_FACTOR and a corner hint is
+# labelBaseSize * SUBLABEL_TEXT_SIZE_FACTOR (x secondary_label_size_scale, default 1).
+CHARACTER_SIZE = 1.18
+LABEL_TEXT_SIZE_FACTOR = 0.36
+SUBLABEL_TEXT_SIZE_FACTOR = 0.13
+KEY_VERTICAL_MARGIN_DP = 1.5
+KEY_HORIZONTAL_MARGIN_DP = 2.0
 APP_DP = 372.0             # app chrome above the keyboard
 TOOLBAR_COMMANDS = [
     "more_tools", "undo", "select_word", "switch_clipboard",
@@ -413,12 +422,25 @@ def main(argv):
             c = k.get("c")
             lbl, single = label_for(c)
             cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+            # Same size the view computes, so the preview's proportions are the app's.
+            label_base = min(rh - KEY_VERTICAL_MARGIN_DP * dp,
+                             (w - KEY_HORIZONTAL_MARGIN_DP * dp) * 1.5) * CHARACTER_SIZE
+            main_px = label_base * LABEL_TEXT_SIZE_FACTOR
+            sub_px = label_base * SUBLABEL_TEXT_SIZE_FACTOR
             if c == "space":
                 kb.line(x0 + (x1 - x0) * 0.30, cy, x1 - (x1 - x0) * 0.30, cy,
                         alpha_rgba(sec_c, 200), 2.5 * dp)
             elif lbl:
-                kb.text(cx, cy, lbl, alpha_rgba(ink), size_px * (1.05 if single else 0.85),
-                        bold=single)
+                # The app paints letters with the system sans at normal weight; medium reads
+                # closest in ImageMagick's DejaVu substitute (bold is too heavy at this size).
+                kb.text(cx, cy, lbl, alpha_rgba(ink), main_px, bold=False)
+            # Corner hint: one symbol in the north-east, exactly what CornerLabelPolicy
+            # prints in calm mode, and only when the key types a character.
+            hint = k.get("ne")
+            if single and hint and not hint.startswith("loc "):
+                pad = 5.0 * dp
+                kb.text(x1 - pad, y0 + pad + sub_px * 0.62, hint, alpha_rgba(sec_c),
+                        sub_px, bold=False, anchor="r")
             x += w
         y += rh
 

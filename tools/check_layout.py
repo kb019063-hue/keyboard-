@@ -187,19 +187,22 @@ def check_gboard_default():
         centers.append([canonical_key_value(k.get("c")) for k in row if k.get("c") is not None])
     if not centers or centers[0] != list("1234567890"):
         fail("%s first row is not the clean 1234567890 digit row: %s" % (gb, centers[0] if centers else None))
-    # The 26 letter keys must carry NO corner hints (Gboard's calm look). `loc` placement
-    # markers never render. Non-letter keys (shift/backspace/space/enter) legitimately keep
-    # functional corner commands — CornerLabelPolicy hides those because their centre is not a
-    # character, so they never appear as clutter on screen.
+    # The 26 letter keys carry EXACTLY ONE visible corner hint, in the north-east corner —
+    # that is what Gboard draws (one small symbol above each letter) and it is the only
+    # corner CornerLabelPolicy prints in calm mode. Anything else on a letter is clutter:
+    # `loc` placement markers never render, and a second symbol would either never be drawn
+    # or (with print_all_key_symbols on) bring the old wall of glyphs back.
     for i, row in enumerate(rows):
         for k in row:
             c = k.get("c")
             if c is None or not re.fullmatch(r"[a-z]", c):
                 continue
-            for attr in ("nw", "ne", "sw", "se", "w", "e", "n", "s"):
+            if k.get("ne") is None or k.get("ne").startswith("loc "):
+                fail("%s letter key %r has no north-east symbol hint (Gboard prints one)" % (gb, c))
+            for attr in ("nw", "sw", "se", "w", "e", "n", "s"):
                 v = k.get(attr)
                 if v is not None and not v.startswith("loc "):
-                    fail("%s letter key %r has a visible corner hint %r (clutter)" % (gb, c, v))
+                    fail("%s letter key %r has a visible corner hint %r outside ne (clutter)" % (gb, c, v))
 
     # (2) method.xml: the generic `en` and the English regional subtypes must all resolve to it.
     try:

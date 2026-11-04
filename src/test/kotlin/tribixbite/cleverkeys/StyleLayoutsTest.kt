@@ -333,12 +333,38 @@ class StyleLayoutsTest {
         // No symbol hints beside the digits: Gboard prints none, and the ?123 pane has them.
         for (k in kw.rows[0].keys) assertThat(visibleCorners(k)).isEmpty()
 
-        // Three letter rows below it, letters with no corner hints at all.
+        // Three letter rows below it. Every letter carries EXACTLY ONE symbol, in the
+        // north-east corner (slot 2) — the one small hint Gboard prints above its letters,
+        // and the only corner CornerLabelPolicy draws in calm mode. The symbols are the ones
+        // photographed off the owner's own Gboard (see the layout header); the two keys whose
+        // Gboard hint repeats another key's (`f`/`h` for "-", `e`/`c` for "'") carry the
+        // nearest distinct symbol instead, because a repeated value in one layout silently
+        // loses a position (KeyboardData.getKeys is keyed by value).
         assertThat(topLetterRow(kw)).isEqualTo(1)
-        val hinted = (1..3).flatMap { kw.rows[it].keys }
-            .filter { it.getKeyValue(0)?.getKind() == KeyValue.Kind.Char }
-            .filter { visibleCorners(it).isNotEmpty() }
-        assertThat(hinted).isEmpty()
+        val expected = mapOf(
+            'q' to "%", 'w' to "`", 'e' to "'", 'r' to "=", 't' to "|", 'y' to "]",
+            'u' to "<", 'i' to ">", 'o' to "{", 'p' to "}",
+            'a' to "@", 's' to "#", 'd' to "$", 'f' to "-", 'g' to "&", 'h' to "_",
+            'j' to "+", 'k' to "(", 'l' to ")",
+            'z' to "*", 'x' to "\"", 'c' to "/", 'v' to ":", 'b' to ";", 'n' to "!", 'm' to "?",
+        )
+        val letters = (1..3).flatMap { kw.rows[it].keys }.filter {
+            val c = it.getKeyValue(0)
+            c != null && c.getKind() == KeyValue.Kind.Char && c.getChar() in 'a'..'z'
+        }
+        assertThat(letters).hasSize(26)
+        for (k in letters) {
+            val ch = k.getKeyValue(0)!!.getChar()
+            assertWithMessage("$ch draws exactly one hint").that(visibleCorners(k)).hasSize(1)
+            assertWithMessage("$ch hint sits north-east")
+                .that(k.getKeyValue(CornerLabelPolicy.NORTH_EAST)?.getString())
+                .isEqualTo(expected[ch])
+            for (slot in listOf(CornerLabelPolicy.NORTH_WEST, CornerLabelPolicy.SOUTH_WEST,
+                                CornerLabelPolicy.SOUTH_EAST)) {
+                assertWithMessage("$ch has nothing in slot $slot")
+                    .that(k.getKeyValue(slot)).isNull()
+            }
+        }
 
         // Phase 4 part 6: the emoji key is its OWN key in Gboard's bottom row, not a hint on
         // the comma. Hiding it on a corner is why the owner could not find it.
