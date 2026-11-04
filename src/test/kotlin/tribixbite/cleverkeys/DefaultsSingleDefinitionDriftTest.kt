@@ -224,6 +224,7 @@ class DefaultsSingleDefinitionDriftTest {
         assertWithMessage("secondary alt").that(Defaults.SECONDARY_LANGUAGE_ALT).isEqualTo("none")
         assertWithMessage("slider fallback = the string default")
             .that(Defaults.SLIDER_SENSITIVITY_FALLBACK).isEqualTo(Defaults.SLIDER_SENSITIVITY.toFloat())
-        assertWithMessage("label factor").that(Defaults.LABEL_TEXT_SIZE_FACTOR).isEqualTo(0.33f)
+        // 2026-11-04: 0.33 -> 0.36 for Gboard-parity letter size (see Config.Defaults).
+        assertWithMessage("label factor").that(Defaults.LABEL_TEXT_SIZE_FACTOR).isEqualTo(0.36f)
     }
 }

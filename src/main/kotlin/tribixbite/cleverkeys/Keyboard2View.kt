@@ -1947,7 +1947,16 @@ class Keyboard2View @JvmOverloads constructor(
                 // mode they are simply no longer printed (docs/PHASE4-POLISH-DESIGN.md S1).
                 var presentCorners = 0
                 for (i in 1..8) {
-                    if (k.keys[i] != null && !k.keyHasFlag(i, KeyboardData.Key.F_LOC))
+                    val cornerKv = k.keys[i]
+                    if (cornerKv != null && !k.keyHasFlag(i, KeyboardData.Key.F_LOC) &&
+                        // Calm mode prints symbols, not command icons (CornerLabelPolicy
+                        // .isPrintableCornerKind): Gboard never draws a gear/scissors/undo
+                        // picture on a key, and our command labels are private-use icon
+                        // glyphs that reached the sub-label paint without their font -- the
+                        // gear on the comma, the scissors on X and the two tofu boxes on C/V
+                        // in the owner's screenshot. They all stay reachable by swipe.
+                        CornerLabelPolicy.isPrintableCornerKind(cornerKv.getKind())
+                    )
                         presentCorners = presentCorners or (1 shl i)
                 }
                 val calmCorners = CornerLabelPolicy.drawn(
