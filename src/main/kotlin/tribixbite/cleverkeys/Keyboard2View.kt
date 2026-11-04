@@ -1931,7 +1931,7 @@ class Keyboard2View @JvmOverloads constructor(
                 // The main label's drawn width bounds the W/E sublabel slots (SubLabelSizing).
                 val mainLabelW = if (k.keys[0] != null)
                     if (isSpaceKey(k.keys[0]!!))
-                        drawSpaceLanguageLabel(canvas, x, y, keyW, keyH, tc_key)
+                        drawSpaceLanguageLabel(canvas, x, y, keyW, keyH, tc_key, snap.primary_language)
                     else
                         drawLabel(canvas, k.keys[0]!!, keyW / 2f + x, y, keyH, isKeyDown, tc_key)
                 else 0f
@@ -2186,9 +2186,11 @@ class Keyboard2View @JvmOverloads constructor(
         y: Float,
         keyW: Float,
         keyH: Float,
-        tc: Theme.Computed.Key
+        tc: Theme.Computed.Key,
+        /** The frame's captured language — never live `Config` (ARC-072). */
+        languageTag: String
     ): Float {
-        val tag = _config.layout_bound_language ?: _config.primary_language
+        val tag = languageTag
         if (tag != _spaceLabelTag) {
             _spaceLabelTag = tag
             _spaceLabelText = LanguageDisplayNames.languageLabel(
