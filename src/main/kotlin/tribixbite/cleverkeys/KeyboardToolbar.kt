@@ -89,12 +89,13 @@ class KeyboardToolbar(
     private var opacity = 100
 
     /**
-     * Gboard's one-row behaviour (phase 4 part 6, corrected in part 7). On Gboard the toolbar
-     * and the word suggestions are the SAME row: one button at its left, one at its right, and
-     * words between them. This view is a sibling of the suggestion strip rather than part of
-     * it, so the closest honest equivalent is to keep the two END buttons while the strip has
-     * content and let [compactSpacer] own the middle. Which buttons those are is positional,
-     * not name-based: a custom toolbar without `more_tools` or `voice_typing` must not vanish.
+     * Collapsed-row mode (phase 4 part 6/7), **no longer wired** as of 2026-11-04.
+     *
+     * It kept the two end buttons and hid the rest while the suggestion strip carried words.
+     * The owner's Gboard screenshots show every icon in the row while typing, and on his phone
+     * the collapse read as "part of the keyboard disappears when I type something", so
+     * `CleverKeysService` stopped calling [setCompactMode]. The mode and its pure policy stay
+     * because they are correct for a future single-row header; nothing turns them on today.
      */
     private var compact = false
 

@@ -206,7 +206,7 @@ class StyleLayoutsTest {
             // space bar one width — Gboard itself also gives the emoji a key and the space 4.
             GBOARD to listOf(
                 numeric("?123", 1.5f), Slot(key(","), 1f), Slot(key("switch_emoji"), 1f),
-                Slot(key("space"), 4f), Slot(key("."), 1f), Slot(key("enter"), 1.5f),
+                Slot(key("space"), 4.5f), Slot(key("."), 1f), Slot(key("enter"), 1f),
             ),
             // SwiftKey: 123 | emoji | , | space | . | enter
             SWIFTKEY to listOf(
@@ -384,8 +384,10 @@ class StyleLayoutsTest {
                 key("?123:switch_numeric"), key(","), key("switch_emoji"),
                 key("space"), key("."), key("enter"),
             ).inOrder()
-        // Gboard's widths: ?123 1.5 | , 1 | emoji 1 | space 4 | . 1 | enter 1.5
-        assertThat(bottom.map { it.width }).containsExactly(1.5f, 1f, 1f, 4f, 1f, 1.5f).inOrder()
+        // Gboard's widths: ?123 1.5 | , 1 | emoji 1 | space 4.5 | . 1 | enter 1. The enter lost
+        // half a key to the space bar on 2026-11-04: Gboard's enter is ONE key wide and painted
+        // as a blue disc, not a long flat 1.5-wide key.
+        assertThat(bottom.map { it.width }).containsExactly(1.5f, 1f, 1f, 4.5f, 1f, 1f).inOrder()
     }
 
     @Test

@@ -21,7 +21,7 @@ What is mimicked, top to bottom:
   a position. The digits are NOT hinted on the top row: the number row above already shows
   them, which is what Gboard does when its own number row is switched on;
 - the second row indented by half a key; Shift and Delete 1.5 keys wide;
-- bottom row "?123 | , | emoji | space | . | enter" at 1.5 / 1 / 1 / 4 / 1 / 1.5 key widths, the
+- bottom row "?123 | , | emoji | space | . | enter" at 1.5 / 1 / 1 / 4.5 / 1 / 1 key widths, the
   emoji key standing on its own where Gboard draws it, and a bare comma and period: Gboard
   prints nothing on those two, so their old corner hints moved onto the letters above
   (? on M, ! on N, : on V, - on F, apostrophe on E).
@@ -92,7 +92,10 @@ time, so turning that preference on cannot produce two rows of digits on this la
     <key width="1.5" c="backspace" nw="delete_last_word" ne="delete" sw="loc esc" se="loc menu" n="loc page_up" s="loc page_down"/>
   </row>
   <!-- Gboard's bottom row, in Gboard's order and widths: ?123 (1.5) | , (1) | emoji (1) |
-       space (4) | . (1) | enter (1.5). The emoji key is its OWN key, not a hint on the comma:
+       space (4.5) | . (1) | enter (1). The enter was 1.5 wide and drew as a long flat key;
+       Gboard gives it ONE key width and paints it as a blue disc (owner screenshot of Gboard,
+       2026-11-04: "enter key is blue and short and not too long"), so the extra half-key went
+       to the space bar. The emoji key is its OWN key, not a hint on the comma:
        that is where Gboard draws it and the owner reported "I don't see the emoji button", which
        was exactly the cost of hiding it on a corner. It carries no corner hints, also like
        Gboard: a value may appear only once in a whole layout (Key.getKeys is keyed by value), so
@@ -101,8 +104,8 @@ time, so turning that preference on cannot produce two rows of digits on this la
     <key width="1.5" c="?123:switch_numeric" nw="ctrl" ne="fn" sw="loc switch_greekmath" se="loc meta" w="loc config" n="loc alt" s="loc compose"/>
     <key c="," nw="loc change_method" sw="loc switch_clipboard" se="switch_gif" s="switch_back_clipboard"/>
     <key c="switch_emoji"/>
-    <key width="4" c="space" n="loc switch_forward" s="loc switch_backward" w="cursor_left" e="cursor_right"/>
+    <key width="4.5" c="space" n="loc switch_forward" s="loc switch_backward" w="cursor_left" e="cursor_right"/>
     <key c="."/>
-    <key width="1.5" c="enter" nw="loc voice_typing" ne="action" n="up" s="down" w="left" e="right" sw="doc_home" se="doc_end"/>
+    <key width="1" c="enter" nw="loc voice_typing" ne="action" n="up" s="down" w="left" e="right" sw="doc_home" se="doc_end"/>
   </row>
 </keyboard>

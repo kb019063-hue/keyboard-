@@ -26,6 +26,30 @@ class CommandRoutingTest {
         }
     }
 
+    /**
+     * Owner report 2026-11-04 (three screenshots): "the more tools doesn't even work, it only
+     * writes it". Tapping the toolbar's four-dot button typed the literal text `more_tools` into
+     * Google Keep, twice. Cause: `KeyValue.getKeyByName` is total, so the executor's fallback
+     * branch resolved the unimplemented command to a String key spelling its own name and
+     * committed it. [CommandRouting.isOwnNameFallback] is the rule that catches it.
+     */
+    @Test
+    fun anUnimplementedCommandIsNeverTypedAsItsOwnName() {
+        assertWithMessage("more_tools must be recognised as the unknown-name fallback")
+            .that(CommandRouting.isOwnNameFallback("more_tools", KeyValue.getKeyByName("more_tools")))
+            .isTrue()
+        assertWithMessage("every default toolbar command must be identifiable the same way")
+            .that(CommandRouting.isOwnNameFallback("switch_gif", KeyValue.getKeyByName("switch_gif")))
+            .isFalse() // an Event key: the executor defers on kind, not on the name rule
+        // A real String key is still typed: the rule keys on the value spelling the name.
+        assertWithMessage("the space key is a real String key, not a fallback")
+            .that(CommandRouting.isOwnNameFallback("space", KeyValue.getKeyByName("space")))
+            .isFalse()
+        assertWithMessage("a character key is never a fallback")
+            .that(CommandRouting.isOwnNameFallback("a", KeyValue.getKeyByName("a")))
+            .isFalse()
+    }
+
     @Test
     fun executorCommandsStayOnTheExecutor() {
         for (name in listOf("copy", "paste", "shareText", "switch_forward", "config", "left", "SWITCH_FORWARD")) {

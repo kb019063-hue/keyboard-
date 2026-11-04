@@ -191,6 +191,12 @@ class ThemeCreatorFieldWiringTest {
         assertThat(tc.keyForRole(Theme.Computed.KeyRole.SPECIAL)).isSameInstanceAs(tc.key_special)
         assertThat(tc.keyForRole(Theme.Computed.KeyRole.NORMAL)).isSameInstanceAs(tc.key)
         assertThat(tc.keyForRole(Theme.Computed.KeyRole.ACTIVATED)).isSameInstanceAs(tc.key_activated)
+        // 2026-11-04: enter has its own frame (Gboard paints it blue). A runtime colour scheme
+        // has no enter colour, so it must fall back to the SPECIAL fill rather than change a
+        // custom theme's appearance.
+        assertThat(tc.keyForRole(Theme.Computed.KeyRole.ENTER)).isSameInstanceAs(tc.key_enter)
+        assertThat(tc.key_enter.bg_paint.color and 0xFFFFFF)
+            .isEqualTo(tc.key_special.bg_paint.color and 0xFFFFFF)
     }
 
     /** The pure role mapping the draw loop feeds with kind + pointer state. */
@@ -218,6 +224,12 @@ class ThemeCreatorFieldWiringTest {
             .isEqualTo(Theme.Computed.KeyRole.NORMAL)
         assertThat(roleOf(null, false, false))
             .isEqualTo(Theme.Computed.KeyRole.NORMAL)
+        // The enter key is the one at-rest exception (Gboard's blue disc), and a press still
+        // wins over it so the pressed fill and its label stay paired.
+        assertThat(Theme.Computed.roleOf(KeyValue.Kind.Keyevent, false, false, true))
+            .isEqualTo(Theme.Computed.KeyRole.ENTER)
+        assertThat(Theme.Computed.roleOf(KeyValue.Kind.Keyevent, true, false, true))
+            .isEqualTo(Theme.Computed.KeyRole.ACTIVATED)
     }
 
     // -------------------------------------------------------- apply: consumer wiring

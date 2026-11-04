@@ -131,6 +131,21 @@ class Theme {
     @JvmField
     val colorKeySpecial: Int
 
+    /**
+     * Background of the ENTER key at rest (`colorKeyEnter`), or [colorKeySpecial] when the theme
+     * sets none. Separate from [colorKeySpecial] because Gboard paints only enter in the brand
+     * blue — backspace and the layout switchers share the special fill and must stay grey.
+     */
+    @JvmField
+    val colorKeyEnter: Int
+
+    /**
+     * Label colour drawn on the enter key (`colorLabelEnter`), or [labelColor] when unset:
+     * white on Gboard's blue fill, ink on every theme that leaves it alone.
+     */
+    @JvmField
+    val colorLabelEnter: Int
+
     /** Border colour of the ACTIVATED (pressed/locked) key frame. */
     val keyBorderColorActivated: Int
 
@@ -210,6 +225,10 @@ class Theme {
         colorKeyboardBackground = s.getColor(R.styleable.keyboard_colorKeyboard, 0)
         // Read before recycle(); 0 = "no opinion", which falls back to the key colour below.
         val suggestionBarColor = s.getColor(R.styleable.keyboard_colorSuggestionBar, 0)
+        // 0 = "no opinion": the enter key keeps the SPECIAL fill / the normal label colour,
+        // which is what every theme that predates colorKeyEnter/colorLabelEnter renders.
+        val enterKeyColor = s.getColor(R.styleable.keyboard_colorKeyEnter, 0)
+        val enterLabelColor = s.getColor(R.styleable.keyboard_colorLabelEnter, 0)
         s.recycle()
 
         // H-4: no XML attrs exist for the Theme-Creator fields — default each to the
@@ -217,6 +236,8 @@ class Theme {
         colorKeyLocked = colorKeyActivated
         colorKeyModifier = colorKey
         colorKeySpecial = colorKey
+        colorKeyEnter = if (enterKeyColor != 0) enterKeyColor else colorKeySpecial
+        colorLabelEnter = if (enterLabelColor != 0) enterLabelColor else labelColor
         keyBorderColorActivated = keyBorderColorTop
         rippleColor = 0 // platform-default ripple
         // Translucent themes need a strip that is more opaque than their keys or the suggestions
@@ -295,6 +316,10 @@ class Theme {
             .compositeOver(colorScheme.keyDefault).toArgb()
         colorKeySpecial = colorScheme.keySpecial
             .compositeOver(colorScheme.keyDefault).toArgb()
+        // Runtime themes have no per-key colour for enter: they keep the special fill, so a
+        // custom theme renders exactly as it did before the attribute existed.
+        colorKeyEnter = colorKeySpecial
+        colorLabelEnter = labelColor
         keyBorderColorActivated = colorScheme.keyBorderActivated.toArgb()
         rippleColor = colorScheme.ripple.toArgb()
         suggestionBackgroundColor = colorScheme.suggestionBackground.toArgb()
@@ -376,6 +401,13 @@ class Theme {
         val key_modifier: Key
         @JvmField
         val key_special: Key
+        /**
+         * The enter key's frame: `colorKeyEnter` when the theme sets one (Gboard's blue),
+         * the SPECIAL fill otherwise. Selected by [roleOf]'s `isEnter`, and drawn with a
+         * disc radius by `Keyboard2View` so it reads as Gboard's round action key.
+         */
+        @JvmField
+        val key_enter: Key
 
         init {
             // Rows height is proportional to the keyboard height, meaning it doesn't
@@ -411,6 +443,7 @@ class Theme {
             key_locked = Key(theme, config, keyWidth, true, theme.colorKeyLocked)
             key_modifier = Key(theme, config, keyWidth, false, theme.colorKeyModifier)
             key_special = Key(theme, config, keyWidth, false, theme.colorKeySpecial)
+            key_enter = Key(theme, config, keyWidth, false, theme.colorKeyEnter)
             indication_paint = init_label_paint(config, null).apply {
                 color = theme.subLabelColor
             }
@@ -420,7 +453,7 @@ class Theme {
          * H-4: which computed key frame a key renders with — pure so the mapping is
          * pinnable off-device (the draw loop feeds it kind + pointer state).
          */
-        enum class KeyRole { NORMAL, ACTIVATED, LOCKED, MODIFIER, SPECIAL }
+        enum class KeyRole { NORMAL, ACTIVATED, LOCKED, MODIFIER, SPECIAL, ENTER }
 
         /** The computed frame for [role] (see [roleOf]). */
         fun keyForRole(role: KeyRole): Key = when (role) {
@@ -429,6 +462,7 @@ class Theme {
             KeyRole.LOCKED -> key_locked
             KeyRole.MODIFIER -> key_modifier
             KeyRole.SPECIAL -> key_special
+            KeyRole.ENTER -> key_enter
         }
 
         class Key(
@@ -525,9 +559,16 @@ class Theme {
              * actions — enter, backspace, switchers, copy/paste) the Key Special fill.
              */
             @JvmStatic
-            fun roleOf(kind: KeyValue.Kind?, isKeyDown: Boolean, isLocked: Boolean): KeyRole = when {
+            fun roleOf(
+                kind: KeyValue.Kind?,
+                isKeyDown: Boolean,
+                isLocked: Boolean,
+                /** The enter key has its own fill (Gboard paints it blue) when at rest. */
+                isEnter: Boolean = false
+            ): KeyRole = when {
                 isKeyDown && isLocked -> KeyRole.LOCKED
                 isKeyDown -> KeyRole.ACTIVATED
+                isEnter -> KeyRole.ENTER
                 kind == KeyValue.Kind.Modifier -> KeyRole.MODIFIER
                 kind == KeyValue.Kind.Keyevent ||
                     kind == KeyValue.Kind.Event ||

@@ -49,6 +49,25 @@ object LanguageDisplayNames {
         }
     }
 
+    /**
+     * The bare language name Gboard prints on the space bar — "English", not the
+     * `"English (English)"` form [displayName] returns and not the region: Gboard's space bar
+     * names the language only, because the region is not something the user chose per keystroke.
+     *
+     * Unknown or empty codes fall back to [displayName]'s behaviour (the upper-cased code), and
+     * [NONE] yields the empty string so the caller can draw nothing.
+     */
+    fun languageLabel(code: String, uiLocale: Locale): String {
+        if (code.isBlank() || code == NONE) return ""
+        val locale = Locale.forLanguageTag(code.replace('_', '-'))
+        if (locale.language.isEmpty()) return code.uppercase(Locale.ROOT)
+        val name = locale.getDisplayLanguage(uiLocale)
+        if (name.isEmpty() || name.equals(locale.language, ignoreCase = true)) {
+            return locale.language.uppercase(Locale.ROOT)
+        }
+        return name.capitalizeFirst(uiLocale)
+    }
+
     /** CLDR language names are lower-case in many languages; a menu label starts upper-case. */
     private fun String.capitalizeFirst(locale: Locale): String =
         replaceFirstChar { if (it.isLowerCase()) it.titlecase(locale) else it.toString() }

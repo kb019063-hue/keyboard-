@@ -4,12 +4,21 @@
   <!-- Core keyboard permissions -->
   <uses-permission android:name="android.permission.VIBRATE"/>
 
-  <!-- PRIVACY: No INTERNET permission - CleverKeys is fully offline, no data leaves your device -->
+  <!-- INTERNET (2026-11-04, owner decision: "just add Internet permission"). Until this date the
+       manifest declared no INTERNET permission and the app was offline by construction. It is
+       declared now for ONE reason: the mic key hands audio to the device's speech recogniser, and
+       a recogniser service that proxies recognition under the calling app's UID needs this
+       permission to answer at all. Nothing in this app's own source opens a socket - that is still
+       pinned by ReleasePackagingDriftTest.productionSourcesCallNoNetworkApi, and no other network
+       permission (ACCESS_NETWORK_STATE, ACCESS_WIFI_STATE) is declared. Dictation audio leaves the
+       device only if the user's chosen recogniser is a cloud one; use an on-device recogniser to
+       keep it local. -->
+  <uses-permission android:name="android.permission.INTERNET"/>
 
   <!-- Voice input support (phase 4 part 1): the mic key dictates in-process through
        SpeechRecognizer, which requires RECORD_AUDIO. Audio is only captured while a dictation
        session is running, and it goes to the device's own speech recogniser - this app still has
-       no INTERNET permission, so nothing here adds a network path of its own. -->
+       so audio only leaves the device if that recogniser is a cloud one. -->
   <uses-permission android:name="android.permission.RECORD_AUDIO"/>
 
   <!-- User dictionary access for word suggestions (system dictionary only) -->
