@@ -1231,6 +1231,7 @@ tasks.register('runPureTests', JavaExec) {
     'tribixbite.cleverkeys.MoreToolsSheetTest',
     'tribixbite.cleverkeys.OneHandedConfigTest',
     'tribixbite.cleverkeys.SuggestionStripPolicyTest',
+    'tribixbite.cleverkeys.SuggestionPillPolicyTest',
     'tribixbite.cleverkeys.ToolbarCompactPolicyTest',
     'tribixbite.cleverkeys.FloatingConfigTest',
     'tribixbite.cleverkeys.ThemeDefaultMigrationTest',

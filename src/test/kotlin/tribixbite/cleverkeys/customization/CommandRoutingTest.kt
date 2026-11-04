@@ -5,6 +5,7 @@ import com.google.common.truth.Truth.assertWithMessage
 import java.io.File
 import org.junit.Test
 import tribixbite.cleverkeys.KeyValue
+import tribixbite.cleverkeys.ToolbarConfig
 
 /**
  * Every catalogue command must reach code that actually performs it (owner report 2026-10-01:
@@ -48,6 +49,31 @@ class CommandRoutingTest {
         assertWithMessage("a character key is never a fallback")
             .that(CommandRouting.isOwnNameFallback("a", KeyValue.getKeyByName("a")))
             .isFalse()
+    }
+
+    /**
+     * Every button on the default toolbar must have a route that actually performs it — the
+     * owner's report was "only the clipboard tool works" (2026-11-04), and the cause was a
+     * command (`more_tools`) that fell through every branch and got typed as text.
+     *
+     * A command qualifies when it is an editing key (pressed through `KeyEventHandler`), an
+     * event key (dispatched by `Keyboard2View`), or one of the view's own custom commands. A
+     * name that matches none of those is a button that can only ever do nothing or type itself.
+     */
+    @Test
+    fun everyDefaultToolbarButtonHasARealRoute() {
+        val viewCustomCommands = setOf("more_tools")
+        val orphaned = ToolbarConfig.DEFAULT_KEYS.filter { name ->
+            val kv = KeyValue.getKeyByName(name)
+            val kind = kv.getKind()
+            CommandRouting.editingValue(name) == null &&
+                kind != KeyValue.Kind.Event &&
+                kind != KeyValue.Kind.Editing &&
+                name !in viewCustomCommands &&
+                // A KeyEvent key is dispatched by the view's `else` branch as well.
+                kind != KeyValue.Kind.Keyevent
+        }
+        assertWithMessage("toolbar buttons with no route").that(orphaned).isEmpty()
     }
 
     @Test

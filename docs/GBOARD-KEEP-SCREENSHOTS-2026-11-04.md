@@ -87,3 +87,37 @@ commit so the claim and the check cannot drift apart.
 - Key corner radius (14 dp) reads rounder than Gboard's tiles.
 - The mic key's recognition path is still unproven on a real device; the bracketed reason in the
   status line is the diagnostic.
+
+---
+
+# Round 2 — the suggestion strip (2026-11-04, after "tackle the rest")
+
+Reference: Gboard, i.e. screenshot 2 of the owner's set, plus Google's own description of the
+feature (`9to5google.com/2021/08/13/gboard-suggestion-highlight/`): the most likely word sits in
+the **centre** of the strip, drawn on a box **hued with the return-key accent** — the same blue as
+the enter key — so it is unmistakable among the others.
+
+What this keyboard did: four grey words at the same weight, the "highlight" applied as a *text
+colour* borrowed from `colorLabelActivated`. On the Gboard themes that colour is the same ink as
+the other words, so there was no visible highlight at all — the owner's screenshot shows four
+identical words.
+
+What changed:
+
+- **`SuggestionPillPolicy`** (new, pure): decides whether the accent pill is drawable at all.
+  No accent, an unknown bar colour, or an accent that matches the bar (< 1.2 contrast) means "bold
+  text only", i.e. the old behaviour rather than an invisible smudge. On a drawable accent the pill
+  takes white ink, or black when the accent is pale.
+- **`SuggestionBar`**: the commit suggestion is now bold (it asked for `Typeface.NORMAL` before, so
+  even the weight was not being applied) and sits on a rounded pill filled with
+  `colorKeyEnter` — the return-key accent the enter-key work introduced, which is exactly the
+  colour Gboard uses. Pooled chips reset their background, padding and typeface on every bind, so
+  a recycle cannot leave a stale pill behind.
+- **`Theme` / `themes.xml`**: both Gboard variants now give the strip the keyboard's own field
+  colour (`#F2E7EAEE` light, `#C4141619` dark) instead of a separate lighter band. Gboard's strip
+  is one surface with the keyboard, not a second row floating under the toolbar.
+
+Still different from Gboard, and deliberately not changed blind: Gboard centres the most likely
+word in the middle slot; this bar keeps the ranked order and highlights the first entry, because
+the highlighted entry is exactly what the space bar commits and re-ordering the display would
+change which word a space press produces. That needs a decision, not a guess.
