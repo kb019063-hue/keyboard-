@@ -224,7 +224,8 @@ class DefaultsSingleDefinitionDriftTest {
         assertWithMessage("secondary alt").that(Defaults.SECONDARY_LANGUAGE_ALT).isEqualTo("none")
         assertWithMessage("slider fallback = the string default")
             .that(Defaults.SLIDER_SENSITIVITY_FALLBACK).isEqualTo(Defaults.SLIDER_SENSITIVITY.toFloat())
-        // 2026-11-04: 0.33 -> 0.36 for Gboard-parity letter size (see Config.Defaults).
-        assertWithMessage("label factor").that(Defaults.LABEL_TEXT_SIZE_FACTOR).isEqualTo(0.36f)
+        // 2026-11-04: 0.33 -> 0.36 by eye; 2026-11-05: 0.36 -> 0.48 measured against the owner's
+        // Gboard screenshot (Gboard's W is ~1.5x ours on the same 88 px tile).
+        assertWithMessage("label factor").that(Defaults.LABEL_TEXT_SIZE_FACTOR).isEqualTo(0.48f)
     }
 }

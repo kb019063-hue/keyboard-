@@ -132,6 +132,16 @@ class Theme {
     val colorKeySpecial: Int
 
     /**
+     * True when the suggestion strip must be painted with [colorKeyboardBackground] at full
+     * alpha rather than with [suggestionBackgroundColor] times the user's bar opacity.
+     *
+     * Gboard's strip is the keyboard surface itself; a separately-opacity-multiplied band over
+     * the app read as a second row under the toolbar. False for every theme that predates the
+     * attribute, so their strips render exactly as before.
+     */
+    val suggestionBarMatchesKeyboard: Boolean
+
+    /**
      * Background of the ENTER key at rest (`colorKeyEnter`), or [colorKeySpecial] when the theme
      * sets none. Separate from [colorKeySpecial] because Gboard paints only enter in the brand
      * blue — backspace and the layout switchers share the special fill and must stay grey.
@@ -229,6 +239,8 @@ class Theme {
         // which is what every theme that predates colorKeyEnter/colorLabelEnter renders.
         val enterKeyColor = s.getColor(R.styleable.keyboard_colorKeyEnter, 0)
         val enterLabelColor = s.getColor(R.styleable.keyboard_colorLabelEnter, 0)
+        suggestionBarMatchesKeyboard =
+            s.getBoolean(R.styleable.keyboard_suggestionBarMatchesKeyboard, false)
         s.recycle()
 
         // H-4: no XML attrs exist for the Theme-Creator fields — default each to the
@@ -320,6 +332,8 @@ class Theme {
         // custom theme renders exactly as it did before the attribute existed.
         colorKeyEnter = colorKeySpecial
         colorLabelEnter = labelColor
+        // Runtime themes keep their own strip colour and opacity handling.
+        suggestionBarMatchesKeyboard = false
         keyBorderColorActivated = colorScheme.keyBorderActivated.toArgb()
         rippleColor = colorScheme.ripple.toArgb()
         suggestionBackgroundColor = colorScheme.suggestionBackground.toArgb()

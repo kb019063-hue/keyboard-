@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
   <dimen name="margin_top">3dp</dimen>
-  <dimen name="key_padding">2dp</dimen>
+  <!-- Inset of a key's main/corner labels from the CELL edge, before the tile's own half-gap
+     inset is added. 2dp put Gboard's corner hints 2dp from the tile edge, where the rounded
+     corner eats them and they read as floating in the row gap; the owner's Gboard screenshot
+     insets them ~5dp (2026-11-05). 4dp + half the 3dp gap lands at 5.5dp. -->
+  <dimen name="key_padding">4dp</dimen>
   <dimen name="emoji_text_size">28dp</dimen>
   <dimen name="pref_button_size">28dp</dimen>
   <!-- Will be overwritten automatically by Gradle for the debug build variant -->

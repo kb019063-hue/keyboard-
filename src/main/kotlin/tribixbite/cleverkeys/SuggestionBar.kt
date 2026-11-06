@@ -603,6 +603,19 @@ class SuggestionBar : LinearLayout {
      * Update the background color with the current opacity
      */
     private fun updateBackgroundOpacity() {
+        // Gboard's strip is the keyboard surface, not a band laid over the app: when the theme
+        // asks for that (`suggestionBarMatchesKeyboard`), paint the keyboard's own field colour
+        // and ignore the bar-opacity multiply — the field is already exactly what the keys sit
+        // on, so any second alpha makes the strip a visibly different shade.
+        val themeNow = theme
+        if (themeNow != null && themeNow.suggestionBarMatchesKeyboard) {
+            val field = themeNow.colorKeyboardBackground
+            if (field != 0) {
+                setBackgroundColor(field)
+                return
+            }
+        }
+
         // Calculate alpha value from opacity percentage (0-100 -> 0-255)
         val alpha = (opacity * 255) / 100
 

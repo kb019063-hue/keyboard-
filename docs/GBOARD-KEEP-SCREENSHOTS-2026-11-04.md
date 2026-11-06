@@ -121,3 +121,30 @@ Still different from Gboard, and deliberately not changed blind: Gboard centres 
 word in the middle slot; this bar keeps the ranked order and highlights the first entry, because
 the highlighted entry is exactly what the space bar commits and re-ordering the display would
 change which word a space press produces. That needs a decision, not a guess.
+
+---
+
+# Round 3 — measured against the owner's Gboard, 2026-11-05
+
+New set in `Updated comparison/` (eleven screenshots, all this app; the Gboard reference is the
+dark one from the previous set, kept in git history). The owner's instruction was to compare them
+exactly rather than by eye, so this round starts from pixel measurements at the same 1080 px
+width, on the same 10-column key pitch (88 px per cell):
+
+| measurement | this keyboard (2026-11-05) | Gboard | change |
+|---|---|---|---|
+| letter `W` glyph width on an 88 px tile | 42 px | 64 px | label factor 0.36 → **0.48** |
+| corner-hint size | 0.13 of key height | ~1.3× ours | sub-label factor 0.13 → **0.17** |
+| tile corner arc | ~12 dp (blob on a 33 dp key) | ~5 dp | `keyBorderRadius` 14 dp → **6 dp** |
+| hint inset from the tile edge | 2 dp (inside the rounded corner) | ~5 dp | `key_padding` 2 dp → **4 dp** |
+| suggestion strip | opacity-multiplied band, visibly darker than the field | the keyboard surface itself | **`suggestionBarMatchesKeyboard`** |
+
+The strip fix is a new theme attribute: when set, the bar paints `colorKeyboardBackground` at full
+alpha instead of `suggestionBackgroundColor` × the user's bar opacity. Multiplying the theme colour
+by 80 % can never land on the field colour (it would need 119 % alpha), which is why the old
+comment "chosen to LAND on the field" was arithmetically impossible and the band always showed.
+Off by default, so every other theme renders exactly as before.
+
+Not changed, and why: the emoji search pane (screenshot 8) shows a large empty area after a few
+results — that is a layout question of its own, not a Gboard-parity delta, and there is no Gboard
+emoji screenshot in the set to measure it against.
