@@ -42,11 +42,12 @@ object Defaults {
     const val CHARACTER_SIZE = 1.18f
     // #133: Secondary-key (flick) label size as fraction of key height.
     // Exposed so a preference can scale it independently of the primary label.
-    // 2026-11-04: 0.22 -> 0.13. The corner hint is Gboard's small symbol above the letter
-    // (`%` over Q), roughly a quarter of the letter's height; at 0.22 ours drew hints two
-    // thirds the size of the letter, which is what made the default look crowded next to
-    // Gboard. secondary_label_size_scale still multiplies this if a user wants them bigger.
-    const val SUBLABEL_TEXT_SIZE_FACTOR = 0.13f
+    // 2026-11-04: 0.22 -> 0.13, then 2026-11-05: 0.13 -> 0.17 after measuring the owner's own
+    // Gboard screenshot at the same 1080 px width: Gboard's corner hint is ~1.3x the glyph this
+    // keyboard drew. 0.13 was tuned by eye against a recollection of Gboard; the measurement
+    // says 0.17 (the hint stays clearly subordinate to the letter, as on Gboard).
+    // secondary_label_size_scale still multiplies this if a user wants them bigger.
+    const val SUBLABEL_TEXT_SIZE_FACTOR = 0.17f
     // #133: User-facing multiplier on the secondary-label size. 1.0 = unchanged
     // (keeps the historic SUBLABEL_TEXT_SIZE_FACTOR ratio). Lets users shrink
     // crowded flick labels or enlarge them independently of the primary label.
@@ -54,10 +55,14 @@ object Defaults {
     /**
      * Primary label size as a fraction of key height (not a preference; L12 names it).
      *
-     * 2026-11-04: 0.33 -> 0.36. Gboard's letters fill ~40 % of the key height; at 0.33 ours
-     * sat at ~34 % and read small and light next to it.
+     * 2026-11-04: 0.33 -> 0.36 by eye. 2026-11-05: 0.36 -> 0.48 after measuring the owner's
+     * Gboard screenshot at the same 1080 px width and the same key pitch: on an 88 px tile
+     * Gboard's `W` measures 64 px wide, this keyboard's `w` 42 px — Gboard's letters are about
+     * 1.5x bigger than ours, which is the single most obvious difference between the two
+     * keyboards side by side. 0.48 keeps every glyph inside its key (the widest, `M`/`W`, at
+     * ~73 % of the tile width, exactly Gboard's proportion).
      */
-    const val LABEL_TEXT_SIZE_FACTOR = 0.36f
+    const val LABEL_TEXT_SIZE_FACTOR = 0.48f
     const val KEY_VERTICAL_MARGIN = 1.5f
     const val KEY_HORIZONTAL_MARGIN = 2.0f
     const val BORDER_CONFIG = false

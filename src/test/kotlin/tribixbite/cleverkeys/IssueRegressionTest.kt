@@ -680,8 +680,8 @@ class IssueRegressionTest {
     @Test
     fun `issue 133 — Defaults SUBLABEL_TEXT_SIZE_FACTOR has sensible default`() {
         // The constant must exist and stay a sane fraction of the key height. It was 0.22
-        // (the pre-#133 hardcoded value); 2026-11-04 moved it to 0.13 so the corner hint
-        // reads like Gboard's small symbol instead of two thirds of the letter.
+        // (the pre-#133 hardcoded value); 2026-11-04 moved it to 0.13 by eye, and 2026-11-05 to
+        // 0.17 after measuring Gboard's own hint on the owner's screenshot.
         val field = try {
             Defaults::class.java.getDeclaredField("SUBLABEL_TEXT_SIZE_FACTOR")
         } catch (e: NoSuchFieldException) {
@@ -690,7 +690,7 @@ class IssueRegressionTest {
         assertThat(field).isNotNull()
         if (field != null) {
             field.isAccessible = true
-            assertThat(field.getFloat(null)).isWithin(0.0001f).of(0.13f)
+            assertThat(field.getFloat(null)).isWithin(0.0001f).of(0.17f)
         }
     }
 }
