@@ -3,8 +3,8 @@ package tribixbite.cleverkeys
 /**
  * Which toolbar buttons survive while the suggestion strip is occupied (phase 4 part 7).
  *
- * The row is a sibling of the word strip, so compact mode keeps the two END buttons and
- * puts a flexible spacer between them. Deciding that from command names was wrong: a user
+ * The shared header keeps the two END buttons and puts a flexible spacer between them.
+ * Deciding that from command names was wrong: a user
  * who removed `more_tools` or `voice_typing` from a custom toolbar lost every button as
  * soon as suggestions appeared. Positions, not names, are the contract.
  *
@@ -21,11 +21,11 @@ object ToolbarCompactPolicy {
     /**
      * Weight of one button. Normal mode divides the row evenly; compact mode pins both
      * ends to their intrinsic width so the spacer — not the buttons — owns the middle.
-     * A one-button toolbar still fills the row in either mode.
+     * A one-button toolbar is pinned to the start in compact mode.
      */
     fun buttonWeight(count: Int, compact: Boolean): Float =
-        if (compact && count > 1) 0f else 1f
+        if (compact && count > 0) 0f else 1f
 
-    /** A flexible spacer is needed only when two end buttons must be pushed apart. */
-    fun spacerVisible(count: Int, compact: Boolean): Boolean = compact && count > 1
+    /** A spacer holds the middle for suggestions, including with a single end button. */
+    fun spacerVisible(count: Int, compact: Boolean): Boolean = compact && count > 0
 }

@@ -437,7 +437,8 @@ class KeyboardComponentGraph(
  *
  * Hierarchy:
  * - inputViewContainer (LinearLayout, VERTICAL)
- *   - topPane (FrameLayout) - contains either scrollView OR contentPaneContainer
+ *   - SharedKeyboardHeader - contains toolbar and topPane
+ *     - topPane (FrameLayout) - contains either scrollView OR contentPaneContainer
  *   - keyboardView (added by caller)
  */
 object SuggestionBarPane {
@@ -451,7 +452,7 @@ object SuggestionBarPane {
         val contentPaneContainer: FrameLayout,
         val scrollView: HorizontalScrollView,
         val topPane: FrameLayout,
-        /** One-tap command row, a sibling ABOVE topPane (see KeyboardToolbar). */
+        /** One-tap command row inside the shared typing header. */
         val toolbar: KeyboardToolbar,
     )
 
@@ -522,20 +523,14 @@ object SuggestionBarPane {
         // Start with scrollView (suggestion bar)
         topPane.addView(scrollView)
 
-        // Toolbar: a sibling ABOVE topPane, deliberately never inside it. topPane swaps its only
-        // child between the suggestion strip and a content pane, so a toolbar inside it would be
-        // removed the moment the clipboard or emoji pane opens; and with prediction and swipe
-        // typing both off topPane is collapsed to height 0, which would hide the toolbar exactly
-        // when there is no suggestion strip to fall back on.
         val toolbar = KeyboardToolbar(context, theme)
-        toolbar.layoutParams = LinearLayout.LayoutParams(
+        // The toolbar and strip share one 40dp row; the content pane is still hosted in
+        // topPane and is placed below the toolbar while open.
+        val header = SharedKeyboardHeader(context, toolbar, topPane, scrollView, suggestionBar, toolbarHeight)
+        inputViewContainer.addView(header, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
-            toolbarHeight
-        )
-        inputViewContainer.addView(toolbar)
-
-        // Add topPane to container (keyboard view added by caller)
-        inputViewContainer.addView(topPane)
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ))
 
         return InitializationResult(
             inputViewContainer,
@@ -587,6 +582,7 @@ object SuggestionBarPane {
             topPane.addView(contentPane)
         }
 
+        (topPane.parent as? SharedKeyboardHeader)?.refresh()
         topPane.requestLayout()
         android.util.Log.i("SuggestionBarInit", "switchToContentPaneMode complete: topPane.childCount=${topPane.childCount}")
     }
@@ -608,10 +604,11 @@ object SuggestionBarPane {
         params.height = height
         topPane.layoutParams = params
 
-        // Set scrollView with explicit height
+        // The strip can be restored at zero height when it is empty, then expanded later
+        // by the occupancy callback. Its child must follow the parent when that happens.
         scrollView.layoutParams = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
-            height
+            FrameLayout.LayoutParams.MATCH_PARENT
         )
 
         // Add scrollView if not already added
@@ -622,6 +619,7 @@ object SuggestionBarPane {
             topPane.addView(scrollView)
         }
 
+        (topPane.parent as? SharedKeyboardHeader)?.refresh()
         topPane.requestLayout()
         android.util.Log.i("SuggestionBarInit", "switchToSuggestionBarMode complete: topPane.childCount=${topPane.childCount}")
     }

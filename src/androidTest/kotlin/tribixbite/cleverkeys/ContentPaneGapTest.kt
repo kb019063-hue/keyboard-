@@ -32,7 +32,7 @@ import org.junit.runner.RunWith
  * `MATCH_PARENT` child stretches past what the parent reserved. So the invariants are:
  *
  *  - after either switch, `topPane.layoutParams.height` is EXACTLY the requested height;
- *  - the child added is given an explicit pixel height, never `MATCH_PARENT`;
+ *  - the content pane gets an explicit pixel height; the strip follows its parent;
  *  - `topPane` holds exactly ONE child, so the outgoing view cannot leave a reserved strip;
  *  - laid out for real, the pane's bottom edge coincides with `topPane`'s — that coincidence,
  *    in pixels, IS "no gap".
@@ -162,8 +162,8 @@ class ContentPaneGapTest {
 
             assertEquals(barHeight, topPane.layoutParams.height)
             assertEquals(
-                "the restored bar gets an explicit height too",
-                barHeight, scrollView.layoutParams.height
+                "the restored bar follows the parent as occupancy changes",
+                ViewGroup.LayoutParams.MATCH_PARENT, scrollView.layoutParams.height
             )
             assertEquals(1, topPane.childCount)
             assertSame(scrollView, topPane.getChildAt(0))
@@ -183,6 +183,52 @@ class ContentPaneGapTest {
             assertEquals(topPane.height, scrollView.bottom)
             assertEquals(topPane.bottom, keyboardStandIn.top)
             assertEquals(barHeight + keyboardHeight, container.height)
+        }
+    }
+
+    @Test
+    fun emptyRestoredStripExpandsWithItsParentWhenSuggestionsArrive() {
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            SuggestionBarPane.switchToContentPaneMode(topPane, contentPane, scrollView, paneHeight)
+            SuggestionBarPane.switchToSuggestionBarMode(topPane, contentPane, scrollView, 0)
+            layOut()
+            assertEquals(0, scrollView.height)
+
+            // The service expands only topPane on an occupancy change.
+            topPane.layoutParams.height = barHeight
+            topPane.requestLayout()
+            layOut()
+            assertEquals(barHeight, scrollView.height)
+            assertEquals(topPane.bottom, keyboardStandIn.top)
+        }
+    }
+
+    @Test
+    fun typingAndClearingSuggestionsKeepsKeyboardPositionAtStableDefault() {
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            val bar = scrollView.getChildAt(0) as SuggestionBar
+            bar.onOccupancyChanged = { occupied ->
+                topPane.layoutParams.height = SuggestionStripPolicy.heightPx(
+                    occupied, Defaults.SUGGESTION_STRIP_ALWAYS_VISIBLE, barHeight
+                )
+                topPane.requestLayout()
+            }
+            layOut()
+            val initialTop = keyboardStandIn.top
+            val initialHeight = container.height
+            bar.setSuggestions(listOf("call", "called"))
+            layOut()
+            assertEquals(initialTop, keyboardStandIn.top)
+            assertEquals(initialHeight, container.height)
+            // Space can clear the current word's suggestions before next-word results arrive.
+            bar.setSuggestions(emptyList())
+            layOut()
+            assertEquals(initialTop, keyboardStandIn.top)
+            assertEquals(initialHeight, container.height)
+            bar.setSuggestions(listOf("me", "the"))
+            layOut()
+            assertEquals(initialTop, keyboardStandIn.top)
+            assertEquals(initialHeight, container.height)
         }
     }
 

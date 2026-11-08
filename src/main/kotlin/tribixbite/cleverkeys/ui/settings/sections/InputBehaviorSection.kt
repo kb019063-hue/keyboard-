@@ -112,9 +112,8 @@ internal fun SettingsActivity.InputBehaviorSection() {
                         displayValue = "$suggestionBarOpacity%"
                     )
 
-                    // Phase 4 part 2: an empty strip read as a broken purple band on the owner's
-                    // phone, so collapsing it is the default; this is the way back to a keyboard
-                    // whose height never moves.
+                    // With the toolbar off, reserve the empty strip to keep typing stable.
+                    // With it on, the toolbar already fills the shared row.
                     SettingsSwitch(
                         title = stringResource(R.string.input_strip_always_title),
                         description = stringResource(R.string.input_strip_always_desc),

@@ -17,7 +17,7 @@ import android.widget.TextView
  * - Clear button (X) to reset search
  * - "No results" message when search returns empty
  * - Focus-based routing (typing goes to EditText only when focused)
- * - Auto-detect word before cursor for initial query
+ * - Supports an optional explicit initial query
  *
  * @since v1.2.10
  */

@@ -80,6 +80,34 @@ class EmojiSearchTest {
         }
     }
 
+    @Test
+    fun openingWithoutQueryShowsEmojiEvenWithNoHistory() {
+        TestConfigHelper.ensureConfigInitialized(context)
+        val prefs = context.getSharedPreferences("emoji_last_use", Context.MODE_PRIVATE)
+        val old = prefs.getStringSet("emoji_last_use", null)?.toSet()
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            try {
+                prefs.edit().remove("emoji_last_use").commit()
+                val themed = android.view.ContextThemeWrapper(context, R.style.GboardLight)
+                val pane = android.view.LayoutInflater.from(themed)
+                    .inflate(R.layout.emoji_pane, null) as android.view.ViewGroup
+                val manager = EmojiSearchManager()
+                manager.initialize(pane)
+                manager.onPaneOpened(null)
+                val input = pane.findViewById<android.widget.EditText>(R.id.emoji_search_input)
+                val grid = pane.findViewById<EmojiGridView>(R.id.emoji_grid)
+                assertEquals("", input.text.toString())
+                assertTrue("A new picker should not be empty", grid.adapter.count > 0)
+                manager.onPaneClosed()
+            } finally {
+                val editor = prefs.edit()
+                if (old == null) editor.remove("emoji_last_use")
+                else editor.putStringSet("emoji_last_use", old)
+                editor.commit()
+            }
+        }
+    }
+
     // =========================================================================
     // Basic search functionality tests
     // =========================================================================

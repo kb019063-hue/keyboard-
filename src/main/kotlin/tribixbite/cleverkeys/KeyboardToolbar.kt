@@ -19,7 +19,7 @@ import tribixbite.cleverkeys.customization.ShortSwipeMapping
 import tribixbite.cleverkeys.customization.SwipeDirection
 
 /**
- * A row of one-tap command buttons, sitting above the suggestion strip.
+ * A row of one-tap command buttons sharing the typing header with suggestions.
  *
  * Phase 1 of the HeliBoard gap analysis (`docs/HELIBOARD-GAP-ANALYSIS.md`): HeliBoard has a
  * toolbar and this codebase did not, but every command a toolbar would run already existed in
@@ -30,15 +30,9 @@ import tribixbite.cleverkeys.customization.SwipeDirection
  * one place that already makes them, so a toolbar button and a short-swipe binding can never
  * disagree about what a command does.
  *
- * ## Placement
- *
- * This is a sibling of `topPane` inside the input-view container, **not** a child of it. Two
- * reasons, both from reading `SuggestionBarPane`:
- * - `topPane` swaps its only child between the suggestion strip and a content pane, so anything
- *   inside it is removed the moment the clipboard or emoji pane opens.
- * - with word prediction and swipe typing both off, `topPane` is collapsed to height 0, so a
- *   toolbar living there would vanish exactly when the user has no suggestion strip and wants the
- *   buttons most.
+ * The shared header overlays its suggestion view over the middle of this row. In compact
+ * mode the first and last configured commands stay at the edges; the remaining commands return
+ * when the header is unoccupied or a content pane is open.
  *
  * ## Sizing
  *
@@ -46,8 +40,8 @@ import tribixbite.cleverkeys.customization.SwipeDirection
  * fit they stretch to divide the width evenly, and when they do not the row scrolls instead of
  * shrinking buttons below [BUTTON_MIN_WIDTH_DP]. In compact mode the two end buttons return
  * to their intrinsic widths and [ToolbarCompactPolicy] gives the middle to [compactSpacer],
- * so they sit at the edges rather than as two half-width blocks. No button is ever
- * unreachable or too small to hit.
+ * so they sit at the edges rather than as two half-width blocks. Middle buttons return when
+ * suggestions are no longer shown; visible buttons keep a minimum touch target.
  *
  * ## Theming
  *
@@ -80,24 +74,16 @@ class KeyboardToolbar(
 
     /**
      * Opacity (0..100) applied to the bar background, mirroring `SuggestionBar.setOpacity`.
-     *
-     * The strip has always multiplied its background by the user's `suggestion_bar_opacity`
-     * (default 80 %) while the toolbar painted the raw colour, so the two rows sat one shade
-     * apart even on an opaque theme — visible as a faint band across the top. With a translucent
-     * theme the mismatch is not faint, so both rows now follow the same rule.
+     * Themes that match the strip to the keyboard field use the field colour instead.
      */
     private var opacity = 100
 
-    /**
-     * Collapsed-row mode (phase 4 part 6/7), **no longer wired** as of 2026-11-04.
-     *
-     * It kept the two end buttons and hid the rest while the suggestion strip carried words.
-     * The owner's Gboard screenshots show every icon in the row while typing, and on his phone
-     * the collapse read as "part of the keyboard disappears when I type something", so
-     * `CleverKeysService` stopped calling [setCompactMode]. The mode and its pure policy stay
-     * because they are correct for a future single-row header; nothing turns them on today.
-     */
+    /** Compact mode leaves space for the shared suggestion strip. */
     private var compact = false
+
+    /** The header reflows when toolbar visibility, keys, or measured edge widths change. */
+    var onLayoutStateChanged: (() -> Unit)? = null
+    private var reportedEdgeWidths: Pair<Int, Int>? = null
 
     init {
         // A stable id so PreferenceUIUpdateHandler can re-find this view after a preference
@@ -161,6 +147,7 @@ class KeyboardToolbar(
             keys = parsed
             rebuild()
         }
+        onLayoutStateChanged?.invoke()
     }
 
     private fun rebuild() {
@@ -170,7 +157,7 @@ class KeyboardToolbar(
         }
         // Between the first and second button, so a visible spacer pushes the last button to
         // the opposite edge in compact mode without disturbing normal-mode button order.
-        if (row.childCount > 1) row.addView(compactSpacer, 1)
+        if (row.childCount > 0) row.addView(compactSpacer, 1)
         applyCompact()
     }
 
@@ -223,6 +210,25 @@ class KeyboardToolbar(
         // Mutating LayoutParams.weight needs a layout pass; visibility changes do not always
         // schedule one when the view is inside a HorizontalScrollView.
         if (changed) row.requestLayout()
+    }
+
+    /** Actual end-button widths, so custom text commands never overlap suggestions. */
+    fun compactEdgeWidths(): Pair<Int, Int> {
+        if (visibility != View.VISIBLE || !compact) return 0 to 0
+        val buttons = (0 until row.childCount).map { row.getChildAt(it) }
+            .filter { it !== compactSpacer && it.visibility == View.VISIBLE }
+        if (buttons.isEmpty()) return 0 to 0
+        fun width(view: View): Int = view.width.takeIf { it > 0 } ?: dp(BUTTON_MIN_WIDTH_DP)
+        return width(buttons.first()) to if (buttons.size > 1) width(buttons.last()) else 0
+    }
+
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        super.onLayout(changed, l, t, r, b)
+        val widths = compactEdgeWidths()
+        if (widths != reportedEdgeWidths) {
+            reportedEdgeWidths = widths
+            onLayoutStateChanged?.invoke()
+        }
     }
 
     /**
@@ -354,10 +360,15 @@ class KeyboardToolbar(
     }
 
     private fun applyThemeColors() {
-        val bg = theme?.suggestionBackgroundColor ?: 0
-        // KeyFillAlpha multiplies the colour's own alpha, so a translucent strip colour survives
-        // and an opaque one keeps exactly the percentage it always had.
-        setBackgroundColor(KeyFillAlpha.of(bg, opacity * 255 / 100))
+        val currentTheme = theme
+        if (currentTheme != null && currentTheme.suggestionBarMatchesKeyboard) {
+            setBackgroundColor(currentTheme.colorKeyboardBackground)
+            return
+        }
+        val bg = currentTheme?.suggestionBackgroundColor ?: 0
+        // KeyFillAlpha.of returns only the alpha byte, not an ARGB colour.
+        val alpha = KeyFillAlpha.of(bg, opacity * 255 / 100)
+        setBackgroundColor((bg and 0x00FFFFFF) or (alpha shl 24))
     }
 
     private fun textColor(): Int = theme?.suggestionTextColor ?: 0xFF000000.toInt()

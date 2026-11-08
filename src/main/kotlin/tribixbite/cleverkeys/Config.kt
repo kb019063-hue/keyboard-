@@ -525,9 +525,9 @@ object Defaults {
     // Calm key labels (phase 4 part 2): off means one corner hint per character key and none on
     // functional keys; on is the dense Unexpected-Keyboard rendering this tree shipped with.
     const val PRINT_ALL_KEY_SYMBOLS = false
-    // Suggestion strip (phase 4 part 2): off collapses the band while the bar has nothing to
-    // show; on reserves it always, for a keyboard whose height never moves.
-    const val SUGGESTION_STRIP_ALWAYS_VISIBLE = false
+    // Keep the keyboard stationary while predictions change, including after a space.
+    // The user can still opt into collapsing the empty strip in settings.
+    const val SUGGESTION_STRIP_ALWAYS_VISIBLE = true
 
     // Accessibility
     const val STICKY_KEYS_ENABLED = false
@@ -2002,6 +2002,7 @@ class Config private constructor(
             migrateThemeDefault(prefs)
             // 2026-10-30: after the purple→Harbor step, so both orders end at the Gboard pair.
             migrateThemeToGboard(prefs)
+            migrateStableSuggestionStrip(prefs)
             val config = Config(prefs, res, handler, foldableUnfolded)
             _globalConfig = config
             LayoutModifier.init(config, res)
@@ -2475,6 +2476,24 @@ class Config private constructor(
             }
             e.putBoolean(GboardThemeMigration.MIGRATION_MARKER_KEY, true)
             e.apply()
+        }
+
+        /**
+         * The old default collapsed the strip between predictions and made the IME resize while
+         * typing. Move existing installs to the stable default once, even if they stored the old
+         * value; a subsequent explicit opt-out is left alone by the permanent marker.
+         */
+        @JvmStatic
+        fun migrateStableSuggestionStrip(prefs: SharedPreferences) {
+            val marker = "stable_suggestion_strip_v1"
+            if (prefs.getBoolean(marker, false)) return
+            val editor = prefs.edit()
+            if (prefs.contains("suggestion_strip_always_visible") &&
+                !prefs.getBoolean("suggestion_strip_always_visible", false)) {
+                editor.putBoolean("suggestion_strip_always_visible", true)
+            }
+            editor.putBoolean(marker, true)
+            editor.apply()
         }
 
         private fun migrate_layout(name: String?): LayoutsPreference.Layout {

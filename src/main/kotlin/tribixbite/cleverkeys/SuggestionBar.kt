@@ -115,17 +115,17 @@ class SuggestionBar : LinearLayout {
     fun isShowingMessage(): Boolean = isShowingTemporaryMessage
 
     /**
-     * Phase 4 part 2: the service collapses the strip's band while it has nothing to show. The
-     * bar is the only thing that knows what it is showing, so it reports occupancy changes and
-     * the service, which owns the topPane the band belongs to, resizes it.
+     * Report every visible content mode so the shared header can switch between commands and
+     * the strip without changing keyboard height.
      */
     var onOccupancyChanged: ((Boolean) -> Unit)? = null
 
-    fun isOccupied(): Boolean = SuggestionStripPolicy.occupied(
-        currentSuggestions.isNotEmpty(),
-        isShowingTemporaryMessage,
-        inlineAutofillView != null
-    )
+    fun isOccupied(): Boolean = isPasswordMode || isInEmojiSearchMode ||
+        SuggestionStripPolicy.occupied(
+            currentSuggestions.isNotEmpty(),
+            isShowingTemporaryMessage,
+            inlineAutofillView != null
+        )
 
     private fun notifyOccupancy() {
         onOccupancyChanged?.invoke(isOccupied())
@@ -599,10 +599,23 @@ class SuggestionBar : LinearLayout {
         updateBackgroundOpacity()
     }
 
+    private var sharedToolbarBackground = false
+
+    /** Avoid compositing the same translucent field twice in the shared header. */
+    fun setSharedToolbarBackground(shared: Boolean) {
+        if (sharedToolbarBackground == shared) return
+        sharedToolbarBackground = shared
+        updateBackgroundOpacity()
+    }
+
     /**
      * Update the background color with the current opacity
      */
     private fun updateBackgroundOpacity() {
+        if (sharedToolbarBackground) {
+            setBackgroundColor(Color.TRANSPARENT)
+            return
+        }
         // Gboard's strip is the keyboard surface, not a band laid over the app: when the theme
         // asks for that (`suggestionBarMatchesKeyboard`), paint the keyboard's own field colour
         // and ignore the bar-opacity multiply — the field is already exactly what the keys sit
@@ -942,6 +955,7 @@ class SuggestionBar : LinearLayout {
             text = message
         }
         addView(statusView)
+        notifyOccupancy()
 
         Log.d(TAG, "showEmojiSearchStatus: '$message'")
     }
@@ -964,6 +978,7 @@ class SuggestionBar : LinearLayout {
 
         // Show empty suggestions (maintains bar visibility if alwaysVisible)
         visibility = if (alwaysVisible) VISIBLE else GONE
+        notifyOccupancy()
 
         Log.d(TAG, "clearEmojiSearchStatus: exited emoji search mode")
     }
@@ -1166,6 +1181,7 @@ class SuggestionBar : LinearLayout {
             clearPasswordModeViews()
         }
 
+        notifyOccupancy()
         Log.d(TAG, "Password mode ${if (enabled) "enabled" else "disabled"}")
     }
 

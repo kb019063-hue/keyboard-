@@ -37,8 +37,8 @@ class ToolbarCompactPolicyTest {
     fun compactModeHandlesTinyCustomToolbars() {
         assertTrue(ToolbarCompactPolicy.buttonVisible(0, 0, compact = true).not())
         assertTrue(ToolbarCompactPolicy.buttonVisible(0, 1, compact = true))
-        assertEquals(1f, ToolbarCompactPolicy.buttonWeight(1, compact = true), 0f)
-        assertFalse(ToolbarCompactPolicy.spacerVisible(1, compact = true))
+        assertEquals(0f, ToolbarCompactPolicy.buttonWeight(1, compact = true), 0f)
+        assertTrue(ToolbarCompactPolicy.spacerVisible(1, compact = true))
         assertTrue(ToolbarCompactPolicy.buttonVisible(0, 2, compact = true))
         assertTrue(ToolbarCompactPolicy.buttonVisible(1, 2, compact = true))
         assertTrue(ToolbarCompactPolicy.spacerVisible(2, compact = true))

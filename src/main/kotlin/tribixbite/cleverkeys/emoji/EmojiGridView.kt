@@ -101,7 +101,8 @@ class EmojiGridView(context: Context, attrs: AttributeSet?) :
         shownGroup = group
         shownQuery = null
         emojiArray = if (group == GROUP_LAST_USE) {
-            getLastEmojis()
+            // A new install has no history. Show the first category instead of a blank picker.
+            getLastEmojis().ifEmpty { Emoji.getEmojisByGroup(0) }
         } else if (group == GROUP_SEARCH) {
             emptyList() // Will be populated by search
         } else {

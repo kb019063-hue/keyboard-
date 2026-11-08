@@ -294,6 +294,18 @@ class KeyboardReceiverPaneHostTest {
     }
 
     @Test
+    fun openingEmojiStartsWithoutSearchingEditorText() {
+        wireContainer()
+        val manager = statefulEmojiManager()
+        receiver.setEmojiSearchManager(manager)
+
+        receiver.handle_event_key(KeyValue.Event.SWITCH_EMOJI)
+
+        verify(exactly = 1) { manager.onPaneOpened(null) }
+        verify(exactly = 0) { manager.extractWordBeforeCursor(any()) }
+    }
+
+    @Test
     fun openingClipboardOverEmojiClearsEmojiRouting() {
         wireContainer()
         receiver.setEmojiSearchManager(statefulEmojiManager())

@@ -864,16 +864,14 @@ class CleverKeysService : InputMethodService(),
         _topPane = predictionSetup.topPane
         _scrollView = predictionSetup.scrollView
         _keyboardToolbar = predictionSetup.toolbar
-        // Phase 4 part 2: while the strip has nothing to show, its band belongs to the keys.
-        // Capture the band's full height once, while it still holds the built-in value, and let
-        // the bar's occupancy reports drive it from then on.
-        if (_stripFullHeightPx <= 0) _stripFullHeightPx = _topPane?.layoutParams?.height ?: 0
-        // 2026-11-04 (owner screenshots): the toolbar used to collapse to its two end buttons --
-        // grid and mic -- as soon as the strip carried words, which read as "part of the keyboard
-        // disappears when I type something". Gboard on this owner's phone keeps every icon in the
-        // row while suggestions are displayed, so compact mode is off: the row always shows the
-        // configured buttons, and a crowded row scrolls instead of hiding anything. Only the
-        // strip's own band height still follows occupancy (below).
+        // Capture the full strip height while the hierarchy holds its built-in value. By default
+        // its band stays reserved as suggestions change, so typing does not resize the IME.
+        _stripFullHeightPx = android.util.TypedValue.applyDimension(
+            android.util.TypedValue.COMPLEX_UNIT_DIP,
+            KeyboardToolbar.HEIGHT_DP.toFloat(),
+            resources.displayMetrics
+        ).toInt()
+        // The shared header swaps its middle content without changing its overall height.
         _suggestionBar?.onOccupancyChanged = { occupied ->
             applyStripHeight(occupied)
         }
@@ -1847,15 +1845,25 @@ class CleverKeysService : InputMethodService(),
 
     private fun applyStripHeight(occupied: Boolean) {
         val top = _topPane ?: return
-        // Pane mode (clipboard, emoji, GIF) owns the band's height; never fight it.
-        if (top.childCount > 0 && top.getChildAt(0) !== _scrollView) return
         val full = _stripFullHeightPx
         if (full <= 0) return
+        // When both prediction modes are off, setup deliberately gives the receiver a zero
+        // strip height. Do not resurrect an empty strip merely because an earlier field had one.
+        val predictionEnabled = _config?.let {
+            it.word_prediction_enabled || it.swipe_typing_enabled
+        } == true
         val target = SuggestionStripPolicy.heightPx(
             occupied,
-            _config?.suggestion_strip_always_visible ?: false,
+            predictionEnabled && (_config?.suggestion_strip_always_visible ?: false),
             full
         )
+        val header = top.parent as? SharedKeyboardHeader
+        if (header != null) {
+            header.setSuggestionState(occupied, target)
+            return
+        }
+        // Pane mode owns the band's height on legacy/non-header hosts.
+        if (top.childCount > 0 && top.getChildAt(0) !== _scrollView) return
         if (top.layoutParams.height != target) {
             top.layoutParams.height = target
             top.requestLayout()

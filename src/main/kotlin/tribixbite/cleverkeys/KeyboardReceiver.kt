@@ -394,11 +394,9 @@ class KeyboardReceiver(
                 // #41 v4: Initialize emoji search manager with the pane and notify pane opened
                 emojiPane?.let { pane ->
                     emojiSearchManager?.initialize(pane)
-                    // Auto-detect context word for initial search query
-                    val textBeforeCursor = keyboard2.currentInputConnection
-                        ?.getTextBeforeCursor(100, 0)
-                    val contextWord = emojiSearchManager?.extractWordBeforeCursor(textBeforeCursor)
-                    emojiSearchManager?.onPaneOpened(contextWord)
+                    // Opening the picker is not a search for the word in the editor.
+                    // Start with recent emoji; the user can type a query explicitly.
+                    emojiSearchManager?.onPaneOpened(null)
 
                     // Wire up search manager to category buttons
                     pane.findViewById<EmojiGroupButtonsBar>(R.id.emoji_group_buttons)

@@ -305,7 +305,7 @@ class PredictionViewSetup(
      *
      * [created] is the toolbar `SuggestionBarPane.initialize` just built. On the path where the
      * container already existed there is no new one, so it is re-found by id. Looking it up is
-     * safe *here* specifically because the toolbar is a stable direct child of the container that
+     * safe *here* specifically because the toolbar is a stable descendant of the container that
      * is never swapped -- unlike topPane's child, which alternates between the suggestion strip
      * and a content pane and is the reason this class threads topPane/scrollView as parameters
      * rather than extracting them from the hierarchy.

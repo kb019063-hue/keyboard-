@@ -6,10 +6,8 @@ import org.junit.Test
 /**
  * Pins when the suggestion strip earns its band (phase 4 part 2).
  *
- * The regression this file guards is the owner's screenshot: an empty purple band between the
- * toolbar and the keys, because the strip reserved its space whether or not it had anything to
- * show. So the empty row must collapse, each of the three things that fill the strip must expand
- * it on its own, and the always-visible preference must restore the reserved band exactly.
+ * The stable default reserves the row while suggestions change. The optional compact mode still
+ * collapses it, and each of the three kinds of content expands it when that mode is selected.
  */
 class SuggestionStripPolicyTest {
 
