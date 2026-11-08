@@ -427,8 +427,7 @@ class KeyboardToolbar(
         private const val LABEL_TEXT_SP = 18f
 
         /**
-         * The toolbar's row height, matching the 40 dp the suggestion strip uses so the two rows
-         * read as one unit.
+         * The shared header height, matching the suggestion strip's 40 dp height.
          */
         const val HEIGHT_DP = 40
     }

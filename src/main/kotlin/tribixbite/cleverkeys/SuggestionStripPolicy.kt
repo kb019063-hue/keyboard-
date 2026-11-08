@@ -3,10 +3,9 @@ package tribixbite.cleverkeys
 /**
  * Whether the suggestion strip occupies its band, and how tall that band is (phase 4 part 2).
  *
- * Suggestions, temporary messages and inline autofill chips occupy the strip. The band is
- * reserved by default even when none is present: collapsing it as words appear and disappear
- * resizes the IME and can move the editor or keys while typing. Users can explicitly opt into
- * the compact, occupancy-driven behaviour in settings.
+ * Suggestions, temporary messages and inline autofill chips occupy the strip. The shared
+ * toolbar provides the typing row when it is enabled; when it is disabled the strip is reserved
+ * by default to avoid resizing the IME. The setting can opt into collapsing that empty strip.
  *
  * Pure Kotlin, like [CornerLabelPolicy]: the view code that cannot be tested off-device holds no
  * decision of its own, only the two numbers this table produces.

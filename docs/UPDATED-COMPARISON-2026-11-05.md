@@ -25,7 +25,8 @@ closing emoji, typing afterwards, and using a light keyboard over a dark app.
 
 The suggestion band used to collapse whenever the suggestion list became empty and expand when
 new suggestions arrived. This can happen between the current-word and next-word predictions when
-space is pressed; changing the IME window height can move the editor and disturb typing. The toolbar and suggestions now share a single fixed-height header. The one-time
+space is pressed; changing the IME window height can move the editor and disturb typing. The
+toolbar and suggestions now share a single fixed-height header. The one-time
 `stable_suggestion_strip_v1` migration also reserves an empty strip by default when the toolbar
 is disabled, including on installs with a stored old `false` value. The **Always Show Suggestion
 Strip** setting can still opt out when the toolbar is disabled, which may bring movement back.
