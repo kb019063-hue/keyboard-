@@ -1617,6 +1617,7 @@ tasks.register('runMockTests', JavaExec) {
     // list). These five build android-backed subjects — a mocked Context/SharedPreferences, the
     // Pointers touch model, or KeyboardData/KeyValue keys — so they need the android.jar stubs.
     'tribixbite.cleverkeys.GboardDefaultLayoutMigrationTest',
+    'tribixbite.cleverkeys.StableSuggestionStripMigrationTest',
     'tribixbite.cleverkeys.ConfigurationBurstCoalescingTest',
     'tribixbite.cleverkeys.PointersSliderSpeedTest',
     'tribixbite.cleverkeys.ModifiersValueSemanticsTest',
