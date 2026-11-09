@@ -670,7 +670,13 @@ class KeyValue private constructor(
             // 2026-11-09: the tools panel. `more_tools` stays the command name (it is in the
             // command registry, the toolbar preference and every translated string); only its
             // destination changed, from a dialog to this pane.
-            "more_tools" -> eventKey(0xE01E, Event.SWITCH_TOOLS, FLAG_SMALLER_FONT)
+            //
+            // The symbol is a literal, NOT a private-use codepoint: the key font has no glyph for
+            // this command (ReleaseClaimCommandCatalogueTest checks every PUA symbol against
+            // special_font.ttf and fails on a missing one), and the toolbar renders the command
+            // registry's Material Symbols icon anyway. `switch_gif` does the same with "GIF".
+            // `switch_back_tools` is the same fallback the other SWITCH_BACK_* events use.
+            "more_tools" -> eventKey("\u22EE\u22EE", Event.SWITCH_TOOLS, FLAG_SMALLER_FONT)
             "switch_back_tools" -> eventKey("ABC", Event.SWITCH_BACK_TOOLS, 0)
 
             /* Key events */
