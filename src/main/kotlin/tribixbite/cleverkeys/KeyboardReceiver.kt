@@ -22,7 +22,6 @@ import android.widget.LinearLayout
 import android.widget.PopupWindow
 import android.widget.TextView
 import androidx.core.view.ViewCompat
-import tribixbite.cleverkeys.activities.ThemeSettingsActivity
 import tribixbite.cleverkeys.gif.Gif
 import tribixbite.cleverkeys.gif.GifAssetManager
 import tribixbite.cleverkeys.gif.GifInsertPolicy
@@ -292,12 +291,12 @@ class KeyboardReceiver(
             }
             MoreToolsPanel.Key.THEME -> {
                 handle_event_key(KeyValue.Event.SWITCH_BACK_TOOLS)
-                startActivity(Intent(context, ThemeSettingsActivity::class.java)
+                context.startActivity(Intent(context, ThemeSettingsActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
             MoreToolsPanel.Key.SETTINGS -> {
                 handle_event_key(KeyValue.Event.SWITCH_BACK_TOOLS)
-                startActivity(Intent(context, SettingsActivity::class.java)
+                context.startActivity(Intent(context, SettingsActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
         }

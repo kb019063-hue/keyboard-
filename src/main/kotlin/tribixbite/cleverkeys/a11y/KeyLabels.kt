@@ -120,6 +120,11 @@ object KeyLabels {
             KeyValue.Event.SWITCH_VOICE_TYPING,
             KeyValue.Event.SWITCH_VOICE_TYPING_CHOOSER -> getString(R.string.key_descr_voice_typing)
             KeyValue.Event.CONFIG -> getString(R.string.key_descr_config)
+            // 2026-11-09: the tools panel. TalkBack names the grid key the same way the command
+            // registry does, so a screen-reader user hears the label everyone else sees on the
+            // panel's title bar. The panel's own X is not a key, so it needs no entry.
+            KeyValue.Event.SWITCH_TOOLS,
+            KeyValue.Event.SWITCH_BACK_TOOLS -> getString(R.string.cmd_more_tools)
             KeyValue.Event.MINIMIZE_BAR -> getString(R.string.cmd_minimize_bar)
             KeyValue.Event.MINIMIZE_FAB -> getString(R.string.cmd_minimize_fab)
             KeyValue.Event.HIDE_KEYBOARD -> getString(R.string.cmd_hide_keyboard)
