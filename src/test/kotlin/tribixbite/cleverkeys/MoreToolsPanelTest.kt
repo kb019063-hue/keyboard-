@@ -1,5 +1,8 @@
 package tribixbite.cleverkeys
 
+import com.google.common.truth.Truth.assertThat
+import com.google.common.truth.Truth.assertWithMessage
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -103,9 +106,76 @@ class MoreToolsPanelTest {
         assertEquals(3, MoreToolsPanel.rowCount(allOff))
     }
 
+    /**
+     * BUG-AUDIT-2026-10-25.md item 7, re-pinned for the surface that replaced the dialog.
+     *
+     * The panel draws its own copy of the switch values instead of re-reading `Config`, because a
+     * toggle's write reaches `Config` only when the preference listener runs. If the panel read
+     * `Config` back, two quick taps would each compute the same "next" from the same stale value
+     * and write it twice — the tile showing one thing and the feature doing another.
+     */
+    @Test
+    fun `two quick taps advance the drawn state twice instead of writing the same value twice`() {
+        // One tap: off -> on.
+        val afterFirst = allOff.with(MoreToolsPanel.Key.INCOGNITO, !allOff.checked(MoreToolsPanel.Key.INCOGNITO))
+        assertTrue("first tap must turn the switch on", afterFirst.incognito)
+
+        // Second tap, computed from the DRAWN state (not from a Config that has not caught up):
+        // on -> off. This is the assertion that fails if anyone reverts to re-reading Config.
+        val afterSecond = afterFirst.with(
+            MoreToolsPanel.Key.INCOGNITO,
+            !afterFirst.checked(MoreToolsPanel.Key.INCOGNITO)
+        )
+        assertFalse("second tap must turn it back off, not write 'on' twice", afterSecond.incognito)
+
+        // Everything else is untouched by both taps.
+        assertEquals(allOff.floating, afterSecond.floating)
+        assertEquals(allOff.split, afterSecond.split)
+        assertEquals(allOff.oneHanded, afterSecond.oneHanded)
+        assertEquals(allOff.sound, afterSecond.sound)
+    }
+
+    @Test
+    fun `with targets exactly one switch and is a no-op for launchers`() {
+        val on = allOff.with(MoreToolsPanel.Key.SPLIT, true)
+        assertEquals(listOf(false, false, true, false, false), MoreToolsPanel.cells(on).take(5).map { it.checked })
+
+        // A launcher has no value; asking must not throw from a UI callback.
+        assertEquals(allOn, allOn.with(MoreToolsPanel.Key.THEME, true))
+        assertEquals(allOff, allOff.with(MoreToolsPanel.Key.EMOJI, true))
+    }
+
     @Test
     fun `grid preserves panel order when read row by row`() {
         val flattened = MoreToolsPanel.gridRows(allOn).flatten().filterNotNull().map { it.key }
         assertEquals(MoreToolsPanel.ALL, flattened)
+    }
+
+    /**
+     * Drift guard: the panel must flip the value it is DRAWING, never re-read `Config`.
+     *
+     * The first version of this panel did exactly that and reintroduced
+     * BUG-AUDIT-2026-10-25.md item 7 — a defect the AlertDialog it replaced had already fixed.
+     * A behavioural test on [MoreToolsPanel.State] cannot catch it, because a re-reading caller
+     * still produces a correct `State`; only the caller's source can. Same source-reading
+     * convention as CoreImeHygieneDriftTest (runs with the project root as CWD).
+     */
+    @Test
+    fun `the panel flips its drawn state, not a re-read Config`() {
+        val receiver = File("src/main/kotlin/tribixbite/cleverkeys/KeyboardReceiver.kt")
+        assertThat(receiver.isFile).isTrue()
+        val body = receiver.readText().substringAfter("private fun onToolTap(")
+
+        assertWithMessage(
+            "onToolTap must advance `panelState` (the drawn state) on a switch tap. If this " +
+                "fails, someone has gone back to recomputing the next value from Config, which " +
+                "reintroduces the double-tap defect from BUG-AUDIT-2026-10-25.md item 7."
+        ).that(body).contains("panelState = current.with(key, next)")
+
+        assertWithMessage(
+            "onToolTap must not snapshot Config into a local for the switch branch — that is " +
+                "the stale read the drawn state exists to avoid. `toolsState()` is allowed as a " +
+                "fallback when nothing has been drawn yet."
+        ).that(body).doesNotContain("val current = toolsState()")
     }
 }

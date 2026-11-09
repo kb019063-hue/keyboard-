@@ -101,6 +101,25 @@ object MoreToolsPanel {
             Key.SOUND -> sound
             Key.EMOJI, Key.CLIPBOARD, Key.THEME, Key.SETTINGS -> false
         }
+
+        /**
+         * This state with one switch set to [value].
+         *
+         * The panel owns the value it is drawing rather than re-reading `Config` after each tap:
+         * a write lands asynchronously in the read-model, so a quick second tap would otherwise
+         * recompute the same "next" from the stale value and write it twice while the tile showed
+         * the opposite ([BUG-AUDIT-2026-10-25.md] item 7). A launcher is not a switch and has no
+         * value to set, so asking for one returns this state unchanged rather than throwing from
+         * a UI callback.
+         */
+        fun with(key: Key, value: Boolean): State = when (key) {
+            Key.INCOGNITO -> copy(incognito = value)
+            Key.FLOATING -> copy(floating = value)
+            Key.SPLIT -> copy(split = value)
+            Key.ONE_HANDED -> copy(oneHanded = value)
+            Key.SOUND -> copy(sound = value)
+            Key.EMOJI, Key.CLIPBOARD, Key.THEME, Key.SETTINGS -> this
+        }
     }
 
     /** Every cell, in [ALL] order, reporting the state it was given. */

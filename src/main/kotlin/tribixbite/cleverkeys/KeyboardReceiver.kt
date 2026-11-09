@@ -226,6 +226,9 @@ class KeyboardReceiver(
         showContentPane()
         currentPaneType = PaneType.TOOLS
 
+        // Re-seed from Config on every open: whatever the panel last drew belongs to a previous
+        // visit, and Config is authoritative once the listener has caught up.
+        panelState = toolsState()
         renderToolsPanel(panel)
 
         // Evidence channel, kept from the dialog it replaces: the emulator's accessibility
@@ -253,16 +256,30 @@ class KeyboardReceiver(
     }
 
     /**
+     * The state the panel is currently DRAWING — which is not always what [Config] says yet.
+     *
+     * This is [BUG-AUDIT-2026-10-25.md] item 7, fixed for the dialog and re-pinned here because
+     * the panel reintroduced it. A toggle writes a SharedPreferences value; `Config` is only
+     * refreshed asynchronously by the listener. Reading `Config` back a moment later therefore
+     * still reports the OLD value, and the next tap computed the same "next" again — so a quick
+     * second tap on one tile wrote the same state twice while the tile showed the opposite.
+     *
+     * The fix is the old fix: the surface the user is looking at owns the value, not the
+     * read-model behind it. Seeded from `Config` when the panel opens, then advanced here on
+     * every tap. `Config` catches up on its own and agrees.
+     */
+    private var panelState: MoreToolsPanel.State? = null
+
+    /**
      * Paint [panel] with the live switch values and route a tap.
      *
-     * Switches go through [CleverKeysService.setToolsPanelSwitch], which is the same explicit
-     * setter each tool's own command uses — writing the panel's `isChecked`-equivalent rather
-     * than re-reading a possibly stale [Config], so a fast double tap cannot invert the feature
-     * the user just turned on. Launchers reuse the keyboard's existing events, so the panel adds
+     * Switches go through [CleverKeysService.setToolsPanelSwitch], the same explicit setter each
+     * tool's own command uses. Launchers reuse the keyboard's existing events, so the panel adds
      * no second dispatch path for emoji, clipboard, theme or settings.
      */
     private fun renderToolsPanel(panel: MoreToolsPanelView) {
-        panel.bind(toolsState()) { key -> onToolTap(panel, key) }
+        val state = panelState ?: toolsState().also { panelState = it }
+        panel.bind(state) { key -> onToolTap(panel, key) }
     }
 
     private fun onToolTap(panel: MoreToolsPanelView, key: MoreToolsPanel.Key) {
@@ -272,13 +289,16 @@ class KeyboardReceiver(
             MoreToolsPanel.Key.SPLIT,
             MoreToolsPanel.Key.ONE_HANDED,
             MoreToolsPanel.Key.SOUND -> {
-                // Flip the value the panel is showing, not what Config says: the panel's tile is
-                // the user's mental model of the state while it is open.
-                val current = toolsState()
+                // Flip the value the panel is SHOWING, not what Config says: Config lags behind
+                // the write (see [panelState]) and a double tap must not write the same value
+                // twice. Mirrors the dialog's `isChecked` defence, audit item 7.
+                val current = panelState ?: toolsState()
                 val next = !current.checked(key)
+                panelState = current.with(key, next)
                 keyboard2.setToolsPanelSwitch(key, next)
-                // Repaint in place so the tile lights immediately; the SharedPreferences
-                // listener will confirm the same value a moment later.
+                // Repaint in place so the tile lights immediately. Safe from inside the click
+                // listener: rebuildGrid() replaces the grid's children, never the tile that is
+                // currently dispatching.
                 renderToolsPanel(panel)
             }
             MoreToolsPanel.Key.EMOJI -> {
@@ -733,6 +753,10 @@ class KeyboardReceiver(
             KeyValue.Event.SWITCH_BACK_TOOLS -> {
                 // A-3/E-2: shared routing-state clear (clipboard search, emoji, GIF)
                 closeCurrentPaneRoutingState()
+
+                // The panel's local copy of the switch values dies with the visit; the next open
+                // re-seeds from Config.
+                panelState = null
 
                 // Reset pane tracking
                 currentPaneType = PaneType.NONE
