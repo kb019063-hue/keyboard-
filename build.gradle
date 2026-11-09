@@ -1222,13 +1222,14 @@ tasks.register('runPureTests', JavaExec) {
     // 2026-10-30/11-01 bug hunt: the fourteen classes below were written for the audit and
     // never registered here, so the Termux runners could not execute them at all. They are
     // policy/arithmetic/file-scanning tests whose subjects import no android.* classes
-    // (CornerLabelPolicy, MoreToolsSheet, OneHandedConfig, SuggestionStripPolicy,
+    // (CornerLabelPolicy, MoreToolsPanel, OneHandedConfig, SuggestionStripPolicy,
     // ToolbarCompactPolicy, IncognitoPolicy, FloatingConfig, VoiceTypingConfig, DictationPolicy,
     // KeyboardGeometry-free geometry, and the two file readers), so they run in the PURE JVM
     // runner. TestRunnerListDriftTest is what caught the omission.
     'tribixbite.cleverkeys.CornerLabelPolicyTest',
     'tribixbite.cleverkeys.IncognitoPolicyTest',
-    'tribixbite.cleverkeys.MoreToolsSheetTest',
+    // Renamed 2026-11-09 when the dialog became a pane: the model is MoreToolsPanel now.
+    'tribixbite.cleverkeys.MoreToolsPanelTest',
     'tribixbite.cleverkeys.OneHandedConfigTest',
     'tribixbite.cleverkeys.SuggestionStripPolicyTest',
     'tribixbite.cleverkeys.SuggestionPillPolicyTest',
