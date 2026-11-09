@@ -44,6 +44,10 @@ class KeyValue private constructor(
         MINIMIZE_FAB,
         // gh #175 (2026-10-07): explicit dismiss, like the "∨" button in other keyboards.
         HIDE_KEYBOARD,
+        // 2026-11-09: the tools panel. Appended for the same reason as the two above -- these
+        // ordinals are persisted, so a new event goes at the end and never in the middle.
+        SWITCH_TOOLS,
+        SWITCH_BACK_TOOLS,
     }
 
     /**
@@ -663,6 +667,11 @@ class KeyValue private constructor(
             "minimize_fab" -> eventKey("◉", Event.MINIMIZE_FAB, 0)
             "hide_keyboard" -> eventKey("⌄", Event.HIDE_KEYBOARD, 0)
             "switch_back_gif" -> eventKey("ABC", Event.SWITCH_BACK_GIF, 0)
+            // 2026-11-09: the tools panel. `more_tools` stays the command name (it is in the
+            // command registry, the toolbar preference and every translated string); only its
+            // destination changed, from a dialog to this pane.
+            "more_tools" -> eventKey(0xE01E, Event.SWITCH_TOOLS, FLAG_SMALLER_FONT)
+            "switch_back_tools" -> eventKey("ABC", Event.SWITCH_BACK_TOOLS, 0)
 
             /* Key events */
             // "escape" is an alias for "esc" (ARC-107): layouts using the long name

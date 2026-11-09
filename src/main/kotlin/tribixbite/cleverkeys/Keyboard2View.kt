@@ -1183,9 +1183,12 @@ class Keyboard2View @JvmOverloads constructor(
                 "incognito_toggle" -> { service.toggleIncognito(); true }
                 "floating_toggle" -> { service.toggleFloating(); true }
                 "split_toggle" -> { service.toggleSplit(); true }
-                // Phase 4 part 3: the sheet lives on the service (it needs the IME window token
-                // and the five toggle methods), like the toggles it collects.
-                "more_tools" -> { service.showMoreToolsSheet(); true }
+                // 2026-11-09: the tools panel is the keyboard's fourth pane (emoji, clipboard,
+                // GIF, tools), hosted by KeyboardReceiver so it is part of the keyboard rather
+                // than a dialog over the app. The command name is unchanged: `more_tools` is in
+                // the registry, in the toolbar preference, and in every translated string, so
+                // only its destination moved. KeyValue resolves it to Event.SWITCH_TOOLS.
+                "more_tools" -> { service.triggerKeyboardEvent(KeyValue.Event.SWITCH_TOOLS); true }
                 else -> false
             }
 

@@ -37,7 +37,7 @@ Every detail here corresponds to something that broke a real run.
 | While the IME is up, the keyboard occludes the bottom band of the screen and the settings rows there are absent | 7e taps the mic key by its `content-desc`, and a settings row rendering in the same band would win the hit test and be tapped instead |
 | The toolbar's seven default buttons (`ToolbarConfig.DEFAULT_KEYS_STRING`), mic LAST at index 6, evenly weighted across the top 40dp of the IME frame, at the 420dpi `wm density` reports — matching the script's `TB_N=7` | 7e's coordinate fallback and 7g compute button centres from the frame rect and the density; a formula bug must fail here in thirty seconds, not on the emulator in fifteen minutes |
 | Host-side `adb logcat` -- no `shell` prefix | the smoke script calls `adb logcat`, and a fake that only served `adb shell logcat` silently swallowed every replay line, which is why VOICE-DIAG read `log='none'` even in scenarios that had logged a press |
-| The more key logs `press` then `shown rows=5 <state>`; `mt_deaf` logs only the press | the 7g ladder: press+shown passes, press without shown is the defect, silence is the harness's miss |
+| The more key logs `press` then `shown rows=3 <state>`; `mt_deaf` logs only the press | the 7g ladder: press+shown passes, press without shown is the defect, silence is the harness's miss |
 | The hit space carries IME nodes even when the dump hides them (`no_ime_nodes`) | run 40's emulator renders the toolbar -- taps land and logcat proves it -- while its dumps carry no IME nodes; without the split the coordinate routes could never be tested against a dump-blind device |
 | The search bar renders whatever the field holds, including text committed through the `InputConnection` | what 7e asserts on: the dictation transcript appearing in the field is the only device-visible evidence that the commit path works |
 | `logcat` replays the lines the model recorded, and `pm grant` records the permission | 7e ships the mic key's decision line as `VOICE-DIAG`, because on an image with no speech service that line is the only record of which branch ran |
@@ -77,7 +77,8 @@ coordinate route with the controller's press in logcat — may accuse (`commit`,
 
 7g rides the same coordinates: the more key is button zero, the sheet is a dialog over the IME
 window that no dump will ever show, so logcat is the witness — `press` when the command dispatches,
-`shown rows=5 <state>` when the dialog is up. `mtdeaf` is its mirror image: the press logged and
+`shown rows=3 <state>` when the tools panel is up (3 grid rows of 4 columns holding the nine
+tools, five switches then four launchers — the panel replaced the dialog on 2026-11-09). `mtdeaf` is its mirror image: the press logged and
 the sheet never showed, the one genuine defect 7g exists to catch, so it must fail. Every other
 scenario's toolbar still carries the more key at position zero, so 7g passes everywhere else.
 A per-scenario run can now emit seven warnings — NFFRAME-DIAG, VOICE skipped, VOICE-DIAG,

@@ -33,11 +33,24 @@ class CommandRoutingTest {
      * Google Keep, twice. Cause: `KeyValue.getKeyByName` is total, so the executor's fallback
      * branch resolved the unimplemented command to a String key spelling its own name and
      * committed it. [CommandRouting.isOwnNameFallback] is the rule that catches it.
+     *
+     * **2026-11-09:** the rule is still needed for every future command — but `more_tools` is no
+     * longer one of the names it has to rescue. It is a real Event now (`SWITCH_TOOLS`), routed by
+     * its KIND — a stronger guarantee than a name rule — and the invented-name assertion below
+     * still pins the rescue path for a command nothing implements. Asserting the opposite here
+     * (that `more_tools` IS the fallback) would now pin a bug that has been fixed.
      */
     @Test
     fun anUnimplementedCommandIsNeverTypedAsItsOwnName() {
-        assertWithMessage("more_tools must be recognised as the unknown-name fallback")
+        assertWithMessage("more_tools is an Event key since 2026-11-09, not an unknown name")
             .that(CommandRouting.isOwnNameFallback("more_tools", KeyValue.getKeyByName("more_tools")))
+            .isFalse()
+        assertWithMessage("the tools panel event is what the toolbar's grid key dispatches")
+            .that(KeyValue.getKeyByName("more_tools").getEvent())
+            .isEqualTo(KeyValue.Event.SWITCH_TOOLS)
+        assertWithMessage("an invented command name is still the fallback the rule exists for")
+            .that(CommandRouting.isOwnNameFallback(
+                "not_a_real_command", KeyValue.getKeyByName("not_a_real_command")))
             .isTrue()
         assertWithMessage("every default toolbar command must be identifiable the same way")
             .that(CommandRouting.isOwnNameFallback("switch_gif", KeyValue.getKeyByName("switch_gif")))
