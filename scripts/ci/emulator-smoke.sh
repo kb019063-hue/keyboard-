@@ -1328,12 +1328,16 @@ fi
 # didn't see many tools not only incognito)." The sheet is a dialog attached to the IME window,
 # and run 40 proved this emulator's dumps never carry IME windows -- so no dump-based check can
 # ever confirm the dialog opened. logcat is the witness instead: the service logs "press" when
-# the command dispatches and "shown rows=5 <state>" when the sheet is up. The tap is the computed
+# the command dispatches and "shown rows=3 <state>" when the tools panel is up. The tap is the computed
 # FIRST toolbar button (the more key's default position). Vocabulary: press+shown passes; press
-# without shown is the defect this section exists to catch -- the dispatch reached the service
-# and no dialog came up; silence means the computed point missed (a customised toolbar, or a
+# without shown is the defect this section exists to catch -- the dispatch reached the keyboard
+# and no panel came up; silence means the computed point missed (a customised toolbar, or a
 # geometry the model got wrong) and stands down as a warning, because blaming the product for
 # the harness's miss is the one sin this script never commits.
+#
+# 2026-11-09: the surface is the tools PANEL (a keyboard pane), not the old AlertDialog. The
+# 7g vocabulary is unchanged on purpose -- "press" then "shown rows=" is the same two-line
+# contract, so the existing verdicts keep their meaning.
 MTSHEET=notrun
 if [ "$(shown)" != "mInputShown=true" ]; then
   info "7g stood down, keyboard not shown ($(shown))"
@@ -1343,19 +1347,20 @@ else
     info "7g stood down, no IME frame/density to compute the more key's centre"
   else
     adb shell input tap $MC; sleep 3
-    MTLOG=$(adb logcat -d -v brief 2>/dev/null | grep 'MoreToolsSheet' | tail -2 | tr '\n' '|' | tr -d '\r' | cut -c1-220)
+    MTLOG=$(adb logcat -d -v brief 2>/dev/null | grep 'MoreToolsPanel' | tail -2 | tr '\n' '|' | tr -d '\r' | cut -c1-220)
     if printf '%s' "$MTLOG" | grep -q 'shown rows='; then
       MTSHEET=shown
       pass "the more-tools sheet opened from the toolbar's more key: $MTLOG"
     elif printf '%s' "$MTLOG" | grep -q 'press'; then
       MTSHEET=press
-      fail "toolbar dispatched more_tools (press logged) but the sheet never showed: log='$MTLOG'"
+      fail "toolbar dispatched more_tools (press logged) but the panel never showed: log='$MTLOG'"
     else
       MTSHEET=silent
       ann warning "MTSHEET skipped, tap at $MC logged nothing (toolbar may not carry the more key at position 1)"
     fi
-    # Dismiss whatever opened: the sheet is non-focusable with FLAG_WATCH_OUTSIDE_TOUCH, so a tap
-    # on the status-bar strip closes it without touching the keyboard or the app below.
+    # Dismiss whatever opened. The panel is a keyboard pane now, so the grid key toggles it shut
+    # and a tap on the key row above it is harmless; the status-bar strip still works for both
+    # the pane and any dialog, and never lands on the app below.
     adb shell input tap 540 5 > /dev/null 2>&1; sleep 1
     ann warning "MTSHEET-DIAG verdict=$MTSHEET tap=$MC shown=$(shown) log='${MTLOG:-none}'"
   fi

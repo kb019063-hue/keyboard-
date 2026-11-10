@@ -31,6 +31,15 @@ on the left, undo, text editing, clipboard, settings and the mic on the right):
 
 `redo` is Material Symbols `redo`, mirrored by the platform (`android:autoMirrored`).
 
+## The tools panel's glyphs (2026-11-09)
+
+The tools panel (`docs/TOOLS-PANEL-2026-11-09.md`) added eight more from the same set by the same
+recipe — `visibility_off` (incognito), `picture_in_picture_alt` (floating),
+`splitscreen` (split), `mobile_friendly` (one-handed), `volume_up` (key sound), `mood` (emoji),
+`palette` (theme) and `close` (the panel's dismiss). It reuses two that already shipped:
+`assignment` for the clipboard tile and `settings` for Settings. Same licence, same NOTICE entry,
+same 960-unit grid, no new attribution.
+
 ## The one glyph the set does not have
 
 Material Symbols has `text_select_start`, `text_select_end`,

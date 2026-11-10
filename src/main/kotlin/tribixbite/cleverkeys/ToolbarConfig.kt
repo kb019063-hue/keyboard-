@@ -73,7 +73,7 @@ object ToolbarConfig {
      *
      * | position | command | route |
      * |---|---|---|
-     * | 1 | `more_tools`       | custom command -> `showMoreToolsSheet` |
+     * | 1 | `more_tools`       | custom command -> the tools panel |
      * | 2 | `undo`             | Kind.Editing -> `KeyEventHandler.key_up` |
      * | 3 | `select_word`      | Kind.Editing |
      * | 4 | `switch_clipboard` | Kind.Event, opens the clipboard pane |

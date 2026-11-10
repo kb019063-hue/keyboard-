@@ -107,6 +107,8 @@ class KeyboardReceiver(
 
     // View references
     private var emojiPane: ViewGroup? = null
+    /** The tools panel (2026-11-09), reused across opens like the panes above. */
+    private var toolsPanel: View? = null
     private var contentPaneContainer: android.widget.FrameLayout? = null
     private var topPane: android.widget.FrameLayout? = null
     private var scrollView: android.widget.HorizontalScrollView? = null
@@ -119,7 +121,7 @@ class KeyboardReceiver(
     // Track which pane is currently visible for toggle behavior
     private var currentPaneType: PaneType = PaneType.NONE
 
-    private enum class PaneType { NONE, EMOJI, CLIPBOARD, GIF }
+    private enum class PaneType { NONE, EMOJI, CLIPBOARD, GIF, TOOLS }
 
     // #41: Emoji search manager (uses suggestion bar for status display)
     private var emojiSearchManager: EmojiSearchManager? = null
@@ -193,6 +195,131 @@ class KeyboardReceiver(
         SuggestionBarPane.switchToSuggestionBarMode(
             top, content, scroll, keyboard2.suggestionStripHeight(suggestionBarHeight)
         )
+    }
+
+    /**
+     * Host the tools panel in the content-pane slot (2026-11-09).
+     *
+     * Kept next to the pane openers because that is what it is: the fourth pane, with the same
+     * lifecycle. It is deliberately NOT an AlertDialog any more — see the note on
+     * [MoreToolsPanelView] for why the dialog was thrown away. Being a pane buys three things a
+     * dialog cannot have: the panel is as wide as the keyboard, it sits on the keyboard's own
+     * surface instead of floating over the app, and it cannot obscure the row of keys it was
+     * opened from.
+     *
+     * Re-binding rather than inflating fresh: unlike the emoji/GIF panes, this one holds no
+     * search field whose state could go stale, so the same view is refreshed in place. That also
+     * means a switch tap can rebuild its own grid from inside its callback without detaching the
+     * view mid-dispatch (the classic `removeAllViews` inside an `OnClickListener` crash).
+     */
+    private fun showToolsPanel(container: android.widget.FrameLayout) {
+        val panel = (toolsPanel as? MoreToolsPanelView)
+            ?: MoreToolsPanelView(context, keyboardView.getTheme()).also {
+                toolsPanel = it
+                it.setOnClose { handle_event_key(KeyValue.Event.SWITCH_BACK_TOOLS) }
+            }
+
+        container.removeAllViews()
+        (panel.parent as? ViewGroup)?.removeView(panel)
+        panel.layoutParams = paneLayoutParams(contentPaneHeight)
+        container.addView(panel)
+        showContentPane()
+        currentPaneType = PaneType.TOOLS
+
+        // Re-seed from Config on every open: whatever the panel last drew belongs to a previous
+        // visit, and Config is authoritative once the listener has caught up.
+        panelState = toolsState()
+        renderToolsPanel(panel)
+
+        // Evidence channel, kept from the dialog it replaces: the emulator's accessibility
+        // dumps never carry IME-window nodes (run 40's DUMPDIAG), so logcat is the only witness
+        // CI has that this opened and what it carried.
+        android.util.Log.i(
+            TAG_TOOLS,
+            "shown rows=${MoreToolsPanel.rowCount(toolsState())} " +
+                MoreToolsPanel.cells(toolsState()).joinToString(" ") {
+                    "${it.key.name.lowercase()}=${if (it.checked) "on" else "off"}"
+                }
+        )
+    }
+
+    /** The five switches' current values, read the same way the dialog's checked array was. */
+    private fun toolsState(): MoreToolsPanel.State {
+        val cfg = Config.globalConfig()
+        return MoreToolsPanel.State(
+            incognito = cfg.incognito_enabled,
+            floating = cfg.floating_enabled,
+            split = cfg.split_enabled,
+            oneHanded = cfg.one_handed_enabled,
+            sound = cfg.sound_enabled,
+        )
+    }
+
+    /**
+     * The state the panel is currently DRAWING — which is not always what [Config] says yet.
+     *
+     * This is [BUG-AUDIT-2026-10-25.md] item 7, fixed for the dialog and re-pinned here because
+     * the panel reintroduced it. A toggle writes a SharedPreferences value; `Config` is only
+     * refreshed asynchronously by the listener. Reading `Config` back a moment later therefore
+     * still reports the OLD value, and the next tap computed the same "next" again — so a quick
+     * second tap on one tile wrote the same state twice while the tile showed the opposite.
+     *
+     * The fix is the old fix: the surface the user is looking at owns the value, not the
+     * read-model behind it. Seeded from `Config` when the panel opens, then advanced here on
+     * every tap. `Config` catches up on its own and agrees.
+     */
+    private var panelState: MoreToolsPanel.State? = null
+
+    /**
+     * Paint [panel] with the live switch values and route a tap.
+     *
+     * Switches go through [CleverKeysService.setToolsPanelSwitch], the same explicit setter each
+     * tool's own command uses. Launchers reuse the keyboard's existing events, so the panel adds
+     * no second dispatch path for emoji, clipboard, theme or settings.
+     */
+    private fun renderToolsPanel(panel: MoreToolsPanelView) {
+        val state = panelState ?: toolsState().also { panelState = it }
+        panel.bind(state) { key -> onToolTap(panel, key) }
+    }
+
+    private fun onToolTap(panel: MoreToolsPanelView, key: MoreToolsPanel.Key) {
+        when (key) {
+            MoreToolsPanel.Key.INCOGNITO,
+            MoreToolsPanel.Key.FLOATING,
+            MoreToolsPanel.Key.SPLIT,
+            MoreToolsPanel.Key.ONE_HANDED,
+            MoreToolsPanel.Key.SOUND -> {
+                // Flip the value the panel is SHOWING, not what Config says: Config lags behind
+                // the write (see [panelState]) and a double tap must not write the same value
+                // twice. Mirrors the dialog's `isChecked` defence, audit item 7.
+                val current = panelState ?: toolsState()
+                val next = !current.checked(key)
+                panelState = current.with(key, next)
+                keyboard2.setToolsPanelSwitch(key, next)
+                // Repaint in place so the tile lights immediately. Safe from inside the click
+                // listener: rebuildGrid() replaces the grid's children, never the tile that is
+                // currently dispatching.
+                renderToolsPanel(panel)
+            }
+            MoreToolsPanel.Key.EMOJI -> {
+                handle_event_key(KeyValue.Event.SWITCH_BACK_TOOLS)
+                handle_event_key(KeyValue.Event.SWITCH_EMOJI)
+            }
+            MoreToolsPanel.Key.CLIPBOARD -> {
+                handle_event_key(KeyValue.Event.SWITCH_BACK_TOOLS)
+                handle_event_key(KeyValue.Event.SWITCH_CLIPBOARD)
+            }
+            MoreToolsPanel.Key.THEME -> {
+                handle_event_key(KeyValue.Event.SWITCH_BACK_TOOLS)
+                context.startActivity(Intent(context, ThemeSettingsActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+            MoreToolsPanel.Key.SETTINGS -> {
+                handle_event_key(KeyValue.Event.SWITCH_BACK_TOOLS)
+                context.startActivity(Intent(context, SettingsActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+        }
     }
 
     /**
@@ -457,6 +584,39 @@ class KeyboardReceiver(
                 currentPaneType = PaneType.CLIPBOARD
             }
 
+            /**
+             * The tools panel (2026-11-09). Opened from the toolbar's grid key (`more_tools`),
+             * hosted exactly like the emoji, clipboard and GIF panes so it is part of the
+             * keyboard instead of a dialog floating over the app.
+             *
+             * The toggle behaviour is the panel's own close route: pressing the grid key while
+             * the panel is up puts it away, which is how Gboard's grid key behaves.
+             */
+            KeyValue.Event.SWITCH_TOOLS -> {
+                // Evidence channel, unchanged from the dialog this replaced: the press is logged
+                // BEFORE the panel is built and the panel logs "shown rows=" after, so a field
+                // build where the command dispatches but nothing appears is one grep away. The
+                // emulator's accessibility dumps never carry IME-window nodes (run 40's
+                // DUMPDIAG), which leaves logcat as the only witness either surface has.
+                android.util.Log.i(TAG_TOOLS, "press")
+
+                if (currentPaneType == PaneType.TOOLS && isContentPaneShowing) {
+                    handle_event_key(KeyValue.Event.SWITCH_BACK_TOOLS)
+                    return
+                }
+
+                // #148: refuse without a host container — see the SWITCH_EMOJI guard.
+                val container = contentPaneContainer ?: run {
+                    android.util.Log.e(TAG, "SWITCH_TOOLS with no contentPaneContainer — refusing (gh #148)")
+                    return
+                }
+
+                // A-3/E-2: evicting another pane must also clear its routing flags
+                closeCurrentPaneRoutingState()
+
+                showToolsPanel(container)
+            }
+
             KeyValue.Event.SWITCH_GIF -> {
                 // GIF panel is opt-in — ignore key if disabled in settings
                 if (!Config.globalConfig().gif_enabled) return
@@ -589,9 +749,14 @@ class KeyboardReceiver(
 
             KeyValue.Event.SWITCH_BACK_EMOJI,
             KeyValue.Event.SWITCH_BACK_CLIPBOARD,
-            KeyValue.Event.SWITCH_BACK_GIF -> {
+            KeyValue.Event.SWITCH_BACK_GIF,
+            KeyValue.Event.SWITCH_BACK_TOOLS -> {
                 // A-3/E-2: shared routing-state clear (clipboard search, emoji, GIF)
                 closeCurrentPaneRoutingState()
+
+                // The panel's local copy of the switch values dies with the visit; the next open
+                // re-seeds from Config.
+                panelState = null
 
                 // Reset pane tracking
                 currentPaneType = PaneType.NONE
@@ -1177,6 +1342,13 @@ class KeyboardReceiver(
 
     companion object {
         private const val TAG = "KeyboardReceiver"
+
+        /**
+         * Logcat tag for the tools panel. Kept as its own constant because two different classes
+         * log under it — this receiver (opens/closes) and nothing else — and because the CI smoke
+         * script greps for it by name.
+         */
+        internal const val TAG_TOOLS = "MoreToolsPanel"
 
         /**
          * How much text before the cursor dictation looks at, purely to decide the joining space

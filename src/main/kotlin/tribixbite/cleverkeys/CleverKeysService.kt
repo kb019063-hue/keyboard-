@@ -1162,82 +1162,45 @@ class CleverKeysService : InputMethodService(),
     }
 
     /**
-     * The `more_tools` command (phase 4 part 3): an IME-safe sheet with the five feature toggles,
-     * theme and settings, one tap from the keyboard. Built on the same dialog mechanism the
-     * clipboard filter dialog and the voice-IME picker use — an AlertDialog on the keyboard's own
-     * window token, non-focusable per [ImeDialogWindowPolicy] — so it cannot hide the keyboard it
-     * was opened from.
+     * Key sound from the tools panel: the same two writes the Accessibility switch makes.
      *
-     * Every toggle goes through the same explicit setter its command uses, so the sheet shares
-     * one source of truth per feature and cannot drift from it. Rows carry their state as of
-     * opening; each tap writes the dialog's own `isChecked` value rather than re-reading a
-     * possibly stale [Config], and the ordinary listener refreshes [Config] afterwards.
+     * (Named for the sheet it used to be called from; it is the panel's switch now. Kept as its
+     * own method because it writes a raw preference key rather than going through a `*Config`
+     * helper the way the other four do.)
      */
-    fun showMoreToolsSheet() {
-        // The press is logged before the sheet is built, and the sheet logs "shown" (below): over
-        // an IME, logcat is the only witness CI has — dumps never carry IME windows (run 40's
-        // DUMPDIAG) — so "press without shown" is the one signal that can convict this code of
-        // dispatching the command and then failing to open anything.
-        Log.i("MoreToolsSheet", "press")
-        val token = window?.window?.decorView?.windowToken ?: run {
-            Log.w("MoreToolsSheet", "press dropped, no window token")
-            return
-        }
-        val cfg = _config
-        val rows = MoreToolsSheet.rows(
-            MoreToolsSheet.State(
-                incognito = cfg?.incognito_enabled ?: false,
-                floating = cfg?.floating_enabled ?: false,
-                split = cfg?.split_enabled ?: false,
-                oneHanded = cfg?.one_handed_enabled ?: false,
-                sound = cfg?.sound_enabled ?: false,
-            )
-        )
-        val labels: Array<CharSequence> = Array(rows.size) { getString(moreToolsLabel(rows[it].action)) }
-        val checked = BooleanArray(rows.size) { rows[it].checked }
-        val dialog = AlertDialog.Builder(this)
-            .setTitle(R.string.more_tools_sheet_title)
-            .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
-                when (rows[which].action) {
-                    MoreToolsSheet.Action.INCOGNITO -> setIncognitoEnabled(isChecked)
-                    MoreToolsSheet.Action.FLOATING -> setFloatingEnabled(isChecked)
-                    MoreToolsSheet.Action.SPLIT -> setSplitEnabled(isChecked)
-                    MoreToolsSheet.Action.ONE_HANDED -> setOneHandedEnabled(isChecked)
-                    MoreToolsSheet.Action.SOUND -> setKeySoundEnabled(isChecked)
-                }
-            }
-            .setNeutralButton(R.string.activities_theme_title) { _, _ ->
-                startActivity(Intent(this, ThemeSettingsActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            }
-            .setPositiveButton(R.string.cmd_config) { _, _ ->
-                startActivity(Intent(this, SettingsActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            }
-            .setNegativeButton(R.string.common_close, null)
-            .create()
-        // Evidence channel for CI and for the field: the emulator's accessibility dumps never
-        // carry IME-window nodes (run 40's DUMPDIAG proved it), so a dialog over the keyboard is
-        // invisible to every dump-based check. logcat sees it, and this line says what opened.
-        Log.i("MoreToolsSheet", "shown rows=${rows.size} " +
-            rows.joinToString(" ") { "${it.action.name.lowercase()}=${if (it.checked) "on" else "off"}" })
-        Utils.show_dialog_on_ime(dialog, token)
-    }
-
-    private fun moreToolsLabel(action: MoreToolsSheet.Action): Int = when (action) {
-        MoreToolsSheet.Action.INCOGNITO -> R.string.cmd_incognito_toggle
-        MoreToolsSheet.Action.FLOATING -> R.string.cmd_floating_toggle
-        MoreToolsSheet.Action.SPLIT -> R.string.cmd_split_toggle
-        MoreToolsSheet.Action.ONE_HANDED -> R.string.cmd_one_handed_toggle
-        MoreToolsSheet.Action.SOUND -> R.string.settings_key_sound_title
-    }
-
-    /** Set key sound from the sheet: the same two writes the Accessibility switch makes. */
     private fun setKeySoundEnabled(enabled: Boolean) {
         DirectBootAwarePreferences.get_shared_preferences(this).edit()
             .putBoolean("sound_enabled", enabled)
             .apply()
         _config?.sound_enabled = enabled
+    }
+
+    /**
+     * Flip one switch in the tools panel (2026-11-09).
+     *
+     * The panel is a pane now, not a dialog: it is built and hosted by
+     * [KeyboardReceiver.showToolsPanel], so this class no longer renders it. What stays here is
+     * this seam, for one reason — every switch has an *explicit* setter below that takes the
+     * value to write, rather than a toggle that re-reads `Config`. The panel passes the value its
+     * own lit tile is showing, so a fast second tap can never invert the feature the user just
+     * turned on (the same defect the dialog's `isChecked` array was written to avoid). Four of
+     * those setters are private; this is the one entry point the panel has.
+     */
+    fun setToolsPanelSwitch(key: MoreToolsPanel.Key, enabled: Boolean) {
+        when (key) {
+            MoreToolsPanel.Key.INCOGNITO -> setIncognitoEnabled(enabled)
+            MoreToolsPanel.Key.FLOATING -> setFloatingEnabled(enabled)
+            MoreToolsPanel.Key.SPLIT -> setSplitEnabled(enabled)
+            MoreToolsPanel.Key.ONE_HANDED -> setOneHandedEnabled(enabled)
+            MoreToolsPanel.Key.SOUND -> setKeySoundEnabled(enabled)
+            // Launchers carry no state; the panel routes them to their events and never asks
+            // for a value. Ignoring them here keeps the signature honest instead of throwing
+            // from a UI callback.
+            MoreToolsPanel.Key.EMOJI,
+            MoreToolsPanel.Key.CLIPBOARD,
+            MoreToolsPanel.Key.THEME,
+            MoreToolsPanel.Key.SETTINGS -> Unit
+        }
     }
 
     /** Move the shrunken keyboard to the other edge (`one_handed_side` command). */

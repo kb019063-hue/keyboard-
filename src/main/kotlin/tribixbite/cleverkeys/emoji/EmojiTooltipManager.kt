@@ -117,13 +117,62 @@ class EmojiTooltipManager(context: Context) {
         // Use showAsDropDown for reliable positioning within IME window
         // showAtLocation uses screen coords which don't work well in keyboard context
         try {
-            // Center horizontally, position above the anchor
-            val offsetX = (anchor.width - tooltipWidth) / 2
-            val offsetY = -anchor.height - tooltipHeight - 8  // 8px gap above anchor
-            popupWindow.showAsDropDown(anchor, offsetX, offsetY, Gravity.TOP or Gravity.START)
+            // Always drawing the bubble above and centred on the cell clipped it: the top row has
+            // the pane's search bar above it, and the end cells of every row overhang the side
+            // edges. EmojiTooltipPlacement owns the flip-or-slide rule; this call only supplies
+            // the rectangles and the offsets the platform expects.
+            val placement = placeInsidePane(anchor, tooltipWidth, tooltipHeight)
+            if (placement != null) {
+                val anchorLoc = IntArray(2)
+                anchor.getLocationInWindow(anchorLoc)
+                val offsetX = placement.x - anchorLoc[0]
+                val offsetY = EmojiTooltipPlacement.dropDownOffsetY(
+                    anchorLoc[1], anchor.height, placement.y
+                )
+                popupWindow.showAsDropDown(anchor, offsetX, offsetY, Gravity.TOP or Gravity.START)
+            } else {
+                // No window bounds to reason about (detached, or a bare test host): keep the
+                // pre-existing above-and-centred behaviour rather than showing nothing.
+                val offsetX = (anchor.width - tooltipWidth) / 2
+                val offsetY = -anchor.height - tooltipHeight - 8
+                popupWindow.showAsDropDown(anchor, offsetX, offsetY, Gravity.TOP or Gravity.START)
+            }
         } catch (e: Exception) {
             android.util.Log.e("EmojiTooltipManager", "Failed to show tooltip", e)
         }
+    }
+
+    /**
+     * The window rectangle the bubble must stay inside, or null when there is none to ask.
+     *
+     * `getWindowVisibleDisplayFrame` is the visible area of the window the anchor lives in — for
+     * an IME that is the keyboard surface, which is exactly the region Gboard keeps its bubble
+     * within, and it already excludes the navigation bar and system insets.
+     */
+    private val visibleFrame = android.graphics.Rect()
+
+    private fun placeInsidePane(anchor: View, width: Int, height: Int): EmojiTooltipPlacement.Result? {
+        if (!anchor.isAttachedToWindow) return null
+        // Void on this compileSdk (it only returns Boolean from S+), so the guard is the frame
+        // being empty afterwards rather than a return value.
+        @Suppress("DEPRECATION")
+        anchor.getWindowVisibleDisplayFrame(visibleFrame)
+        if (visibleFrame.isEmpty) return null
+
+        val loc = IntArray(2)
+        anchor.getLocationInWindow(loc)
+        return EmojiTooltipPlacement.place(
+            anchorX = loc[0],
+            anchorY = loc[1],
+            anchorWidth = anchor.width,
+            anchorHeight = anchor.height,
+            width = width,
+            height = height,
+            boundsLeft = visibleFrame.left,
+            boundsTop = visibleFrame.top,
+            boundsRight = visibleFrame.right,
+            boundsBottom = visibleFrame.bottom,
+        )
     }
 
     /**

@@ -359,22 +359,33 @@ def ime_nodes(s, for_hit=False):
 
 
 def more_tools_sheet(s):
-    """What the more key does (7g): the service logs the press, then the sheet it shows.
+    """What the more key does (7g): the service logs the press, then the panel it shows.
 
-    mt_deaf models the one defect 7g exists to catch -- the command dispatched, the dialog never
-    came up: press in logcat, no shown line. The state in the shown line mirrors the five rows
-    MoreToolsSheet.rows carries, read from the same switches 7d toggles.
+    2026-11-09: the surface is the tools PANEL -- a keyboard pane built by
+    KeyboardReceiver.showToolsPanel -- replacing the AlertDialog the sheet used to be. The
+    evidence contract 7g reads is deliberately unchanged: "press" before the build, then a
+    "shown rows=N ..." line carrying the switches. That is why the tag, the row count and the
+    verdicts below kept their shape while the product changed.
+
+    mt_deaf models the one defect 7g exists to catch -- the command dispatched and nothing came
+    up: press in logcat, no shown line. The state in the shown line mirrors the nine cells
+    MoreToolsPanel.cells carries (five switches then four launchers that never report a state),
+    read from the same switches 7d toggles.
     """
-    s.setdefault("loglines", []).append("I MoreToolsSheet: press")
+    s.setdefault("loglines", []).append("I MoreToolsPanel: press")
     if s.get("mt_deaf"):
         return
     st = s["checked"]
+    switches = " ".join(
+        "%s=%s" % (label, "on" if st.get(name) else "off")
+        for label, name in (("incognito", "Incognito Mode"), ("floating", "Floating Keyboard"),
+                            ("split", "Split Keyboard"), ("one_handed", "One-Handed Mode"),
+                            ("sound", "Key Sound")))
+    # Launchers always report "off": they carry no state, and MoreToolsPanelTest pins that.
+    launchers = " ".join("%s=off" % label
+                         for label in ("emoji", "clipboard", "theme", "settings"))
     s["loglines"].append(
-        "I MoreToolsSheet: shown rows=5 " + " ".join(
-            "%s=%s" % (label, "on" if st.get(name) else "off")
-            for label, name in (("incognito", "Incognito Mode"), ("floating", "Floating Keyboard"),
-                                ("split", "Split Keyboard"), ("one_handed", "One-Handed Mode"),
-                                ("sound", "Key Sound"))))
+        "I MoreToolsPanel: shown rows=3 " + switches + " " + launchers)
 
 
 def voice_mic(s):

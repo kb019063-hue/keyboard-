@@ -30,6 +30,31 @@ class EmojiGridView(context: Context, attrs: AttributeSet?) :
     }
     private var saveScheduled = false  // Debounce flag for saveLastUsed
 
+    /**
+     * The write queued by [scheduleSaveLastUsed], 500 ms after the last selection.
+     *
+     * Deliberately holds **no reference to this view**: the payload is snapshotted into
+     * [pendingSaveSet] / [pendingSavePrefs] when the debounce is armed. That is what makes it safe
+     * to leave queued across a detach — a `Runnable` closing over `this` would keep the whole
+     * detached view (and its adapter and bitmaps) alive for half a second, which is the leak the
+     * old View-scoped `postDelayed` avoided only by losing the write instead.
+     */
+    private val saveLastUsedRunnable = Runnable {
+        saveScheduled = false
+        val prefs = pendingSavePrefs ?: return@Runnable
+        val set = pendingSaveSet ?: return@Runnable
+        pendingSavePrefs = null
+        pendingSaveSet = null
+        try {
+            prefs.edit().putStringSet(LAST_USE_PREF, set).apply()
+        } catch (_: Exception) {
+            // A failed write must not take the IME down; the next selection re-arms the debounce.
+        }
+    }
+
+    private var pendingSavePrefs: SharedPreferences? = null
+    private var pendingSaveSet: Set<String>? = null
+
     // #41 v8: Reference to search manager for bypassing search routing on emoji selection
     private var searchManager: EmojiSearchManager? = null
     // #41 v10: Reference to service for suggestion bar messages (Toast suppressed on Android 13+ IME)
@@ -94,6 +119,13 @@ class EmojiGridView(context: Context, attrs: AttributeSet?) :
     override fun onDetachedFromWindow() {
         // EmojiCompat is a process singleton: never let it hold this view.
         if (EmojiCompat.isConfigured()) EmojiCompat.get().unregisterInitCallback(emojiCompatLoaded)
+        // The tooltip and its auto-dismiss are pure decoration: dropping them on detach is
+        // correct, and clearing the handler here also releases its reference to this view.
+        tooltipDismissHandler.removeCallbacksAndMessages(null)
+        tooltipManager.dismiss()
+        // saveLastUsedRunnable is deliberately NOT cancelled: it holds no reference to this view
+        // (see saveLastUsedRunnable) and carries the user's last selection to disk. Cancelling it
+        // here is what lost that write.
         super.onDetachedFromWindow()
     }
 
@@ -166,10 +198,22 @@ class EmojiGridView(context: Context, attrs: AttributeSet?) :
     private fun scheduleSaveLastUsed() {
         if (saveScheduled) return
         saveScheduled = true
-        postDelayed({
+        // NOT `postDelayed` on the View. A detached View's queue is discarded, and this pane is
+        // detached on every switch back to the keyboard — so tapping the grid's close button
+        // within the 500 ms window cancelled the write and the emoji the user had just used was
+        // never recorded in recents. A process-wide handler keeps the deadline alive past detach;
+        // the payload is snapshotted here so the runnable cannot hold the view alive.
+        pendingSavePrefs = try {
+            emojiSharedPreferences()
+        } catch (_: Exception) {
+            null
+        }
+        pendingSaveSet = lastUsed.map { (emoji, count) -> "$count-${emoji.kv().getString()}" }.toSet()
+        if (pendingSavePrefs == null) {
             saveScheduled = false
-            saveLastUsed()
-        }, 500)  // 500ms debounce
+            return
+        }
+        MAIN_HANDLER.postDelayed(saveLastUsedRunnable, 500)
     }
 
     /**
@@ -222,21 +266,6 @@ class EmojiGridView(context: Context, attrs: AttributeSet?) :
         val list = lastUsed.keys.toMutableList()
         list.sortByDescending { lastUsed[it] ?: 0 }
         return list
-    }
-
-    private fun saveLastUsed() {
-        val edit = try {
-            emojiSharedPreferences().edit()
-        } catch (_: Exception) {
-            return
-        }
-
-        val set = lastUsed.map { (emoji, count) ->
-            "$count-${emoji.kv().getString()}"
-        }.toSet()
-
-        edit.putStringSet(LAST_USE_PREF, set)
-        edit.apply()
     }
 
     private fun loadLastUsed() {
@@ -365,6 +394,12 @@ class EmojiGridView(context: Context, attrs: AttributeSet?) :
         const val GROUP_LAST_USE = -1
         const val GROUP_SEARCH = -2  // #41: Search mode
         private const val LAST_USE_PREF = "emoji_last_use"
+
+        /**
+         * Main-looper handler for the recents write. Process-lifetime, not per-view: a detached
+         * View's own queue is discarded, which is what used to swallow the last selection.
+         */
+        private val MAIN_HANDLER = android.os.Handler(android.os.Looper.getMainLooper())
     }
 }
 
