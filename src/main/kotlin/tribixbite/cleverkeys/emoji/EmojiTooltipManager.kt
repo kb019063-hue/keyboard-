@@ -153,8 +153,10 @@ class EmojiTooltipManager(context: Context) {
 
     private fun placeInsidePane(anchor: View, width: Int, height: Int): EmojiTooltipPlacement.Result? {
         if (!anchor.isAttachedToWindow) return null
+        // Void on this compileSdk (it only returns Boolean from S+), so the guard is the frame
+        // being empty afterwards rather than a return value.
         @Suppress("DEPRECATION")
-        if (!anchor.getWindowVisibleDisplayFrame(visibleFrame)) return null
+        anchor.getWindowVisibleDisplayFrame(visibleFrame)
         if (visibleFrame.isEmpty) return null
 
         val loc = IntArray(2)
