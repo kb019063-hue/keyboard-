@@ -500,6 +500,9 @@
 
     <!-- SettingsScreen chrome + SettingsDialogs -->
     <string name="settings_search_hint">Search settings…</string>
+    <!-- 2026-11-09: a query that matched nothing collapsed the results card and showed no
+         feedback at all, so "no match" was indistinguishable from "search is broken". -->
+    <string name="settings_search_no_results">No settings match \"%1$s\"</string>
     <string name="settings_drawer_open_desc">Open sections menu</string>
     <string name="settings_swipe_data_title">Swipe Data</string>
     <string name="settings_search_words_hint">Search words…</string>
