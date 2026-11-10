@@ -282,6 +282,7 @@ class ClipboardManager(
 
             // Set up regex toggle button (.*)
             regexToggle = clipboardPane?.findViewById(R.id.clipboard_regex_toggle)
+            regexToggle?.let { describe(it, R.string.clipboard_regex_help) }
             regexToggle?.setOnClickListener {
                 if (isInEditMode()) return@setOnClickListener
                 val historyView = clipboardHistoryView ?: return@setOnClickListener
@@ -350,7 +351,10 @@ class ClipboardManager(
             deleteSelectedButton?.let { describe(it, R.string.clipboard_delete_selected) }
             exitSelectionButton?.let { describe(it, R.string.clipboard_selection_exit) }
             exitSelectionButton?.setOnClickListener { exitSelectionMode() }
-            clipboardHistoryView?.onResultsChanged = { updateResultSummary() }
+            clipboardHistoryView?.onResultsChanged = {
+                updateResultSummary()
+                updateSearchBoxErrorState(clipboardHistoryView?.hasRegexError() == true)
+            }
             updateResultSummary()
 
             // Apply tab visibility based on config toggles

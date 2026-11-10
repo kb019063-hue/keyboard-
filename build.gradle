@@ -57,6 +57,8 @@ dependencies {
   // a11y helper never silently loses its dependency.
   implementation "androidx.customview:customview:1.1.0"
 
+  // Linear-time clipboard regex matching; user patterns must not freeze the IME.
+  implementation "com.google.re2j:re2j:1.8"
   implementation "org.jetbrains.kotlin:kotlin-stdlib:2.0.0"
   implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1"
 

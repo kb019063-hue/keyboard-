@@ -30,6 +30,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.withContext
 import tribixbite.cleverkeys.clipboard.ClipboardBulkPlans
 import tribixbite.cleverkeys.clipboard.ClipboardCleanResult
@@ -40,7 +43,6 @@ import tribixbite.cleverkeys.clipboard.ClipboardSwipeTracker
 import tribixbite.cleverkeys.clipboard.ClipboardProvenance
 import tribixbite.cleverkeys.clipboard.ClipboardSelection
 import tribixbite.cleverkeys.clipboard.ClipboardSelectionHolder
-import java.util.regex.PatternSyntaxException
 
 /**
  * Clipboard tab types for the unified clipboard view.
@@ -162,6 +164,7 @@ class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListVi
     private var sizeMinimum = 0L
     private var sizeMaximum: Long? = null
     private var dataReady = false
+    private var filterPending = false
     var onResultsChanged: (() -> Unit)? = null
 
     /** Current inclusive payload-size bounds; kept across tabs, reset by Clear filters. */
@@ -174,7 +177,7 @@ class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListVi
         applyFilter()
     }
 
-    fun isResultsReady(): Boolean = dataReady && !bulkRunning
+    fun isResultsReady(): Boolean = dataReady && !filterPending && !bulkRunning
     fun resultSummary(): Pair<Int, Long> = filteredHistory.size to filteredHistory.sumOf { it.sizeBytes }
 
     // ─── Persistent selection (2026-10-07) ───
@@ -257,7 +260,7 @@ class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListVi
      */
     fun selectAllMatching(): Int {
         val current = selection ?: return 0
-        if (!dataReady || bulkRunning) return 0
+        if (!dataReady || filterPending || bulkRunning) return 0
         val added = current.selectAll(filteredHistory)
         selectionChanged()
         return added
@@ -266,7 +269,7 @@ class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListVi
     /** Remove every row matching the current search and filters (all pages) from the selection. */
     fun deselectAllMatching(): Int {
         val current = selection ?: return 0
-        if (bulkRunning) return 0
+        if (!dataReady || filterPending || bulkRunning) return 0
         val removed = current.deselectAll(filteredHistory)
         selectionChanged()
         return removed
@@ -291,7 +294,7 @@ class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListVi
      */
     fun selectionSnapshot(): ClipboardDeleteSnapshot? {
         val current = selection ?: return null
-        if (!dataReady || bulkRunning || isEditing() || current.tab != currentTab) return null
+        if (!dataReady || filterPending || bulkRunning || isEditing() || current.tab != currentTab) return null
         return current.resolve(history).takeIf { it.entries.isNotEmpty() }
     }
 
@@ -481,6 +484,7 @@ class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListVi
     private var viewScope: CoroutineScope? = null
     // Current async load job — cancelled on new load to prevent stale data
     private var loadJob: Job? = null
+    private var filterJob: Job? = null
 
     companion object {
         const val ITEMS_PER_PAGE = 100
@@ -513,9 +517,6 @@ class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListVi
             else -> R.drawable.ic_media_file
         }
 
-        /** Delegates to [ClipboardSearchUtils.expandGlobShorthand] */
-        fun expandGlobShorthand(query: String): String =
-            ClipboardSearchUtils.expandGlobShorthand(query)
     }
 
     init {
@@ -545,6 +546,9 @@ class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListVi
         holder?.let { if (it.observer === holderObserver) it.observer = null }
         loadJob?.cancel()
         loadJob = null
+        filterJob?.cancel()
+        filterJob = null
+        filterPending = false
         viewScope?.cancel()
         viewScope = null
         super.onDetachedFromWindow()
@@ -583,7 +587,7 @@ class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListVi
 
     /** Filter clipboard history by search text */
     fun setSearchFilter(filter: String?) {
-        searchFilter = filter?.lowercase() ?: ""
+        searchFilter = filter ?: ""
         applyFilter()
     }
 
@@ -600,111 +604,93 @@ class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListVi
     fun hasRegexError(): Boolean = searchRegexError
 
     private fun applyFilter(resetView: Boolean = true) {
-        // resetView=true means the search or filter criteria changed: the results the undo
-        // offer described are gone, so a swiped row is deleted now (reloads pass false).
         if (resetView) commitPendingDeletion(ClipboardPendingDeletion.CommitReason.FILTER_CHANGE)
-        // A row awaiting its deferred delete is hidden from every result and count.
-        val source = if (pendingDeletion?.pending?.tab == currentTab) history.filterNot(::isPendingDeletion) else history
+        filterJob?.cancel()
+        val pending = pendingDeletion?.pending?.takeIf { it.tab == currentTab }?.content
+        val source = history
+        val query = searchFilter
+        val regex = regexMode
+        val tab = currentTab
+        val min = sizeMinimum
+        val max = sizeMaximum
+        val dateEnabled = dateFilterEnabled
+        val dateBefore = dateFilterBefore
+        val date = dateFilterTimestamp
+        val privateOnly = privateOnlyFilter
+        val tags = tagFilterSelected.toSet()
+        val matchAll = tagFilterMatchAll
+        val active = statusFilterActive
+        val planned = statusFilterPlanned
+        val completed = statusFilterCompleted
+        val hasStatusFilter = tab == ClipboardTab.TODOS && !(active && planned && completed)
+        val noFilters = pending == null && query.isEmpty() && !dateEnabled && tags.isEmpty() &&
+            !hasStatusFilter && !privateOnly && min == 0L && max == null
+        if (resetView) currentPage = 0
 
-        // Pre-compile regex once per filter pass (not per entry)
-        val compiledRegex: Regex? = if (regexMode && searchFilter.isNotEmpty()) {
-            try {
-                val pattern = expandGlobShorthand(searchFilter)
-                searchRegexError = false
-                Regex(pattern, RegexOption.IGNORE_CASE)
-            } catch (e: PatternSyntaxException) {
-                searchRegexError = true
-                null  // invalid regex → match nothing
+        fun publish(result: List<ClipboardEntry>, error: Boolean) {
+            filterPending = false
+            searchRegexError = error
+            filteredHistory = result
+            applyPagination(clearExpandedStates = resetView)
+        }
+        // A true fast path: do not traverse or allocate a second list for an unfiltered tab.
+        if (noFilters) {
+            publish(source, false)
+            return
+        }
+
+        // All values above are snapshots. Only the latest job may publish; a new filter or load
+        // cancels its predecessor. Detached JVM fixtures have no scope and use the same logic
+        // synchronously; attached views never scan clipboard contents on the main thread.
+        fun filter(checkCancelled: () -> Unit): Pair<List<ClipboardEntry>, Boolean> {
+            val pattern = if (regex && query.isNotEmpty()) ClipboardSearchUtils.compileRegex(query) else null
+            if (regex && query.isNotEmpty() && pattern == null) return emptyList<ClipboardEntry>() to true
+            val result = ArrayList<ClipboardEntry>()
+            for (entry in source) {
+                checkCancelled()
+                if (pending != null && entry.content == pending) continue
+                if (!ClipboardSizePolicy.matches(entry.sizeBytes, min, max)) continue
+                if (query.isNotEmpty()) {
+                    if (regex) {
+                        if (!pattern!!.matcher(entry.content).find()) continue
+                    } else if (!entry.content.contains(query, ignoreCase = true)) continue
+                }
+                if (dateEnabled && (if (dateBefore) entry.timestamp >= date else entry.timestamp < date)) continue
+                if (privateOnly && !entry.isPrivate) continue
+                if (tags.isNotEmpty() && (entry.tags.isEmpty() ||
+                        if (matchAll) !tags.all { it in entry.tags } else !entry.tags.any { it in tags })) continue
+                if (tab == ClipboardTab.TODOS) {
+                    val passes = when (entry.todoStatus ?: TodoEntry.STATUS_ACTIVE) {
+                        TodoEntry.STATUS_ACTIVE -> active
+                        TodoEntry.STATUS_PLANNED -> planned
+                        TodoEntry.STATUS_COMPLETED -> completed
+                        else -> active
+                    }
+                    if (!passes) continue
+                }
+                result.add(entry)
             }
+            return result to false
+        }
+        val scope = viewScope
+        if (scope == null) {
+            val (result, error) = filter { }
+            publish(result, error)
         } else {
+            filterPending = true
             searchRegexError = false
-            null
+            // Do not let stale visible results be selected while the new query is running.
+            filteredHistory = emptyList()
+            applyPagination(clearExpandedStates = resetView)
+            filterJob = scope.launch {
+                if (resetView && query.isNotEmpty()) delay(100)
+                val (result, error) = withContext(Dispatchers.Default) {
+                    val job = coroutineContext[Job]
+                    filter { job?.ensureActive() }
+                }
+                publish(result, error)
+            }
         }
-
-        // Apply both search and date filters (searches ALL items)
-        val filtered = source.filter { entry ->
-            if (!ClipboardSizePolicy.matches(entry.sizeBytes, sizeMinimum, sizeMaximum)) return@filter false
-            // Apply search filter
-            if (searchFilter.isNotEmpty()) {
-                if (regexMode) {
-                    // Regex mode: use compiled pattern or reject all on syntax error
-                    if (compiledRegex == null || !compiledRegex.containsMatchIn(entry.content)) {
-                        return@filter false
-                    }
-                } else {
-                    // Plain text mode: case-insensitive substring match
-                    if (!entry.content.lowercase().contains(searchFilter)) {
-                        return@filter false
-                    }
-                }
-            }
-
-            // Apply date filter
-            if (dateFilterEnabled) {
-                if (dateFilterBefore) {
-                    // Show entries before the selected date
-                    if (entry.timestamp >= dateFilterTimestamp) {
-                        return@filter false
-                    }
-                } else {
-                    // Show entries after the selected date
-                    if (entry.timestamp < dateFilterTimestamp) {
-                        return@filter false
-                    }
-                }
-            }
-
-            // Private-only filter (#156 — all tabs). Additional AND predicate: keep only 🔒 entries.
-            if (privateOnlyFilter && !entry.isPrivate) {
-                return@filter false
-            }
-
-            // Tag filter (PINNED/TODOS tabs — when tags are selected)
-            if (tagFilterSelected.isNotEmpty()) {
-                if (entry.tags.isEmpty()) {
-                    // Entries with no tags don't match any tag filter
-                    return@filter false
-                }
-                val matches = if (tagFilterMatchAll) {
-                    tagFilterSelected.all { it in entry.tags }  // AND: must have all
-                } else {
-                    entry.tags.any { it in tagFilterSelected }  // OR: any match
-                }
-                if (!matches) return@filter false
-            }
-
-            // Status filter (TODOS tab only — filter by active/planned/completed)
-            if (currentTab == ClipboardTab.TODOS) {
-                val status = entry.todoStatus ?: TodoEntry.STATUS_ACTIVE
-                val passes = when (status) {
-                    TodoEntry.STATUS_ACTIVE -> statusFilterActive
-                    TodoEntry.STATUS_PLANNED -> statusFilterPlanned
-                    TodoEntry.STATUS_COMPLETED -> statusFilterCompleted
-                    else -> statusFilterActive  // unknown status treated as active
-                }
-                if (!passes) return@filter false
-            }
-
-            true
-        }
-
-        // If no filters are active, show all history (skip filter pass optimization)
-        // Status filter is active when not ALL three statuses are enabled (truly "show all").
-        // The default state (only active=true) IS a filter — it hides planned/completed items.
-        val hasStatusFilter = currentTab == ClipboardTab.TODOS &&
-            !(statusFilterActive && statusFilterPlanned && statusFilterCompleted)
-        filteredHistory = if (searchFilter.isEmpty() && !dateFilterEnabled &&
-            tagFilterSelected.isEmpty() && !hasStatusFilter && !privateOnlyFilter && sizeMinimum == 0L && sizeMaximum == null) {
-            source
-        } else {
-            filtered
-        }
-
-        // Reset to first page when filter changes (but not on data reloads)
-        if (resetView) {
-            currentPage = 0
-        }
-        applyPagination(clearExpandedStates = resetView)
     }
 
     private fun applyPagination(clearExpandedStates: Boolean = false) {
@@ -1349,6 +1335,8 @@ class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListVi
         // Also the guard that makes listener callbacks from a running action's IO thread inert.
         if (bulkRunning) return
         dataReady = false
+        filterJob?.cancel()
+        filterPending = false
         onResultsChanged?.invoke()
         loadJob?.cancel()
         val loadingTab = currentTab

@@ -218,6 +218,54 @@ class ClipboardFilterDialogTest {
     }
 
     @Test
+    fun searchPublishesOnlyLatestQueryAndKeepsRegexEscapes() {
+        val db = ClipboardDatabase.getInstance(context)
+        val prefix = "search-${java.util.UUID.randomUUID()}-"
+        val expiry = System.currentTimeMillis() + 3600_000
+        val alpha = prefix + "ABC"
+        val digits = prefix + "123"
+        assertTrue(db.addClipboardEntry(alpha, expiry))
+        assertTrue(db.addClipboardEntry(digits, expiry))
+        var manager: ClipboardManager? = null
+        try {
+            ActivityScenario.launch(ClipboardEditTestActivity::class.java).use { scenario ->
+                lateinit var history: ClipboardHistoryView
+                scenario.onActivity { activity ->
+                    manager = ClipboardManager(activity, Config.globalConfig())
+                    val pane = manager!!.getClipboardPane(activity.layoutInflater)
+                    activity.setContentView(pane)
+                    history = pane.findViewById(R.id.clipboard_history_view)
+                }
+                awaitCondition { history.isResultsReady() }
+                onMain {
+                    history.setSearchFilter(prefix + "ABC")
+                    history.setSearchFilter(prefix + "123")
+                    assertFalse(history.isResultsReady())
+                    assertEquals(0, history.resultSummary().first)
+                }
+                awaitCondition { history.isResultsReady() && history.resultSummary().first == 1 }
+                onMain {
+                    history.setRegexMode(true)
+                    history.setSearchFilter(java.util.regex.Pattern.quote(prefix) + "\\D+$")
+                }
+                awaitCondition { history.isResultsReady() }
+                assertEquals(1, onMain { history.resultSummary().first })
+                assertFalse(onMain { history.hasRegexError() })
+                onMain { history.setSearchFilter("[") }
+                awaitCondition { history.isResultsReady() }
+                assertTrue(onMain { history.hasRegexError() })
+                assertEquals(0, onMain { history.resultSummary().first })
+                onMain { manager!!.cleanup() }
+                manager = null
+            }
+        } finally {
+            manager?.let { onMain(it::cleanup) }
+            db.removeClipboardEntry(alpha)
+            db.removeClipboardEntry(digits)
+        }
+    }
+
+    @Test
     fun confirmedSizeFilteredDeletionCoversAllPagesAndPreservesChangedRowsAndCopies() {
         val db = ClipboardDatabase.getInstance(context)
         val prefix = "ewgap-${java.util.UUID.randomUUID()}-"
@@ -249,9 +297,11 @@ class ClipboardFilterDialogTest {
                 assertEquals(205, onMain { history.selectedCount() })
                 // The selection survives a search that hides it, and adds to it.
                 onMain { history.setSearchFilter(small) }
+                awaitCondition { history.isResultsReady() }
                 onMain { pane.findViewById<View>(R.id.clipboard_select_matching).performClick() }
                 assertEquals(205, onMain { history.selectedCount() })  // the small clip fails the size filter
                 onMain { history.setSearchFilter(prefix) }
+                awaitCondition { history.isResultsReady() }
                 onMain { pane.findViewById<View>(R.id.clipboard_delete_selected).performClick() }
                 assertEquals(205, db.getActiveClipboardEntries().count { it.content.startsWith(prefix) && it.content != small })
                 onMain { requireNotNull(dialog(manager!!, "bulkDialog")).getButton(AlertDialog.BUTTON_NEGATIVE).performClick() }

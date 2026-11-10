@@ -295,7 +295,9 @@ object ComposeKeyData {{
 
         try {{
             context.assets.open("compose_data.bin").use {{ inputStream ->
-                DataInputStream(inputStream).use {{ dis ->
+                // AssetInputStream crosses into native code on reads. Buffer the generated
+                // table so DataInputStream's per-byte reads do not cross it for each byte.
+                DataInputStream(inputStream.buffered()).use {{ dis ->
                     val size = dis.readInt()
                     val statesArray = CharArray(size)
                     for (i in 0 until size) {{

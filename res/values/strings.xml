@@ -355,6 +355,7 @@
     <string name="clipboard_search_hint">Search…</string>
     <string name="clipboard_clear_search">Clear search</string>
     <string name="clipboard_toggle_regex">Toggle regex search</string>
+    <string name="clipboard_regex_help">Toggle regex search. Regex mode uses RE2 syntax: use .* for a wildcard. Lookaround, backreferences and very large repetitions are not supported. Invalid patterns appear in red.</string>
     <string name="clipboard_date_filter">Date filter</string>
     <string name="clipboard_close">Close clipboard</string>
 
