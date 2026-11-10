@@ -1229,6 +1229,7 @@ tasks.register('runPureTests', JavaExec) {
     'tribixbite.cleverkeys.CornerLabelPolicyTest',
     'tribixbite.cleverkeys.IncognitoPolicyTest',
     // Renamed 2026-11-09 when the dialog became a pane: the model is MoreToolsPanel now.
+    'tribixbite.cleverkeys.EmojiTooltipPlacementTest',
     'tribixbite.cleverkeys.MoreToolsPanelTest',
     'tribixbite.cleverkeys.OneHandedConfigTest',
     'tribixbite.cleverkeys.SuggestionStripPolicyTest',
