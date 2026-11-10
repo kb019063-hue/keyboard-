@@ -148,6 +148,31 @@ object DictationPolicy {
     }
 
     /**
+     * How long a single listening session may run before the keyboard gives up on it.
+     *
+     * The recogniser is supposed to end a session with `onResults` or `onError`. Two real cases
+     * leave it silent instead: a service that dies after `startListening` (some OEM builds, and
+     * any recogniser whose process is killed mid-session), and a session that begins its own
+     * silent retry while the previous attempt never reported anything. Both leave `sessionActive`
+     * true with nothing coming, which turns the mic key into a stop button for a dead session: the
+     * user presses, the bar says "Listening…", nothing is ever heard, and every later press only
+     * ever cancels. That is the "the mic key does nothing now" report.
+     *
+     * 60 s is deliberately generous: a dictated paragraph plus silence-endpointing fits well
+     * inside it, and the cost of being too long is one dead press, while the cost of being too
+     * short is truncating a real sentence.
+     */
+    const val SESSION_WATCHDOG_MS = 60_000L
+
+    /**
+     * Whether the watchdog above should end the session that started [elapsedMs] ago.
+     *
+     * Pure so the threshold is testable: the controller only owns the timer that feeds it.
+     */
+    fun onSessionExpired(elapsedMs: Long, sessionActive: Boolean): Boolean =
+        sessionActive && elapsedMs >= SESSION_WATCHDOG_MS
+
+    /**
      * The space that joins dictated text to what was already there. A blank field gets none; a
      * field ending in whitespace gets none; anything else gets exactly one, so two dictations in a
      * row read as two words and never as "hellohello" or "hello  world".

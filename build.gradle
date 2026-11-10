@@ -1240,6 +1240,10 @@ tasks.register('runPureTests', JavaExec) {
     'tribixbite.cleverkeys.voice.VoiceTypingConfigTest',
     'tribixbite.cleverkeys.voice.DictationPolicyTest',
     'tribixbite.cleverkeys.voice.VoiceLanguagePolicyTest',
+    // 2026-11-09: dictation asked for the DEVICE locale, not the keyboard's active language.
+    'tribixbite.cleverkeys.voice.DictationLanguageSourceTest',
+    // 2026-11-09: a recogniser that never called back left the mic key a stop button forever.
+    'tribixbite.cleverkeys.voice.DictationSessionWatchdogTest',
     'tribixbite.cleverkeys.ui.settings.SettingsDrawerItemsTest',
     'tribixbite.cleverkeys.VerboseLogRatchetTest',
     // KeyFillAlpha is a pure ARGB bit operation (2026-11-01: it no longer calls
