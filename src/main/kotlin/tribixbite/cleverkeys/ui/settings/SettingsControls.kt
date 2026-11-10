@@ -2,42 +2,48 @@
 
 package tribixbite.cleverkeys.ui.settings
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import tribixbite.cleverkeys.R
 import tribixbite.cleverkeys.SettingsActivity
 import tribixbite.cleverkeys.sliderSteps
 
 // Composable helper components
+//
+// 2026-11-09 (UI/UX round): a section renders its CONTENT only. The title moved to the top app
+// bar and the collapse chevron is gone -- see SettingsPane below and SectionHeaderPolicy for the
+// three defects the old titled, collapsible card produced.
+/**
+ * A settings section's content card.
+ *
+ * **This deliberately renders no title and no collapse chevron.** The drawer names the section and
+ * the top app bar repeats that name in context, so a header here was the third copy -- and a
+ * clickable one at that: with exactly one section per pane, collapsing it emptied the screen and
+ * left a title with nothing under it. [SectionHeaderPolicy] documents the full reasoning,
+ * including the "the pane never said which section you were in" defect that came from the same
+ * arrangement.
+ *
+ * [sectionId] is still honoured: it is the scroll target for search results that land on the
+ * section itself rather than on a control inside it.
+ */
 @Composable
-internal fun SettingsActivity.CollapsibleSettingsSection(
-    title: String,
-    expanded: Boolean,
-    onExpandChange: (Boolean) -> Unit,
+internal fun SettingsActivity.SettingsPane(
     sectionId: String? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
@@ -46,96 +52,43 @@ internal fun SettingsActivity.CollapsibleSettingsSection(
             .fillMaxWidth()
             .let { m ->
                 if (sectionId != null) m.onGloballyPositioned { coords ->
-                    // Track scroll offset so SearchableSetting can target a section header.
-                    //
-                    // The read MUST stay inside this layout lambda (issue #79). `ScrollState.value`
-                    // is snapshot-backed, so hoisting it into the composition body — as this did
-                    // between d2d0e456 and now — subscribes every one of the 18 sections to it and
-                    // recomposes them on each scroll PIXEL. Worse, the lambda then captures the
-                    // changed offset, so the Card's modifier is a fresh instance every frame and
-                    // the whole node chain re-diffs and re-lays-out mid-scroll: visible jitter.
-                    // The other three call sites (SettingsSwitch/Slider/Dropdown) always read it
-                    // here; this one is now consistent with them.
+                    // The read MUST stay inside this layout lambda (issue #79): `ScrollState.value`
+                    // is snapshot-backed, so hoisting it into the composition body subscribes the
+                    // section to every scroll PIXEL and re-diffs the whole node chain mid-scroll.
                     recordSettingPosition(sectionId, contentYOf(coords))
                 } else m
             },
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
-        shape = RoundedCornerShape(8.dp)
+        shape = RoundedCornerShape(12.dp)
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onExpandChange(!expanded) },
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // weight(1f): the title takes only the space left after the chevron and wraps
-                // onto a second line instead of running underneath it (device finding
-                // 2026-09-29: hu "Biztonsági mentés & Visszaállítás" collided with the icon).
-                Text(
-                    text = title,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(end = 8.dp)
-                )
-                Icon(
-                    imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                    contentDescription = stringResource(
-                        if (expanded) R.string.common_collapse else R.string.common_expand
-                    ),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            AnimatedVisibility(
-                visible = expanded,
-                enter = expandVertically(),
-                exit = shrinkVertically()
-            ) {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    content()
-                }
-            }
+            content()
         }
     }
 }
 
-// Non-collapsible version for simple sections
+/**
+ * Retained name for the nineteen existing section call sites; renders [SettingsPane].
+ *
+ * The three unused parameters are kept so this change did not have to touch every section in the
+ * same commit. They are inert by design, which is what [SectionHeaderPolicy.isCollapsibleInPane]
+ * and [SectionHeaderPolicy.showsOwnTitle] pin.
+ */
+@Suppress("UNUSED_PARAMETER")
 @Composable
-internal fun SettingsActivity.SettingsSection(
+internal fun SettingsActivity.CollapsibleSettingsSection(
     title: String,
+    expanded: Boolean,
+    onExpandChange: (Boolean) -> Unit,
+    sectionId: String? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        shape = RoundedCornerShape(8.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Text(
-                text = title,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onBackground
-            )
-            content()
-        }
-    }
+    SettingsPane(sectionId = sectionId, content = content)
 }
 
 @OptIn(ExperimentalFoundationApi::class)

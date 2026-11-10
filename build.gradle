@@ -1245,6 +1245,10 @@ tasks.register('runPureTests', JavaExec) {
     // 2026-11-09: a recogniser that never called back left the mic key a stop button forever.
     'tribixbite.cleverkeys.voice.DictationSessionWatchdogTest',
     'tribixbite.cleverkeys.ui.settings.SettingsDrawerItemsTest',
+    // 2026-11-09 UI/UX: section title moved to the app bar; pane no longer repeats it.
+    'tribixbite.cleverkeys.ui.settings.SectionHeaderPolicyTest',
+    // 2026-11-09 UI/UX: a query matching nothing used to render nothing at all.
+    'tribixbite.cleverkeys.ui.settings.SettingsSearchEmptyStateTest',
     'tribixbite.cleverkeys.VerboseLogRatchetTest',
     // KeyFillAlpha is a pure ARGB bit operation (2026-11-01: it no longer calls
     // android.graphics.Color, which the stub answers with 0 in a JVM test).

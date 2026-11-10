@@ -151,13 +151,6 @@ internal fun SettingsActivity.SettingsScreen() {
                         color = MaterialTheme.colorScheme.onBackground,
                         modifier = Modifier.padding(horizontal = 16.dp)
                     )
-                    Text(
-                        text = stringResource(R.string.settings_description),
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        lineHeight = 18.sp,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                    )
                     Spacer(Modifier.height(8.dp))
                     SettingsDrawerItems.ORDER.forEach { key ->
                         NavigationDrawerItem(
@@ -188,7 +181,28 @@ internal fun SettingsActivity.SettingsScreen() {
                 // Zero insets: the surrounding Column already applied the system-bar padding, and
                 // the default TopAppBar insets would apply it a second time.
                 TopAppBar(
-                    title = { Text(stringResource(R.string.settings_title)) },
+                    // Two-line title: the app on top, the section below. With one section per
+                    // pane the screen previously said only "Settings" for all nineteen of them,
+                    // so the repeated header inside the pane was doing the app bar's job. Now it
+                    // names the section, and the pane does not repeat it (SectionHeaderPolicy).
+                    title = {
+                        Column {
+                            Text(
+                                text = stringResource(R.string.settings_title),
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
+                            )
+                            Text(
+                                text = SectionHeaderPolicy.headerText(
+                                    stringResource(sectionTitleRes(selectedSectionKey))
+                                ),
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1
+                            )
+                        }
+                    },
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
                             Icon(
@@ -203,12 +217,15 @@ internal fun SettingsActivity.SettingsScreen() {
                 // Settings Search Bar — pinned between the app bar and the content pane, so the
                 // complaint it answers ("the search bar scrolls away") cannot come back.
                 val filteredSettings = getFilteredSettings(settingsSearchQuery)
-                val showResults = settingsSearchQuery.isNotBlank() && filteredSettings.isNotEmpty()
+                val searching = settingsSearchQuery.isNotBlank()
+                val showResults = searching && filteredSettings.isNotEmpty()
 
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        // Was vertical = 8: the field sat flush against the app bar and the
+                        // content card, so the screen read as one crowded block.
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
                 ) {
                     OutlinedTextField(
                         value = settingsSearchQuery,
@@ -242,6 +259,18 @@ internal fun SettingsActivity.SettingsScreen() {
                         ),
                         shape = RoundedCornerShape(12.dp)
                     )
+
+                    // A query that matches nothing used to collapse the results card and show
+                    // NOTHING, so the screen was indistinguishable from a search that simply was
+                    // not working. Say so instead.
+                    if (searching && filteredSettings.isEmpty()) {
+                        Text(
+                            text = stringResource(R.string.settings_search_no_results, settingsSearchQuery),
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                        )
+                    }
 
                     // Search Results - always below search field, scrollable
                     // Uses nestedScroll barrier to prevent scroll propagation to parent
