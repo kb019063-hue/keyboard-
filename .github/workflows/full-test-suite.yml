@@ -98,11 +98,20 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          # `|| true` is deliberate: these steps exist to PRODUCE the XML, and the verdict is
-          # decided by the report step below. Without it, `bash -e` aborts at the first failing
-          # test and the copy never happens (attempt 3: "no JUnit XML found" while Gradle was
-          # happily reporting failing tests).
-          ./gradlew testDebugUnitTest -PskipHeavy=true --stacktrace 2>&1 | tee unit-test-output.log || true
+          # This step must always reach the XML copy below, even when Gradle fails: the report
+          # step needs the XML to say WHY. So the exit code is RECORDED rather than allowed to
+          # abort the step, and the gate at the bottom of the job decides the verdict.
+          #
+          # A COMPILE failure and a TEST failure are not the same thing, and until 2026-11-09
+          # both were erased by a trailing `|| true`. A Kotlin raw-string error in a new test
+          # class made `:compileDebugUnitTestKotlin` fail, no JUnit XML was produced, and this job
+          # reported SUCCESS -- broken test code could merge green. Hence the recorded exit code.
+          mkdir -p build
+          set +e
+          ./gradlew testDebugUnitTest -PskipHeavy=true --stacktrace 2>&1 | tee unit-test-output.log
+          gradle_exit=$?
+          set -e
+          echo "gradle_exit=$gradle_exit" > build/unit-test-gradle-exit.txt
           # Gradle deletes a re-run task's previous outputs, and the heavy invocation below is a
           # re-run of this same task: without this copy its XML vanished and the report covered
           # 7 classes instead of 423 (first attempt, run 41366549694).
@@ -256,3 +265,33 @@ jobs:
         run: |
           echo "::error::the whole suite is not green - see the annotations and the job summary"
           exit 1
+
+      # The assertion this workflow is for. With `continue-on-error` the two test steps can fail
+      # without failing the job, which is intentional so the report step still runs -- but it means
+      # a COMPILE failure used to exit 0 overall. That is the worst case: nothing was tested, the
+      # annotations say "no JUnit XML found", and the check is green.
+      #
+      # Two distinct signals, because they mean different things:
+      #   * Gradle exited non-zero and produced NO XML at all -> the test sources did not compile
+      #     (or the build broke). Nothing was verified. FATAL.
+      #   * Gradle exited non-zero but XML exists -> real failing tests. Also fatal, and the
+      #     dedicated step above already caught it; kept here so the reason is unambiguous.
+      - name: Fail the job when the test task did not compile or produced nothing
+        if: always()
+        run: |
+          exit_file=build/unit-test-gradle-exit.txt
+          code=0
+          if [ -f "$exit_file" ]; then
+            code=$(sed -n 's/^gradle_exit=//p' "$exit_file" | tail -1)
+            code=${code:-1}
+          fi
+          xml=$(find build/full-suite-xml build/test-results/heavy -name '*.xml' 2>/dev/null | wc -l)
+          echo "gradle exit=$code, junit xml files=$xml"
+          if [ "$code" != "0" ] && [ "$xml" = "0" ]; then
+            echo "::error::the unit-test task produced NO results - the test sources did not compile. Nothing was verified."
+            exit 1
+          fi
+          if [ "$xml" = "0" ]; then
+            echo "::error::the unit-test task produced no JUnit XML at all."
+            exit 1
+          fi

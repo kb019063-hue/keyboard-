@@ -64,7 +64,10 @@ class SettingsSearchEmptyStateTest {
         )
         assertTrue(
             "the no-results string must interpolate the query",
-            Regex("""<string name="settings_search_no_results">[^<]*%1\$s""").containsMatchIn(text)
+            // Kotlin raw strings have no backslash escapes, so `\$` would be "backslash then a
+            // literal $s" — a compile error. Concatenate the dollar sign instead.
+            Regex("<string name=\"settings_search_no_results\">[^<]*%1" + "\\$" + "s")
+                .containsMatchIn(text)
         )
     }
 
