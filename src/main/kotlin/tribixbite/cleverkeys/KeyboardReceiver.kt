@@ -87,8 +87,17 @@ class KeyboardReceiver(
      */
     private var dictationController: DictationController? = null
 
-    private fun dictation(): DictationController =
-        dictationController ?: DictationController(context).also { dictationController = it }
+    private fun dictation(): DictationController = dictationController ?: DictationController(
+        context,
+        // Dictate in the language the user is typing, not the language the phone is set to: the
+        // keyboard carries its own per-layout language, so a device set to English while the
+        // layout is Spanish used to dictate English. Read through a lambda, not captured, so a
+        // layout switch between two presses is honoured. `globalConfigOrNull` rather than
+        // `globalConfig` because the very first press can beat Config initialisation.
+        keyboardLanguage = {
+            Config.globalConfigOrNull()?.activeLanguages()?.primary
+        }
+    ).also { dictationController = it }
 
     /** The keyboard side of dictation: where text goes and where status lines are shown. */
     private val dictationSink = object : DictationController.Sink {

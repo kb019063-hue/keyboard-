@@ -35,6 +35,25 @@ object VoiceLanguagePolicy {
         tag.split('-').drop(1).firstOrNull { it.length == 2 }?.uppercase()
 
     /**
+     * What language the user is *typing* right now, which is what they want to dictate.
+     *
+     * This used to be the device locale (`context.resources.configuration.locales[0]`). That is
+     * the wrong source: the keyboard has its own per-layout active language, so a phone set to
+     * English whose keyboard is on a Spanish layout dictated English. The 2026-11-04 fix (this
+     * class) made that tag *negotiable*, which stopped `en-GH` from producing NO_MATCH, but it
+     * still asked the wrong question first -- it negotiated a language the user was not typing in.
+     *
+     * The keyboard's active language wins when it is set; the device locale is only the fallback
+     * for the case where there is no keyboard language yet (first run, or Config not initialised).
+     *
+     * @param keyboardLanguage the active language of the current layout, e.g. `es`.
+     * @param deviceLocaleTag the device locale as a BCP-47 tag, e.g. `en-GH`.
+     * @return a normalised tag, or null when neither is usable.
+     */
+    fun wanted(keyboardLanguage: String?, deviceLocaleTag: String?): String? =
+        normalise(keyboardLanguage) ?: normalise(deviceLocaleTag)
+
+    /**
      * The tag to pass as `RecognizerIntent.EXTRA_LANGUAGE`.
      *
      * @param wanted the keyboard's locale, e.g. `en-GH`.

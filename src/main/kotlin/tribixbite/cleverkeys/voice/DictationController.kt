@@ -32,7 +32,18 @@ import tribixbite.cleverkeys.VoicePermissionActivity
  * synchronously in [press] rather than inside the posted work, because that is what makes a fast
  * double-tap a start-then-stop instead of two starts.
  */
-internal class DictationController(private val context: Context) {
+internal class DictationController(
+    private val context: Context,
+    /**
+     * The keyboard's active language for the current layout, e.g. `es`.
+     *
+     * Dictation must ask for the language the user is *typing*, not the language the phone is set
+     * to: the keyboard carries its own per-layout language, so a device set to English while the
+     * user types on a Spanish layout used to dictate English. Read per session (not cached), so a
+     * layout switch between two presses is honoured.
+     */
+    private val keyboardLanguage: () -> String? = { null }
+) {
 
     /** The three things dictation needs from the keyboard, so this class stays testable in shape. */
     interface Sink {
@@ -49,6 +60,34 @@ internal class DictationController(private val context: Context) {
     private val main = Handler(Looper.getMainLooper())
     private var recognizer: SpeechRecognizer? = null
     private var sink: Sink? = null
+
+    /**
+     * When the current listening session began, for [DictationPolicy.SESSION_WATCHDOG_MS]. Stamped
+     * where a session actually starts (including the silent retry, which starts a fresh one) and
+     * ignored once `sessionActive` is false, so a stale stamp can never expire a later press.
+     */
+    private var sessionStartedAt = 0L
+
+    /**
+     * Ends the session the recogniser forgot about.
+     *
+     * A recogniser that never calls back is not merely slow: several builds wedge after
+     * `startListening` and then answer every subsequent start with `ERROR_RECOGNIZER_BUSY`. So the
+     * recovery is to drop the instance as well, which makes the next press build a fresh one,
+     * rather than leaving the user with a mic key that can only ever fail.
+     */
+    private val watchdog = Runnable {
+        val expired = DictationPolicy.onSessionExpired(
+            elapsedMs = System.currentTimeMillis() - sessionStartedAt,
+            sessionActive = sessionActive
+        )
+        if (expired) {
+            Log.w(TAG, "session expired with no recogniser callback; releasing it")
+            endSession()
+            releaseRecognizer()
+            sink?.showMessage(context.getString(R.string.voice_typing_nothing_heard))
+        }
+    }
 
     /**
      * The microphone permission has been asked for at least once and has not been granted since.
@@ -202,6 +241,7 @@ internal class DictationController(private val context: Context) {
         // is safe (abandonAudioFocus is a no-op when no focus is held) and closes that leak.
         if (!sessionActive && recognizer == null && !focusHeld) return
         sessionActive = false
+        main.removeCallbacks(watchdog)
         abandonAudioFocus()
         main.post {
             try {
@@ -215,6 +255,7 @@ internal class DictationController(private val context: Context) {
     /** Release the recogniser. Called when the service is destroyed. */
     fun destroy() {
         sessionActive = false
+        main.removeCallbacks(watchdog)
         sink = null
         abandonAudioFocus()
         main.post {
@@ -243,7 +284,7 @@ internal class DictationController(private val context: Context) {
         val active = obtainRecognizer()
         if (active == null) {
             // Recogniser vanished between the availability check and here.
-            sessionActive = false
+            endSession()
             sink?.showMessage(context.getString(R.string.voice_typing_unavailable))
             return
         }
@@ -284,13 +325,17 @@ internal class DictationController(private val context: Context) {
         )
         try {
             active.startListening(intent)
+            // Arm the watchdog from the one place a session actually begins, so the silent retry
+            // gets a fresh window instead of inheriting the first attempt's.
+            sessionStartedAt = System.currentTimeMillis()
+            main.removeCallbacks(watchdog)
+            main.postDelayed(watchdog, DictationPolicy.SESSION_WATCHDOG_MS)
             sink?.showMessage(context.getString(R.string.voice_typing_listening))
         } catch (t: Throwable) {
             Log.e(TAG, "startListening threw", t)
-            sessionActive = false
             // No recognition callback will arrive from a start that threw, so this is the
             // only place that can release the focus requested above.
-            abandonAudioFocus()
+            endSession()
             sink?.showMessage(context.getString(R.string.voice_typing_failed))
         }
     }
@@ -301,8 +346,7 @@ internal class DictationController(private val context: Context) {
         } catch (t: Throwable) {
             Log.w(TAG, "stopListening threw: $t")
             // Nothing will arrive now, so the session must not stay open forever.
-            sessionActive = false
-            abandonAudioFocus()
+            endSession()
         }
     }
 
@@ -350,10 +394,41 @@ internal class DictationController(private val context: Context) {
 
     /** The tag to ask for right now: negotiated against what the service advertises. */
     private fun negotiateLanguage(): String? = VoiceLanguagePolicy.pick(
-        wanted = localeLanguageTag(),
+        wanted = wantedLanguageTag(),
         supported = supportedLanguages,
         preference = serviceLanguagePreference
     )
+
+    /**
+     * The tag the user wants to dictate in: the keyboard's active language, falling back to the
+     * device locale only when the keyboard has none.
+     */
+    private fun wantedLanguageTag(): String? = VoiceLanguagePolicy.wanted(
+        keyboardLanguage = try {
+            keyboardLanguage()
+        } catch (t: Throwable) {
+            null
+        },
+        deviceLocaleTag = localeLanguageTag()
+    )
+
+    /**
+     * Drop the recogniser instance so the next session builds a fresh one.
+     *
+     * `destroy()` on a recogniser that is mid-session is the documented way to abort it, and
+     * dropping the reference is what lets [obtainRecognizer] recover from a wedged service (a
+     * cancelled-but-not-dead session keeps answering `ERROR_RECOGNIZER_BUSY` otherwise).
+     */
+    private fun releaseRecognizer() {
+        val current = recognizer
+        recognizer = null
+        if (current == null) return
+        try {
+            current.destroy()
+        } catch (t: Throwable) {
+            Log.w(TAG, "recognizer destroy threw: $t")
+        }
+    }
 
     private fun obtainRecognizer(): SpeechRecognizer? {
         recognizer?.let { return it }
@@ -412,8 +487,14 @@ internal class DictationController(private val context: Context) {
         Log.i(TAG, "committed ${prefix.length + text.length} characters")
     }
 
+    /**
+     * End the session: nothing is listening, no watchdog is left armed, no audio focus is held.
+     * Every end-of-session path funnels through here so the three cannot drift apart -- a session
+     * that clears `sessionActive` but leaves the watchdog armed would fire into the *next* press.
+     */
     private fun endSession() {
         sessionActive = false
+        main.removeCallbacks(watchdog)
         abandonAudioFocus()
     }
 
@@ -473,8 +554,7 @@ internal class DictationController(private val context: Context) {
             Log.w(TAG, "service-default retry failed as well; language override disabled " +
                 "for this session's lifetime")
         }
-        sessionActive = false
-        abandonAudioFocus()
+        endSession()
         val message = when (failure) {
             DictationPolicy.Failure.NOTHING_HEARD -> R.string.voice_typing_nothing_heard
             DictationPolicy.Failure.PERMISSION -> R.string.voice_typing_permission_needed
