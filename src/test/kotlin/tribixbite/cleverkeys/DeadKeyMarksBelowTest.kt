@@ -39,6 +39,39 @@ class DeadKeyMarksBelowTest {
         ComposeKeyData.initialize(context)
     }
 
+    @Test
+    fun composeLoaderBuffersAssetReadsWithoutChangingData() {
+        val statesField = ComposeKeyData::class.java.getDeclaredField("_states").apply { isAccessible = true }
+        val edgesField = ComposeKeyData::class.java.getDeclaredField("_edges").apply { isAccessible = true }
+        val statesBefore = statesField.get(ComposeKeyData) as CharArray
+        val edgesBefore = edgesField.get(ComposeKeyData) as IntArray
+        val bin = File("src/main/assets/compose_data.bin")
+        var calls = 0
+        val input = object : java.io.FilterInputStream(FileInputStream(bin)) {
+            override fun read(): Int { calls++; return super.read() }
+            override fun read(b: ByteArray, off: Int, len: Int): Int {
+                calls++
+                return super.read(b, off, len)
+            }
+        }
+        val assets = mockk<AssetManager>()
+        every { assets.open("compose_data.bin") } returns input
+        val context = mockk<Context>()
+        every { context.assets } returns assets
+        try {
+            statesField.set(ComposeKeyData, null)
+            edgesField.set(ComposeKeyData, null)
+            ComposeKeyData.initialize(context)
+            assertThat(ComposeKeyData.states.toList()).containsExactlyElementsIn(statesBefore.toList()).inOrder()
+            assertThat(ComposeKeyData.edges.toList()).containsExactlyElementsIn(edgesBefore.toList()).inOrder()
+            // One bulk read per 8 KiB buffer, not one native read for each table byte.
+            assertThat(calls).isLessThan((bin.length() / 1024).toInt() + 10)
+        } finally {
+            statesField.set(ComposeKeyData, statesBefore)
+            edgesField.set(ComposeKeyData, edgesBefore)
+        }
+    }
+
     private fun macronBelow(c: Char): KeyValue =
         KeyModifier.modify(KeyValue.makeCharKey(c), KeyValue.Modifier.MACRON_BELOW)
 

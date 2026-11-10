@@ -654,10 +654,14 @@ class Keyboard2View @JvmOverloads constructor(
     /** Called by auto-capitalisation. */
     fun set_shift_state(latched: Boolean, lock: Boolean) {
         val shiftKv = _shift_kv
+        val previousMods = _mods
         set_fake_ptr_latched(_shift_key, shiftKv, latched, lock)
-        // CRITICAL: Update _mods so swipe typing can detect shift state
+        // Keep swipe typing's modifier snapshot current, even if no pointer changed.
+        // An actual pointer change already calls onPointerFlagsChanged (which invalidates).
+        // Only invalidate here if the snapshot itself changed: the delayed autocap callback
+        // runs after ordinary typing too, and redrawing every key for a no-op adds extra frames.
         _mods = _pointers.getModifiers()
-        invalidate() // Redraw keyboard to show shift state
+        if (_mods != previousMods) invalidate()
     }
 
     /**

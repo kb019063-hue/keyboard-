@@ -83,6 +83,27 @@ class Keyboard2ViewContinuousLifecycleTest {
         return swipe
     }
 
+    @Test
+    fun unchangedAutocapShiftDoesNotRedrawTheKeyboard() {
+        val pointers = mockk<Pointers>(relaxed = true)
+        every { pointers.getModifiers() } returns Pointers.Modifiers.EMPTY
+        view.setField("_pointers", pointers)
+        view.setField("_mods", Pointers.Modifiers.EMPTY)
+        view.set_shift_state(false, false)
+        verify(exactly = 0) { view.invalidate() }
+    }
+
+    @Test
+    fun changedModifierSnapshotStillTriggersRedraw() {
+        val shift = KeyValue.getKeyByName("shift")
+        val pointers = mockk<Pointers>(relaxed = true)
+        every { pointers.getModifiers() } returns Pointers.Modifiers.ofArray(arrayOf<KeyValue?>(shift), 1)
+        view.setField("_pointers", pointers)
+        view.setField("_mods", Pointers.Modifiers.EMPTY)
+        view.set_shift_state(true, false)
+        verify(exactly = 1) { view.invalidate() }
+    }
+
     // ------------------------------------------------------------------ finding 6
 
     @Test

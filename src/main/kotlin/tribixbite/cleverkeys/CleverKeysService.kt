@@ -811,13 +811,15 @@ class CleverKeysService : InputMethodService(),
 
         // Set special layout if needed (v1.32.363: use LayoutManager)
         val specialLayout = refresh_special_layout(info)
-        if (specialLayout != null) {
+        // Both operations return the selected layout. Reuse it instead of resolving the
+        // current layout again on every field start (including a second modifier-cache lookup).
+        val layout = if (specialLayout != null) {
             _layoutManager?.setSpecialLayout(specialLayout)
         } else {
             _layoutManager?.clearSpecialLayout()
         }
 
-        _keyboardView.setKeyboard(current_layout())
+        _keyboardView.setKeyboard(layout ?: current_layout())
         // WP9 R-1 step 8: background-warm the geometric engine when this layout routes to it,
         // so the first non-QWERTY swipe avoids the synchronous template-index build. No-op
         // unless swipe typing is on AND swipe_engine_mode is hybrid/geometric.
