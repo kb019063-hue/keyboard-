@@ -256,21 +256,37 @@ class KeyboardToolbar(
             rippleBackground()
             addView(button, FrameLayout.LayoutParams(size, size, Gravity.CENTER))
             setOnClickListener { dispatch(name, CommandRegistry.getDisplayInfo(name)) }
-            setOnLongClickListener {
-                Toast.makeText(context, label, Toast.LENGTH_SHORT).show()
-                true
-            }
             contentDescription = label
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                tooltipText = label
-            }
         }
+        nameOnLongPress(wrapper, label)
         wrapper.layoutParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT,
             LinearLayout.LayoutParams.MATCH_PARENT,
             1f
         )
         return wrapper
+    }
+
+    /**
+     * Name a button when it is long-pressed.
+     *
+     * From API 26 the platform does this: `tooltipText` shows a small label next to the view.
+     * It does so only when no long-click listener claims the press, and until 2026-11-11 one
+     * did, to show a Toast. A keyboard's toasts are dropped on Android 13+ (see
+     * ImeToastBanDriftTest), so there a long-press showed nothing: the toast was suppressed and
+     * the tooltip was pre-empted. Below API 26 there is no tooltip (`View.tooltipText` does not
+     * exist; calling it throws NoSuchMethodError) and toasts still work, so the Toast is kept
+     * there and only there.
+     */
+    private fun nameOnLongPress(view: View, label: String) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            view.tooltipText = label
+        } else {
+            view.setOnLongClickListener {
+                Toast.makeText(context, label, Toast.LENGTH_SHORT).show()
+                true
+            }
+        }
     }
 
     private fun createButton(name: String): View? {
@@ -293,23 +309,15 @@ class KeyboardToolbar(
             isFocusable = true
             // Localized command name — the registry already carries one per command, so the
             // toolbar adds no strings of its own and is translated wherever the command is.
+            // It is the accessible label on every version; the long-press label is decoration.
             contentDescription = context.getString(command.nameRes)
-            // View.tooltipText is API 26+ and minSdk is 24: compileSdk 34 lets this compile, but
-            // an unguarded call throws NoSuchMethodError on API 24-25. contentDescription above
-            // is the accessible label on every version; the tooltip is decoration.
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                tooltipText = context.getString(command.nameRes)
-            }
             rippleBackground()
             tag = name
         }
 
         button.setOnClickListener { dispatch(name, info) }
-        button.setOnLongClickListener {
-            // A reminder of what the glyph means; the label itself is only 4 characters.
-            Toast.makeText(context, command.nameRes, Toast.LENGTH_SHORT).show()
-            true
-        }
+        // A reminder of what the glyph means; the label itself is only 4 characters.
+        nameOnLongPress(button, context.getString(command.nameRes))
 
         button.layoutParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT,
