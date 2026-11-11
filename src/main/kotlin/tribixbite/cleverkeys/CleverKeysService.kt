@@ -432,8 +432,12 @@ class CleverKeysService : InputMethodService(),
 
         // Register ConfigurationManager as SharedPreferences listener
         prefs.registerOnSharedPreferenceChangeListener(_configManager)
-        // Also register this service to handle theme changes directly
-        prefs.registerOnSharedPreferenceChangeListener(this)
+        // This service's own preference handling ([onSharedPreferenceChanged] below) reads Config,
+        // so it must run AFTER the manager has refreshed it. It therefore goes through the
+        // manager rather than being a second listener on the preferences: Android runs such
+        // listeners in an unspecified order, and whenever this one ran first the open keyboard
+        // applied the value from before the change (one-handed mode one tap behind, 2026-11-11).
+        _configManager.setAfterRefreshListener(this)
 
         // Register theme change broadcast receiver (for immediate theme updates from ThemeSettingsActivity)
         _themeChangeReceiver = object : BroadcastReceiver() {
@@ -551,14 +555,15 @@ class CleverKeysService : InputMethodService(),
             _themeChangeReceiver = null
         }
 
-        // The two SharedPreferences listeners registered in onCreate hold this service and its
-        // ConfigurationManager. SharedPreferences keeps only weak references, but unregistering
-        // is still the lifecycle contract and stops callbacks reaching a destroyed IME.
+        // The SharedPreferences listener registered in onCreate is the ConfigurationManager, and
+        // it forwards to this service. SharedPreferences keeps only weak references, but
+        // unregistering is still the lifecycle contract and stops callbacks reaching a destroyed
+        // IME; clearing the forward does the same for a trailing refresh that is still queued.
         val prefs = DirectBootAwarePreferences.get_shared_preferences(this)
         if (::_configManager.isInitialized) {
             prefs.unregisterOnSharedPreferenceChangeListener(_configManager)
+            _configManager.setAfterRefreshListener(null)
         }
-        prefs.unregisterOnSharedPreferenceChangeListener(this)
 
         // Dictation owns a SpeechRecognizer and transient audio focus. Input-finish cancels a
         // session; service destruction must destroy the recogniser itself.
@@ -1222,6 +1227,11 @@ class CleverKeysService : InputMethodService(),
      * refreshes [Config], then [onSharedPreferenceChanged] reaches
      * `PreferenceUIUpdateHandler.updateOneHanded`, so the open keyboard changes with no IME restart
      * and no second code path that could disagree with what Settings writes.
+     *
+     * That "then" is enforced, not assumed: this service is the manager's after-refresh listener
+     * (see onCreate). While it was a SharedPreferences listener of its own it could run before
+     * the refresh, apply the old value and never be run again — the toggle did nothing, and the
+     * stop control could not undo it because writing `false` over `false` notifies nobody.
      */
     private fun setOneHandedEnabled(enabled: Boolean) {
         DirectBootAwarePreferences.get_shared_preferences(this).edit()
@@ -1606,8 +1616,9 @@ class CleverKeysService : InputMethodService(),
     }
 
     override fun onSharedPreferenceChanged(prefs: SharedPreferences, key: String?) {
-        // NOTE: ConfigurationManager is the primary SharedPreferences listener and handles
-        // config refresh. This method handles additional UI updates.
+        // NOTE: ConfigurationManager is the ONLY SharedPreferences listener and handles the
+        // config refresh. It then calls this method (setAfterRefreshListener in onCreate), so
+        // everything below may rely on Config already holding the new value for [key].
         // (v1.32.412: Delegated to PreferenceUIUpdateHandler)
 
         // Skip if keyboard components aren't initialized yet (happens when SettingsActivity

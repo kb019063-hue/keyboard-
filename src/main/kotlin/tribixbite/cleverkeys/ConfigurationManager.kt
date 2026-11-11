@@ -20,6 +20,7 @@ import android.util.Log
  * - Listen to SharedPreferences changes
  * - Refresh config when needed
  * - Notify registered listeners of changes
+ * - Tell the one after-refresh consumer about each preference change, once [Config] holds it
  *
  * This class is extracted from CleverKeysService.java for better separation of concerns
  * and testability (v1.32.345).
@@ -47,20 +48,72 @@ class ConfigurationManager(
     /** Monotonic millis of the write that started the current burst; 0 = no burst. */
     private var burstStartedAt = 0L
 
+    /** Monotonic milliseconds. Replaced only by the internal test constructor. */
+    private var clock: () -> Long = { System.nanoTime() / 1_000_000L }
+
+    /** Set only by the internal test constructor; production resolves the main Looper lazily. */
+    private var injectedScheduler: ConfigRefreshScheduler? = null
+
+    /**
+     * Constructor-scoped test seam (the [ConfigPropagator] idiom): a plain-JVM test has no main
+     * Looper, so without this the deferred half of a burst could never be exercised off-device.
+     */
+    internal constructor(
+        context: Context,
+        config: Config,
+        foldStateTracker: FoldStateTracker,
+        scheduler: ConfigRefreshScheduler,
+        clock: () -> Long
+    ) : this(context, config, foldStateTracker) {
+        this.injectedScheduler = scheduler
+        this.clock = clock
+    }
+
     /** `null` when the process has no main Looper (plain-JVM tests): no coalescing then. */
-    private val handler: Handler? by lazy {
-        try {
-            Looper.getMainLooper()?.let { Handler(it) }
+    private val scheduler: ConfigRefreshScheduler? by lazy {
+        injectedScheduler ?: try {
+            Looper.getMainLooper()?.let { MainLooperConfigRefreshScheduler(Handler(it)) }
         } catch (t: Throwable) {
             Log.w(TAG, "No main Looper available — preference bursts refresh synchronously", t)
             null
         }
     }
 
+    // ── After-refresh delivery (2026-11-11) ──────────────────────────────────────────────────
+    // The service has preference handling of its own — the one-handed root, the toolbar, the
+    // strip opacity and height, floating and split — and every piece of it READS Config. It used
+    // to be a second, independent SharedPreferences listener, which was wrong in two ways:
+    //
+    //  1. Android promises no order between listeners. SharedPreferencesImpl copies them into a
+    //     HashSet built from a WeakHashMap's keys, so which of the two ran first depended on
+    //     object hash codes and could differ from one process start to the next. Whenever the
+    //     service ran first it applied the value from BEFORE the change.
+    //  2. The burst coalescing above postpones this class's refresh for the 2nd..nth write of a
+    //     burst — but the service's listener still ran at once, against a Config that would not
+    //     be refreshed for another 100 ms, and was never run again when it finally was.
+    //
+    // Either way the open keyboard ended up one change behind the saved setting: one-handed mode
+    // did nothing, or switched on when it had just been switched off. And its stop control
+    // could not recover, because writing `false` over a stored `false` reports no change at all.
+    // So that handling is now driven from HERE, strictly after the refresh it depends on, on
+    // both the immediate and the trailing path. Pinned by ConfigurationBurstCoalescingTest.
+
+    /** The one consumer told about each changed key once [Config] holds the new value. */
+    private var afterRefreshListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
+
+    /**
+     * Keys written since the last delivery, in first-write order. A set, so a slider that writes
+     * one key thirty times in a drag costs its consumer one update rather than thirty.
+     */
+    private val owedKeys = LinkedHashSet<String?>()
+
+    /** The preferences the owed keys belong to (the listener's first argument). */
+    private var owedPrefs: SharedPreferences? = null
+
     /** Runs the one trailing refresh for a burst, then re-arms the leading edge. */
     private val trailingRefresh = Runnable {
         burstStartedAt = 0L
-        refreshNow(null)
+        refreshThenDeliver(null)
     }
 
     init {
@@ -102,6 +155,20 @@ class ConfigurationManager(
      */
     fun unregisterConfigChangeListener(listener: ConfigChangeListener?) {
         listeners.remove(listener)
+    }
+
+    /**
+     * Sets the ONE consumer that handles preference changes by reading [Config].
+     *
+     * It is called with each changed key AFTER the refresh that covers it — at once for the
+     * first write of a burst, after the single trailing refresh for the rest. Register it here
+     * instead of on the SharedPreferences: a second listener there runs in an unspecified
+     * order relative to this class and so can read a [Config] that has not been refreshed yet.
+     *
+     * @param listener the consumer, or `null` to stop deliveries (service teardown)
+     */
+    fun setAfterRefreshListener(listener: SharedPreferences.OnSharedPreferenceChangeListener?) {
+        afterRefreshListener = listener
     }
 
     /**
@@ -161,21 +228,49 @@ class ConfigurationManager(
      * @param key Key of the preference that changed (may be null)
      */
     override fun onSharedPreferenceChanged(prefs: SharedPreferences, key: String?) {
-        val now = System.nanoTime() / 1_000_000L
-        if (shouldRefreshImmediately(burstStartedAt, now)) {
-            // First change of a burst: apply it synchronously, exactly as before.
+        val now = clock()
+        owedPrefs = prefs
+        owedKeys.add(key)
+        val s = scheduler
+        if (s == null || shouldRefreshImmediately(burstStartedAt, now)) {
+            // First change of a burst (or no Looper to wait on): apply it synchronously, exactly
+            // as before. Keys still owed from a trailing refresh this one supersedes are
+            // delivered with it — the refresh re-reads every preference, so it covers them too.
             burstStartedAt = now
-            handler?.removeCallbacks(trailingRefresh)
-            refreshNow(key)
+            s?.cancel(trailingRefresh)
+            refreshThenDeliver(key)
         } else {
             // Still inside a burst (a slider drag writes on every increment, and a multi-key
             // editor commit fires once per key): collapse the rest into one trailing refresh.
-            val h = handler
-            if (h == null) {
-                refreshNow(key)
-            } else {
-                h.removeCallbacks(trailingRefresh)
-                h.postDelayed(trailingRefresh, TRAILING_DELAY_MS)
+            // The key stays owed until that refresh has run.
+            s.cancel(trailingRefresh)
+            s.postDelayed(trailingRefresh, TRAILING_DELAY_MS)
+        }
+    }
+
+    /**
+     * Refresh [Config], then hand the after-refresh listener every key that refresh covered.
+     *
+     * The owed keys are taken BEFORE the refresh starts, for two reasons. A key written while
+     * the refresh is running (a config listener that itself saves a preference, e.g. the current
+     * layout) may or may not have been read by it, so it stays owed to the next refresh instead
+     * of being delivered against a value that could be stale. And the consumer may write a
+     * preference too, which re-enters [onSharedPreferenceChanged] and must find a clean slate
+     * rather than a set that is being iterated.
+     */
+    private fun refreshThenDeliver(key: String?) {
+        val covered = owedKeys.toList()
+        owedKeys.clear()
+        refreshNow(key)
+        if (covered.isEmpty()) return
+        val prefs = owedPrefs ?: return
+        val listener = afterRefreshListener ?: return
+        for (owed in covered) {
+            try {
+                listener.onSharedPreferenceChanged(prefs, owed)
+            } catch (t: Throwable) {
+                // Same guard as the config listeners above: a UI update must not take the IME down.
+                Log.e(TAG, "After-refresh preference listener failed for key=$owed", t)
             }
         }
     }
@@ -216,5 +311,26 @@ class ConfigurationManager(
 
         /** How long after the last write of a burst the single trailing refresh runs. */
         private const val TRAILING_DELAY_MS = 100L
+    }
+}
+
+/**
+ * Where the one trailing refresh of a preference burst waits. Production is the main Looper;
+ * a plain-JVM test hands in a hand-cranked queue through [ConfigurationManager]'s internal
+ * constructor so the deferred half can be driven without one.
+ */
+internal interface ConfigRefreshScheduler {
+    fun postDelayed(task: Runnable, delayMs: Long)
+    fun cancel(task: Runnable)
+}
+
+/** [ConfigRefreshScheduler] on the main thread's queue. */
+private class MainLooperConfigRefreshScheduler(private val handler: Handler) : ConfigRefreshScheduler {
+    override fun postDelayed(task: Runnable, delayMs: Long) {
+        handler.postDelayed(task, delayMs)
+    }
+
+    override fun cancel(task: Runnable) {
+        handler.removeCallbacks(task)
     }
 }
