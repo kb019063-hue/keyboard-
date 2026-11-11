@@ -88,6 +88,30 @@ class VerboseLogRatchetTest {
         ).that(offenders.size).isAtMost(MAX_UNGUARDED_LOG_CALLS)
     }
 
+    /**
+     * 2026-11-11 hunt, part 2 (F2). `R.bool.debug_logs` switches on
+     * `Logs.debug_startup_input_view`, which writes the focused field's `EditorInfo` to logcat
+     * on every `onStartInputView`: the app's package name, the field's hint, label and id, and
+     * its extras. The debug build type forced it on, and the debug build is the one that is
+     * installed. It must follow the same LOCAL_BUILD opt-in as `ENABLE_VERBOSE_LOGGING`.
+     */
+    @Test
+    fun theFocusedFieldDumpIsOptInLikeTheVerboseFlag() {
+        val gradle = File("build.gradle")
+        assertWithMessage("test must run from the project root").that(gradle.isFile).isTrue()
+        val settings = gradle.readLines().map { it.trim() }
+            .filter { it.startsWith("resValue") && it.contains("\"debug_logs\"") }
+        assertWithMessage("build.gradle sets debug_logs in one place").that(settings).hasSize(1)
+        assertWithMessage("debug_logs must be on only for LOCAL_BUILD=true")
+            .that(settings.single()).isEqualTo("resValue \"bool\", \"debug_logs\", isLocalBuild ? \"true\" : \"false\"")
+        assertWithMessage("the default every other build type gets must stay off")
+            .that(File("res/values/values.xml").readText())
+            .contains("<bool name=\"debug_logs\">false</bool>")
+        assertWithMessage("the service must take the switch from that resource")
+            .that(read("tribixbite/cleverkeys/CleverKeysService.kt"))
+            .contains("Logs.set_debug_logs(resources.getBoolean(R.bool.debug_logs))")
+    }
+
     @Test
     fun suggestionBarPerUpdateCallsStayGated() {
         // SuggestionBar updates on every keystroke through these two entry points; the rest of
