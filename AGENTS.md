@@ -29,13 +29,30 @@ below is here because it already cost someone a day.
 - **The dev sandbox cannot build.** No Android SDK, no Gradle distribution, no Maven Central.
   GitHub Actions is the compiler: push and read the run. Never claim a Kotlin change is correct
   because it "looks right"; say it is unverified until a green build says otherwise.
+- **Nothing is done until the run is green, and you must say which run.** On 2026-11-11 a change
+  that did not compile (unresolved names in three files) was merged to `main` 28 seconds after it
+  was pushed and five seconds after its pull request was opened; its own build failed a minute
+  later, and `main` stayed unbuildable until the merge was reverted
+  ([`docs/BUG-HUNT-2026-11-11.md`](docs/BUG-HUNT-2026-11-11.md)). So: push, wait for **Build
+  APK**, **Emulator smoke** and (on a pull request) **Full unit-test suite** on your head commit,
+  and put their run ids and conclusions in your report. **Never merge a pull request whose checks
+  have not finished.** If you cannot wait, say the change is UNVERIFIED and that it must not be
+  merged yet. A changelog is not evidence either: that one listed two changes its diff did not
+  contain.
+- **Before pushing Kotlin, run `scripts/ci/offline/typecheck.sh`.** It runs the Kotlin
+  compiler's front end over the base commit and over your tree and lists the errors only yours
+  has — two minutes, no Gradle, everything it needs comes from PyPI and GitHub. It reproduces
+  that day's breakage exactly, and it caught a redeclaration in the fix itself that a
+  single-file check had passed. It cannot see AndroidX, Compose, Gson, `R` or `BuildConfig`, so
+  a clean result is a reason to push, never a substitute for the run. Its README section says
+  how to read the output.
 - **CI runs the tests too.** `build-apk.yml` runs a ~65-class / ~770-test subset on every push;
-  `.github/workflows/full-test-suite.yml` runs **all 413 classes / 4,650 tests** nightly, on demand,
-  and whenever that file or `build.gradle` changes. Both are green as of run 41374157846
-  (`4,650 run, 0 failed, 204 skipped`), so **a red run now means a real problem in this
-  repository** — do not explain one away as "upstream drift". The 204 skips are 22 classes that
-  assert on artefacts this fork does not vendor; they report SKIPPED through `UpstreamArtefacts`,
-  not failed and not passed.
+  `.github/workflows/full-test-suite.yml` runs **all 413 classes / 4,650 tests** nightly, on
+  demand, on every push to `main` and on every pull request that targets `main`. Both were green
+  as of run 41374157846 (`4,650 run, 0 failed, 204 skipped`), so **a red run now means a real
+  problem in this repository** — do not explain one away as "upstream drift". The 204 skips are
+  22 classes that assert on artefacts this fork does not vendor; they report SKIPPED through
+  `UpstreamArtefacts`, not failed and not passed.
 - **When a test is red, read [`docs/TEST-PITFALLS.md`](docs/TEST-PITFALLS.md) before "fixing" it.**
   That file is the catalogue of the twelve ways tests in this repo have lied — entire classes
   passing with the feature switched off, assertions on a device path a stub cannot produce, source
@@ -78,8 +95,10 @@ version, do not revert:
 
 - The target layout is the Gboard screenshot, not the dense October 23 CleverKeys photo.
   English defaults and the no-subtype fallback are `latn_qwerty_us_gboard_style`.
-- The owner rejected the purple default. `Defaults.THEME` is `harbor`. The wardrobe is
-  Harbor, Daybreak, Signal, Ember, Kiln. Purple remains selectable; it is not the default.
+- The owner rejected the purple default. `Defaults.THEME` is `gboard` — the Gboard-glass
+  light/dark pair, since 2026-10-30; it replaced `harbor`, which stays the fallback id when a
+  custom theme is deleted. The Harbor wardrobe (Harbor, Daybreak, Signal, Ember, Kiln) and purple
+  remain selectable; none of them is the default.
 - The toolbar is seven buttons, mic last. Icon buttons are dead if the inner `ImageView` is
   clickable.
 - The installable app is the debug APK on the rolling `dev-builds` release:

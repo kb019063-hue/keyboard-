@@ -88,11 +88,13 @@ secret; it is inherited from upstream, where it is likewise public.
 
 ## Tests
 
-CI runs `assembleDebug` only — **not** `test`. Upstream carries a set of "drift tests" that
+CI builds with `assembleDebug` and runs the unit tests: a ~65-class subset on every push
+(`build-apk.yml`, advisory) and the whole suite nightly, on every push to `main` and on every
+pull request (`full-test-suite.yml`, gating). Upstream carries a set of "drift tests" that
 assert on repository files this fork intentionally does not vendor, e.g.
 `ReleaseRecordDriftTest` reads `docs/RELEASE_RECORD.md` and `CuratedInstrumentationListTest`
-reads `.github/scripts/emulator-ci.sh`. Running them here would fail for reasons unrelated to
-code correctness. Restore those paths before re-enabling the test gate.
+reads `.github/scripts/emulator-ci.sh`. Those 22 classes report SKIPPED here rather than
+failing; see `AGENTS.md` and `docs/TEST-PITFALLS.md`.
 
 The instrumented-test langpacks are likewise absent: `copyScriptLatencyPacks` copies six
 `langpack-*.zip` files out of `scripts/dictionaries/`, which is not vendored. That task is wired
