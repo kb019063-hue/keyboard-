@@ -7,10 +7,11 @@
 #
 #   * a JRE              -- PyPI wheel `jdk4py`
 #   * the Kotlin compiler -- embedded in the PyPI wheel `kotlin-jupyter-kernel`
+#   * kotlinx.coroutines  -- bundled, unrelocated, inside that same kernel jar
 #   * android.jar (API 34) -- a git blob in github.com/Sable/android-platforms
 #
 # With only those on the classpath, every reference to AndroidX, Compose, Gson, `R` or
-# `BuildConfig` is unresolved, so a healthy tree reports ~15,000 errors. That is expected and it
+# `BuildConfig` is unresolved, so a healthy tree reports ~14,000 errors. That is expected and it
 # does not matter, because the answer is the DIFFERENCE: the same front end is run over a base
 # commit and over your tree, and only the errors your tree has and the base does not are shown.
 #
@@ -44,6 +45,13 @@ die() { say "typecheck: $*"; exit 2; }
 JAVA_BIN="$TC/jdk/jdk4py/java-runtime/bin/java"
 JARS="$TC/kernel/run_kotlin_kernel/jars"
 ANDROID_JAR="$TC/android-34.jar"
+# kotlinx-coroutines-core, lifted out of the kernel jar (see setup). Without it every coroutine
+# builder is an unresolved name and nothing inside a `launch { }` or `withContext { }` is checked.
+COROUTINES_JAR="$TC/kotlinx-coroutines-core.jar"
+# Part of every cached result's file name. Bump it whenever the compile classpath or the compiler
+# flags change: a base cached under the old classpath compared with a tree compiled under the new
+# one would report the difference between the classpaths, not between the trees.
+CLASSPATH_TAG="cp2"
 
 setup() {
     mkdir -p "$TC" || die "cannot create $TC"
@@ -62,6 +70,27 @@ setup() {
         python3 -m zipfile -e "$TC"/wheels/kotlin_jupyter_kernel-*.whl "$TC/kernel" \
             || die "could not unpack kotlin-jupyter-kernel"
     fi
+    if [ ! -s "$COROUTINES_JAR" ]; then
+        # The kernel's fat jar carries kotlinx-coroutines-core under its real package name, with
+        # its .kotlin_module (which is what makes top-level `launch`/`withContext` resolvable).
+        # Copy just that out: putting the whole fat jar on the compile classpath would also
+        # expose the compiler's own internals to the sources being checked.
+        python3 - "$JARS/$KERNEL_JAR" "$COROUTINES_JAR.part" <<'PY' || die "could not extract kotlinx.coroutines from $KERNEL_JAR"
+import sys, zipfile
+source, target = sys.argv[1], sys.argv[2]
+copied = 0
+with zipfile.ZipFile(source) as fat, zipfile.ZipFile(target, 'w', zipfile.ZIP_DEFLATED) as out:
+    for name in fat.namelist():
+        if name.endswith('/'):
+            continue
+        if name.startswith('kotlinx/coroutines/') or name == 'META-INF/kotlinx-coroutines-core.kotlin_module':
+            out.writestr(name, fat.read(name))
+            copied += 1
+# ~800 classes plus the module file; far fewer means the kernel jar's layout changed.
+sys.exit(0 if copied > 500 else 1)
+PY
+        mv "$COROUTINES_JAR.part" "$COROUTINES_JAR"
+    fi
     if [ ! -f "$ANDROID_JAR" ] || [ "$(wc -c < "$ANDROID_JAR")" -ne "$ANDROID_JAR_BYTES" ]; then
         local sdk_jar="${ANDROID_HOME:-/nonexistent}/platforms/android-34/android.jar"
         if [ -f "$sdk_jar" ]; then
@@ -79,7 +108,7 @@ setup() {
         fi
     fi
     [ -x "$JAVA_BIN" ] && [ -f "$JARS/$KERNEL_JAR" ] && [ -f "$JARS/$STDLIB_JAR" ] && [ -f "$ANDROID_JAR" ] \
-        || die "toolchain incomplete under $TC"
+        && [ -s "$COROUTINES_JAR" ] || die "toolchain incomplete under $TC"
 }
 
 # front_end <root holding src/> <diagnostics file>: run the compiler front end; never fails on
@@ -93,7 +122,7 @@ front_end() {
     ( cd "$root" && "$JAVA_BIN" "-Xmx$HEAP" -Xss8m -cp "$JARS/$KERNEL_JAR" \
         org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
         -no-stdlib -no-reflect -language-version 2.0 -api-version 2.0 -jvm-target 11 \
-        -cp "$ANDROID_JAR:$JARS/$STDLIB_JAR" -d "$objs" "@$list" ) > "$out" 2>&1
+        -cp "$ANDROID_JAR:$JARS/$STDLIB_JAR:$COROUTINES_JAR" -d "$objs" "@$list" ) > "$out" 2>&1
     rm -rf "$objs" "$list"
     if grep -qE 'OutOfMemoryError|^exception: |Internal error|Could not create the Java Virtual Machine' "$out"; then
         say "$(grep -m3 -E 'OutOfMemoryError|^exception: |Internal error|Could not create' "$out")"
@@ -135,7 +164,7 @@ SET_TAG="$(printf '%s' "$SOURCE_SETS" | tr -c 'a-z' '_')"
 diagnostics_for_commit() {
     local ref="$1" key cached
     key="$(git -C "$REPO" rev-parse "$ref:src")" || die "'$ref' has no src/ directory"
-    cached="$TC/cache/$key-$SET_TAG.txt"
+    cached="$TC/cache/$key-$SET_TAG-$CLASSPATH_TAG.txt"
     if [ ! -s "$cached" ]; then
         say "typecheck: compiling $ref ($(git -C "$REPO" rev-parse --short "$ref")) ..."
         mkdir -p "$WORK/$key"

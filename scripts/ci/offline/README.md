@@ -130,6 +130,12 @@ the Kotlin compiler's front end: a JRE (the `jdk4py` wheel), the compiler (embed
 `Sable/android-platforms`). `typecheck.sh` fetches them once into `~/.cache/tc-typecheck`
 (about 320 MB, outside the repository).
 
+The kernel wheel turned out to carry one more useful thing: its fat jar bundles
+`kotlinx-coroutines-core` under its real package name. Since 2026-11-11 (part 2 of that hunt)
+`typecheck.sh` copies those classes into their own jar and puts it on the compile classpath, so
+`launch`, `withContext`, `Job` and what happens inside their lambdas are checked like any other
+code. It is 1.10.2, not the project's 1.8.1 — see Limits.
+
 ```
 scripts/ci/offline/typecheck.sh                    # working tree vs origin/main
 scripts/ci/offline/typecheck.sh --tests            # ...including src/test/kotlin
@@ -142,10 +148,11 @@ or `curl`.
 
 ## How it works, and why thousands of errors are normal
 
-With only the Android SDK and the Kotlin standard library on the classpath, every reference to
-AndroidX, Compose, Gson, coroutines, `R` or `BuildConfig` is unresolved. A tree that builds
-perfectly in CI therefore reports about **15,000** errors here (15,060 for `main` at `0e2dce4`;
-240 of its 429 files report none at all, the other 189 touch a library the tool cannot see).
+With only the Android SDK, the Kotlin standard library and kotlinx.coroutines on the classpath,
+every reference to AndroidX, Compose, Gson, RE2/J, `R` or `BuildConfig` is unresolved. A tree that
+builds perfectly in CI therefore reports about **14,700** errors here (14,703 for `main` at
+`dcdf2df`; 242 of its 429 files report none at all, the other 187 touch a library the tool cannot
+see). Before coroutines were on the classpath the same tree reported 15,060.
 
 So the count means nothing and the **difference** means everything. The same front end runs over
 a base commit and over your tree, and only what your tree has and the base does not is shown, in
@@ -159,7 +166,9 @@ three classes:
 
 Diagnostics are compared as counts per (file, message), not by line number, so an edit that only
 moves code does not look like a new error. The base's result is cached by the hash of its `src/`
-tree. Exit status: `0` nothing new to its file, `1` something to read, `2` the check did not run.
+tree plus a classpath tag (`CLASSPATH_TAG` in the script: bump it whenever the classpath or the
+compiler flags change, or a cached base would be compared with a tree compiled differently).
+Exit status: `0` nothing new to its file, `1` something to read, `2` the check did not run.
 
 Measured in the 4 GB sandbox: about 50 seconds per tree for `src/main/kotlin`, about 75 with
 `--tests`.
@@ -185,9 +194,14 @@ Measured in the 4 GB sandbox: about 50 seconds per tree for `src/main/kotlin`, a
 A clean result is evidence, not a verdict.
 
 - **Code behind a missing library is not checked.** A call on a receiver whose type is unresolved
-  produces no diagnostic, whatever is wrong with it. Compose UI, coroutine bodies and anything
-  built on an AndroidX type are largely invisible. A class that does not exist *inside* such a
-  library (PR #26's `com.google.gson.stream.JsonParser`) looks like any other use of it.
+  produces no diagnostic, whatever is wrong with it. Compose UI and anything built on an AndroidX
+  type are largely invisible. A class that does not exist *inside* such a library (PR #26's
+  `com.google.gson.stream.JsonParser`) looks like any other use of it.
+- **Coroutines are checked against 1.10.2, the project ships 1.8.1.** The jar is whatever the
+  kernel wheel bundles. An API added after 1.8.1 passes here and fails in CI; nothing the app
+  uses today is that new, but a clean result does not prove the next call is not.
+  `kotlinx-coroutines-test` and `-android` are not in the kernel jar, so `Dispatchers.setMain`
+  and friends in tests are still unresolved names.
 - **Adding tests is noisy.** JUnit, Truth and MockK are missing too, so a test file that starts
   using one of them lists those names as NEW TO THE FILE. Read them; they should all be library
   names.
