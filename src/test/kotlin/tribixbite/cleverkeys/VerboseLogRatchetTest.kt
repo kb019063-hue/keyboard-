@@ -31,8 +31,9 @@ class VerboseLogRatchetTest {
     /**
      * Measured 2026-10-31 on the tree that gates SuggestionBar's per-update calls: 246.
      * This is a CEILING, not a target — when a slice removes more, lower it in the same commit.
+     * 2026-11-11: 244, after gating the two SuggestionBar calls that printed the bar's message.
      */
-    private val MAX_UNGUARDED_LOG_CALLS = 246
+    private val MAX_UNGUARDED_LOG_CALLS = 244
 
     private val logCall = Regex("""\bLog\.[div]\(""")
 
@@ -124,6 +125,24 @@ class VerboseLogRatchetTest {
         )) {
             assertWithMessage("SuggestionBar's per-update log \"$marker\" must stay gated")
                 .that(bar).contains("if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, \"$marker")
+        }
+    }
+
+    /**
+     * 2026-11-11 hunt, part 2. The bar's temporary message is often the user's own word:
+     * "Added “…” to dictionary", "Removed “…” from dictionary", "Swiping now prefers “…”".
+     * `SuggestionHandler` builds those and is careful to log them without the word; the bar
+     * then logged the whole message, ungated, on the build that is installed.
+     */
+    @Test
+    fun suggestionBarDoesNotLogTheMessageItShows() {
+        val bar = read("tribixbite/cleverkeys/SuggestionBar.kt")
+        val printsTheMessage = bar.lines().filter { logCall.containsMatchIn(it) && it.contains("\$message") }
+        assertWithMessage("SuggestionBar still has the two log lines that print the message")
+            .that(printsTheMessage).hasSize(2)
+        for (line in printsTheMessage) {
+            assertWithMessage("a log line that prints the bar's message must be gated: ${line.trim()}")
+                .that(line.trim()).startsWith("if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG,")
         }
     }
 
