@@ -23,9 +23,15 @@ copying Gboard's expiry policy.
   are not counted. See [RE2/J issue 216](https://github.com/google/re2j/issues/216).
 - Filtering is debounced for a changing non-empty query and executed off the UI thread. Each
   job works on a snapshot and is cancelled on a new filter, data load or view detach. While it
-  runs, the old rows are hidden and bulk selection is disabled; only the newest result publishes.
-  The unfiltered case uses the existing list directly. The test-only unattached view path remains
-  synchronous because no view coroutine scope exists.
+  runs, the rows already on screen stay there and bulk selection is disabled; only the newest
+  result publishes. The unfiltered case uses the existing list directly. The test-only
+  unattached view path remains synchronous because no view coroutine scope exists.
+- **Changed 2026-11-11** (`docs/BUG-HUNT-2026-11-11.md`, part 2, F1). As first shipped, the old
+  rows were *hidden* while a job ran, and a job ran for every filter, not only a text query.
+  Emptying the list resets it to page 1 and collapses every expanded row, so each reload, each
+  swiped row and each keystroke did that; the To-do tab, which always has a status filter, did it
+  on every refresh. Now only a text query goes to the worker, everything else is answered in
+  place, and a swiped row is taken off the screen at once even while a query is running.
 
 ## Verification needed
 
