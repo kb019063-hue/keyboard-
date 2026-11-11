@@ -65,14 +65,21 @@ permissions:
   contents: read
 
 concurrency:
-  group: full-test-suite
-  # A stale run is worthless once a newer commit exists, and this suite can occupy a runner for
-  # tens of minutes: supersede instead of queueing behind it.
+  # One group PER REF (a branch, or a pull request's merge ref). Until 2026-11-11 this was the
+  # single name `full-test-suite`, so runs for unrelated commits cancelled each other: PR #26's
+  # run (42938417424) was cancelled by the push that merged it, and any pull-request push would
+  # equally have cancelled an in-flight run for `main` or the nightly -- leaving the one commit
+  # people install unverified until the next night. The nightly and a push to `main` share
+  # `refs/heads/main`, which is right: both test `main`, and the newer commit wins.
+  group: full-test-suite-${{ github.ref }}
+  # A stale run is worthless once a newer commit OF THE SAME REF exists, and this suite can
+  # occupy a runner for tens of minutes: supersede instead of queueing behind it.
   cancel-in-progress: true
 
 jobs:
   unit-tests:
-    runs-on: ubuntu-latest
+    # Pinned like the other two workflows; see the note in `emulator-smoke.yml`.
+    runs-on: ubuntu-24.04
     # Measured 2026-11-01: a normal whole-suite run takes 11-12 minutes; one run sat inside the
     # test task for 90+ minutes with no progress. The Gradle test task is now bounded at 45
     # minutes (build.gradle), so 75 leaves room for checkout, setup, the report step and the
@@ -82,7 +89,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -250,6 +257,9 @@ jobs:
       - name: Upload unit-test XML
         if: always()
         uses: actions/upload-artifact@v4
+        # AGENTS.md: every upload is continue-on-error, so a full artifact quota cannot change
+        # this job's verdict. The verdict is the two gate steps below, which need no upload.
+        continue-on-error: true
         with:
           name: full-suite-xml
           path: |
