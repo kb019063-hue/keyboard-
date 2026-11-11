@@ -1050,13 +1050,25 @@ class CleverKeysService : InputMethodService(),
         updateSoftInputWindowLayoutParams()
     }
 
-    /** Knob dragged horizontally: one percent of width per percent of screen width moved. */
+    /** Knob pixels not yet spent on a whole percent of width; see [FloatingConfig.resizeStep]. */
+    private var _floatingResizeCarry = 0
+
+    /**
+     * Knob dragged horizontally: one percent of width per percent of screen width moved.
+     *
+     * The handle reports each move event's own delta, usually a few pixels, and a percent of the
+     * screen is about eleven. Dividing each delta on its own rounded nearly all of them to zero,
+     * so the knob only answered a flick. [FloatingConfig.resizeStep] carries the remainder from
+     * one event to the next, and the window is only relaid out when the width really changed.
+     */
     private fun resizeFloating(dx: Int) {
         val cfg = _config ?: return
-        val dm = resources.displayMetrics
-        cfg.floating_width_percent = FloatingConfig.clampWidthPercent(
-            cfg.floating_width_percent + dx * 100 / dm.widthPixels
+        val step = FloatingConfig.resizeStep(
+            cfg.floating_width_percent, _floatingResizeCarry, dx, resources.displayMetrics.widthPixels
         )
+        _floatingResizeCarry = step.carry
+        if (step.widthPercent == cfg.floating_width_percent) return
+        cfg.floating_width_percent = step.widthPercent
         updateSoftInputWindowLayoutParams()
     }
 
@@ -1077,6 +1089,8 @@ class CleverKeysService : InputMethodService(),
 
     /** Knob released: same for the width. */
     private fun persistFloatingWidth() {
+        // The next gesture starts from where this one stopped, not from its leftover pixels.
+        _floatingResizeCarry = 0
         val cfg = _config ?: return
         DirectBootAwarePreferences.get_shared_preferences(this).edit()
             .putInt(FloatingConfig.PREF_WIDTH_PERCENT, cfg.floating_width_percent)

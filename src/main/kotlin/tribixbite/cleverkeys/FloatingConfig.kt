@@ -75,6 +75,40 @@ object FloatingConfig {
         return (screenHeight * yFraction.coerceIn(0f, max)).toInt()
     }
 
+    /**
+     * One event of a width drag: the knob moved [dxPx] since it last reported.
+     *
+     * A touch stream reports a few pixels per event, and one percent of a 1080 px screen is
+     * 10.8 px. Converting each event on its own (`dx * 100 / screenWidth`, in integers) rounds
+     * every event shorter than that to zero and throws its pixels away, so at an ordinary drag
+     * speed the knob did nothing at all; only a flick fast enough to cover a whole percent
+     * between two events moved the width, and then by less than the finger had travelled.
+     * The pixels that have not yet added up to a percent are carried to the next event instead.
+     *
+     * [carry] is `pixels * 100` (hundredths of a percent-pixel), which keeps the arithmetic exact
+     * in integers at any screen width. A gesture starts with 0 and feeds each result's
+     * [ResizeStep.carry] into the next call, so the width depends on how far the finger moved
+     * and not on how the system chopped that movement into events.
+     *
+     * A carry that points past the end the width is resting on is dropped, not banked: dragging
+     * 300 px beyond the minimum must not have to be paid back before the keyboard widens again.
+     */
+    fun resizeStep(widthPercent: Int, carry: Int, dxPx: Int, screenWidth: Int): ResizeStep {
+        val current = clampWidthPercent(widthPercent)
+        if (screenWidth <= 0) return ResizeStep(current, 0)
+        val total = carry.toLong() + dxPx.toLong() * 100L
+        // Truncates toward zero, so `steps` and `rest` both carry the sign of `total`.
+        val steps = total / screenWidth
+        val rest = (total - steps * screenWidth).toInt()
+        val next = clampWidthPercent((current + steps).coerceIn(0L, 1000L).toInt())
+        val keep = when {
+            next <= MIN_WIDTH_PERCENT && rest < 0 -> 0
+            next >= MAX_WIDTH_PERCENT && rest > 0 -> 0
+            else -> rest
+        }
+        return ResizeStep(next, keep)
+    }
+
     /** The whole window geometry in one call, so callers cannot apply half of it. */
     fun window(
         screenWidth: Int,
@@ -95,3 +129,6 @@ object FloatingConfig {
 
 /** A resolved floating window geometry, in pixels, ready for the window manager. */
 data class FloatingWindow(val widthPx: Int, val x: Int, val y: Int)
+
+/** Where one width-drag event leaves the keyboard; see [FloatingConfig.resizeStep]. */
+data class ResizeStep(val widthPercent: Int, val carry: Int)
