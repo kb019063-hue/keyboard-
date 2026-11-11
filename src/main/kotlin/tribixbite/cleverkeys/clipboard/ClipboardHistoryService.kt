@@ -131,7 +131,13 @@ class ClipboardHistoryService private constructor(ctx: Context) {
                 IntentFilter(SettingsActivity.ACTION_SANITIZATION_RULES_CHANGED)
             )
             _sanitizationReceiverRegistered = true
-        } catch (e: Throwable) {
+        } catch (e: SecurityException) {
+            android.util.Log.w("ClipboardHistory", "Sanitization-rules receiver security exception: ${e.message}")
+        } catch (e: NullPointerException) {
+            android.util.Log.w("ClipboardHistory", "Sanitization-rules receiver null pointer: ${e.message}")
+        } catch (e: IllegalStateException) {
+            android.util.Log.w("ClipboardHistory", "Sanitization-rules receiver illegal state: ${e.message}")
+        } catch (e: Exception) {
             android.util.Log.w("ClipboardHistory", "Sanitization-rules receiver not registered: ${e.message}")
         }
     }
@@ -217,9 +223,15 @@ class ClipboardHistoryService private constructor(ctx: Context) {
         } catch (e: SecurityException) {
             _isListenerRegistered = false
             android.util.Log.e("ClipboardHistory", "Clipboard access denied: " + e.message)
+        } catch (e: NullPointerException) {
+            _isListenerRegistered = false
+            android.util.Log.e("ClipboardHistory", "Null pointer in listener registration", e)
+        } catch (e: IllegalStateException) {
+            _isListenerRegistered = false
+            android.util.Log.e("ClipboardHistory", "Illegal state in listener registration", e)
         } catch (e: Exception) {
             _isListenerRegistered = false
-            android.util.Log.e("ClipboardHistory", "Failed to register clipboard listener", e)
+            android.util.Log.e("ClipboardHistory", "Failed to register clipboard listener: ${e.message}", e)
         }
     }
 

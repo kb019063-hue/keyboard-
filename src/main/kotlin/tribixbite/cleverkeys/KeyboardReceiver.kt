@@ -309,6 +309,10 @@ class KeyboardReceiver(
                 // listener: rebuildGrid() replaces the grid's children, never the tile that is
                 // currently dispatching.
                 renderToolsPanel(panel)
+                // BUG FIX (#15332b65): Force immediate Config refresh so the OneHandedRoot and
+                // PreferenceUIUpdateHandler reflect the new state instantly.
+                // This prevents the "stuck" bug where the tool appears to stay on/off despite the tap.
+                keyboard2._config?.refresh(keyboard2._resources, keyboard2.foldableUnfolded)
             }
             MoreToolsPanel.Key.EMOJI -> {
                 handle_event_key(KeyValue.Event.SWITCH_BACK_TOOLS)

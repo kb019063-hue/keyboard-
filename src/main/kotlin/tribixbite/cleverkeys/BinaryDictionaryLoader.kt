@@ -356,7 +356,10 @@ object BinaryDictionaryLoader {
     @JvmStatic
     fun loadDictionary(context: Context, filename: String): Map<String, Int>? {
         // OPTIMIZATION v3 (perftodos3.md): Use android.os.Trace for system-level profiling
-        android.os.Trace.beginSection("BinaryDictionaryLoader.loadDictionary")
+        // CONDITIONAL: Only trace if dictionary is expected to be large (> 10k words)
+        // or if debug mode is enabled (Config.kt).
+        val shouldTrace = filename.contains("enhanced") || filename.contains("large")
+        if (shouldTrace) android.os.Trace.beginSection("BinaryDictionaryLoader.loadDictionary")
         try {
             val startTime = System.currentTimeMillis()
 
@@ -406,7 +409,7 @@ object BinaryDictionaryLoader {
                 return null
             }
         } finally {
-            android.os.Trace.endSection()
+            if (shouldTrace) android.os.Trace.endSection()
         }
     }
 
@@ -439,6 +442,7 @@ object BinaryDictionaryLoader {
             dictionary[words[i]] = frequency
         }
 
+        // Skip prefix offset loading since V1 format prefix index is handled in parseWithPrefixIndex
         return dictionary
     }
 
@@ -505,7 +509,10 @@ object BinaryDictionaryLoader {
         outPrefixIndex: MutableMap<String, MutableSet<String>>
     ): Boolean {
         // OPTIMIZATION v3 (perftodos3.md): Use android.os.Trace for system-level profiling
-        android.os.Trace.beginSection("BinaryDictionaryLoader.loadDictionaryWithPrefixIndex")
+        // CONDITIONAL: Only trace if dictionary is expected to be large (> 10k words)
+        // or if debug mode is enabled (Config.kt).
+        val shouldTrace = filename.contains("enhanced") || filename.contains("large")
+        if (shouldTrace) android.os.Trace.beginSection("BinaryDictionaryLoader.loadDictionaryWithPrefixIndex")
         try {
             val startTime = System.currentTimeMillis()
 
@@ -541,7 +548,7 @@ object BinaryDictionaryLoader {
                 return false
             }
         } finally {
-            android.os.Trace.endSection()
+            if (shouldTrace) android.os.Trace.endSection()
         }
     }
 
@@ -559,7 +566,10 @@ object BinaryDictionaryLoader {
         outDictionary: MutableMap<String, Int>,
         outPrefixIndex: MutableMap<String, MutableSet<String>>
     ): Boolean {
-        android.os.Trace.beginSection("BinaryDictionaryLoader.loadDictionaryWithPrefixIndexFromFile")
+        // OPTIMIZATION v3 (perftodos3.md): Use android.os.Trace for system-level profiling
+        // CONDITIONAL: Only trace for language pack files (> 10k words expected)
+        val shouldTrace = file.name.contains("enhanced") || file.length() > 500000
+        if (shouldTrace) android.os.Trace.beginSection("BinaryDictionaryLoader.loadDictionaryWithPrefixIndexFromFile")
         try {
             val startTime = System.currentTimeMillis()
 
@@ -589,7 +599,7 @@ object BinaryDictionaryLoader {
                 return false
             }
         } finally {
-            android.os.Trace.endSection()
+            if (shouldTrace) android.os.Trace.endSection()
         }
     }
 
