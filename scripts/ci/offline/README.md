@@ -111,3 +111,90 @@ refuse to assert. It cannot test anything about rendering, timing, the real acce
 the window manager — those are what the emulator run is for, and the two are complementary rather
 than interchangeable. A green harness means the script will look in the right places and report
 honestly; it says nothing about whether the keyboard itself works.
+
+# `typecheck.sh` — a compiler check without a build
+
+A second, unrelated tool that lives here for the same reason the harness does: it runs in the dev
+sandbox, and CI never invokes it.
+
+## Why it exists
+
+The dev sandbox cannot run Gradle (no Android SDK, no Maven Central), so until 2026-11-11 a Kotlin
+change could not be checked at all before it was pushed. On that day a change with unresolved
+names in three files was merged to `main` before its build had reported, and `main` did not
+compile until it was reverted (`docs/BUG-HUNT-2026-11-11.md`).
+
+The sandbox *can* reach PyPI and `api.github.com`, and three things from there are enough to run
+the Kotlin compiler's front end: a JRE (the `jdk4py` wheel), the compiler (embedded in the
+`kotlin-jupyter-kernel` wheel) and `android.jar` for API 34 (a git blob in
+`Sable/android-platforms`). `typecheck.sh` fetches them once into `~/.cache/tc-typecheck`
+(about 320 MB, outside the repository).
+
+```
+scripts/ci/offline/typecheck.sh                    # working tree vs origin/main
+scripts/ci/offline/typecheck.sh --tests            # ...including src/test/kotlin
+scripts/ci/offline/typecheck.sh <base>             # working tree vs <base>
+scripts/ci/offline/typecheck.sh <base> <commit>    # <commit> vs <base>
+```
+
+Run it before every push that touches Kotlin. It needs `python3`, `git`, `pip` and either `gh`
+or `curl`.
+
+## How it works, and why thousands of errors are normal
+
+With only the Android SDK and the Kotlin standard library on the classpath, every reference to
+AndroidX, Compose, Gson, coroutines, `R` or `BuildConfig` is unresolved. A tree that builds
+perfectly in CI therefore reports about **15,000** errors here (15,060 for `main` at `0e2dce4`;
+240 of its 429 files report none at all, the other 189 touch a library the tool cannot see).
+
+So the count means nothing and the **difference** means everything. The same front end runs over
+a base commit and over your tree, and only what your tree has and the base does not is shown, in
+three classes:
+
+| Class | Meaning | What to do |
+|---|---|---|
+| **NEW TO THE TREE** | no file in the base reports this message | it is a real error; fix it |
+| **NEW TO THE FILE** | the base reports the same message, but only in other files | read each: either the file now uses a library the tool cannot see, or it is real |
+| *repeats* (counted, not listed) | the same file already reported this exact message in the base | more uses of a library the tool cannot see |
+
+Diagnostics are compared as counts per (file, message), not by line number, so an edit that only
+moves code does not look like a new error. The base's result is cached by the hash of its `src/`
+tree. Exit status: `0` nothing new to its file, `1` something to read, `2` the check did not run.
+
+Measured in the 4 GB sandbox: about 50 seconds per tree for `src/main/kotlin`, about 75 with
+`--tests`.
+
+## What it has been checked against
+
+- **The change that broke `main`.** `typecheck.sh 0e2dce4 51c9107` reports eleven errors that are
+  new to the tree — `_resources` and `foldableUnfolded` at `CleverKeysService.kt:1171` and `:1265`
+  and at `KeyboardReceiver.kt:315`, the private `_config` there, the missing `IOException`
+  import — and three that are new to their file. That includes the two lines CI's eight-item
+  annotation list never reached (`CleverKeysService.kt:1265`, `KeyboardReceiver.kt:315`). Under
+  two minutes, both trees compiled from scratch.
+- **The change that added it.** A single-file type-check of the new `ConfigurationManager.kt`
+  passed. The whole-tree run did not: the file declared a `private class MainLooperScheduler`,
+  and `clipboard/ClipboardManager.kt` already has one in the same package, which is a
+  redeclaration. It would have been a red build.
+- **Itself.** With a heap too small to finish, it exits `2` and says the compiler did not finish;
+  a tree with fewer than 1,000 diagnostics is treated the same way, because for this codebase
+  that can only mean the front end stopped early.
+
+## Limits
+
+A clean result is evidence, not a verdict.
+
+- **Code behind a missing library is not checked.** A call on a receiver whose type is unresolved
+  produces no diagnostic, whatever is wrong with it. Compose UI, coroutine bodies and anything
+  built on an AndroidX type are largely invisible. A class that does not exist *inside* such a
+  library (PR #26's `com.google.gson.stream.JsonParser`) looks like any other use of it.
+- **Adding tests is noisy.** JUnit, Truth and MockK are missing too, so a test file that starts
+  using one of them lists those names as NEW TO THE FILE. Read them; they should all be library
+  names.
+- **`--tests` compiles main and test as one module.** Gradle compiles them separately.
+- **The compiler is not the project's.** It is a 2.3 development build held to language level
+  2.0; the project builds with Kotlin 2.0.0. They can disagree at the margins.
+- **Nothing else runs.** No resources, manifest, lint, generated sources
+  (`build/generated/**`), `tools/check_layout.py`, packaging or tests.
+
+Push, then read the run. That is still the only thing that says the build is green.

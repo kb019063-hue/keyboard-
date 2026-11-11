@@ -15,8 +15,12 @@ import android.util.Log
  * reload that lived here could not see it. Every language change — preference or layout —
  * goes through [ActiveLanguageSync], fed from `CleverKeysService.onConfigChanged`.
  *
- * Note: ConfigurationManager is the primary SharedPreferences listener and
- * handles config refresh. This handler focuses on UI-specific updates.
+ * Note: ConfigurationManager is the only SharedPreferences listener and handles the config
+ * refresh. This handler focuses on UI-specific updates, and everything it applies is READ FROM
+ * [Config] — so it must only ever run after that refresh. The manager guarantees it
+ * (`ConfigurationManager.setAfterRefreshListener`, 2026-11-11); do not call
+ * [handlePreferenceChange] from a second SharedPreferences listener, whose order relative to
+ * the refresh Android does not define.
  *
  * Extracted from CleverKeysService.onSharedPreferenceChanged() to reduce main class size.
  *

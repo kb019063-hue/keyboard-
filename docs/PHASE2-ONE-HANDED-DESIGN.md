@@ -108,6 +108,10 @@ an exploration:
 3. **Live refresh** — `saveSetting` → prefs → `Config.refresh()` → `PreferenceUIUpdateHandler` →
    a new `updateOneHanded()`. Changing side or scale in Settings applies to the open keyboard with
    no IME restart, which is already proven for the toolbar.
+   *(Correction, 2026-11-11: that order was assumed, not enforced. The handler ran from a second
+   SharedPreferences listener, which Android does not order against the first, and could apply
+   the value from before the change. `ConfigurationManager` now calls it after the refresh — see
+   [`BUG-HUNT-2026-11-11.md`](BUG-HUNT-2026-11-11.md), finding 2.)*
 4. **Construction** — `SuggestionBarPane.initialize` in `wiring/KeyboardComponentGraph.kt` built
    the toolbar; it builds the controller the same way, returned through `InitializationResult` →
    `PredictionViewSetup.SetupResult` → `CleverKeysService`.
