@@ -262,14 +262,7 @@ class CleverKeysService : InputMethodService(),
             val instance = _instance ?: return null
             val layout = try {
                 instance.current_layout()
-            } catch (e: NullPointerException) {
-                Log.e("CleverKeysService", "Layout null pointer in findKeyByChar", e)
-                return null
-            } catch (e: IllegalStateException) {
-                Log.e("CleverKeysService", "Layout state invalid in findKeyByChar", e)
-                return null
             } catch (e: Exception) {
-                Log.e("CleverKeysService", "Unexpected error in findKeyByChar", e)
                 return null
             }
 
@@ -303,14 +296,7 @@ class CleverKeysService : InputMethodService(),
             val instance = _instance ?: return 1.0f
             val layout = try {
                 instance.current_layout()
-            } catch (e: NullPointerException) {
-                Log.e("CleverKeysService", "Layout null pointer in getRowHeightForKey", e)
-                return 1.0f
-            } catch (e: IllegalStateException) {
-                Log.e("CleverKeysService", "Layout state invalid in getRowHeightForKey", e)
-                return 1.0f
             } catch (e: Exception) {
-                Log.e("CleverKeysService", "Unexpected error in getRowHeightForKey", e)
                 return 1.0f
             }
 
@@ -559,12 +545,8 @@ class CleverKeysService : InputMethodService(),
         _themeChangeReceiver?.let {
             try {
                 unregisterReceiver(it)
-            } catch (e: NullPointerException) {
-                Log.w("CleverKeysService", "Theme receiver already null", e)
-            } catch (e: IllegalStateException) {
-                Log.w("CleverKeysService", "Theme receiver already unregistered", e)
             } catch (e: Exception) {
-                Log.w("CleverKeysService", "Failed to unregister theme receiver: ${e.message}", e)
+                // Receiver may not have been registered
             }
             _themeChangeReceiver = null
         }
@@ -1157,18 +1139,9 @@ class CleverKeysService : InputMethodService(),
     /**
      * Toggle one-handed mode. Reached through the `one_handed_toggle` command, so it works from a
      * phase-1 toolbar button, a short swipe or an extra key with no second dispatch path.
-     *
-     * BUG FIX (#15332b65): Explicitly refresh Config after preference write to ensure the
-     * OneHandedRoot and PreferenceUIUpdateHandler see the updated state immediately.
-     * Without this, a fast second tap on the tools panel might read the old Config state
-     * before the SharedPreferences listener fires, causing the tool to appear stuck "on" or "off".
      */
     fun toggleOneHandedMode() {
-        val next = !(_config?.one_handed_enabled ?: false)
-        setOneHandedEnabled(next)
-        // Force immediate config refresh so the UI update handler and OneHandedRoot
-        // reflect the new state instantly, avoiding the "stuck" bug.
-        _config?.refresh(_resources, foldableUnfolded)
+        setOneHandedEnabled(!(_config?.one_handed_enabled ?: false))
     }
 
     /**
@@ -1249,20 +1222,12 @@ class CleverKeysService : InputMethodService(),
      * refreshes [Config], then [onSharedPreferenceChanged] reaches
      * `PreferenceUIUpdateHandler.updateOneHanded`, so the open keyboard changes with no IME restart
      * and no second code path that could disagree with what Settings writes.
-     *
-     * BUG FIX (#15332b65): Explicitly refresh Config after preference write to ensure the
-     * OneHandedRoot and PreferenceUIUpdateHandler see the updated state immediately.
-     * Without this, a fast second tap on the tools panel might read the old Config state
-     * before the SharedPreferences listener fires, causing the tool to appear stuck "on" or "off".
      */
     private fun setOneHandedEnabled(enabled: Boolean) {
         DirectBootAwarePreferences.get_shared_preferences(this).edit()
             .putBoolean(OneHandedConfig.PREF_ENABLED, enabled)
             .apply()
         _config?.one_handed_enabled = enabled
-        // Force immediate config refresh so the UI update handler and OneHandedRoot
-        // reflect the new state instantly, avoiding the "stuck" bug.
-        _config?.refresh(_resources, foldableUnfolded)
     }
 
     /** gh #175: collapse the keyboard to [style] until it is tapped or hidden. */
@@ -1609,14 +1574,8 @@ class CleverKeysService : InputMethodService(),
 
         return try {
             tribixbite.cleverkeys.autofill.InlineAutofillUtils.createInlineSuggestionsRequest(this)
-        } catch (e: NullPointerException) {
-            android.util.Log.e("CleverKeysService", "Null pointer in inline suggestions request", e)
-            null
-        } catch (e: IllegalStateException) {
-            android.util.Log.e("CleverKeysService", "Illegal state in inline suggestions request", e)
-            null
         } catch (e: Exception) {
-            android.util.Log.e("CleverKeysService", "Failed to create inline suggestions request: ${e.message}", e)
+            android.util.Log.e("CleverKeysService", "Failed to create inline suggestions request", e)
             null
         }
     }
@@ -1640,14 +1599,8 @@ class CleverKeysService : InputMethodService(),
             _suggestionBar?.setInlineAutofillView(inlineSuggestionView)
 
             true
-        } catch (e: NullPointerException) {
-            android.util.Log.e("CleverKeysService", "Null pointer in inline suggestions response", e)
-            false
-        } catch (e: IllegalStateException) {
-            android.util.Log.e("CleverKeysService", "Illegal state in inline suggestions response", e)
-            false
         } catch (e: Exception) {
-            android.util.Log.e("CleverKeysService", "Failed to display inline suggestions: ${e.message}", e)
+            android.util.Log.e("CleverKeysService", "Failed to display inline suggestions", e)
             false
         }
     }

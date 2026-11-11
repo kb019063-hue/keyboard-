@@ -551,15 +551,10 @@ open class BackupRestoreManager(
             readFromDownloadsMediaStore(fileName, "%BrownKeys%")?.let { return it }
             readFromDownloadsMediaStore(fileName, "%CleverKeys%")?.let { return it }
 
-            // Try 4: Trigger MediaStore scan of the exact path (async, non-blocking)
+            // Try 4: Force MediaStore scan of the exact path, then retry query
             // This indexes files created/modified by external tools (cp, vim, etc.)
-            // The subsequent queries will pick up the file once the scanner finishes
-            // (usually within a few seconds). No blocking wait to prevent UI/task freezes.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 scanFileIntoMediaStore(path)
-                // Note: We don't block here anymore. The queries below will either
-                // find the file (if already indexed) or fail (if still scanning).
-                // The caller can retry or rely on the direct FileInputStream fallback.
                 readFromDownloadsMediaStore(fileName, "%BrownKeys%")?.let { return it }
                 readFromDownloadsMediaStore(fileName, "%CleverKeys%")?.let { return it }
             }
@@ -582,25 +577,20 @@ open class BackupRestoreManager(
 
     /**
      * Force MediaStore to scan a file path so it becomes queryable.
-     * Asynchronous: fires the scan and returns immediately. The caller
-     * should not assume the file is queryable instantly; use the MediaStore
-     * query with a retry or a timeout if needed.
-     *
+     * Synchronous: blocks up to 5 seconds for the scan to complete.
      * After scanning, the file entry is owned by the system (not this app),
      * so it may still be unreadable without storage permissions on Android 13+.
-     *
-     * #15332b65: Moved from synchronous (blocking up to 5 seconds) to async
-     * to prevent UI thread freezes or background task timeouts during import.
-     * The caller (openInputStream) now relies on the MediaStore query retry
-     * or the direct FileInputStream fallback, rather than blocking for the scan.
      */
     private fun scanFileIntoMediaStore(filePath: String) {
         try {
+            val latch = java.util.concurrent.CountDownLatch(1)
             android.media.MediaScannerConnection.scanFile(
                 context, arrayOf(filePath), arrayOf("application/json")
             ) { scannedPath, scannedUri ->
                 Log.i(TAG, "MediaScanner indexed: $scannedPath → $scannedUri")
+                latch.countDown()
             }
+            latch.await(5, java.util.concurrent.TimeUnit.SECONDS)
         } catch (e: Exception) {
             Log.w(TAG, "MediaScanner scan failed for $filePath: ${e.message}")
         }

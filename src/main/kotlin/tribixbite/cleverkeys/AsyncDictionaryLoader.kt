@@ -236,66 +236,48 @@ class AsyncDictionaryLoader {
                 )
 
                 if (!loadedBinary) {
-        /**
-         * Stream-parse JSON dictionary to avoid loading the entire file into memory.
-         * Uses Gson for efficient parsing (already available in BackupRestoreManager).
-         *
-         * OPTIMIZATION: Prevents memory spikes and GC pauses during JSON dictionary loading
-         * - Uses streaming parser instead of StringBuilder + JSONObject
-         * - Checks cancellation periodically
-         */
-        val jsonFilename = "dictionaries/${language}_enhanced.json"
-        try {
-            val reader = BufferedReader(
-                InputStreamReader(context.assets.open(jsonFilename))
-            )
-            
-            // Stream parse JSON object
-            val jsonParser = com.google.gson.stream.JsonParser()
-            val jsonElement = jsonParser.parse(reader)
-            
-            if (!jsonElement.isJsonObject) {
-                throw IOException("Invalid JSON format: expected object")
-            }
-            
-            val jsonDict = jsonElement.asJsonObject
-            val keys = jsonDict.keySet().iterator()
-            
-            // Process keys and build dictionary
-            while (keys.hasNext()) {
-                // Batch cancellation check (every 1000 words) to reduce overhead
-                // while maintaining responsiveness (< 100ms latency)
-                val currentWordIndex = 0 // TODO: track index if needed for batching
-                // For now, keep per-word check for safety, but optimize the loop
-                requests.checkCurrent(slot, request)
-                
-                val word = keys.next().lowercase()
-                val frequency = jsonDict.get(word)?.asInt ?: 0
-                // Scale frequency to 100-10000 range
-                val scaledFreq = 100 + ((frequency - 128) / 127.0 * 9900).toInt()
-                dictionary[word] = scaledFreq
-            }
+                    // Fall back to JSON format (slow path)
+                    Log.d(TAG, "Binary dictionary not available, falling back to JSON")
 
-            // Build prefix index
-            for (word in dictionary.keys) {
-                requests.checkCurrent(slot, request)
-                val maxLen = min(3, word.length)
-                for (len in 1..maxLen) {
-                    val prefix = word.substring(0, len)
-                    prefixIndex.getOrPut(prefix) { HashSet() }.add(word)
-                }
-            }
+                    val jsonFilename = "dictionaries/${language}_enhanced.json"
+                    try {
+                        val reader = BufferedReader(
+                            InputStreamReader(context.assets.open(jsonFilename))
+                        )
+                        val jsonBuilder = StringBuilder()
+                        reader.useLines { lines ->
+                            lines.forEach {
+                                requests.checkCurrent(slot, request)
+                                jsonBuilder.append(it)
+                            }
+                        }
 
-            Log.d(TAG, "Loaded JSON dictionary: $jsonFilename")
-        } catch (e: Exception) {
-            requests.checkCurrent(slot, request)
-            Log.e(TAG, "Dictionary loading failed: $language", e)
-            // Notify failure on main thread
-            requests.publish(slot, request, Runnable { callback.onLoadFailed(language, e) })
-            // Skip the rest of the loading process
-            android.os.Trace.endSection()
-            return
-        }
+                        // Parse JSON object
+                        val jsonDict = JSONObject(jsonBuilder.toString())
+                        val keys = jsonDict.keys()
+                        while (keys.hasNext()) {
+                            requests.checkCurrent(slot, request)
+                            val word = keys.next().lowercase()
+                            val frequency = jsonDict.getInt(word)
+                            // Scale frequency to 100-10000 range
+                            val scaledFreq = 100 + ((frequency - 128) / 127.0 * 9900).toInt()
+                            dictionary[word] = scaledFreq
+                        }
+
+                        // Build prefix index
+                        for (word in dictionary.keys) {
+                            requests.checkCurrent(slot, request)
+                            val maxLen = min(3, word.length)
+                            for (len in 1..maxLen) {
+                                val prefix = word.substring(0, len)
+                                prefixIndex.getOrPut(prefix) { HashSet() }.add(word)
+                            }
+                        }
+
+                        Log.d(TAG, "Loaded JSON dictionary: $jsonFilename")
+                    } catch (e: Exception) {
+                        throw RuntimeException("Failed to load dictionary: $language", e)
+                    }
                 }
 
                 val loadTime = System.currentTimeMillis() - startTime
