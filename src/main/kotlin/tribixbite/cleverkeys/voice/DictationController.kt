@@ -8,6 +8,7 @@ import android.media.AudioManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -65,6 +66,14 @@ internal class DictationController(
      * When the current listening session began, for [DictationPolicy.SESSION_WATCHDOG_MS]. Stamped
      * where a session actually starts (including the silent retry, which starts a fresh one) and
      * ignored once `sessionActive` is false, so a stale stamp can never expire a later press.
+     *
+     * In `SystemClock.uptimeMillis()`, the clock `Handler.postDelayed` counts in. It was the wall
+     * clock until 2026-11-11. The watchdog runs once and the policy's boundary is exact, so the
+     * two clocks had to agree to the millisecond: they tick at unrelated sub-millisecond phases,
+     * and a timer that fires at 60 000 ms of uptime can read 59 999 ms of wall time. Then the
+     * check said "not yet", nothing re-armed it, and the wedged session it exists to end stayed.
+     * (A clock set backwards during the session did the same.) On one clock the timer cannot
+     * fire before the limit it is checked against.
      */
     private var sessionStartedAt = 0L
 
@@ -78,7 +87,7 @@ internal class DictationController(
      */
     private val watchdog = Runnable {
         val expired = DictationPolicy.onSessionExpired(
-            elapsedMs = System.currentTimeMillis() - sessionStartedAt,
+            elapsedMs = SystemClock.uptimeMillis() - sessionStartedAt,
             sessionActive = sessionActive
         )
         if (expired) {
@@ -327,7 +336,7 @@ internal class DictationController(
             active.startListening(intent)
             // Arm the watchdog from the one place a session actually begins, so the silent retry
             // gets a fresh window instead of inheriting the first attempt's.
-            sessionStartedAt = System.currentTimeMillis()
+            sessionStartedAt = SystemClock.uptimeMillis()
             main.removeCallbacks(watchdog)
             main.postDelayed(watchdog, DictationPolicy.SESSION_WATCHDOG_MS)
             sink?.showMessage(context.getString(R.string.voice_typing_listening))
