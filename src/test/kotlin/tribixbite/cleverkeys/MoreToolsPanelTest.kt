@@ -178,4 +178,32 @@ class MoreToolsPanelTest {
                 "fallback when nothing has been drawn yet."
         ).that(body).doesNotContain("val current = toolsState()")
     }
+
+    /**
+     * 2026-11-11 hunt, part 2 (F3). The panel is kept and re-bound across opens, and it reads
+     * every colour from the Theme it was constructed with. A theme change gives the keyboard a
+     * new view with a new Theme and the service rebuilds the emoji and clipboard panes, but
+     * nothing rebuilt this one: it kept the previous theme's colours until the keyboard process
+     * died (dark tiles on a light keyboard, or the reverse). The receiver now reuses the kept
+     * panel only for the theme the keyboard is drawn with. Like the pin above, only the
+     * caller's source can show that.
+     */
+    @Test
+    fun `a panel built for another theme is rebuilt, not reused`() {
+        val receiver = File("src/main/kotlin/tribixbite/cleverkeys/KeyboardReceiver.kt")
+        val view = File("src/main/kotlin/tribixbite/cleverkeys/MoreToolsPanelView.kt")
+        assertThat(receiver.isFile).isTrue()
+        assertThat(view.isFile).isTrue()
+        val open = receiver.readText().substringAfter("private fun showToolsPanel(")
+            .substringBefore("container.removeAllViews()")
+
+        assertWithMessage("showToolsPanel must compare the kept panel with the keyboard's current theme")
+            .that(open).contains("val theme = keyboardView.getTheme()")
+        assertWithMessage("a kept panel is reused only when it was built for that theme")
+            .that(open).contains("(toolsPanel as? MoreToolsPanelView)?.takeIf { it.isBuiltFor(theme) }")
+        assertWithMessage("and the replacement is built with it")
+            .that(open).contains("MoreToolsPanelView(context, theme)")
+        assertWithMessage("the check is identity: each inflated keyboard view owns its own Theme object")
+            .that(view.readText()).contains("fun isBuiltFor(candidate: Theme?): Boolean = theme === candidate")
+    }
 }

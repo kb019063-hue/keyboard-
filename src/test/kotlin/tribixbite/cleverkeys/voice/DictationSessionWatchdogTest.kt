@@ -110,6 +110,77 @@ class DictationSessionWatchdogTest {
     }
 
     /**
+     * 2026-11-11 hunt, part 2 (D-a). The timer is a `Handler.postDelayed`, which counts in
+     * `SystemClock.uptimeMillis()`; the elapsed time it then checks was taken from
+     * `System.currentTimeMillis()`. The watchdog runs once and the boundary above is exact
+     * ("one millisecond short must NOT fire"), so the two clocks had to agree to the
+     * millisecond. They do not: they tick at unrelated sub-millisecond phases, so a timer that
+     * fires at 60 000 ms of uptime can read 59 999 ms of wall time, and a clock set backwards
+     * reads less still. The check then said "not yet" and nothing ran it again, which left
+     * exactly the dead session this class is about. Both stamps must come from the timer's clock.
+     */
+    @Test
+    fun `the session is measured on the clock its timer runs on`() {
+        val text = java.io.File(
+            "src/main/kotlin/tribixbite/cleverkeys/voice/DictationController.kt"
+        ).readText()
+
+        assertTrue(
+            "the session start must be stamped in uptime",
+            text.contains("sessionStartedAt = SystemClock.uptimeMillis()")
+        )
+        assertTrue(
+            "the watchdog must measure in uptime",
+            text.contains("elapsedMs = SystemClock.uptimeMillis() - sessionStartedAt")
+        )
+        assertFalse(
+            "no wall-clock reading may feed the watchdog",
+            text.contains("System.currentTimeMillis()")
+        )
+        assertTrue(
+            "the timer itself must still be the handler's (uptime) delay",
+            text.contains("main.postDelayed(watchdog, DictationPolicy.SESSION_WATCHDOG_MS)")
+        )
+    }
+
+    /**
+     * The arithmetic behind the pin above. Time is counted in tenths of a millisecond, and a
+     * clock is that instant shifted by its phase and cut down to whole milliseconds. `Handler`
+     * dispatches at the first instant its clock reads `when`; what the watchdog computes there
+     * can never be short of the limit on the timer's own clock, and can be on another.
+     */
+    @Test
+    fun `a timer checked on its own clock never fires short, on another clock it can`() {
+        val limit = DictationPolicy.SESSION_WATCHDOG_MS
+        // What a clock with [phase] (tenths of a millisecond) reads at instant [tenths].
+        fun read(tenths: Long, phase: Long): Long = Math.floorDiv(tenths + phase, 10L)
+
+        var shortOnOwnClock = 0
+        var shortOnOtherClock = 0
+        for (startFraction in 0L until 10L) for (timerPhase in 0L until 10L) for (otherPhase in 0L until 10L) {
+            val start = 10_000L + startFraction
+            // postDelayed: when = now (timer clock) + limit, dispatched at the first instant the
+            // timer clock reads `when`.
+            val whenMs = read(start, timerPhase) + limit
+            val dispatch = whenMs * 10L - timerPhase
+            assertEquals("the model dispatches exactly when the timer clock reads `when`",
+                whenMs, read(dispatch, timerPhase))
+            val own = read(dispatch, timerPhase) - read(start, timerPhase)
+            val other = read(dispatch, otherPhase) - read(start, otherPhase)
+            if (!DictationPolicy.onSessionExpired(own, sessionActive = true)) shortOnOwnClock++
+            if (!DictationPolicy.onSessionExpired(other, sessionActive = true)) shortOnOtherClock++
+        }
+        assertEquals("on the timer's clock the session always expires", 0, shortOnOwnClock)
+        // With no wake-up latency at all, 450 of these 1000 phase combinations read one
+        // millisecond short. A real looper wakes a little late, which makes it rarer, not
+        // impossible; the count is not the contract, that it can happen is.
+        assertTrue(
+            "on a clock with another phase the same instant can read short ($shortOnOtherClock of 1000)",
+            shortOnOtherClock > 0
+        )
+    }
+
+    /**
      * Every path that clears `sessionActive` must disarm the timer in the same breath.
      *
      * Not a count: a count would have to be edited every time a legitimate path is added, and the

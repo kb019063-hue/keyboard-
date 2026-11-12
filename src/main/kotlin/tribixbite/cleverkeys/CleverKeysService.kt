@@ -3,7 +3,6 @@ package tribixbite.cleverkeys
 import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.Context
-import android.widget.Toast
 import android.app.AlertDialog
 import android.content.Intent
 import android.content.IntentFilter
@@ -1050,13 +1049,25 @@ class CleverKeysService : InputMethodService(),
         updateSoftInputWindowLayoutParams()
     }
 
-    /** Knob dragged horizontally: one percent of width per percent of screen width moved. */
+    /** Knob pixels not yet spent on a whole percent of width; see [FloatingConfig.resizeStep]. */
+    private var _floatingResizeCarry = 0
+
+    /**
+     * Knob dragged horizontally: one percent of width per percent of screen width moved.
+     *
+     * The handle reports each move event's own delta, usually a few pixels, and a percent of the
+     * screen is about eleven. Dividing each delta on its own rounded nearly all of them to zero,
+     * so the knob only answered a flick. [FloatingConfig.resizeStep] carries the remainder from
+     * one event to the next, and the window is only relaid out when the width really changed.
+     */
     private fun resizeFloating(dx: Int) {
         val cfg = _config ?: return
-        val dm = resources.displayMetrics
-        cfg.floating_width_percent = FloatingConfig.clampWidthPercent(
-            cfg.floating_width_percent + dx * 100 / dm.widthPixels
+        val step = FloatingConfig.resizeStep(
+            cfg.floating_width_percent, _floatingResizeCarry, dx, resources.displayMetrics.widthPixels
         )
+        _floatingResizeCarry = step.carry
+        if (step.widthPercent == cfg.floating_width_percent) return
+        cfg.floating_width_percent = step.widthPercent
         updateSoftInputWindowLayoutParams()
     }
 
@@ -1077,6 +1088,8 @@ class CleverKeysService : InputMethodService(),
 
     /** Knob released: same for the width. */
     private fun persistFloatingWidth() {
+        // The next gesture starts from where this one stopped, not from its leftover pixels.
+        _floatingResizeCarry = 0
         val cfg = _config ?: return
         DirectBootAwarePreferences.get_shared_preferences(this).edit()
             .putInt(FloatingConfig.PREF_WIDTH_PERCENT, cfg.floating_width_percent)
@@ -1113,8 +1126,7 @@ class CleverKeysService : InputMethodService(),
         // listener's refresh landed — the user taps the tools-sheet toggle and nothing moves.
         // `edit` applies the write and re-publishes the read-model together.
         _config?.edit { split_enabled = enabled }
-        Toast.makeText(this, getString(if (enabled) R.string.split_toast_on else R.string.split_toast_off),
-            Toast.LENGTH_SHORT).show()
+        confirmToolSwitch(if (enabled) R.string.split_toast_on else R.string.split_toast_off)
     }
 
     /** `floating_toggle` command; writes the same preference the Settings switch writes. */
@@ -1125,9 +1137,22 @@ class CleverKeysService : InputMethodService(),
             .putBoolean(FloatingConfig.PREF_ENABLED, enabled)
             .apply()
         _config?.floating_enabled = enabled
-        Toast.makeText(this, getString(if (enabled) R.string.floating_toast_on else R.string.floating_toast_off),
-            Toast.LENGTH_SHORT).show()
+        confirmToolSwitch(if (enabled) R.string.floating_toast_on else R.string.floating_toast_off)
     }
+
+    /**
+     * Say that a tool was switched, in the suggestion strip.
+     *
+     * These three used a Toast. Android 13+ shows an app's toasts only while it has
+     * notification permission or an activity in front, and a keyboard has neither (this app
+     * does not even declare POST_NOTIFICATIONS), so the toast never appeared: the rule
+     * ImeToastBanDriftTest already enforces for the files around this one. For incognito that
+     * left a toolbar button or a swipe with no confirmation at all.
+     *
+     * While a pane (the tools panel included) covers the strip the message is not visible;
+     * there the tile that lights up is the confirmation.
+     */
+    private fun confirmToolSwitch(messageRes: Int) = showSuggestionBarMessage(getString(messageRes))
 
     /** The one-handed wrapper root, created on first use and kept for the service's lifetime. */
     private fun oneHandedRoot(): OneHandedRoot =
@@ -1154,8 +1179,9 @@ class CleverKeysService : InputMethodService(),
      * clipboard history until toggled again. The write goes through the same preferences the
      * Settings switch writes, so ConfigurationManager's refresh and this service's
      * onSharedPreferenceChanged apply it to an open keyboard with no IME restart -- one code path,
-     * not two that could disagree. The toast is the only confirmation a toolbar key can give:
-     * unlike one-handed mode there is no visible geometry change to notice.
+     * not two that could disagree. The message in the suggestion strip is the only confirmation
+     * a toolbar key can give: unlike one-handed mode there is no visible geometry change to
+     * notice. (It was a Toast until 2026-11-11, which a keyboard cannot show on Android 13+.)
      */
     fun toggleIncognito() = setIncognitoEnabled(!(_config?.incognito_enabled ?: false))
 
@@ -1164,8 +1190,7 @@ class CleverKeysService : InputMethodService(),
             .putBoolean("incognito_enabled", enabled)
             .apply()
         _config?.incognito_enabled = enabled
-        Toast.makeText(this, getString(if (enabled) R.string.incognito_toast_on else R.string.incognito_toast_off),
-            Toast.LENGTH_SHORT).show()
+        confirmToolSwitch(if (enabled) R.string.incognito_toast_on else R.string.incognito_toast_off)
     }
 
     /**

@@ -31,8 +31,9 @@ class VerboseLogRatchetTest {
     /**
      * Measured 2026-10-31 on the tree that gates SuggestionBar's per-update calls: 246.
      * This is a CEILING, not a target — when a slice removes more, lower it in the same commit.
+     * 2026-11-11: 244, after gating the two SuggestionBar calls that printed the bar's message.
      */
-    private val MAX_UNGUARDED_LOG_CALLS = 246
+    private val MAX_UNGUARDED_LOG_CALLS = 244
 
     private val logCall = Regex("""\bLog\.[div]\(""")
 
@@ -88,6 +89,30 @@ class VerboseLogRatchetTest {
         ).that(offenders.size).isAtMost(MAX_UNGUARDED_LOG_CALLS)
     }
 
+    /**
+     * 2026-11-11 hunt, part 2 (F2). `R.bool.debug_logs` switches on
+     * `Logs.debug_startup_input_view`, which writes the focused field's `EditorInfo` to logcat
+     * on every `onStartInputView`: the app's package name, the field's hint, label and id, and
+     * its extras. The debug build type forced it on, and the debug build is the one that is
+     * installed. It must follow the same LOCAL_BUILD opt-in as `ENABLE_VERBOSE_LOGGING`.
+     */
+    @Test
+    fun theFocusedFieldDumpIsOptInLikeTheVerboseFlag() {
+        val gradle = File("build.gradle")
+        assertWithMessage("test must run from the project root").that(gradle.isFile).isTrue()
+        val settings = gradle.readLines().map { it.trim() }
+            .filter { it.startsWith("resValue") && it.contains("\"debug_logs\"") }
+        assertWithMessage("build.gradle sets debug_logs in one place").that(settings).hasSize(1)
+        assertWithMessage("debug_logs must be on only for LOCAL_BUILD=true")
+            .that(settings.single()).isEqualTo("resValue \"bool\", \"debug_logs\", isLocalBuild ? \"true\" : \"false\"")
+        assertWithMessage("the default every other build type gets must stay off")
+            .that(File("res/values/values.xml").readText())
+            .contains("<bool name=\"debug_logs\">false</bool>")
+        assertWithMessage("the service must take the switch from that resource")
+            .that(read("tribixbite/cleverkeys/CleverKeysService.kt"))
+            .contains("Logs.set_debug_logs(resources.getBoolean(R.bool.debug_logs))")
+    }
+
     @Test
     fun suggestionBarPerUpdateCallsStayGated() {
         // SuggestionBar updates on every keystroke through these two entry points; the rest of
@@ -100,6 +125,24 @@ class VerboseLogRatchetTest {
         )) {
             assertWithMessage("SuggestionBar's per-update log \"$marker\" must stay gated")
                 .that(bar).contains("if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, \"$marker")
+        }
+    }
+
+    /**
+     * 2026-11-11 hunt, part 2. The bar's temporary message is often the user's own word:
+     * "Added “…” to dictionary", "Removed “…” from dictionary", "Swiping now prefers “…”".
+     * `SuggestionHandler` builds those and is careful to log them without the word; the bar
+     * then logged the whole message, ungated, on the build that is installed.
+     */
+    @Test
+    fun suggestionBarDoesNotLogTheMessageItShows() {
+        val bar = read("tribixbite/cleverkeys/SuggestionBar.kt")
+        val printsTheMessage = bar.lines().filter { logCall.containsMatchIn(it) && it.contains("\$message") }
+        assertWithMessage("SuggestionBar still has the two log lines that print the message")
+            .that(printsTheMessage).hasSize(2)
+        for (line in printsTheMessage) {
+            assertWithMessage("a log line that prints the bar's message must be gated: ${line.trim()}")
+                .that(line.trim()).startsWith("if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG,")
         }
     }
 

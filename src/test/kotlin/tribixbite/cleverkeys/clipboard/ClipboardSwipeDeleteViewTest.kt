@@ -109,6 +109,36 @@ class ClipboardSwipeDeleteViewTest {
         verifyNothingDeleted()
     }
 
+    /**
+     * 2026-11-11 hunt, part 2 (F1). With a text search active an attached view filters on a
+     * worker. The swiped row must not wait for that, and the rest of the list must not be
+     * emptied while it runs (which sent the reader back to page 1).
+     */
+    @Test
+    fun aSwipedRowLeavesAtOnceWhileASearchIsStillRunning() {
+        val rows = (1..250).map { entry("row-$it", it.toLong()) }
+        buildView(rows)
+        view.setSearchFilter("row")  // not attached yet: answered in place
+        view.nextPage()
+        // "Attached": a scope whose dispatcher never runs, so the refilter stays in flight.
+        val parked = object : kotlinx.coroutines.CoroutineDispatcher() {
+            override fun dispatch(context: kotlin.coroutines.CoroutineContext, block: Runnable) = Unit
+        }
+        view.setField("viewScope", kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + parked))
+
+        assertThat(view.deferDelete(rows[150])).isTrue()
+
+        assertThat(view.isResultsReady()).isFalse()
+        assertThat(visibleContents()).doesNotContain("row-151")
+        // Still page 2: its other 99 rows, and the first row of page 3 moved up into the gap.
+        assertThat(visibleContents()).hasSize(100)
+        assertThat(visibleContents().first()).isEqualTo("row-101")
+        assertThat(visibleContents().last()).isEqualTo("row-201")
+        assertThat(view.resultSummary().first).isEqualTo(249)
+        assertThat(view.hasPreviousPage()).isTrue()
+        verifyNothingDeleted()
+    }
+
     @Test
     fun undoBringsTheRowBackWithoutTouchingTheDatabase() {
         buildView(listOf(entry("a", 2), entry("b", 1)))

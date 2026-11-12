@@ -507,6 +507,116 @@ class ClipboardHistoryViewStateGuardsTest {
         assertThat(view.getField("loadJob")).isNotNull()
     }
 
+    // ───────────────── 2026-11-11 hunt, part 2 (F1): an attached list is never emptied to refilter
+    //
+    // Since the search moved off the UI thread (2026-11-10) an attached view emptied its list
+    // before every filtered refresh and refilled it from a coroutine. Emptying clamps the page
+    // to the first and prunes every expanded row, so each reload, each swiped row and each
+    // keystroke in the search box sent the reader back to page 1 with everything collapsed.
+    // None of the tests above could see it: they drive a view with no window scope, which
+    // filters in place. These attach one.
+
+    /**
+     * "Attached to a window": a scope whose coroutine steps wait in [steps] until the test
+     * runs them, so the state between "the filter started" and "its result arrived" is visible.
+     */
+    private class HeldDispatcher : kotlinx.coroutines.CoroutineDispatcher() {
+        val steps = java.util.concurrent.LinkedBlockingQueue<Runnable>()
+        override fun dispatch(context: kotlin.coroutines.CoroutineContext, block: Runnable) {
+            steps.add(block)
+        }
+    }
+
+    private fun attachHeld(): HeldDispatcher {
+        val held = HeldDispatcher()
+        view.setField("viewScope", kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + held))
+        return held
+    }
+
+    /** Run the held steps here, waiting for the ones the debounce timer and the worker hand back. */
+    private fun HeldDispatcher.runUntilResultsAreReady() {
+        while (!view.isResultsReady()) {
+            val step = steps.poll(10, java.util.concurrent.TimeUnit.SECONDS)
+            assertWithMessage("the filter never published its result").that(step).isNotNull()
+            step!!.run()
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun expandedRows() = view.getField("expandedStates") as MutableMap<Long, Boolean>
+
+    @Test
+    fun aReloadOfTheTodoTabKeepsThePageAndTheExpandedRow() {
+        // The To-do tab hides planned and finished items by default: it always has a filter.
+        val todos = (1..250).map { ClipboardEntry("todo-$it", it.toLong(), rowId = it.toLong()) }
+        buildView(tab = ClipboardTab.TODOS)
+        every { view.invalidate() } just runs
+        view.setField("searchFilter", "")
+        view.setField("statusFilterActive", true)
+        view.acceptLoadedHistory(todos)
+        val held = attachHeld()
+        view.nextPage()
+        expandedRows()[todos[120].timestamp] = true
+        val pagesShown = mutableListOf<Int>()
+        view.setOnPaginationChangeListener { _, page, _ -> pagesShown += page }
+
+        view.acceptLoadedHistory(todos + ClipboardEntry("todo-new", 999, rowId = 999))
+
+        assertWithMessage("no text is searched, so nothing is deferred").that(held.steps).isEmpty()
+        assertThat(view.isResultsReady()).isTrue()
+        assertThat(view.resultSummary().first).isEqualTo(251)
+        assertWithMessage("page 2 stays page 2, without a visit to page 1").that(pagesShown).containsExactly(2)
+        assertThat(expandedRows()).containsKey(todos[120].timestamp)
+    }
+
+    @Test
+    fun aSearchLeavesTheOldRowsOnScreenUntilItsResultArrives() {
+        val rows = (1..250).map { ClipboardEntry("row-$it", it.toLong(), rowId = it.toLong()) }
+        buildReadyView(rows)
+        val held = attachHeld()
+        view.nextPage()
+        val onScreen = view.getField("paginatedHistory")
+        view.startSelection()
+
+        view.setSearchFilter("row-25")  // row-25 and row-250
+
+        assertWithMessage("the query is still running").that(view.isResultsReady()).isFalse()
+        assertWithMessage("the rows on screen are left alone")
+            .that(view.getField("paginatedHistory")).isSameInstanceAs(onScreen)
+        assertThat(view.resultSummary().first).isEqualTo(250)
+        assertWithMessage("rows of the previous query cannot be selected wholesale")
+            .that(view.selectAllMatching()).isEqualTo(0)
+
+        held.runUntilResultsAreReady()
+
+        assertThat(view.resultSummary().first).isEqualTo(2)
+        assertWithMessage("a new query starts on its first page").that(view.hasPreviousPage()).isFalse()
+        assertThat(view.selectAllMatching()).isEqualTo(2)
+    }
+
+    @Test
+    fun aReloadUnderASearchKeepsThePageAndTheExpandedRow() {
+        val rows = (1..250).map { ClipboardEntry("row-$it", it.toLong(), rowId = it.toLong()) }
+        buildReadyView(rows)
+        view.setSearchFilter("row")  // not attached yet: answered in place
+        view.nextPage()
+        expandedRows()[rows[120].timestamp] = true
+        val held = attachHeld()
+        val pagesShown = mutableListOf<Int>()
+        view.setOnPaginationChangeListener { _, page, _ -> pagesShown += page }
+
+        view.acceptLoadedHistory(rows + ClipboardEntry("row-new", 999, rowId = 999))
+
+        assertThat(view.isResultsReady()).isFalse()
+        assertWithMessage("nothing is redrawn, let alone emptied, before the result").that(pagesShown).isEmpty()
+
+        held.runUntilResultsAreReady()
+
+        assertThat(view.resultSummary().first).isEqualTo(251)
+        assertThat(pagesShown).containsExactly(2)
+        assertThat(expandedRows()).containsKey(rows[120].timestamp)
+    }
+
     private fun buildReadyView(entries: List<ClipboardEntry>) {
         buildView()
         every { view.invalidate() } just runs

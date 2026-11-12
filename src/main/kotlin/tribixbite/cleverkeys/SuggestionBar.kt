@@ -885,7 +885,10 @@ class SuggestionBar : LinearLayout {
         }
         addView(messageView)
 
-        Log.d(TAG, "showTemporaryMessage: '$message' for ${durationMs}ms, clearAfter=$clearAfter, undoable=${undoable != null}")
+        // Gated: the message is often the user's own word ("Added “…” to dictionary").
+        // SuggestionHandler, which builds it, takes care not to log that word; this line used
+        // to print it anyway.
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "showTemporaryMessage: '$message' for ${durationMs}ms, clearAfter=$clearAfter, undoable=${undoable != null}")
 
         // Schedule restore
         mainHandler.postDelayed(restoreRunnable, durationMs)
@@ -943,7 +946,7 @@ class SuggestionBar : LinearLayout {
         }
         addView(statusView)
 
-        Log.d(TAG, "showEmojiSearchStatus: '$message'")
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "showEmojiSearchStatus: '$message'")
     }
 
     /**

@@ -56,6 +56,10 @@ same preference the switch writes, so ConfigurationManager's refresh applies it 
 with no IME restart: one code path, not two that could disagree. Because incognito has no visible
 geometry change the way one-handed mode does, the command confirms itself with a toast.
 
+*(Changed 2026-11-11: the confirmation is now a message in the suggestion strip. Android 13 and
+later do not show a toast raised by a keyboard, so from a toolbar key or a swipe there was no
+confirmation at all. See [`BUG-HUNT-2026-11-11-PART-2.md`](BUG-HUNT-2026-11-11-PART-2.md), F5.)*
+
 ## Verification
 
 `IncognitoPolicyTest` pins the truth table. The settings plumbing is checked the usual ways: both

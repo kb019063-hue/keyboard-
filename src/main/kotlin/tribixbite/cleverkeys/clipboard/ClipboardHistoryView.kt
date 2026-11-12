@@ -672,24 +672,38 @@ class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListVi
             }
             return result to false
         }
+        // Only a text query reads clipboard contents. Every other filter compares a few fields
+        // per row (hiding a swiped row is a string equality, which gives up at the first
+        // difference), and that costs less than the list update it feeds. So it is answered
+        // at once: a reload, a swiped row or a status filter (the To-do tab always has one)
+        // must not send the list through an empty state. Emptying it clamps the page to the
+        // first and forgets which rows were expanded, whatever `resetView` says.
         val scope = viewScope
-        if (scope == null) {
+        if (scope == null || query.isEmpty()) {
             val (result, error) = filter { }
             publish(result, error)
+            return
+        }
+        filterPending = true
+        searchRegexError = false
+        // The rows on screen stay until the result replaces them. They are real rows, so a tap
+        // on one still does what it says; what a half-run query must not feed is "select all
+        // matching" and the bulk actions, and `filterPending` closes those. A swiped row is
+        // the one thing that cannot wait for the scan: take it off the screen now.
+        val shown = filteredHistory
+        if (pending != null && shown.any { it.content == pending }) {
+            filteredHistory = shown.filterNot { it.content == pending }
+            applyPagination()
         } else {
-            filterPending = true
-            searchRegexError = false
-            // Do not let stale visible results be selected while the new query is running.
-            filteredHistory = emptyList()
-            applyPagination(clearExpandedStates = resetView)
-            filterJob = scope.launch {
-                if (resetView && query.isNotEmpty()) delay(100)
-                val (result, error) = withContext(Dispatchers.Default) {
-                    val job = coroutineContext[Job]
-                    filter { job?.ensureActive() }
-                }
-                publish(result, error)
+            onResultsChanged?.invoke()
+        }
+        filterJob = scope.launch {
+            if (resetView) delay(100)
+            val (result, error) = withContext(Dispatchers.Default) {
+                val job = coroutineContext[Job]
+                filter { job?.ensureActive() }
             }
+            publish(result, error)
         }
     }
 

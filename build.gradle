@@ -480,7 +480,13 @@ android {
       // (Debug)" no matter what strings.xml said -- which is why the rebrand looked like it
       // had not taken. strings.xml is now the single source of truth for the app name;
       // do not re-add an override here without changing it there too.
-      resValue "bool", "debug_logs", "true"
+      // debug_logs switches on Logs.debug_startup_input_view: a dump of the focused field's
+      // EditorInfo (the app's package name, the field's hint, label and id, its extras) written
+      // to logcat every time a text field gains focus. It was forced on here, on the build that
+      // is installed, after the verbose flag below had been made opt-in for exactly that reason.
+      // Same switch now (2026-11-11): quiet unless LOCAL_BUILD=true. res/values/values.xml holds
+      // the default (false) for release. VerboseLogRatchetTest pins this line.
+      resValue "bool", "debug_logs", isLocalBuild ? "true" : "false"
       // Verbose logging was unconditionally ON for debug, and the debug APK is the one this
       // project actually installs (README: "Debug builds are signed with the committed
       // debug.keystore, so successive builds install as upgrades"). 257 Log sites are gated on

@@ -238,10 +238,13 @@ class ClipboardFilterDialogTest {
                 }
                 awaitCondition { history.isResultsReady() }
                 onMain {
+                    val shown = history.resultSummary().first
                     history.setSearchFilter(prefix + "ABC")
                     history.setSearchFilter(prefix + "123")
                     assertFalse(history.isResultsReady())
-                    assertEquals(0, history.resultSummary().first)
+                    // The rows on screen stay until the newest query answers (2026-11-11: they
+                    // used to be emptied, which also reset the page on every reload).
+                    assertEquals(shown, history.resultSummary().first)
                 }
                 awaitCondition { history.isResultsReady() && history.resultSummary().first == 1 }
                 onMain {

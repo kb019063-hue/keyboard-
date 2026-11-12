@@ -220,10 +220,16 @@ class KeyboardReceiver(
      * search field whose state could go stale, so the same view is refreshed in place. That also
      * means a switch tap can rebuild its own grid from inside its callback without detaching the
      * view mid-dispatch (the classic `removeAllViews` inside an `OnClickListener` crash).
+     * The one thing that does go stale is the theme, so a new one is built when it has changed.
      */
     private fun showToolsPanel(container: android.widget.FrameLayout) {
-        val panel = (toolsPanel as? MoreToolsPanelView)
-            ?: MoreToolsPanelView(context, keyboardView.getTheme()).also {
+        // The panel reads its colours from the Theme it was built with. A theme change gives the
+        // keyboard a new view with a new Theme and the service rebuilds the other panes, but
+        // this one is kept here, so it went on wearing the old theme until the process died.
+        // Reuse it only for the theme the keyboard is drawn with now.
+        val theme = keyboardView.getTheme()
+        val panel = (toolsPanel as? MoreToolsPanelView)?.takeIf { it.isBuiltFor(theme) }
+            ?: MoreToolsPanelView(context, theme).also {
                 toolsPanel = it
                 it.setOnClose { handle_event_key(KeyValue.Event.SWITCH_BACK_TOOLS) }
             }

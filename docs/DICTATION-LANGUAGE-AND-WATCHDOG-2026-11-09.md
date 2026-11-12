@@ -26,6 +26,11 @@ which stopped an unsupported *region* from producing NO_MATCH. But negotiation s
 wrong tag in the first place: it worked hard to find a decodable version of a language the user was
 not speaking.
 
+*(Correction, 2026-11-11: the negotiation itself never ran, because the query behind it cannot
+return an answer; the silent retry did the rescuing. See
+[`BUG-HUNT-2026-11-11-PART-2.md`](BUG-HUNT-2026-11-11-PART-2.md), D-b. The fix below does not
+depend on it.)*
+
 **Fix.** `VoiceLanguagePolicy.wanted(keyboardLanguage, deviceLocaleTag)` — the keyboard's active
 language wins; the device locale is only the fallback for the case where the keyboard has none
 (first run, or `Config` not yet initialised). `DictationController` takes a
@@ -78,6 +83,11 @@ keyboard process. This is the "the mic key does nothing now" shape of report.
 Pinned by `DictationSessionWatchdogTest` (7 tests, including two source-reading guards: the
 watchdog reports a visible message and releases the recogniser; and every line that sets
 `sessionActive = false` removes the timer within six lines of itself).
+
+*(Changed 2026-11-11: the elapsed time was read from the wall clock while the timer runs on
+uptime, so the check could come up 1 ms short of the limit and was never run again. Both
+readings are uptime now. See [`BUG-HUNT-2026-11-11-PART-2.md`](BUG-HUNT-2026-11-11-PART-2.md),
+D-a.)*
 
 ---
 

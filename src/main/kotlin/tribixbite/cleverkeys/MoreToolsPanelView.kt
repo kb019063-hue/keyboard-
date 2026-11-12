@@ -101,6 +101,13 @@ class MoreToolsPanelView(context: Context, private val theme: Theme?) : LinearLa
     }
 
     /**
+     * Whether this panel was built with [candidate] (the same object, not an equal one). Every
+     * colour here is read from that Theme, so a panel built for another theme cannot be
+     * re-bound into the new one: the host builds a fresh panel instead.
+     */
+    fun isBuiltFor(candidate: Theme?): Boolean = theme === candidate
+
+    /**
      * Show [state] and route taps to [onTap]. Safe to call repeatedly: the grid is rebuilt from
      * scratch, so a toggle that flipped the value of one switch cannot leave a stale tile behind.
      */
