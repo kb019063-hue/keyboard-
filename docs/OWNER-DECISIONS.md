@@ -166,9 +166,12 @@ geometry. `scripts/ci/emulator-smoke.sh` uses `TB_N=7`.
 
 `focus_activity()` in the smoke script exists because an emulator launcher ANR killed
 Quickstep and left focus checks failing with no dialog to dismiss. Do not delete it
-because a green run no longer shows that failure. Its wait after the third start is there
-for the same launcher on a slow runner (run 43278438056); a run that meets a "not
-responding" dialog now names whose it was in a `Latency` notice (`anr first-dialog`).
+because a green run no longer shows that failure. `in_front()` beside it exists because the
+same launcher's dead window can stay the system's focused window for a whole run while the
+app is on screen (runs 43278438056 and 43285608845 failed on that and nothing else): when
+the focused window names something else, the resumed activity and this app's nodes on
+screen decide. A run that meets a "not responding" dialog names whose it was in a `Latency`
+notice (`anr first-dialog`).
 
 ## Where the design notes live
 
