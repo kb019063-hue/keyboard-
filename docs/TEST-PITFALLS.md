@@ -356,11 +356,20 @@ Facts that keep costing time:
 9. **A run that hits the 45-minute cap leaves no XML at all**, not "everything but the class that
    stalled": run 43242985447 (2026-11-12) ended with `Timeout has been exceeded` and
    `no JUnit XML found`, on a commit whose code had passed the same suite in nine minutes an hour
-   before. It could not be diagnosed, and neither could the one of 2026-11-01. Since then
-   `scripts/ci/test-wedge-watchdog.sh` runs beside Gradle: at 15 and 30 minutes it writes down the
-   test JVM's thread dump (the "Test worker" stack names the class and method), its collector
-   occupancy, and disk and memory. They arrive as **`Long test run`** annotations: errors when the
-   run then failed, warnings when it was only slow. Read those first when a run stalls.
+   before. It could not be diagnosed, and neither could the one of 2026-11-01. Two instruments
+   exist since then, and both arrive as annotations:
+   - **`Test JVM`**, on every run: one line per Gradle invocation from the test JVM's own
+     collection log (`-PtestGcLog`, `scripts/ci/test-gc-summary.py`). It says how long the JVM
+     ran, how much of that the collector took, and how much heap was left after a collection at
+     each quarter of the run against the JVM's limit. The whole suite shares ONE JVM and static
+     state is never released, so a run can be slow because it is out of room; this line is how
+     that is told from a stuck test, and it shows the room shrinking before a run fails.
+   - **`Long test run`**, only when a run is still going at 15 and 30 minutes
+     (`scripts/ci/test-wedge-watchdog.sh`): the test JVM's thread dump (the "Test worker" stack
+     names the class and method), its collector occupancy, disk and memory, and what Gradle
+     itself is waiting for. Errors when the run then failed, warnings when it was only slow.
+   The report also prints `test time: N s inside M classes; slowest: …`, so two runs can be
+   compared class by class. Read these before guessing.
 
 ---
 

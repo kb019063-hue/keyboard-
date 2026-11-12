@@ -116,12 +116,14 @@ jobs:
           mkdir -p build
           # If this is still running long after it should have finished, write down what it is
           # doing (scripts/ci/test-wedge-watchdog.sh). The step normally takes 5 to 9 minutes.
-          rm -rf "$RUNNER_TEMP/test-wedge"
+          rm -rf "$RUNNER_TEMP/test-wedge" "$RUNNER_TEMP"/test-gc-*.log
           bash scripts/ci/test-wedge-watchdog.sh "$RUNNER_TEMP/test-wedge" "whole suite" 15 30 \
             > /dev/null 2>&1 &
           watchdog=$!
           set +e
-          ./gradlew testDebugUnitTest -PskipHeavy=true --stacktrace 2>&1 | tee unit-test-output.log
+          # -PtestGcLog: the test JVM logs its collections (build.gradle); summarised below.
+          ./gradlew testDebugUnitTest -PskipHeavy=true -PtestGcLog="$RUNNER_TEMP/test-gc-whole.log" \
+            --stacktrace 2>&1 | tee unit-test-output.log
           gradle_exit=$?
           set -e
           kill "$watchdog" 2>/dev/null || true
@@ -154,29 +156,41 @@ jobs:
           # 2026-11-12 a trailing `|| true` erased it.
           set +e
           ./gradlew testDebugUnitTest -PonlyHeavy=true -PtestMaxHeap=3g \
+            -PtestGcLog="$RUNNER_TEMP/test-gc-heavy.log" \
             -PjunitXmlDir=build/test-results/heavy --stacktrace 2>&1 | tee heavy-test-output.log
           heavy_exit=$?
           set -e
           kill "$watchdog" 2>/dev/null || true
           echo "gradle_exit=$heavy_exit" > build/heavy-test-gradle-exit.txt
 
-      # What a run that went on too long was doing, as annotations: the one thing about a run
-      # that the development sandbox can read. An error when the run then failed; a warning when
-      # it was merely slow and finished. Its own step, so that the ten-per-step cap on
-      # annotations cannot drop these behind the report's.
-      - name: Say what a long test run was doing
+      # How the test JVMs spent their time, as annotations: the one thing about a run that the
+      # development sandbox can read. Its own step, so that the ten-per-step cap on annotations
+      # cannot drop these behind the report's.
+      #
+      #  * "Test JVM", on every run: one line per invocation from its collection log
+      #    (scripts/ci/test-gc-summary.py says how to read it).
+      #  * "Long test run", only when a run went on too long: what it was doing at the time. An
+      #    error when the run then failed; a warning when it was merely slow and finished.
+      - name: Say how the test JVMs spent their time
         if: always()
+        # Diagnostics only: a mistake in here must not be able to fail the job or skip the report.
+        continue-on-error: true
         shell: bash
         run: |
           shopt -s nullglob
+          for which in whole heavy; do
+            label="whole suite"; [ "$which" = "heavy" ] && label="memory-hungry classes"
+            line=$(python3 scripts/ci/test-gc-summary.py "$label" "$RUNNER_TEMP/test-gc-$which.log" 2>/dev/null || true)
+            if [ -n "$line" ]; then echo "::notice title=Test JVM::${line//%/%25}"; fi
+          done
           level=warning
           for f in build/unit-test-gradle-exit.txt build/heavy-test-gradle-exit.txt; do
             [ "$(sed -n 's/^gradle_exit=//p' "$f" 2>/dev/null | tail -1)" = "0" ] || level=error
           done
           for f in "$RUNNER_TEMP"/test-wedge/*.txt; do
-            body=$(head -c 14000 "$f" | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk 'BEGIN { ORS = "%0A" } { print }')
+            body=$(head -c 24000 "$f" | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk 'BEGIN { ORS = "%0A" } { print }')
             echo "::${level} title=Long test run::${body}"
-            { echo '```'; head -c 14000 "$f"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            { echo '```'; head -c 24000 "$f"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           done
 
       - name: Report results as annotations and a job summary
@@ -197,7 +211,7 @@ jobs:
           def esc(t):
               return t.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
 
-          rows, cases = [], []
+          rows, cases, times = [], [], []
           for f in sorted(glob.glob('build/full-suite-xml/*.xml') +
                           glob.glob('build/test-results/heavy/*.xml')):
               try:
@@ -208,6 +222,10 @@ jobs:
               tests, skipped = int(r.get('tests', 0)), int(r.get('skipped', 0))
               failed = int(r.get('failures', 0)) + int(r.get('errors', 0))
               rows.append((name, tests, failed, skipped))
+              try:
+                  times.append((float(r.get('time', 0) or 0), name))
+              except ValueError:
+                  pass
               for case in r.iter('testcase'):
                   for kind in ('failure', 'error'):
                       node = case.find(kind)
@@ -239,6 +257,13 @@ jobs:
           # For the gate at the bottom of the job (scripts/ci/full-suite-verdict.sh).
           with open('build/unit-test-failed.txt', 'w') as fh:
               fh.write('%d\n' % bad)
+          # Where the time went, so that two runs can be compared class by class. The sum is
+          # time inside test classes; the step's own duration (in the API) holds the rest.
+          if times:
+              times.sort(reverse=True)
+              print('::notice::test time: %.0f s inside %d classes; slowest: %s'
+                    % (sum(t for t, _ in times), len(times),
+                       ', '.join('%s %.1fs' % (n.split('.')[-1], t) for t, n in times[:12])[:1500]))
           skipped = sum(r[3] for r in rows)
           bad_classes = sorted([r for r in rows if r[2]], key=lambda r: (-r[2], r[0]))
           print('::notice::unit tests: %d run, %d failed, %d skipped in %d classes'

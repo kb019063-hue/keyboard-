@@ -57,9 +57,10 @@ below is here because it already cost someone a day.
   tests failed: the step meant to fail the job could not
   ([`docs/TEST-PITFALLS.md`](docs/TEST-PITFALLS.md), CI trap 8). It is gated now
   (`scripts/ci/full-suite-verdict.sh`), and the habit stands: report
-  `unit tests: N run, 0 failed` with the run id. When a run stalls instead of failing (it has
-  happened twice), its **`Long test run`** annotations hold a thread dump of the test JVM taken
-  while it was stuck (CI trap 9); read those before guessing.
+  `unit tests: N run, 0 failed` with the run id. When a run stalls or crawls instead of failing
+  (it has happened twice), read its **`Test JVM`** notice (how much of the run the garbage
+  collector took and how full the heap was) and its **`Long test run`** annotations (a thread
+  dump of the test JVM taken while it was stuck) before guessing: CI trap 9.
 - **When a test is red, read [`docs/TEST-PITFALLS.md`](docs/TEST-PITFALLS.md) before "fixing" it.**
   That file is the catalogue of the twelve ways tests in this repo have lied — entire classes
   passing with the feature switched off, assertions on a device path a stub cannot produce, source

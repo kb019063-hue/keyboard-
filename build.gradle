@@ -611,6 +611,15 @@ tasks.withType(Test).configureEach {
   if (findProperty('testMaxHeap')) {
     maxHeapSize = findProperty('testMaxHeap').toString()
   }
+  // A log of the test JVM's garbage collections, which scripts/ci/test-gc-summary.py turns into
+  // one line of the full-suite report: how much of the run went to the collector, and how full
+  // the heap was by the end. The whole suite shares one JVM, so that is how a run that is slow
+  // because it is out of room is told from one that is stuck. Only when asked for
+  // (`-PtestGcLog=<absolute path in a directory that exists>`): a path the JVM cannot open
+  // stops it from starting, and then no test runs at all.
+  if (findProperty('testGcLog')) {
+    jvmArgs "-Xlog:gc,gc+init:file=${findProperty('testGcLog')}:uptime:filecount=0"
+  }
   // Which half of the split this invocation is.
   if (findProperty('onlyHeavy') == 'true') {
     filter { heavyEngineTests.each { includeTestsMatching it } }
