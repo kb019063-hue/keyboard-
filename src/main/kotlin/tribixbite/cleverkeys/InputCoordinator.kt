@@ -333,6 +333,9 @@ class InputCoordinator(
         // Schedule new sync with debounce delay
         pendingSyncRunnable = Runnable {
             if (closed) return@Runnable
+            // Timed: these are round trips to the app on the main thread, the one cost of
+            // typing that the emulator cannot show (its test field lives in this process).
+            val syncBegan = System.nanoTime()
             contextTracker.synchronizeWithCursor(ic, language, editorInfo)
 
             // Trigger predictions for the synced word
@@ -376,6 +379,7 @@ class InputCoordinator(
             }
 
             debugLogger?.invoke("🎯 Cursor sync: pos=$newPosition, prefix='$prefix', suffix='$suffix'")
+            LatencyMeter.synced(System.nanoTime() - syncBegan)
         }
         syncHandler.postDelayed(pendingSyncRunnable!!, CURSOR_SYNC_DEBOUNCE_MS)
     }

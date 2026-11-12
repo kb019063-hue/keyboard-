@@ -21,6 +21,10 @@ import java.util.Locale
  *  - **the keyboard's own layout work**: every measure and layout pass of its outermost view,
  *    which is its share of a frame's layout stage (the platform's figure for that stage also
  *    holds the window manager's work);
+ *  - **reading the app's text**: each re-read of the editor that follows a caret move -- two
+ *    round trips to the app on the keyboard's main thread, so on a phone this is how long the
+ *    app took to answer; the emulator's test field lives in the keyboard's own process and
+ *    answers at once, which makes the COUNT the only part of this the emulator can show;
  *  - **work that should not repeat**: how often the key view was re-attached, re-measured, the
  *    input view re-installed, and the keyboard's height changed while it was open.
  *
@@ -105,6 +109,7 @@ object LatencyMeter {
         val treeMeasure = Stat() // measure passes of the keyboard's outermost view
         val treeLayout = Stat()  // layout passes of the same
         val strip = Stat()   // suggestion strip rebinds
+        val sync = Stat()    // re-reads of the editor after a caret move, on the main thread
         var attaches = 0
         var measures = 0
         var installs = 0
@@ -123,6 +128,7 @@ object LatencyMeter {
             val theirAppear = o.appear
             if (theirAppear != null && theirAppear[0] > (appear?.get(0) ?: -1L)) appear = theirAppear.copyOf()
             treeMeasure.add(o.treeMeasure); treeLayout.add(o.treeLayout)
+            sync.add(o.sync)
             attaches += o.attaches; measures += o.measures
             installs += o.installs; resizes += o.resizes
         }
@@ -134,6 +140,7 @@ object LatencyMeter {
             stages.fill(0L)
             worst = null; appear = null
             treeMeasure.clear(); treeLayout.clear()
+            sync.clear()
         }
 
         /** One frame as `total:wait:input:layout:draw:sync:gpu`, whole milliseconds. */
@@ -152,7 +159,7 @@ object LatencyMeter {
                 "worst=${stagesOf(worst)} appear=${stagesOf(appear)} " +
                 "tm=${treeMeasure.count}:${treeMeasure.pair()} " +
                 "tl=${treeLayout.count}:${treeLayout.pair()} " +
-                "strip=${strip.count}:${strip.pair()} " +
+                "strip=${strip.count}:${strip.pair()} sync=${sync.count}:${sync.pair()} " +
                 "attach=$attaches measure=$measures install=$installs resize=$resizes"
     }
 
@@ -304,6 +311,12 @@ object LatencyMeter {
     /** The suggestion strip rebound its views in [nanos]. */
     fun stripUpdated(nanos: Long) = synchronized(lock) { session.strip.add(nanos) }
 
+    /**
+     * The editor was re-read after a caret move, which held the main thread for [nanos]: the
+     * time the app took to answer, plus handing the word to the predictor.
+     */
+    fun synced(nanos: Long) = synchronized(lock) { session.sync.add(nanos) }
+
     /** The key view was attached to a window. Once per view is the healthy number. */
     fun attached() = synchronized(lock) { session.attaches++ }
 
@@ -388,6 +401,10 @@ object LatencyMeter {
                 "${ms(all.treeMeasure.avgMs)} ms on average, ${ms(all.treeMeasure.maxMs)} ms at " +
                 "worst; laid out ${all.treeLayout.count} times, ${ms(all.treeLayout.avgMs)} ms " +
                 "on average, ${ms(all.treeLayout.maxMs)} ms at worst")
+        }
+        if (all.sync.count > 0) {
+            out.add("Reading the app's text after the caret moved: ${all.sync.count} times, " +
+                "${ms(all.sync.avgMs)} ms on average, ${ms(all.sync.maxMs)} ms at worst")
         }
         out.add("While open: height changed ${all.resizes} times, keys re-attached " +
             "${all.attaches} times, view re-installed ${all.installs} times")

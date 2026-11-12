@@ -125,6 +125,8 @@ class LatencyMeterTest {
         LatencyMeter.treeMeasured(600_000L); LatencyMeter.treeMeasured(200_000L)
         LatencyMeter.treeLaidOut(300_000L)
         LatencyMeter.stripUpdated(1_500_000L)
+        // the editor was re-read twice after the caret moved
+        LatencyMeter.synced(3_000_000L); LatencyMeter.synced(9_000_000L)
         LatencyMeter.resized()
 
         val line = LatencyMeter.sessionEnd().last()
@@ -147,6 +149,7 @@ class LatencyMeterTest {
         assertEquals("1:0.30/0.30", field(line, "tl"))
         assertEquals("none", field(line, "steps"))
         assertEquals("1:1.50/1.50", field(line, "strip"))
+        assertEquals("2:6.00/9.00", field(line, "sync"))
         assertEquals("1", field(line, "attach"))
         assertEquals("2", field(line, "measure"))
         assertEquals("1", field(line, "install"))
@@ -242,6 +245,7 @@ class LatencyMeterTest {
         LatencyMeter.frame(8_000_000L, 1_000_000L, 0L, 0L, 1_000_000L, 1_000_000L, 5_000_000L,
             windowShown = true)
         LatencyMeter.treeMeasured(1_000_000L)
+        LatencyMeter.synced(2_000_000L)
         LatencyMeter.sessionEnd()
 
         // Still open: the settings screen is usually read with the keyboard up.
@@ -253,6 +257,7 @@ class LatencyMeterTest {
             windowShown = true)
         LatencyMeter.treeMeasured(3_000_000L)
         LatencyMeter.treeLaidOut(2_000_000L)
+        LatencyMeter.synced(10_000_000L)
         LatencyMeter.resized()
 
         val text = LatencyMeter.report("9.9").joinToString("\n")
@@ -270,7 +275,17 @@ class LatencyMeterTest {
         assertTrue(text, text.contains(
             "The keyboard's own layout: measured 2 times, 2.00 ms on average, 3.00 ms at worst; " +
                 "laid out 1 times, 2.00 ms on average, 2.00 ms at worst"))
+        assertTrue(text, text.contains(
+            "Reading the app's text after the caret moved: 2 times, 6.00 ms on average, 10.00 ms at worst"))
         assertTrue(text, text.contains("height changed 1 times"))
         assertFalse(text, text.contains("No key has been pressed"))
+    }
+
+    @Test
+    fun report_leavesTheEditorReadsOutWhenThereWereNone() {
+        LatencyMeter.createBegin(-1); LatencyMeter.createEnd()
+        LatencyMeter.showBegin(); LatencyMeter.showStarted(); LatencyMeter.drawn(1_000_000L)
+        val text = LatencyMeter.report("9.9").joinToString("\n")
+        assertFalse(text, text.contains("Reading the app's text"))
     }
 }
