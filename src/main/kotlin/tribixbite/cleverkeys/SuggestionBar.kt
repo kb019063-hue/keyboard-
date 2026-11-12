@@ -714,11 +714,13 @@ class SuggestionBar : LinearLayout {
         // rebound in place; only the child-count delta is added/removed. Click
         // listeners are bound once at pool-creation with an index-stable closure
         // (pool slot i always renders suggestion i), preserving click semantics.
+        val rebindStart = System.nanoTime()
         try {
             rebindSuggestionViews()
         } catch (e: Exception) {
             Log.e("SuggestionBar", "Error updating suggestion views: ${e.message}")
         }
+        LatencyMeter.stripUpdated(System.nanoTime() - rebindStart)
 
         // Show or hide the entire bar based on suggestions (unless always visible mode)
         // NOTE: Visibility is now controlled by the parent HorizontalScrollView
@@ -1183,7 +1185,8 @@ class SuggestionBar : LinearLayout {
      */
     fun setAllowSwipeInPasswordMode(allow: Boolean) {
         allowSwipeInPasswordMode = allow
-        Log.d(TAG, "Swipe in password mode: ${if (allow) "enabled" else "disabled"}")
+        // Called for every text field that takes focus, whatever the value.
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "Swipe in password mode: ${if (allow) "enabled" else "disabled"}")
     }
 
     /**

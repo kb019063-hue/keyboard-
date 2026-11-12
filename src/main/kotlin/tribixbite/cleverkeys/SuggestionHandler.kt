@@ -960,6 +960,7 @@ class SuggestionHandler(
         languages: List<String>? = null,
         commitGuard: EditorCommitGuard? = null
     ) {
+        noteNotATypedLetter()
         // Swipe results replace whatever the bar shows — any next-word display state ends here,
         // and so does an undoable "Added …" confirmation (the user moved on).
         nextWordSuggestionsActive = false
@@ -1461,6 +1462,7 @@ class SuggestionHandler(
     ): String? {
         // Null/empty check
         if (word.isNullOrBlank()) return null
+        noteNotATypedLetter()
 
         // A suggestion tap supersedes an undoable "Added …" confirmation (none can be on screen
         // while a chip is tappable, but a programmatic selection must not leave one armed).
@@ -3144,6 +3146,16 @@ class SuggestionHandler(
     }
 
     /**
+     * Something other than a letter added to the word in progress is on its way to the editor: a
+     * space, a swipe, a suggestion, Backspace, Enter, an arrow, a paste. The caret report that
+     * follows is then never "only a typed letter's echo" -- and a letter still waiting for its
+     * own report may not claim this one either, which is what would happen if an editor dropped
+     * a report and the next key happened to move the caret by one ([TypedLetterEcho]).
+     * Bookkeeping only: the one thing it decides is how soon the editor is re-read.
+     */
+    private fun noteNotATypedLetter() = contextTracker.noteTyped(extendsWord = false)
+
+    /**
      * Handle regular typing predictions (non-swipe).
      * Updates predictions as user types each character.
      *
@@ -3152,6 +3164,10 @@ class SuggestionHandler(
      * @param editorInfo Editor info for app detection
      */
     fun handleRegularTyping(text: String, ic: InputConnection?, editorInfo: EditorInfo?) {
+        // The caret report that follows this key is "only a typed letter's echo" in one case,
+        // decided where the letter is appended below. Everything that is not a letter says so
+        // here, before any early return (TypedLetterEcho).
+        if (text.length != 1 || !text[0].isLetter()) noteNotATypedLetter()
         wordEditReceipt = null
         // Any typing dismisses an undoable "Added …" confirmation — BEFORE the prediction update
         // below, which a showing bar message would otherwise swallow.
@@ -3174,6 +3190,16 @@ class SuggestionHandler(
                 // showing) are superseded by ordinary prefix predictions below.
                 nextWordSuggestionsActive = false
                 contextTracker.appendToCurrentWord(text)
+                // A letter added to the END of a word that already had one: the caret report it
+                // causes is no news, and the re-read of the editor after it can wait for a pause.
+                // The FIRST letter of a word keeps its prompt re-read: that one joins "don'" to
+                // "t" and notices text the field already held. So does a letter typed INTO a
+                // word (text follows the caret): there the re-read is what drops the fragment
+                // from learning (handleCursorSyncPrediction). TypedLetterEcho, CursorSyncPace.
+                contextTracker.noteTyped(
+                    extendsWord = contextTracker.getCurrentWordLength() > 1 &&
+                        contextTracker.getCurrentWordSuffixLength() == 0
+                )
                 // If just started a new word (first letter), clear auto-insert and autocorrect tracking
                 // This prevents incorrectly deleting a previously swiped word when
                 // user types a new word then taps a prediction
@@ -3492,6 +3518,7 @@ class SuggestionHandler(
      * Updates predictions as user deletes characters.
      */
     fun handleBackspace(ic: InputConnection? = null, editorInfo: EditorInfo? = null) {
+        noteNotATypedLetter()
         wordEditReceipt = null
         suggestionBar?.dismissUndoableMessage()
 
@@ -3543,6 +3570,7 @@ class SuggestionHandler(
      * callback that follows the key re-syncs the tracker from their real text.
      */
     fun handleNonTextInput(editorInfo: EditorInfo?) {
+        noteNotATypedLetter()
         if (!isTerminalEditor(editorInfo)) return
         endTerminalTypedWord()
     }
@@ -3640,6 +3668,9 @@ class SuggestionHandler(
 
             // Copy context to be thread-safe
             val contextWords = contextTracker.getContextWords().toList()
+            // Timed from here to the result being ready for the strip (LatencyMeter): how long a
+            // typed letter waits for its suggestions, the worker thread's queue included.
+            val predictionAsked = System.nanoTime()
 
             // Cancel previous task if running, then submit new prediction task
             predictionTasks.cancelAndSubmit {
@@ -3835,6 +3866,7 @@ class SuggestionHandler(
                 // bar can show the correction it is about to commit.)
                 if ((barRows.words.isNotEmpty() || wouldCorrect) && suggestionBar != null &&
                     !Thread.currentThread().isInterrupted && !specialPromptActive) {
+                    LatencyMeter.predicted(System.nanoTime() - predictionAsked)
                     // Use Handler.post() instead of View.post() — View.post() silently
                     // drops runnables when the View is not attached to a window
                     mainHandler.post {
@@ -3879,6 +3911,7 @@ class SuggestionHandler(
      * @param editorInfo Editor info for app detection
      */
     fun handleDeleteLastWord(ic: InputConnection?, editorInfo: EditorInfo?) {
+        noteNotATypedLetter()
         suggestionBar?.dismissUndoableMessage()
         if (ic == null) return
 

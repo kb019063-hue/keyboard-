@@ -170,6 +170,18 @@ jobs:
             --tests 'tribixbite.cleverkeys.prefs.*' \
             --tests 'tribixbite.cleverkeys.clipboard.*' \
             --tests '*FloatingConfigTest' \
+            --tests '*LatencyMeterTest' \
+            --tests '*InputViewInstallTest' \
+            --tests '*SuggestionStripPolicyTest' \
+            --tests '*SettingsDrawerItemsTest' \
+            --tests '*TypedLetterEchoTest' \
+            --tests '*ProcessStartLogTest' \
+            --tests '*TerminalTypedWordTrackingTest' \
+            --tests '*BlindFieldPolicyTest' \
+            --tests '*BackspaceUndoTest' \
+            --tests '*DictionaryAddUndoTest' \
+            --tests '*SuggestionHandlerOwnedCallbackTest' \
+            --tests '*InputCoordinator*' \
             --tests '*Autocapitalisation*' \
             --tests '*ClipboardSearchRegexTest' \
             --tests '*DeadKeyMarksBelowTest' \

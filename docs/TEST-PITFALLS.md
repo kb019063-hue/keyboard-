@@ -325,21 +325,212 @@ Facts that keep costing time:
 1. **Two `./gradlew testDebugUnitTest` invocations are the same Gradle task.** The second deletes the
    first's JUnit XML, so a run that executed 500 tests can report "no JUnit XML found". The first
    run's results are copied to `build/full-suite-xml/` between the two — do not remove that copy.
-2. **`bash -e` + `set -o pipefail` aborts the step at the first failing test.** Both Gradle lines end
-   with `|| true`; the verdict is decided by the report step, which reads the XML.
+2. **`bash -e` + `set -o pipefail` aborts the step at the first failing test.** So neither Gradle
+   line is allowed to fail its step: each records its exit code in a file instead, the report step
+   reads the XML, and the last step (`scripts/ci/full-suite-verdict.sh`) decides. See trap 8 for
+   what happened while nothing decided.
 3. **`isFailOnNoMatchingTests` is not a property of `DefaultTestFilter` in this Gradle version.**
    Adding it fails the build in ~60 s naming the unknown property. The `filter { }` block stays
    exactly `heavyEngineTests.each { … }`.
 4. **The workflow's `paths:` must include `build.gradle`**, because heap, filters and the test
    timeout live there and change every verdict below them. A workflow file edited without a matching
    push runs nothing.
-5. **Never widen the test heap globally.** 3 GB for the whole suite turns a 12-minute run into a
-   70-minute GC crawl; the hungry engine classes get their own invocation via `-PonlyHeavy` /
-   `-PtestMaxHeap` / `-PjunitXmlDir`.
+5. **The test heap is a measured number: read the `Test JVM` line before changing it.** Two
+   mistakes have been made here, in opposite directions.
+   - *Too much, for everything.* 3 GB for the whole suite, engine classes included, turned a
+     12-minute run into one that was abandoned after 70 minutes (2026-10-31). Nobody knows why:
+     there was no collection log then. The hungry engine classes have had their own invocation
+     since (`-PonlyHeavy` / `-PtestMaxHeap=3g` / `-PjunitXmlDir`). Alone, their log shows no
+     more than 266M left after a collection at any quarter of the run, so the 3 GB they have is
+     a guess that was never revisited either.
+   - *Too little, unnoticed.* Everything else ran on Gradle's default, 512 MB, which no file
+     here mentioned (one comment called it 2 GB). The first collection log (run 43259344146,
+     2026-11-12) showed the suite at the edge of it; trap 9 has the line. The whole-suite
+     invocation was given 1 GB. Three runs there ended with about 550M in use, and the one
+     that measured the fullest moment the present way put it at 842M: more than the whole
+     of the heap the suite had before, and 82% of the new one. It now passes
+     `-PtestMaxHeap=2g`.
+
+   The line turns into a warning that says `NEARLY OUT OF ROOM` when, at the JVM's fullest,
+   85% of the limit was still in use after a collection. Raising the number is the quick
+   answer. Finding what the tests keep is the real one, and it has not been attempted: see
+   the end of trap 9.
 6. **The job timeout destroys the report.** It was 180 minutes; a stalled class meant the report step
-   never ran. It is 75 minutes with a 45-minute test-task cap, and the XML is uploaded.
+   never ran. It is 75 minutes with a 45-minute test-task cap, and the XML is uploaded. See trap 9
+   for what a run that hits the cap leaves behind (no XML).
 7. **`gh pr edit --body` fails** on the deprecated Projects GraphQL field — use
    `gh api -X PATCH repos/{owner}/{repo}/pulls/<n> --input <json>`.
+8. **The check was green with failing tests until 2026-11-12.** The step named "Fail the job when
+   tests failed" asked whether the test step had failed, and the test step cannot fail (trap 2).
+   The report printed `FAILING TESTS` and the job concluded `success`: runs 41766203725,
+   41774492055, 41828565272, 41840073362, 42558434610 and 42559739283, all on pull requests, each
+   report one or two failed tests in their annotations under a green tick. Every run on `main`
+   among the 55 looked at reports `0 failed`, so nothing red is known to have been merged because
+   of it, but only because whoever merged read the notice. The gate is now
+   `scripts/ci/full-suite-verdict.sh`, which was run against eleven made-up outcomes first: green needs
+   both Gradle exit codes to be 0, XML to exist, and the report's count of failures to be 0.
+   **Still quote the notice (`unit tests: N run, 0 failed`) and the run id, not the colour.**
+9. **A run that hits the 45-minute cap leaves no XML at all**, not "everything but the class that
+   stalled": run 43242985447 (2026-11-12) ended with `Timeout has been exceeded` and
+   `no JUnit XML found`, on a commit whose code had passed the same suite in nine minutes an hour
+   before. It could not be diagnosed, and neither could the one of 2026-11-01. Two instruments
+   exist since then, and both arrive as annotations:
+   - **`Test JVM`**, on every run: one line per Gradle invocation from the test JVM's own
+     collection log (`-PtestGcLog`, `scripts/ci/test-gc-summary.py`). It says how long the JVM
+     ran, how much of that the collector took, and how much heap was left after a collection at
+     each quarter of the run and at its fullest, against the JVM's limit. The whole suite
+     shares ONE JVM and static state is never released, so a run can be slow because it is out
+     of room; this line is how that is told from a stuck test, and it shows the room shrinking
+     before a run fails. It is a notice, and a warning that says `NEARLY OUT OF ROOM` from 85%
+     of the limit. It counts apart the full collections that the code asked for with
+     `System.gc()`, which say nothing about room: `StaticLmAssetDriftTest` makes 36 in every
+     run.
+   - **`Long test run`**, only when a run is still going at 15 and 30 minutes
+     (`scripts/ci/test-wedge-watchdog.sh`): the test JVM's thread dump (the "Test worker" stack
+     names the class and method), its collector occupancy, disk and memory, and what Gradle
+     itself is waiting for. Errors when the run then failed, warnings when it was only slow.
+   The report also prints `test time: N s inside M classes; slowest: …`, so two runs can be
+   compared class by class. Read these before guessing.
+
+   **What the first `Test JVM` line said** (run 43259344146, the same code as the run that
+   stalled plus CI files, 9.1 minutes, green):
+
+   ```
+   whole suite: test JVM ran 340 s (G1); 1416 young and 61 full collections, 90 concurrent
+   cycles; paused 27.3 s in all (8.0%), longest 485 ms; concurrent work 94.5 s; heap left after
+   a collection: 100M, 162M, 283M, 475M at each quarter of the run, of a possible 512M;
+   machine: 2 processors, 7932M
+   memory-hungry classes: test JVM ran 50 s (G1); 78 young and 2 full collections, 2 concurrent
+   cycles; paused 1.2 s in all (2.5%), longest 125 ms; concurrent work 0.7 s; heap left after a
+   collection: 266M, 266M, 61M, 68M at each quarter of the run, of a possible 3072M
+   ```
+
+   The suite ended that run with 475M of its 512M still in use after a collection, and what
+   it keeps grows all the way through: static state is never released, as trap 12 says. So the
+   suite had been outgrowing its heap one test class at a time (413 classes on 2026-11-01, 424
+   now), and nothing reported it.
+
+   One number in that line was misread at first. Of the 61 full collections, 36 are not a
+   sign of anything: `StaticLmAssetDriftTest` calls `System.gc()` three times before and
+   three times after loading each of six language models, to print a heap delta. That count
+   is exact and the line could not tell the two kinds apart; it does now ("the full ones: N
+   for want of room, M asked for by the code"). The other 25 would be the collector's last
+   resort, but that is a subtraction: the log itself was never seen.
+
+   What a JVM does in that state was tried in the sandbox with a stand-in program under the
+   same collector (steady work that makes garbage, while the heap it never releases climbs to
+   475M over 40 seconds). At a 512 MB limit its work rate had halved by the time nine tenths
+   of the limit was in use and fell to a ninth at 96%, through 1,409 full collections and **no
+   error**; at 1 GB it kept full speed with none. Allowed three megabytes more, the 512 MB one
+   stopped with `OutOfMemoryError`. So just below failing there is a narrow band in which a
+   run only gets slower, and a suite at the edge of that band can finish in nine minutes one
+   hour and not in forty-five the next. That is the likeliest account of run 43242985447 and
+   of 2026-11-01. It is not proved for either: neither left a log, and the stand-in is not the
+   suite.
+
+   What was done: the whole-suite invocation was given more heap (trap 5), 1 GB at first
+   and 2 GB after the three runs described next, and the line becomes a warning before the
+   room runs out again. **The first run at 1 GB** (43266527543, 4,797 run, 0 failed):
+
+   ```
+   whole suite: test JVM ran 395 s (G1); 219 young and 36 full collections, 37 concurrent
+   cycles; paused 15.4 s in all (3.9%), longest 301 ms; concurrent work 50.0 s; heap left after
+   a collection: 86M, 156M, 295M, 554M at each quarter of the run, of a possible 1024M;
+   machine: 2 processors, 7932M
+   ```
+
+   What it shows, and what it does not:
+   - The collector did about half the work: 15 s of pauses against 27, 50 s beside the tests
+     against 94, 219 young collections against 1,416. The 36 full collections left are the
+     ones the one test asks for, so by the same subtraction none was for want of room.
+   - The run was **not faster**: the JVM ran 395 s against 340, and the step took 11.4
+     minutes against 9.1. The time inside the test classes rose with it (382 s against 327 s),
+     and so did the rest of the step, which is mostly compiling (4.8 minutes against 3.4), so
+     this was a slower machine; the four runs of the step that finished on this branch took
+     8.6, 11.0, 9.1 and 11.4 minutes, the first three at 512 MB. One run each cannot show
+     what the heap is worth in minutes. What the change is for is the run that does not
+     finish, and that cannot be shown by one run that does.
+   - With twice the room the suite read 554M at its end, not 475M. The figure is what a
+     collection left behind, so it includes garbage the collection did not look at, and a
+     collector with room to spare leaves more of it lying; a JVM against its limit also drops
+     what it may (soft references). Which of the two the 79M is was not determined, so
+     compare runs at the same limit only.
+   - What the tests keep still nearly doubles from each quarter of the run to the next.
+
+   **The second run at 1 GB** (43270987868, 4,797 run, 0 failed, 8.6 minutes) was the first
+   to print the two additions to the line:
+
+   ```
+   whole suite: test JVM ran 308 s (G1); 231 young and 36 full collections, 56 concurrent
+   cycles; the full ones: 0 for want of room (-0.0 s), 36 asked for by the code (6.1 s);
+   paused 12.1 s in all (3.9%), longest 238 ms; concurrent work 61.4 s; heap left after a
+   collection: 96M, 156M, 297M, 551M at each quarter of the run and 762M at its fullest, of a
+   possible 1024M; machine: 2 processors, 7932M
+   ```
+
+   - The subtraction is now a reading: no full collection for want of room, and the 36 that
+     the one test asks for are half of all the time the tests were stopped (6.1 of 12.1 s).
+   - **762M at its fullest.** At some moment in the run the heap stood at three quarters of
+     a gigabyte after five collections in a row: 200M more than at the end, and half as much
+     again as the whole of the 512 MB the suite used to run in. Not all of that is in use,
+     as the run at 2 GB shows below (the figure rises with the limit). What it does show is
+     a burst: a few hundred megabytes reaching the old generation faster than G1 clears
+     them. A 512 MB heap has nowhere to put such a burst except through full collections,
+     which fits the 25 of the first line, and how long those take depends on what else is
+     live just then. Which test class it is, nobody knows yet.
+   - Two details of that line were corrected afterwards. The `-0.0` is a rounding slip. And
+     "at its fullest" is the most that five collections in a row all left behind, but it
+     counted the two pauses inside a concurrent cycle as collections. Those can read lower
+     than the collections around them (they give back regions that marking found empty), so
+     the figure was too low.
+
+   **The third run at 1 GB** (43275303929, 4,797 run, 0 failed, 10.8 minutes), counting young
+   and full collections only:
+
+   ```
+   whole suite: test JVM ran 372 s (G1); 232 young and 36 full collections, 53 concurrent
+   cycles; the full ones: 0 for want of room (0.0 s), 36 asked for by the code (7.2 s);
+   paused 13.8 s in all (3.7%), longest 269 ms; concurrent work 59.9 s; heap left after a
+   collection: 92M, 156M, 301M, 543M at each quarter of the run and 842M at its fullest, of a
+   possible 1024M; machine: 2 processors, 7932M
+   ```
+
+   842M of 1024M is 82%, three points short of the line's own warning, in a run that showed
+   no other sign of trouble (no full collection for want of room, under 4% paused). That is
+   too close to leave, so **the whole-suite invocation now runs with `-PtestMaxHeap=2g`**.
+   The runner has 7.9 GB and the engine classes' invocation has run at 3 GB beside the same
+   Gradle and Kotlin daemons since 2026-11-02.
+
+   **The first run at 2 GB** (43278706137, 4,797 run, 0 failed, 10.0 minutes):
+
+   ```
+   whole suite: test JVM ran 342 s (G1); 146 young and 36 full collections, 18 concurrent
+   cycles; the full ones: 0 for want of room (0.0 s), 36 asked for by the code (7.2 s);
+   paused 12.1 s in all (3.5%), longest 248 ms; concurrent work 7.1 s; heap left after a
+   collection: 73M, 146M, 374M, 616M at each quarter of the run and 1160M at its fullest, of a
+   possible 2048M; machine: 2 processors, 7932M
+   ```
+
+   - The collector has little left to do: 7 s of work beside the tests against 50 to 61 at
+     1 GB and 94 at 512 MB, and of the 12 s the tests were stopped, 7 are the collections that
+     the one test asks for.
+   - "At its fullest" went up with the limit, from 842M to 1160M (57%). That is G1, not the
+     suite: it lets old garbage lie until the heap is about half full before it starts to
+     clean it, so a long run drifts up towards half its limit whatever the limit is. The
+     figure is not what the tests need. It means something near the top.
+   - Still not faster in minutes: 10.0, inside the 8.6 to 11.4 of the six runs before it.
+
+   When the warning does come, treat it as the prompt to look at what the tests keep, and
+   not only to raise the number again.
+
+   What was not done: **nobody has looked at what the tests keep.** Half a gigabyte is a
+   great deal for 424 classes of unit tests. Bringing it down would shorten every run (in
+   the first one the collector stopped the tests for 27 s and worked beside them for another
+   94 s, on two processors) and would let the limit come back down. The way in: `jcmd <pid>
+   GC.class_histogram` on the test worker while it runs says which classes of object fill the
+   heap (the watchdog script already finds the worker's pid); and the JUnit XML's `timestamp`
+   per class, set against a collection log that carries wall-clock time (add `utctime` to the
+   decorations in `build.gradle`), says during which test classes the kept heap rose.
 
 ---
 

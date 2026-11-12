@@ -13,9 +13,12 @@
 # happening again: everything runs at least once a day, and a failure means something in THIS
 # repository is wrong.
 #
-# Measured 2026-11-01 (run 41369205687): 4,650 tests in 413 classes, 22 minutes wall clock on the
-# default 2 GB test heap with the heavy classes split into a second invocation. That is the number
-# the 75-minute job timeout is sized against; a run that approaches it is a signal, not noise.
+# Measured 2026-11-01 (run 41369205687): 4,650 tests in 413 classes, 22 minutes wall clock on
+# Gradle's default test heap with the heavy classes split into a second invocation. That is the
+# number the 75-minute job timeout is sized against; a run that approaches it is a signal, not
+# noise. (This paragraph used to call that heap "the default 2 GB". Nothing ever set 2 GB: the
+# default is 512 MB, which is what the JVM itself reported the first time it was asked, on
+# 2026-11-12. The whole-suite step below says what was found then and what the heap is now.)
 #
 # State at the end of the 2026-11-01 pass: 4,650 run, 0 failed, 204 skipped — the skips are the 22
 # upstream-artefact classes reporting SKIPPED rather than passing. From here a red run means a real
@@ -114,10 +117,38 @@ jobs:
           # class made `:compileDebugUnitTestKotlin` fail, no JUnit XML was produced, and this job
           # reported SUCCESS -- broken test code could merge green. Hence the recorded exit code.
           mkdir -p build
+          # If this is still running long after it should have finished, write down what it is
+          # doing (scripts/ci/test-wedge-watchdog.sh). The step normally takes 5 to 9 minutes.
+          rm -rf "$RUNNER_TEMP/test-wedge" "$RUNNER_TEMP"/test-gc-*.log
+          bash scripts/ci/test-wedge-watchdog.sh "$RUNNER_TEMP/test-wedge" "whole suite" 15 30 \
+            > /dev/null 2>&1 &
+          watchdog=$!
           set +e
-          ./gradlew testDebugUnitTest -PskipHeavy=true --stacktrace 2>&1 | tee unit-test-output.log
+          # -PtestGcLog: the test JVM logs its collections (build.gradle); summarised below.
+          #
+          # -PtestMaxHeap=2g. Until 2026-11-12 this invocation ran on Gradle's default, 512 MB,
+          # and the first collection log ever read (run 43259344146) said the suite had grown to
+          # the edge of it: "... paused 27.3 s in all (8.0%) ... concurrent work 94.5 s; heap
+          # left after a collection: 100M, 162M, 283M, 475M at each quarter of the run, of a
+          # possible 512M". A JVM that full does not fail, it slows down, and a little fuller
+          # it slows down a great deal: that is the likeliest account of the run that sat here
+          # until the 45-minute bound (43242985447), though that run itself left nothing to
+          # prove it. At 1 GB (three runs, 43266527543 to 43275303929) the collector did half
+          # the work and no full collection was for want of room; but once the line could say
+          # how full the JVM was at its fullest, it said 842M of the 1024M, three points short
+          # of the line's own warning. Hence 2 GB, where the first run (43278706137) had 7 s
+          # of concurrent collector work against 50 to 61 and stood at 1160M of 2048M at its
+          # fullest. The "Test JVM" annotation says after every run how much of the limit was
+          # used. docs/TEST-PITFALLS.md, CI traps 5 and 9.
+          #
+          # Not everything in one JVM at 3 GB: that was tried on 2026-10-31, engine classes
+          # included, and the run was abandoned after 70 minutes (see the next step).
+          ./gradlew testDebugUnitTest -PskipHeavy=true -PtestMaxHeap=2g \
+            -PtestGcLog="$RUNNER_TEMP/test-gc-whole.log" \
+            --stacktrace 2>&1 | tee unit-test-output.log
           gradle_exit=$?
           set -e
+          kill "$watchdog" 2>/dev/null || true
           echo "gradle_exit=$gradle_exit" > build/unit-test-gradle-exit.txt
           # Gradle deletes a re-run task's previous outputs, and the heavy invocation below is a
           # re-run of this same task: without this copy its XML vanished and the report covered
@@ -138,8 +169,54 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          mkdir -p build
+          # Normally under a minute.
+          bash scripts/ci/test-wedge-watchdog.sh "$RUNNER_TEMP/test-wedge" "memory-hungry classes" 10 25 \
+            > /dev/null 2>&1 &
+          watchdog=$!
+          # Recorded, like the first invocation's, for the gate at the bottom of the job. Until
+          # 2026-11-12 a trailing `|| true` erased it.
+          set +e
           ./gradlew testDebugUnitTest -PonlyHeavy=true -PtestMaxHeap=3g \
-            -PjunitXmlDir=build/test-results/heavy --stacktrace 2>&1 | tee heavy-test-output.log || true
+            -PtestGcLog="$RUNNER_TEMP/test-gc-heavy.log" \
+            -PjunitXmlDir=build/test-results/heavy --stacktrace 2>&1 | tee heavy-test-output.log
+          heavy_exit=$?
+          set -e
+          kill "$watchdog" 2>/dev/null || true
+          echo "gradle_exit=$heavy_exit" > build/heavy-test-gradle-exit.txt
+
+      # How the test JVMs spent their time, as annotations: the one thing about a run that the
+      # development sandbox can read. Its own step, so that the ten-per-step cap on annotations
+      # cannot drop these behind the report's.
+      #
+      #  * "Test JVM", on every run: one line per invocation from its collection log
+      #    (scripts/ci/test-gc-summary.py says how to read it). A notice, or a warning when the
+      #    JVM, at its fullest, still had 85% or more of its limit in use after a collection.
+      #  * "Long test run", only when a run went on too long: what it was doing at the time. An
+      #    error when the run then failed; a warning when it was merely slow and finished.
+      - name: Say how the test JVMs spent their time
+        if: always()
+        # Diagnostics only: a mistake in here must not be able to fail the job or skip the report.
+        continue-on-error: true
+        shell: bash
+        run: |
+          shopt -s nullglob
+          for which in whole heavy; do
+            label="whole suite"; [ "$which" = "heavy" ] && label="memory-hungry classes"
+            line=$(python3 scripts/ci/test-gc-summary.py "$label" "$RUNNER_TEMP/test-gc-$which.log" 2>/dev/null || true)
+            # A warning when the line itself says the JVM is nearly out of room; a notice otherwise.
+            how=notice; case "$line" in *"NEARLY OUT OF ROOM"*) how=warning ;; esac
+            if [ -n "$line" ]; then echo "::$how title=Test JVM::${line//%/%25}"; fi
+          done
+          level=warning
+          for f in build/unit-test-gradle-exit.txt build/heavy-test-gradle-exit.txt; do
+            [ "$(sed -n 's/^gradle_exit=//p' "$f" 2>/dev/null | tail -1)" = "0" ] || level=error
+          done
+          for f in "$RUNNER_TEMP"/test-wedge/*.txt; do
+            body=$(head -c 24000 "$f" | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk 'BEGIN { ORS = "%0A" } { print }')
+            echo "::${level} title=Long test run::${body}"
+            { echo '```'; head -c 24000 "$f"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          done
 
       - name: Report results as annotations and a job summary
         shell: bash
@@ -159,7 +236,7 @@ jobs:
           def esc(t):
               return t.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
 
-          rows, cases = [], []
+          rows, cases, times = [], [], []
           for f in sorted(glob.glob('build/full-suite-xml/*.xml') +
                           glob.glob('build/test-results/heavy/*.xml')):
               try:
@@ -170,6 +247,10 @@ jobs:
               tests, skipped = int(r.get('tests', 0)), int(r.get('skipped', 0))
               failed = int(r.get('failures', 0)) + int(r.get('errors', 0))
               rows.append((name, tests, failed, skipped))
+              try:
+                  times.append((float(r.get('time', 0) or 0), name))
+              except ValueError:
+                  pass
               for case in r.iter('testcase'):
                   for kind in ('failure', 'error'):
                       node = case.find(kind)
@@ -198,6 +279,16 @@ jobs:
 
           total = sum(r[1] for r in rows)
           bad = sum(r[2] for r in rows)
+          # For the gate at the bottom of the job (scripts/ci/full-suite-verdict.sh).
+          with open('build/unit-test-failed.txt', 'w') as fh:
+              fh.write('%d\n' % bad)
+          # Where the time went, so that two runs can be compared class by class. The sum is
+          # time inside test classes; the step's own duration (in the API) holds the rest.
+          if times:
+              times.sort(reverse=True)
+              print('::notice::test time: %.0f s inside %d classes; slowest: %s'
+                    % (sum(t for t, _ in times), len(times),
+                       ', '.join('%s %.1fs' % (n.split('.')[-1], t) for t, n in times[:12])[:1500]))
           skipped = sum(r[3] for r in rows)
           bad_classes = sorted([r for r in rows if r[2]], key=lambda r: (-r[2], r[0]))
           print('::notice::unit tests: %d run, %d failed, %d skipped in %d classes'
@@ -258,7 +349,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         # AGENTS.md: every upload is continue-on-error, so a full artifact quota cannot change
-        # this job's verdict. The verdict is the two gate steps below, which need no upload.
+        # this job's verdict. The verdict is the gate step below, which needs no upload.
         continue-on-error: true
         with:
           name: full-suite-xml
@@ -268,40 +359,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 1
 
-      # Make the job result mean what it says: the test task is advisory above only so the report
-      # always runs; the verdict is applied here.
-      - name: Fail the job when tests failed
-        if: steps.tests.outcome == 'failure' || steps.heavy.outcome == 'failure'
-        run: |
-          echo "::error::the whole suite is not green - see the annotations and the job summary"
-          exit 1
-
-      # The assertion this workflow is for. With `continue-on-error` the two test steps can fail
-      # without failing the job, which is intentional so the report step still runs -- but it means
-      # a COMPILE failure used to exit 0 overall. That is the worst case: nothing was tested, the
-      # annotations say "no JUnit XML found", and the check is green.
+      # The verdict. The two test steps above cannot fail by themselves (so that the report always
+      # runs and says why), which leaves this step as the only gate. It is a script so that it can
+      # be run against made-up results before it is trusted: scripts/ci/full-suite-verdict.sh,
+      # whose header says how the check came to be green with failing tests until 2026-11-12.
       #
-      # Two distinct signals, because they mean different things:
-      #   * Gradle exited non-zero and produced NO XML at all -> the test sources did not compile
-      #     (or the build broke). Nothing was verified. FATAL.
-      #   * Gradle exited non-zero but XML exists -> real failing tests. Also fatal, and the
-      #     dedicated step above already caught it; kept here so the reason is unambiguous.
-      - name: Fail the job when the test task did not compile or produced nothing
+      # Green needs all of: both Gradle invocations exited 0, JUnit XML exists, and the report
+      # counted no failure in it. A run that hit its time bound, did not compile, or left
+      # anything missing is red: "nothing was verified" must never look like "all passed".
+      - name: Fail the job unless every test ran and passed
         if: always()
-        run: |
-          exit_file=build/unit-test-gradle-exit.txt
-          code=0
-          if [ -f "$exit_file" ]; then
-            code=$(sed -n 's/^gradle_exit=//p' "$exit_file" | tail -1)
-            code=${code:-1}
-          fi
-          xml=$(find build/full-suite-xml build/test-results/heavy -name '*.xml' 2>/dev/null | wc -l)
-          echo "gradle exit=$code, junit xml files=$xml"
-          if [ "$code" != "0" ] && [ "$xml" = "0" ]; then
-            echo "::error::the unit-test task produced NO results - the test sources did not compile. Nothing was verified."
-            exit 1
-          fi
-          if [ "$xml" = "0" ]; then
-            echo "::error::the unit-test task produced no JUnit XML at all."
-            exit 1
-          fi
+        shell: bash
+        run: bash scripts/ci/full-suite-verdict.sh

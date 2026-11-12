@@ -57,13 +57,15 @@ NF_VERDICT=notrun
 KB_VERDICT=notrun
 ANR_SEEN=0
 VOICE_VERDICT=notrun
+ROT_VERDICT=notrun
 # The voice field is spelled `-v=` and appended LAST on purpose: the workflow truncates the summary
 # to 90 characters before it becomes the artifact name, and the run-36 summary is already 80. A
 # longer spelling would push `anr=` past the cut and silently lose the ANR witness.
 write_summary() {
-  printf 'fails=%s-toolbar=%s-tbui=%s-oh=%s-nf=%s-keyboard=%s-anr=%s-v=%s\n' \
+  printf 'fails=%s-toolbar=%s-tbui=%s-oh=%s-nf=%s-keyboard=%s-anr=%s-v=%s-r=%s\n' \
     "${fails:-?}" "${TB_VERDICT:-?}" "${TBUI_VERDICT:-?}" "${OH_VERDICT:-?}" \
     "${NF_VERDICT:-?}" "${KB_VERDICT:-?}" "${ANR_SEEN:-?}" "${VOICE_VERDICT:-?}" \
+    "${ROT_VERDICT:-?}" \
     > "$OUT/summary.txt" 2>/dev/null || true
 }
 trap write_summary EXIT
@@ -200,6 +202,18 @@ dismiss_anr() {
       foreign="$subj"
     fi
   fi
+  # Whose dialog it was, where the sandbox can read it: a line in latency.txt, which the
+  # workflow ships as a `Latency` notice from a step with its own annotation budget (this
+  # step's is spent). The first dialog of a run only -- a wedged launcher has produced
+  # twenty-one. Run 43270968715 ended fails=0 with anr=1 and nothing to say whether that dialog
+  # was the launcher's, as every one identified so far had been, or this app's -- which, in a
+  # run that measures how quick the keyboard is, would be the finding.
+  if [ "$ANR_SEEN" -eq 1 ] && [ -n "${LAT:-}" ]; then
+    local whose="ours-or-unknown"; [ -z "$foreign" ] || whose="not-ours"
+    printf "anr first-dialog whose=%s subject='%s' package='%s' via=%s events=%s\n" \
+      "$whose" "${subj:-none}" "${apkg:-none}" "$hit" "$(anrln)" \
+      | tr '\r' ' ' | cut -c1-400 >> "$LAT" 2>/dev/null || true
+  fi
   if [ -n "$foreign" ]; then
     info "ANR belongs to $foreign, not $PKG -- closing it so the device recovers"
     c=$(nodecenter "$f" '^close app$'); [ -n "${c:-}" ] || c=$(nodecenter "$f" 'close app')
@@ -237,8 +251,18 @@ dismiss_anr() {
 # stuck on the killed Quickstep window, and `dismiss_anr` correctly found nothing to dismiss. In
 # that state an ordinary `am start` reports WARM/ok without changing focus. Restart the launcher,
 # return HOME, and retry the start; three failures still produce the original FAIL annotation.
+#
+# The third start then gets what the first two were not given: time. Run 43278438056 failed the
+# check that follows this call, twice, with focus on a launcher that was restarting (three
+# "isn't responding" dialogs in that run, the first one Quickstep's by its own subject line).
+# The first time, the app was on screen moments later with nothing having started it again:
+# section 5 found its text field and the keyboard came up over it. So the activity does arrive,
+# and five seconds after the start is too soon to look on a slow runner. Nothing is started or
+# stopped in the wait, only watched, with any dialog in the way dismissed. A run that passed
+# therefore passes exactly as before, and an activity that never arrives still fails, about
+# half a minute later.
 focus_activity() {
-  local component="$1" label="$2" prefix="$3" try f
+  local component="$1" label="$2" prefix="$3" try f look
   for try in 1 2 3; do
     dismiss_anr || true
     adb shell am start -W -n "$component" > "$OUT/$prefix-$try.log" 2>&1
@@ -255,7 +279,148 @@ focus_activity() {
         ;;
     esac
   done
+  for look in 1 2 3 4 5 6; do
+    dismiss_anr || true
+    sleep 3
+    case "$(focus)" in
+      *"$label"*) info "$label took focus on look $look after the third start"; return 0 ;;
+    esac
+  done
   return 1
+}
+
+ime_frame_rect() {  # "l t r b" of the input-method window's frame, dialect-tolerant (see 7d/7f)
+  adb shell dumpsys window windows 2>/dev/null | python3 -c '
+import re, sys
+blocks = re.split(r"(?=Window #)", sys.stdin.read())
+for b in blocks:
+    head = b.split("\n", 1)[0]
+    if "ty=INPUT_METHOD" in b or "InputMethod" in head:
+        m = re.search(r"\bm?[Ff]rame=\[(\d+),(\d+)\]\[(\d+),(\d+)\]", b)
+        if m:
+            print(" ".join(m.groups())); sys.exit(0)
+'
+}
+
+# --- latency probe (2026-11-12) -------------------------------------------------------------------
+# "Slow to appear and laggy while typing" was reported three times and never measured, because
+# this run asserted behaviour and no duration. The keyboard now times itself (LatencyMeter.kt) and
+# logs one or two lines of numbers, tag CKLatency, each time it is hidden. This probe produces a
+# showing worth timing -- open the keyboard, tap a fixed sentence on its real keys, hide it -- and
+# copies the lines into $OUT/latency.txt. The workflow turns that file into annotations in a step
+# of its own, because this step's annotation budget is spent (constraint 2 in the header).
+#
+# What the numbers are: an x86_64 emulator, two cores, a software GPU. They compare two builds on
+# the same boot, and they count work that should not repeat (resize=, attach=, install=). They are
+# NOT what a phone will show, and nothing here asserts on a duration -- a slow runner must not be
+# able to fail a run.
+LAT="$OUT/latency.txt"; : > "$LAT"
+LAT_ROWH=""   # height in px of one full key row, measured once over an empty field (section 5)
+LAT_DPI=""
+lat_count() { adb logcat -d -v raw -s CKLatency:I 2>/dev/null | tr -d '\r' | grep -c "^$1 "; }
+lat_last()  { adb logcat -d -v raw -s CKLatency:I 2>/dev/null | tr -d '\r' | grep "^$1 " | tail -1; }
+lat_note()  { printf '%s\n' "$1" >> "$LAT"; info "latency: $1"; }
+
+select_ime() {  # make ours the selected IME (again): idempotent, used after every reinstall
+  adb shell ime enable "$SVC" > /dev/null 2>&1
+  adb shell ime set "$SVC" > /dev/null 2>&1
+  sleep 3
+  case "$(selime)" in *"$PKG"*) return 0 ;; esac
+  adb shell settings put secure default_input_method "$SVC" > /dev/null 2>&1
+  sleep 2
+  case "$(selime)" in *"$PKG"*) return 0 ;; esac
+  return 1
+}
+
+# The bottom edge of the keys for a frame whose bottom is $1: the frame's own bottom, unless the
+# window runs under the navigation bar (bottom at the screen's edge), where the key view pads
+# itself by the bar's height. 48dp is the three-button bar; a gesture pill is shorter, and the
+# taps below sit half a row inside the rows they aim at, which absorbs the difference.
+lat_keys_bottom() {
+  if [ "$1" -ge $(( ${SH:-2400} - 2 )) ]; then echo $(( $1 - 48 * LAT_DPI / 160 )); else echo "$1"; fi
+}
+
+# Call while the keyboard is up over an EMPTY field, where the window is the toolbar (40dp) plus
+# the key rows and nothing else. The default layout (latn_qwerty_us_gboard_style) is a number row
+# 0.75 high over four full rows: 4.75 row-heights, hence the 4/19. A layout without the number
+# row would make the estimate 16% short, which still leaves both targets inside their rows.
+lat_measure_rows() {
+  local rect th kb
+  rect=$(ime_frame_rect); [ -n "$rect" ] || return 1
+  LAT_DPI=$(adb shell wm density 2>/dev/null | sed -n 's/[^0-9]*\([0-9][0-9]*\)[^0-9]*$/\1/p' | tail -1)
+  case "$LAT_DPI" in ''|*[!0-9]*) LAT_DPI=""; return 1 ;; esac
+  set -- $rect
+  th=$(( 40 * LAT_DPI / 160 ))
+  kb=$(lat_keys_bottom "$4")
+  LAT_ROWH=$(( (kb - $2 - th) * 4 / 19 ))
+  [ "$LAT_ROWH" -gt 40 ] || { LAT_ROWH=""; return 1; }
+  info "latency: a key row is ${LAT_ROWH}px (frame $rect, toolbar ${th}px, keys end at $kb)"
+}
+
+# Tap "a sad lad had a salad" on the home row and the space bar: 21 presses, five word
+# boundaries. Real words on purpose -- each one fills the suggestion strip and each space empties
+# it, which is the path that resizes the keyboard. Keys are anchored to the bottom of the window,
+# so the strip opening above them does not move the targets.
+lat_type() {
+  local rect l r b w ya ysp cmd="" ch x n=0
+  [ -n "$LAT_ROWH" ] || return 1
+  rect=$(ime_frame_rect); [ -n "$rect" ] || return 1
+  set -- $rect; l=$1; r=$3; b=$(lat_keys_bottom "$4"); w=$(( r - l ))
+  ya=$(( b - LAT_ROWH * 5 / 2 ))   # home row: a s d f g h j k l, centred on tenths of the width
+  ysp=$(( b - LAT_ROWH / 2 ))      # bottom row: the space bar spans 3.5 to 8 tenths
+  for ch in a _ s a d _ l a d _ h a d _ a _ s a l a d; do
+    case "$ch" in
+      a) x=$(( l + w * 1 / 10 )) ;; s) x=$(( l + w * 2 / 10 )) ;; d) x=$(( l + w * 3 / 10 )) ;;
+      h) x=$(( l + w * 6 / 10 )) ;; l) x=$(( l + w * 9 / 10 )) ;;
+      _) cmd="$cmd input tap $(( l + w / 2 )) $ysp; sleep 0.7;"; n=$(( n + 1 )); continue ;;
+    esac
+    # The pause is for the measurement, not the keyboard: every `input` is a fresh process that
+    # takes most of a core to start, and on a two-core emulator the next one starting may
+    # compete with the keyboard for the very press being timed. Run 43142217574, without the
+    # pause, reported 230-310 ms of UI-thread time per frame on every build alike; whether the
+    # taps' own processes were the cause is a suspicion this pause is here to test, not a finding.
+    cmd="$cmd input tap $x $ya; sleep 0.7;"; n=$(( n + 1 ))
+  done
+  adb shell "$cmd" > /dev/null 2>&1
+  echo "$n"
+}
+
+# One timed showing. $1 labels the build in latency.txt. Needs CENTER (the launcher's text field).
+# Two showings per call. The first is a warm-up that is only waited on: it lets a process that
+# has just started finish loading its dictionary (run 43142217574: a fresh process produced one
+# suggestion update in 21 presses, a warm one twelve), and ending it is what writes that process's
+# start-up line. The second is the one that is typed in and reported, so every build's session
+# line describes a WARM showing of a keyboard whose predictions work.
+latency_probe() {
+  local label="$1" s0 sent cold sess
+  dismiss_anr || true
+  # Whatever showing is open ends here. On a process's first showing that is also the moment
+  # its start-up line is written.
+  adb shell input keyevent KEYCODE_BACK; sleep 3
+  focus_activity "$PKG/$NS.LauncherActivity" "LauncherActivity" "am-lat-$label" || true
+  adb shell input tap $CENTER; sleep 8
+  [ -n "$LAT_ROWH" ] || lat_measure_rows || true
+  # Empty the field (Ctrl+A, Del) so every build types the same sentence into the same text.
+  adb shell input keycombination 113 29 > /dev/null 2>&1; adb shell input keyevent 67 > /dev/null 2>&1
+  adb shell input keyevent KEYCODE_BACK; sleep 3
+  cold=$(lat_last cold)
+  s0=$(lat_count session)
+  adb shell input tap $CENTER; sleep 5
+  sent=$(lat_type) || sent=0
+  sleep 3
+  shot "lat-$label"
+  adb shell input keyevent KEYCODE_BACK; sleep 3
+  sess=$(lat_last session)
+  if [ "$(lat_count session)" -gt "${s0:-0}" ] && [ -n "$sess" ]; then
+    lat_note "$label taps-sent=$sent $sess"
+  else
+    lat_note "$label taps-sent=$sent NO-SESSION-LINE shown=$(shown) cur=$(curime)"
+  fi
+  # A start-up line belongs to this build only if it is newer than the last one seen.
+  if [ -n "$cold" ] && [ "$cold" != "${LAT_COLD_SEEN:-}" ]; then
+    LAT_COLD_SEEN="$cold"
+    lat_note "$label $cold"
+  fi
 }
 
 # --- locate the x86_64 split (the emulator is x86_64; ARM splits cannot run on it) ---
@@ -265,6 +430,11 @@ if [ -z "$APK" ] || [ ! -f "$APK" ]; then
   fail "no x86_64 APK found under build/outputs/apk/debug (got '${APK:-}')"; exit 1
 fi
 info "APK: $APK ($(du -m "$APK" | cut -f1) MB)"
+# The comparison build for the latency probe, when the workflow made one (see 6c).
+APK_AB="${APK_AB:-}"
+[ -z "$APK_AB" ] && [ -f build/ab/debuggable-x86_64.apk ] && APK_AB=build/ab/debuggable-x86_64.apk
+[ -n "$APK_AB" ] && [ ! -f "$APK_AB" ] && APK_AB=""
+[ -n "$APK_AB" ] && info "comparison APK: $APK_AB"
 
 echo "== 1. boot =="
 adb wait-for-device
@@ -393,6 +563,9 @@ else
   if [ "$SHOWN" = "mInputShown=true" ] && printf '%s' "$CUR" | grep -q "$PKG"; then
     KB_VERDICT=bound
     pass "KEYBOARD RENDERED AND BOUND: $SHOWN $CUR"
+    # The field is still empty here, so the window is toolbar + keys: the one moment the key
+    # rows can be sized from outside. The latency probe (6c) aims its taps with this.
+    lat_measure_rows || info "latency: key rows could not be measured (frame='$(ime_frame_rect)')"
   else
     KB_VERDICT=notup
     fail "keyboard not up: shown='${SHOWN:-none}' ${CUR:-mCurId=none} focus='$FOCUS2' crash='${CRASH2:-none}' anr='$(anrln)' tap=$CENTER"
@@ -431,6 +604,28 @@ else
   else
     TB_VERDICT=unverifiable
     info "toolbar unverifiable by dump: uiautomator captured no IME window (Keyboard2View absent), so absence proves nothing -- screenshot 03-typed-text is the arbiter"
+  fi
+
+  echo "== 6c. latency: one showing and one typed sentence, timed by the keyboard itself =="
+  if [ "$KB_VERDICT" = "bound" ]; then
+    latency_probe ship
+    # Optional comparison (APK_AB, see the workflow): the same commit built DEBUGGABLE, timed on
+    # this same boot, then the shipped build once more -- so that "the second run had a warmer
+    # emulator" cannot be mistaken for a difference between the two builds.
+    if [ -n "$APK_AB" ]; then
+      if adb install -r -g "$APK_AB" > "$OUT/install-ab.log" 2>&1 && select_ime; then
+        latency_probe debuggable
+      else
+        lat_note "debuggable NOT-INSTALLED $(peek "$OUT/install-ab.log" 120)"
+      fi
+      if adb install -r -g "$APK" > "$OUT/install-back.log" 2>&1 && select_ime; then
+        latency_probe ship-again
+      else
+        fail "could not put the shipped APK back after the comparison: $(peek "$OUT/install-back.log" 160) secure='$(selime)'"
+      fi
+    fi
+  else
+    lat_note "ship NOT-RUN keyboard=$KB_VERDICT"
   fi
 fi
 
@@ -1124,18 +1319,7 @@ fi
 # the tap missed, the key legitimately does the legacy thing and a failure would blame the product
 # for the harness's miss. VOICE-DIAG is emitted whether or not anything was asserted, because
 # warnings survive annotation storage where notices are dropped at about twelve.
-ime_frame_rect() {  # "l t r b" of the input-method window's frame, dialect-tolerant (see 7d/7f)
-  adb shell dumpsys window windows 2>/dev/null | python3 -c '
-import re, sys
-blocks = re.split(r"(?=Window #)", sys.stdin.read())
-for b in blocks:
-    head = b.split("\n", 1)[0]
-    if "ty=INPUT_METHOD" in b or "InputMethod" in head:
-        m = re.search(r"\bm?[Ff]rame=\[(\d+),(\d+)\]\[(\d+),(\d+)\]", b)
-        if m:
-            print(" ".join(m.groups())); sys.exit(0)
-'
-}
+# ime_frame_rect() is defined with the other helpers near the top: the latency probe needs it first.
 
 kb_toolbar_center() {  # $1 = zero-based toolbar button index; echoes "x y" of its centre, or nothing
   # Run 40's DUMPDIAG settled what run 39 raised: this emulator's accessibility dumps never carry
@@ -1387,10 +1571,215 @@ else
 fi
 
 echo "== 9. clipboard subsystem (informational) =="
-# run-as works because the debug build is debuggable. clipboard_history.db may legitimately not
-# exist until the first copy, so this is reported, never failed.
+# run-as needs a debuggable build, and since 2026-11-12 the APK this run installs is not one
+# (build.gradle, debugBuildDebuggable): the listing below is then "run-as: package not
+# debuggable", which is the expected answer and is only printed. It still lists the databases
+# for a build made with LOCAL_BUILD=true or -PckDebuggable=true. clipboard_history.db may
+# legitimately not exist until the first copy. Reported, never failed.
 adb shell run-as "$PKG" ls -la databases/ > "$OUT/app-databases.txt" 2>&1
 info "databases: $(grep -oE '[a-z_]+\.db' "$OUT/app-databases.txt" 2>/dev/null | tr '\n' ' ')$(peek "$OUT/app-databases.txt" 80)"
+
+echo "== 9b. the Keyboard speed card in settings, and the drawer that leads to it (informational) =="
+# Settings > Information & Actions shows what LatencyMeter has measured in this process, so that
+# the owner can read a number off the phone and paste it into a report. Nobody but the owner can
+# look at the phone, so prove here that the card composes and carries numbers. The settings
+# screen lives in the keyboard's process and keys were pressed in 6c, so a "Key presses: N" line
+# is due, and the keyboard was set up at least once, so a "Set up from nothing: ..." line is due
+# too (ProcessStartLog). The card is one clickable element, which Compose reports as ONE node
+# with its lines joined, hence no text=" anchor.
+#
+# Two runs could not get there with the shared drawer hunt (43151960834 and 43154964666, "card
+# not-reached"). The second said why, as far as two numbers can: eleven of the nineteen sections
+# on the first screen, four dumps in the first round and none in the second. Read together with
+# what this script did before it: the keyboard was still up from 7d-7g, and FLOATING, its
+# window starting at 54% of the screen's height -- and the shared hunt drags from 55%. So its
+# three drags started on the keyboard and scrolled nothing; then its BACK hid the keyboard
+# instead of closing the sheet, and the second round found no hamburger behind the open sheet.
+# That is a reading of two numbers, not something seen. And it says nothing yet about whether
+# the sheet's list scrolls (it is meant to since 8dbb88c; "Information & Actions" is the
+# eighteenth of nineteen), which is the thing to find out.
+#
+# So this section makes its own trip:
+#   1. a keyboard that is up is put away first (BACK; the activity stays), and the note says
+#      whether that worked;
+#   2. a sheet that is already open is used as it is;
+#   3. each drag runs from the lowest item to the highest item of the dump just taken, at the
+#      left edge of the sheet, so it lands on the list whatever the geometry is -- beside a
+#      floating keyboard that would not go away, above a docked one;
+#   4. the note carries what the open sheet showed before any drag and after the last one, and
+#      how many drags it took. Fewer than nineteen at first, another lowest item after a drag,
+#      and the item found: that is what "the list scrolls and needed to" looks like. The same
+#      lowest item before and after is what "it does not scroll" looks like.
+#
+# Written to latency.txt and never failed: this is a diagnostic about a diagnostic, and this
+# run must not go red over it.
+
+# For a dump of the open drawer ($1), and the height above which a touch reaches the sheet ($2):
+#   "N lowest x from to"
+# N section items on screen and the label of the lowest; then a drag that scrolls the list by
+# as much as one drag can -- x, and the y to start and end at: the centre of the lowest item
+# that is clear of $2, and the centre of the highest. "0 0 0" when there are not two to drag
+# between. An item is a node at the sheet's left edge whose text is an emoji and a section
+# title; one that was given no height is not on screen, whatever the tree says.
+drawer_items() {
+  python3 - "$1" "${2:-99999}" <<'PY' 2>/dev/null || echo "0 unreadable 0 0 0"
+import html, re, sys
+names = ["Test Keyboard", "Activities", "Swipe Typing", "Appearance", "Swipe Trail", "Toolbar",
+         "One-Handed Mode", "Input Behavior", "Auto-Correction", "Gesture Tuning", "Accessibility",
+         "Clipboard", "GIF Panel", "Backup & Restore", "Multi-Language", "Privacy & Data",
+         "Advanced", "Information & Actions", "Help & FAQ"]
+xml = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+limit = int(sys.argv[2])
+seen = {}
+for m in re.finditer(r'<node[^>]*>', xml):
+    tag = m.group(0)
+    t = re.search(r'text="([^"]*)"', tag)
+    b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', tag)
+    if not t or not b:
+        continue
+    label = html.unescape(t.group(1)).strip()
+    x1, y1, x2, y2 = map(int, b.groups())
+    for n in names:
+        if label.endswith(n) and len(label) <= len(n) + 4 and x1 <= 60 and (y2 - y1) > 10:
+            seen[n] = (x1, y1, x2, y2)
+if not seen:
+    print("0 none 0 0 0"); sys.exit(0)
+order = sorted(seen, key=lambda n: seen[n][1])
+lowest = order[-1].replace(" & ", "-and-").replace(" ", "-")
+clear = [n for n in order if (seen[n][1] + seen[n][3]) // 2 < limit - 20]
+drag = "0 0 0"
+if len(clear) >= 2:
+    top, bottom = seen[clear[0]], seen[clear[-1]]
+    # Near the left edge: a floating keyboard that stayed up starts a tenth of the way in.
+    drag = "%d %d %d" % (top[0] + 40, (bottom[1] + bottom[3]) // 2, (top[1] + top[3]) // 2)
+print(len(seen), lowest, drag)
+PY
+}
+
+CARD="not-reached"; DRAWER="not-opened"; CARD_KB=none; CARD_DRAGS=0; CARD_FOUND=no
+dismiss_anr || true
+focus_activity "$PKG/$NS.SettingsActivity" "SettingsActivity" "am-card" || true
+# 1. Put a keyboard that is up away. BACK goes to the keyboard first whenever one is showing,
+#    so this cannot leave the activity; and it is only pressed when one is showing, because
+#    without one it WOULD leave (run 39783242401).
+CARD_TOUCH=99999
+CARD_KB=$(shown); CARD_KB=${CARD_KB#mInputShown=}; CARD_KB=${CARD_KB:-unknown}
+if [ "$CARD_KB" = "true" ]; then
+  adb shell input keyevent KEYCODE_BACK; sleep 3
+  CARD_AFTER=$(shown); CARD_AFTER=${CARD_AFTER#mInputShown=}
+  CARD_KB="true>${CARD_AFTER:-unknown}"
+  if [ "$CARD_AFTER" = "true" ]; then
+    # It would not go. This section touches the screen 40px from the left edge. A floating
+    # keyboard starts further in than that (a tenth of the width), so it is simply beside the
+    # touches; a docked one spans the width, and then drags and taps must stay above it.
+    CARD_RECT=$(ime_frame_rect)
+    set -- $CARD_RECT
+    [ -n "${2:-}" ] && [ "${1:-0}" -le 60 ] && CARD_TOUCH=$2
+  fi
+  # Had the report of a keyboard been stale, that BACK left the activity. Come back to it.
+  case "$(focus)" in
+    *SettingsActivity*) ;;
+    *) CARD_KB="$CARD_KB(left-activity)"
+       focus_activity "$PKG/$NS.SettingsActivity" "SettingsActivity" "am-card-again" || true ;;
+  esac
+fi
+# 2. Open the sheet, unless it is open already (no hamburger, section items on screen).
+dumpui "$OUT/ui-card-land.xml"
+C=$(nodecenter_desc "$OUT/ui-card-land.xml" 'sections menu')
+read -r DI_N _rest <<< "$(drawer_items "$OUT/ui-card-land.xml")"
+if [ -n "$C" ]; then
+  adb shell input tap $C; sleep 3
+elif [ "${DI_N:-0}" -lt 3 ]; then
+  info "card: neither the hamburger nor an open sheet is on screen ($(texts "$OUT/ui-card-land.xml"))"
+fi
+# 3. Find the item, dragging the list from its lowest item to its highest until it shows.
+for attempt in 1 2 3 4 5 6; do
+  E="$OUT/ui-card-sheet-$attempt.xml"; dumpui "$E"
+  read -r DI_N DI_LOW DI_X DI_FROM DI_TO <<< "$(drawer_items "$E" "$CARD_TOUCH")"
+  [ "$attempt" -eq 1 ] && DRAWER="first-screen=${DI_N:-0}/19 lowest=${DI_LOW:-none}"
+  DI_LAST="${DI_N:-0}:${DI_LOW:-none}"
+  # The item reads "Information & Actions"; the dump escapes the ampersand. "Information" alone
+  # would also match the version card's title in a pane behind the sheet.
+  C=$(nodecenter "$E" 'Information.{1,9}Actions')
+  if [ -n "$C" ]; then
+    set -- $C
+    if [ "$2" -lt $(( CARD_TOUCH - 20 )) ]; then
+      # Tapped near the left edge for the same reason the drags run there.
+      CARD_X=$1; [ "${DI_X:-0}" -gt 0 ] && CARD_X=$DI_X
+      adb shell input tap "$CARD_X" "$2"; sleep 3
+      CARD_FOUND=yes
+      break
+    fi
+  fi
+  [ "$attempt" -eq 6 ] && break
+  if [ "${DI_FROM:-0}" -gt "${DI_TO:-0}" ] && [ "${DI_TO:-0}" -gt 0 ]; then
+    adb shell input swipe "$DI_X" "$DI_FROM" "$DI_X" "$DI_TO" 600; sleep 2
+    CARD_DRAGS=$(( CARD_DRAGS + 1 ))
+  else
+    info "card: nothing to drag between in dump $attempt (${DI_N:-0} items)"
+    break
+  fi
+done
+[ "$DRAWER" = "not-opened" ] || DRAWER="kb=$CARD_KB $DRAWER drags=$CARD_DRAGS last-screen=${DI_LAST:-none} item=$CARD_FOUND"
+# 4. The pane that the item opened.
+if [ "$CARD_FOUND" = "yes" ]; then
+  dumpui "$OUT/ui-card.xml"
+  ct=no; cb=no; ck=no; cs=no
+  grep -q 'Keyboard speed' "$OUT/ui-card.xml" 2>/dev/null && ct=yes
+  grep -q 'Build: ' "$OUT/ui-card.xml" 2>/dev/null && cb=yes
+  grep -qE 'Key presses: [0-9]+' "$OUT/ui-card.xml" 2>/dev/null && ck=yes
+  grep -qE 'Set up from nothing: (once|[0-9]+ times)' "$OUT/ui-card.xml" 2>/dev/null && cs=yes
+  CARD="title=$ct build-line=$cb presses-line=$ck starts-line=$cs"
+  shot 12-speed-card
+elif [ "${DI_N:-0}" -ge 3 ]; then
+  # The sheet is still open (its items were in the last dump): close it behind us.
+  adb shell input keyevent KEYCODE_BACK; sleep 2
+fi
+lat_note "card $CARD drawer $DRAWER"
+
+echo "== 10. a configuration change with the keyboard open (rotation) =="
+# Rotating the screen is the commonest configuration change, and it makes InputMethodService
+# discard its window content and build a new input frame (initViews). The keyboard's own views
+# survive and must be moved into the new frame: a view that still has its old parent cannot be
+# added, and the attempt throws out of onStartInputView -- the keyboard's process dies and the
+# user waits for a cold start. Nothing in this run changed the configuration before 2026-11-12, so
+# nothing would have seen that. Last on purpose: a crash here cannot disturb another section, and
+# by now one-handed, floating and incognito are all on, so the wrappers are exercised too.
+# The witnesses are the process id (the launcher activity lives in the same process, so a
+# surviving pid means nothing died), the crash buffer, and the keyboard being up afterwards.
+ROT_VERDICT=notrun
+if [ -n "${CENTER:-}" ]; then
+  dismiss_anr || true
+  adb shell input keyevent KEYCODE_HOME; sleep 2
+  focus_activity "$PKG/$NS.LauncherActivity" "LauncherActivity" "am-rot" || true
+  adb shell input tap $CENTER; sleep 5
+  RP0=$(adb shell pidof "$PKG" 2>/dev/null | tr -d '\r'); RC0=$(crashln); RS0=$(shown)
+  adb shell settings put system accelerometer_rotation 0 > /dev/null 2>&1
+  adb shell settings put system user_rotation 1 > /dev/null 2>&1; sleep 7
+  shot 13-rotated
+  RS1=$(shown); RP1=$(adb shell pidof "$PKG" 2>/dev/null | tr -d '\r')
+  adb shell settings put system user_rotation 0 > /dev/null 2>&1; sleep 7
+  dismiss_anr || true
+  focus_activity "$PKG/$NS.LauncherActivity" "LauncherActivity" "am-rot-back" || true
+  adb shell input tap $CENTER; sleep 5
+  shot 14-rotated-back
+  RS2=$(shown); RP2=$(adb shell pidof "$PKG" 2>/dev/null | tr -d '\r'); RC2=$(crashln)
+  RNEW=none; [ "$RC2" = "$RC0" ] || RNEW="$RC2"
+  if [ "$RS0" != "mInputShown=true" ] || [ -z "$RP0" ]; then
+    # The keyboard was not up before the rotation, so nothing was put to the test.
+    ROT_VERDICT=unv
+    info "rotation unverifiable: before it, shown='$RS0' pid='${RP0:-none}'"
+  elif [ "$RP0" = "$RP1" ] && [ "$RP0" = "$RP2" ] && [ "$RNEW" = "none" ] && [ "$RS2" = "mInputShown=true" ]; then
+    ROT_VERDICT=ok
+    pass "the keyboard survived a rotation there and back: pid $RP0 throughout, $RS2, no new crash"
+  else
+    ROT_VERDICT=fail
+    fail "the keyboard did not survive a rotation: pid ${RP0:-none}>${RP1:-none}>${RP2:-none} shown ${RS0#mInputShown=}>${RS1#mInputShown=}>${RS2#mInputShown=} new-crash='$RNEW'"
+  fi
+  lat_note "rotate verdict=$ROT_VERDICT pid=${RP0:-none}>${RP1:-none}>${RP2:-none} shown=${RS0#mInputShown=}>${RS1#mInputShown=}>${RS2#mInputShown=} new-crash=$(printf '%s' "$RNEW" | cut -c1-160)"
+else
+  lat_note "rotate verdict=notrun (no text field was found in section 5)"
+fi
 
 write_summary
 echo "SUMMARY $(cat "$OUT/summary.txt" 2>/dev/null)"

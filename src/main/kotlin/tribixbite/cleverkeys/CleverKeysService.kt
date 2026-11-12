@@ -382,14 +382,31 @@ class CleverKeysService : InputMethodService(),
 
     override fun onCreate() {
         super.onCreate()
+        // Start-up timing (LatencyMeter): each mark below closes the step named in it. They are
+        // plain statements between the existing ones on purpose -- nothing is wrapped or moved.
+        LatencyMeter.createBegin(msSinceProcessStart())
+        // Write down that the keyboard was set up from nothing just now (ProcessStartLog): how
+        // often that happens on the owner's phone is the one thing about "it appears late" that
+        // neither the code nor the emulator can say. A few bytes, on a thread of its own.
+        // onDestroy writes the matching "let go of normally" line.
+        val startLogContext = applicationContext
+        Thread({
+            try {
+                ProcessStartLog.record(processStartLogFile(startLogContext), System.currentTimeMillis())
+            } catch (_: Exception) {
+                // No storage yet, no record: never the keyboard's problem.
+            }
+        }, "ck-start-log").start()
 
         // Store instance for static access (needed by ShortSwipeCustomizationActivity)
         _instance = this
 
         // Initialize ComposeKeyData early (required for shift key modifier operations)
         ComposeKeyData.initialize(this)
+        LatencyMeter.mark("compose")
 
         val prefs = DirectBootAwarePreferences.get_shared_preferences(this)
+        LatencyMeter.mark("prefs")
         _handler = Handler(mainLooper)
 
         // Create bridge for KeyEventHandler to KeyboardReceiver delegation (v1.32.390)
@@ -410,9 +427,11 @@ class CleverKeysService : InputMethodService(),
         // Installed BEFORE initGlobalConfig, whose refresh resolves the first effective theme.
         val themeProvider = tribixbite.cleverkeys.theme.ThemeProvider.getInstance(this)
         Config.themeAvailability = themeProvider::isAvailable
+        LatencyMeter.mark("theme")
 
         // Initialize global config for KeyEventHandler
         Config.initGlobalConfig(prefs, resources, _keyeventhandler, foldStateTracker.isUnfolded())
+        LatencyMeter.mark("config")
 
         // Prewarm emoji keyword index for fast search (loads in background on IO thread)
         EmojiKeywordIndex.prewarm(this)
@@ -465,10 +484,13 @@ class CleverKeysService : InputMethodService(),
 
         // Check if we're the default IME and remind user if not
         checkAndPromptDefaultIME()
+        LatencyMeter.mark("listeners")
         _keyboardView = inflate_view(R.layout.keyboard) as Keyboard2View
         _keyboardView.reset()
+        LatencyMeter.mark("inflate")
         Logs.set_debug_logs(resources.getBoolean(R.bool.debug_logs))
         ClipboardHistoryService.on_startup(this, _keyeventhandler)
+        LatencyMeter.mark("clipboard")
 
         // Fold state change callback is handled by ConfigurationManager
 
@@ -500,9 +522,11 @@ class CleverKeysService : InputMethodService(),
 
         // Suggestion bridge (v1.32.406: extracted to SuggestionBridge; built by the graph)
         _suggestionBridge = _graph.suggestionBridge
+        LatencyMeter.mark("graph")
 
         // Wire the view's service handle (unconditional) and load prediction models if enabled
         _graph.wireSwipeTypingComponents()
+        LatencyMeter.mark("swipe")
 
         // Initialize debug logging manager (v1.32.384)
         _debugLoggingManager = DebugLoggingManager(this, packageName)
@@ -530,10 +554,71 @@ class CleverKeysService : InputMethodService(),
 
         // Register broadcast receiver for debug mode control (v1.32.384: delegated to DebugLoggingManager)
         _debugLoggingManager.registerDebugModeReceiver(this)
+        LatencyMeter.mark("propagate")
+        startFrameTiming()
+        LatencyMeter.createEnd()
+    }
+
+    /** How long this process had been alive when `onCreate` began; negative when unknown. */
+    private fun msSinceProcessStart(): Long = try {
+        android.os.SystemClock.elapsedRealtime() - android.os.Process.getStartElapsedRealtime()
+    } catch (_: Throwable) {
+        -1L
+    }
+
+    // The platform's own per-frame timing for the keyboard window, delivered on a thread of its
+    // own so that measuring the UI thread does not add work to it. API 24, which is minSdk.
+    private var _frameTimingThread: android.os.HandlerThread? = null
+    private val _frameTimingListener =
+        android.view.Window.OnFrameMetricsAvailableListener { _, fm, _ ->
+            LatencyMeter.frame(
+                totalNanos = fm.getMetric(android.view.FrameMetrics.TOTAL_DURATION),
+                waitNanos = fm.getMetric(android.view.FrameMetrics.UNKNOWN_DELAY_DURATION),
+                inputNanos = fm.getMetric(android.view.FrameMetrics.INPUT_HANDLING_DURATION) +
+                    fm.getMetric(android.view.FrameMetrics.ANIMATION_DURATION),
+                layoutNanos = fm.getMetric(android.view.FrameMetrics.LAYOUT_MEASURE_DURATION),
+                drawNanos = fm.getMetric(android.view.FrameMetrics.DRAW_DURATION),
+                syncNanos = fm.getMetric(android.view.FrameMetrics.SYNC_DURATION),
+                gpuNanos = fm.getMetric(android.view.FrameMetrics.COMMAND_ISSUE_DURATION) +
+                    fm.getMetric(android.view.FrameMetrics.SWAP_BUFFERS_DURATION),
+                windowShown = fm.getMetric(android.view.FrameMetrics.FIRST_DRAW_FRAME) != 0L
+            )
+        }
+
+    private fun startFrameTiming() {
+        try {
+            val win = window?.window ?: return
+            val thread = android.os.HandlerThread("ck-frame-timing").also { it.start() }
+            _frameTimingThread = thread
+            win.addOnFrameMetricsAvailableListener(_frameTimingListener, Handler(thread.looper))
+        } catch (t: Throwable) {
+            // Timing is an instrument. It must never be the reason the keyboard fails to start.
+            Log.w(LatencyMeter.TAG, "frame timing unavailable: ${t.javaClass.simpleName}")
+        }
+    }
+
+    private fun stopFrameTiming() {
+        try {
+            window?.window?.removeOnFrameMetricsAvailableListener(_frameTimingListener)
+        } catch (_: Throwable) {
+            // Never registered, or the window is already gone.
+        }
+        _frameTimingThread?.quitSafely()
+        _frameTimingThread = null
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        // The keyboard is being let go of in the ordinary way (another keyboard was chosen, the
+        // system unbound this one). Written down so that the next start is not mistaken for one
+        // that follows a kill (ProcessStartLog). At once, not on a thread: nothing promises this
+        // process another second. A few hundred bytes, and never on a typing path.
+        try {
+            ProcessStartLog.recordStop(processStartLogFile(applicationContext), System.currentTimeMillis())
+        } catch (_: Exception) {
+            // No storage, no record.
+        }
+        stopFrameTiming()
         // Tile: stop the deferred-show loop so no callback outlives the service.
         _tileShow.cancel()
         if (::_handler.isInitialized) _handler.removeCallbacks(_tileShowTick)
@@ -751,6 +836,14 @@ class CleverKeysService : InputMethodService(),
      */
     override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
         super.onStartInput(attribute, restarting)
+        // A new input session, or the same field restarted by its app (which apps do after
+        // changing the text themselves): nothing the keyboard believed about the word at the
+        // caret is known to hold, so the next caret report gets a prompt re-read whatever it
+        // looks like (TypedLetterEcho, CursorSyncPace).
+        if (::_contextTracker.isInitialized) {
+            _contextTracker.noteInputStarted(attribute?.initialSelStart ?: -1, attribute?.initialSelEnd ?: -1)
+        }
+        if (::_inputCoordinator.isInitialized) _inputCoordinator.onInputStarted()
         // Tile: a deferred show armed for another app's editor must not land here.
         if (_tileShow.hasPending) tileLog { "onStartInput ${attribute?.packageName} while a deferred show is armed" }
         _tileShow.onStartInput(attribute?.packageName)
@@ -760,6 +853,13 @@ class CleverKeysService : InputMethodService(),
     }
 
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
+        LatencyMeter.showBegin()
+        // A different field earns its suggestion band afresh. `restarting` is the SAME field
+        // (many editors restart input while being typed in), where the band must not move --
+        // unless the restart is the app emptying the field (a sent message), which the caret
+        // position says: 0 lets the band go. See StripBandLatch.
+        if (!restarting) _stripBand.onNewField()
+        _stripBand.onCaret(info.initialSelStart, info.initialSelEnd, _suggestionBar?.hasSuggestions() == true)
         _formAtFinishView = null
         _viewEditor = editorRefOf(info)
         _keyboardView.cancelContinuousSwipe()
@@ -769,6 +869,7 @@ class CleverKeysService : InputMethodService(),
         // Pass the editor's package so password-manager exclusion identifies the app the user
         // is actually typing into, instead of a cached UsageStats guess from another app.
         ClipboardHistoryService.on_keyboard_shown(info.packageName)
+        LatencyMeter.showMark("clip")
         // NOTE: Config refresh is handled by SharedPreferences listener (onSharedPreferenceChanged)
         // We only do initial config load here if config is completely null (shouldn't happen normally)
         if (_config == null) {
@@ -796,6 +897,8 @@ class CleverKeysService : InputMethodService(),
             setInputView(_keyboardView)
         }
 
+        LatencyMeter.showMark("view")
+
         // Initialize subtype and layout if not already done (v1.32.413: ensure layoutManager is ready)
         // This is needed for receiver initialization which depends on layoutManager
         if (_layoutManager == null) {
@@ -807,6 +910,7 @@ class CleverKeysService : InputMethodService(),
         // Lazy initialization: creates receiver on first call, returns existing on subsequent calls
         // Note: createReceiverIfNeeded() may return null if layoutManager not ready (rare edge case)
         _receiver = _graph.createReceiverIfNeeded(_receiver, _layoutManager, _subtypeManager)
+        LatencyMeter.showMark("receiver")
 
         // NOTE: Content pane state is now managed by KeyboardReceiver.resetContentPaneState()
         // which is called in onFinishInputView. No visibility manipulation needed here.
@@ -824,20 +928,24 @@ class CleverKeysService : InputMethodService(),
         }
 
         _keyboardView.setKeyboard(layout ?: current_layout())
+        LatencyMeter.showMark("layout")
         // WP9 R-1 step 8: background-warm the geometric engine when this layout routes to it,
         // so the first non-QWERTY swipe avoids the synchronous template-index build. No-op
         // unless swipe typing is on AND swipe_engine_mode is hybrid/geometric.
         if (::_inputCoordinator.isInitialized) _inputCoordinator.prewarmGeometricEngine()
         _keyeventhandler.started(info)
+        LatencyMeter.showMark("editor")
 
         // Setup prediction views (v1.32.400: extracted prediction/swipe setup logic)
         // Handles initialization, suggestion bar creation, keyboard dimensions, and cleanup
         installPredictionViews(info)
+        LatencyMeter.showMark("field")
 
         // Key positions are read per swipe from Keyboard2View.geometryParams()
         // The manual post() call here was causing redundant "key positions set" logs and layout updates
 
         _config?.let { Logs.debug_startup_input_view(info, it) }
+        LatencyMeter.showStarted()
     }
 
     /**
@@ -862,6 +970,7 @@ class CleverKeysService : InputMethodService(),
             _receiver,
             _emojiPane
         ).setupPredictionViews(_suggestionBar, _inputViewContainer, _contentPaneContainer, _topPane, _scrollView)
+        LatencyMeter.showMark("strip")
 
         // Update components from setup result
         _suggestionBar = predictionSetup.suggestionBar
@@ -886,6 +995,7 @@ class CleverKeysService : InputMethodService(),
         val stripOccupied = _suggestionBar?.isOccupied() == true
         applyStripHeight(stripOccupied)
         setInputView(predictionSetup.inputView)
+        LatencyMeter.showMark("install")
 
         // #41 v5: Emoji search manager persists across onStartInputView calls
         // Only create once; it gets initialized when emoji pane is first opened
@@ -916,13 +1026,14 @@ class CleverKeysService : InputMethodService(),
         // While minimized the requested view is remembered as the one to expand back to, and
         // the minimized view stays (gh #175).
         val shown = _minimizer.resolve(v)
-        val parent = shown.parent
-        if (parent != null && parent is ViewGroup) {
-            parent.removeView(shown)
-        }
         // One-handed mode (HeliBoard gap analysis phase 2): the platform gets the wrapper, and the
         // requested view becomes its scaled child. host() is idempotent, so the repeated calls this
         // sees — theme change, pane swap, minimize/expand — never nest a root inside a root.
+        //
+        // `shown` is NOT pulled out of its parent first, as it used to be. host() moves a view
+        // that lives somewhere else by itself; and removing one that is already hosted defeated
+        // the idempotence host() was written for -- every call, i.e. every focused text field,
+        // took the keyboard out of the window and put it back.
         //
         // WindowLayoutUtils is unaffected: it configures android.R.id.inputArea, the platform
         // container this root sits inside, and sets that container's background transparent, which
@@ -935,7 +1046,23 @@ class CleverKeysService : InputMethodService(),
         root.scaleSuppressed = _minimizer.style != null || floatingActive()
         val floated = floatingRoot().host(root)
         floated.setState(floatingActive())
-        super.setInputView(floated)
+        // Hand the outermost view to the platform only when it is not already where the
+        // platform keeps it -- and when it is still attached to a frame the platform has since
+        // replaced (any configuration change does that), detach it first, or the add throws and
+        // takes the keyboard's process with it. Both cases are spelled out in InputViewInstall.
+        val frame = window?.window?.findViewById<View>(android.R.id.inputArea)
+        when (InputViewInstall.decide(floated.parent, frame)) {
+            InputViewInstall.Action.KEEP -> Unit
+            InputViewInstall.Action.INSTALL -> {
+                LatencyMeter.installed()
+                super.setInputView(floated)
+            }
+            InputViewInstall.Action.MOVE -> {
+                (floated.parent as? ViewGroup)?.removeView(floated)
+                LatencyMeter.installed()
+                super.setInputView(floated)
+            }
+        }
         updateSoftInputWindowLayoutParams()
         applyBackdropBlur()
         root.requestApplyInsets()
@@ -983,6 +1110,13 @@ class CleverKeysService : InputMethodService(),
         fr.onDragEnd = { persistFloatingPosition() }
         fr.onResize = { dx -> resizeFloating(dx) }
         fr.onResizeEnd = { persistFloatingWidth() }
+        // The input view's own height is the keyboard's height. Count the times it changes
+        // while the keyboard is open: each one resizes the app behind it as well.
+        fr.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+            val height = bottom - top
+            val oldHeight = oldBottom - oldTop
+            if (height > 0 && oldHeight > 0 && height != oldHeight) LatencyMeter.resized()
+        }
         // The window is WRAP_CONTENT around this root, so the height the y clamp needs only exists
         // after the first layout pass -- and changes when the suggestion strip, toolbar or a
         // rotation changes it. Re-resolve the geometry when that happens, otherwise a stored
@@ -1541,6 +1675,16 @@ class CleverKeysService : InputMethodService(),
         candidatesEnd: Int
     ) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
+        // Is this report only the caret arriving where a letter just typed put it? Asked of
+        // every report, before anything filters them, so the bookkeeping never misses one
+        // (TypedLetterEcho). The answer changes one thing: how soon the editor is re-read below.
+        val afterTypedLetter = _contextTracker.noteSelection(newSelStart, newSelEnd)
+        // The suggestion band is held open while a field is typed in and let go when the caret
+        // is back at the very start (the field was emptied). Uses the position just reported:
+        // no call to the app. False on an ordinary keystroke, so nothing is resized then.
+        if (_stripBand.onCaret(newSelStart, newSelEnd, _suggestionBar?.hasSuggestions() == true)) {
+            applyStripHeight(_suggestionBar?.isOccupied() == true)
+        }
         // Selection UI sees every callback, including ranges owned by a suffix
         // edit. Only manual/unowned movement reaches phrase and cursor tracking.
         _keyeventhandler.selection_updated(oldSelStart, newSelStart)
@@ -1556,13 +1700,22 @@ class CleverKeysService : InputMethodService(),
                     newPosition = newSelStart,
                     ic = currentInputConnection,
                     language = _config?.primary_language ?: "en",
-                    editorInfo = currentInputEditorInfo
+                    editorInfo = currentInputEditorInfo,
+                    afterTypedLetter = afterTypedLetter
                 )
             }
         }
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
+        // One or two lines of numbers per showing (LatencyMeter): durations and counts only,
+        // never text. This is the channel the emulator smoke test reads.
+        // On unless someone lowers the tag (`setprop log.tag.CKLatency WARN`).
+        if (Log.isLoggable(LatencyMeter.TAG, Log.INFO)) {
+            for (line in LatencyMeter.sessionEnd()) Log.i(LatencyMeter.TAG, line)
+        } else {
+            LatencyMeter.sessionEnd()
+        }
         _keyboardView.cancelContinuousSwipe()
         _suggestionHandler.onEditorSessionChanged()
         super.onFinishInputView(finishingInput)
@@ -1840,11 +1993,15 @@ class CleverKeysService : InputMethodService(),
      * [KeyboardReceiver.hideContentPane] asks this when it puts the strip back after a content
      * pane, so closing the clipboard cannot resurrect an empty band.
      */
-    fun suggestionStripHeight(fullHeightPx: Int): Int = SuggestionStripPolicy.heightPx(
+    fun suggestionStripHeight(fullHeightPx: Int): Int = _stripBand.heightPx(
         _suggestionBar?.isOccupied() == true,
+        _suggestionBar?.hasSuggestions() == true,
         _config?.suggestion_strip_always_visible ?: false,
         fullHeightPx
     )
+
+    /** Keeps the strip's band open for the rest of a field once it has been typed in; see the class. */
+    private val _stripBand = StripBandLatch()
 
     private fun applyStripHeight(occupied: Boolean) {
         val top = _topPane ?: return
@@ -1852,8 +2009,9 @@ class CleverKeysService : InputMethodService(),
         if (top.childCount > 0 && top.getChildAt(0) !== _scrollView) return
         val full = _stripFullHeightPx
         if (full <= 0) return
-        val target = SuggestionStripPolicy.heightPx(
+        val target = _stripBand.heightPx(
             occupied,
+            _suggestionBar?.hasSuggestions() == true,
             _config?.suggestion_strip_always_visible ?: false,
             full
         )

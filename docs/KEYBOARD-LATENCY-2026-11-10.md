@@ -1,5 +1,9 @@
 # Keyboard latency: first investigation
 
+**Later (2026-11-12):** the second pass built the instruments this one lacked and measured:
+[`KEYBOARD-LATENCY-2026-11-12.md`](KEYBOARD-LATENCY-2026-11-12.md). Read that one for what was
+found; this note stays as the record of what was changed before anything could be timed.
+
 The report is that this keyboard feels slow both to appear and while typing. No device trace or
 before/after timings are available, so these are targeted reductions in work, **not a demonstrated
 root cause or a measured fix**.

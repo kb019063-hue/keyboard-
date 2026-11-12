@@ -433,6 +433,9 @@ android {
     // LOCAL_BUILD env var enables verbose logging for local development
     // Set by build-on-termux.sh, not set by GitHub Actions
     def isLocalBuild = System.env.LOCAL_BUILD == "true"
+    // Whether the `debug` build type is debuggable; see the comment on `debug` below.
+    def debuggableOverride = project.findProperty('ckDebuggable')
+    def debugBuildDebuggable = debuggableOverride != null ? debuggableOverride.toString().toBoolean() : isLocalBuild
 
     release {
       // REPRODUCIBILITY: Disable VCS info to prevent version-control-info.textproto (AGP 8.3+)
@@ -471,7 +474,23 @@ android {
       applicationIdSuffix '.debug'
       minifyEnabled false
       shrinkResources false
-      debuggable true
+      // NOT debuggable when CI builds it (2026-11-12). This build type is the APK the owner
+      // installs and types on all day, and `android:debuggable="true"` is not a label: it tells
+      // ART to run the app in its debuggable mode -- compiled code keeps every local alive and
+      // gives up inlining so a debugger can attach at any line -- and Android's own benchmark
+      // documentation tells people never to time such a build. The comment further down has
+      // said since 2026-11-01 that this flag is "a large part of laggy and kinda slow"; the
+      // flag itself was left on.
+      //
+      // What does NOT change: the applicationId (.debug), the committed debug keystore and the
+      // versionCode, so the new APK installs over the old one and keeps its data. What does:
+      // `adb shell run-as` no longer reaches the app's files, which also means a cable and USB
+      // debugging are no longer enough to read a keyboard's clipboard history and learned words.
+      //
+      // A developer at a desk keeps the debugger: LOCAL_BUILD=true (build-on-termux.sh sets it)
+      // or -PckDebuggable=true turns it back on. The emulator smoke test uses the property to
+      // time both variants on one emulator.
+      debuggable debugBuildDebuggable
       // Translation QA (2026-09-29): generate en-XA (accented, ~30% longer) and ar-XB (RTL)
       // pseudolocales for visual long-text/RTL checks. DEBUG ONLY — release stays false.
       pseudoLocalesEnabled true
@@ -540,6 +559,16 @@ android {
     checkReleaseBuilds = true
   }
 
+  // `checkReleaseBuilds` wires a lint-vital pass into `assemble` for every NON-DEBUGGABLE
+  // variant, and since 2026-11-12 the CI-built `debug` type is one (see buildTypes). That gate
+  // was written for release, as the comment above says. `assembleDebug` is what every push
+  // builds; it should not grow a lint pass, or a new way to fail, because of a speed flag.
+  project.tasks.configureEach { t ->
+    if (t.name.startsWith('lintVital') && t.name.endsWith('Debug')) {
+      t.enabled = false
+    }
+  }
+
   testOptions {
     unitTests {
       includeAndroidResources = true
@@ -554,9 +583,14 @@ android {
 
 // A wedged test must not eat the whole job. Measured 2026-11-01: one full-suite run sat inside
 // `testDebugUnitTest` for 90 minutes and produced no result at all, and the job's 180-minute
-// timeout then discarded the entire report (no annotations, no XML). Gradle writes one JUnit XML
-// per class the moment that class finishes, so with a bound in place everything completed is
-// still reported and the missing XML names the class that stalled.
+// timeout then discarded the entire report (no annotations, no XML). The bound below stops the
+// task so that the job's later steps still run and say so.
+//
+// It does NOT leave "everything but the class that stalled", as this comment used to promise.
+// The first time the bound was hit (2026-11-12, run 43242985447) there was no JUnit XML at all,
+// which fits Gradle writing its XML when the task ends rather than class by class. What a
+// stalled run is doing is written down while it is still running, by
+// scripts/ci/test-wedge-watchdog.sh, and reaches the check run as "Long test run" annotations.
 // Memory-hungry engine classes. They decode against the full 98k-word lexicon (and, for the CtC
 // sweeps, every bundled lexicon at once), which the default test heap cannot hold: they fail with
 // `OutOfMemoryError` while the rest of the suite runs in seconds. Giving the whole suite 3 GB was
@@ -576,6 +610,15 @@ tasks.withType(Test).configureEach {
   timeout = java.time.Duration.ofMinutes(45)
   if (findProperty('testMaxHeap')) {
     maxHeapSize = findProperty('testMaxHeap').toString()
+  }
+  // A log of the test JVM's garbage collections, which scripts/ci/test-gc-summary.py turns into
+  // one line of the full-suite report: how much of the run went to the collector, and how full
+  // the heap was by the end. The whole suite shares one JVM, so that is how a run that is slow
+  // because it is out of room is told from one that is stuck. Only when asked for
+  // (`-PtestGcLog=<absolute path in a directory that exists>`): a path the JVM cannot open
+  // stops it from starting, and then no test runs at all.
+  if (findProperty('testGcLog')) {
+    jvmArgs "-Xlog:gc,gc+init:file=${findProperty('testGcLog')}:uptime:filecount=0"
   }
   // Which half of the split this invocation is.
   if (findProperty('onlyHeavy') == 'true') {
@@ -1261,6 +1304,16 @@ tasks.register('runPureTests', JavaExec) {
     // KeyFillAlpha is a pure ARGB bit operation (2026-11-01: it no longer calls
     // android.graphics.Color, which the stub answers with 0 in a JVM test).
     'tribixbite.cleverkeys.KeyFillAlphaTest',
+    // 2026-11-12: the keyboard's own timing instrument; its arithmetic and its log format.
+    'tribixbite.cleverkeys.LatencyMeterTest',
+    // 2026-11-12: the input view is handed to the platform once, and moved (not re-added)
+    // after a configuration change.
+    'tribixbite.cleverkeys.InputViewInstallTest',
+    // 2026-11-12: the editor is no longer re-read after every letter of a word; which caret
+    // reports are only a typed letter's echo, and how long the re-read may wait.
+    'tribixbite.cleverkeys.TypedLetterEchoTest',
+    // 2026-11-12: how often the keyboard was set up from nothing (the Keyboard speed card).
+    'tribixbite.cleverkeys.ProcessStartLogTest',
   ]
 
   mainClass = 'org.junit.runner.JUnitCore'

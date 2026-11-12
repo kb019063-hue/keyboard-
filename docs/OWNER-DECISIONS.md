@@ -134,6 +134,24 @@ What that does and does not mean:
 - **Never let a locale story block English work**, and never spend a CI run on it.
 - If the owner ever adds a language, that is when a speaker gets involved — not before.
 
+## Speed changes the owner has NOT yet ruled on (2026-11-12)
+
+The owner asked for the keyboard to stop being slow, laggy and late. These were chosen by the
+agent to that end, without asking, and none has been tried on the phone. They are listed here so
+that nobody mistakes them for the owner's wishes, and nobody undoes one without knowing why it
+is there. Write-up: [`KEYBOARD-LATENCY-2026-11-12.md`](KEYBOARD-LATENCY-2026-11-12.md).
+
+| Change | To reverse it |
+|---|---|
+| The APK that CI builds is not debuggable (same id, keystore and versionCode; installs over the old one). | `-PckDebuggable=true` or `LOCAL_BUILD=true` |
+| The suggestion band stays open while a field that has text is typed in; it closes when the field is emptied or another field takes focus. "Always visible" is untouched. | `StripBandLatch` in `SuggestionStripPolicy.kt` |
+| A letter that extends a word no longer makes the keyboard re-read the app's text at once; that waits for a 1.5 s pause. First letters, spaces, Backspace, suggestions, swipes and caret moves are as before. | pass `afterTypedLetter = false` in `CleverKeysService.onUpdateSelection` |
+| The keyboard writes down when it is created and when it is let go of: times only, 120 lines, a private file that is not backed up. Shown on the Keyboard speed card. | remove the two `ProcessStartLog` calls in `CleverKeysService` |
+| The settings drawer's list of sections scrolls. | not something to reverse: sections at the end could not be reached |
+
+If the owner says the band should close at every space again, or that anything here feels worse,
+that is a decision and it moves up into the sections above.
+
 ## Bugs already fixed — do not reintroduce
 
 Full write-up: [`BUG-AUDIT-2026-10-25.md`](BUG-AUDIT-2026-10-25.md).
@@ -148,7 +166,9 @@ geometry. `scripts/ci/emulator-smoke.sh` uses `TB_N=7`.
 
 `focus_activity()` in the smoke script exists because an emulator launcher ANR killed
 Quickstep and left focus checks failing with no dialog to dismiss. Do not delete it
-because a green run no longer shows that failure.
+because a green run no longer shows that failure. Its wait after the third start is there
+for the same launcher on a slow runner (run 43278438056); a run that meets a "not
+responding" dialog now names whose it was in a `Latency` notice (`anr first-dialog`).
 
 ## Where the design notes live
 

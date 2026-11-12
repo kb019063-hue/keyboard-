@@ -53,6 +53,18 @@ below is here because it already cost someone a day.
   problem in this repository** — do not explain one away as "upstream drift". The 204 skips are
   22 classes that assert on artefacts this fork does not vendor; they report SKIPPED through
   `UpstreamArtefacts`, not failed and not passed.
+- **Quote the notice, not the tick.** Until 2026-11-12 the full-suite check stayed green while
+  tests failed: the step meant to fail the job could not
+  ([`docs/TEST-PITFALLS.md`](docs/TEST-PITFALLS.md), CI trap 8). It is gated now
+  (`scripts/ci/full-suite-verdict.sh`), and the habit stands: report
+  `unit tests: N run, 0 failed` with the run id. When a run stalls or crawls instead of failing
+  (it has happened twice), read its **`Test JVM`** notice (how much of the run the garbage
+  collector took and how full the heap was) and its **`Long test run`** annotations (a thread
+  dump of the test JVM taken while it was stuck) before guessing: CI trap 9. The first such
+  notice found the suite at the edge of Gradle's default 512 MB, and at 1 GB it still reached
+  82% at its fullest, which is why the whole-suite step passes `-PtestMaxHeap=2g`; when the
+  notice comes back as a warning that says `NEARLY OUT OF ROOM`, deal with it then (CI trap
+  5), not after the next run that does not finish.
 - **When a test is red, read [`docs/TEST-PITFALLS.md`](docs/TEST-PITFALLS.md) before "fixing" it.**
   That file is the catalogue of the twelve ways tests in this repo have lied — entire classes
   passing with the feature switched off, assertions on a device path a stub cannot produce, source
@@ -62,11 +74,24 @@ below is here because it already cost someone a day.
 
 ## The installed build is the DEBUG variant
 
-`build.gradle` gives debug `applicationIdSuffix ".debug"`, `minifyEnabled false`,
-`debuggable true`, and a stable committed keystore so builds install as upgrades. That is the APK
-the owner actually uses, so **debug-only costs are user-visible costs** — verbose logging used to
-be forced on here and made typing feel slow. Keep `ENABLE_VERBOSE_LOGGING` opt-in
-(`LOCAL_BUILD=true`), and gate anything per-frame or per-touch behind it.
+`build.gradle` gives debug `applicationIdSuffix ".debug"`, `minifyEnabled false`, and a stable
+committed keystore so builds install as upgrades. That is the APK the owner actually uses, so
+**debug-only costs are user-visible costs** — verbose logging used to be forced on here and made
+typing feel slow. Keep `ENABLE_VERBOSE_LOGGING` opt-in (`LOCAL_BUILD=true`), and gate anything
+per-frame or per-touch behind it.
+
+Since 2026-11-12 that APK is **not debuggable** when CI builds it (`debuggable
+debugBuildDebuggable`). ART runs a debuggable app without its optimised code, and the owner had
+been typing on exactly that. Measured on the CI emulator, same commit, one sample each (run
+43142217574): `onCreate` 271 ms against 742 ms, first picture 382 ms against 585 ms. What follows
+from it:
+
+- `adb shell run-as` does not reach the app's files, a debugger cannot attach, and
+  `BuildConfig.DEBUG` is false in the installed app. Do not hang behaviour on `BuildConfig.DEBUG`.
+- `LOCAL_BUILD=true` or `-PckDebuggable=true` builds the debuggable variant again. A commit whose
+  message contains `[ab-debuggable]` makes the emulator smoke test build both and time both.
+- applicationId, keystore and versionCode did not change: it installs over the old app and keeps
+  its data.
 
 The same goes for what a log line says. `R.bool.debug_logs` (the dump of each focused field's
 `EditorInfo`) follows the same switch, and an ungated line must not carry what the user typed or
@@ -77,6 +102,29 @@ gate one.
 A minified release APK is faster but has a different `applicationId`, so it cannot install over
 the debug app — it arrives as a fresh app and loses settings, learned words and clipboard history
 unless they are migrated through backup/restore.
+
+## Measuring speed
+
+"It feels slow" is answered with a number or not at all
+([`docs/KEYBOARD-LATENCY-2026-11-12.md`](docs/KEYBOARD-LATENCY-2026-11-12.md)).
+
+- `LatencyMeter` times the keyboard from inside: one `CKLatency` log line per process start and
+  one per showing. Durations and counts only. Never put text, a word or an app's name in it.
+- The emulator smoke test (section 6c) types a fixed sentence and ships those lines as `Latency`
+  notices on the check run. **Compare counts between runs** (`sync=`, `strip=`, `resize=`,
+  `install=`, `attach=`), **not durations**: one runner was three times slower than the next, and
+  the emulator draws in software and keeps its test field in the keyboard's own process.
+- The owner reads the same numbers on the phone: Settings, Information & Actions, "Keyboard
+  speed" (tap refreshes, long-press copies). Its second line comes from `ProcessStartLog` and says
+  how often the keyboard was set up from nothing and how often that followed a kill. Ask for that
+  text before theorising about the phone.
+- The phone is a Huawei with a 1080x2280 screen; its Android version is not recorded. Do not
+  assume that anything needing Android 12 or later (window blur, for one) runs there, and do not
+  assume the emulator's API 34 behaviour either.
+- While a word is being typed, the app's text is not re-read after each letter
+  (`TypedLetterEcho`, `CursorSyncPace`). Anything new that writes to the editor from
+  `SuggestionHandler` must say so first (`noteNotATypedLetter()`), or a letter's caret report
+  could be mistaken for it; `TypedLetterEchoTest` pins the existing ones.
 
 ## Layout files
 

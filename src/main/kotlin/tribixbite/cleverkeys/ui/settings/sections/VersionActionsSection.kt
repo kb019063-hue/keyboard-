@@ -12,6 +12,7 @@ import tribixbite.cleverkeys.R
 import tribixbite.cleverkeys.SettingsActivity
 import tribixbite.cleverkeys.ui.settings.CollapsibleSettingsSection
 import tribixbite.cleverkeys.ui.settings.GitHubInfoCard
+import tribixbite.cleverkeys.ui.settings.LatencyInfoCard
 import tribixbite.cleverkeys.ui.settings.VersionInfoCard
 import tribixbite.cleverkeys.ui.settings.resetAllSettings
 
@@ -24,6 +25,9 @@ internal fun SettingsActivity.VersionActionsSection() {
                 onExpandChange = { infoSectionExpanded = it }
             ) {
                 VersionInfoCard()
+
+                // The keyboard's own timings: start-up, opening, key presses (LatencyMeter).
+                LatencyInfoCard()
 
                 // GitHub release info
                 GitHubInfoCard()

@@ -76,7 +76,10 @@ run_one() {  # $1 = scenario
   rm -rf "$WORK/out"; mkdir -p "$WORK/out"
   python3 "$HERE/scenarios.py" write "$sc" > /dev/null || return 2
   want=$(python3 "$HERE/scenarios.py" expect "$sc")
-  out=$(PATH="$WORK/bin:$PATH" bash "$WORK/harness.sh" 2>&1)
+  # OUT is set here as well as in the harness's glue: the script's opening lines create $OUT
+  # and its latency file before the glue runs, and without this they did so as ./artifacts in
+  # whatever directory the harness was started from -- the repository root.
+  out=$(OUT="$WORK/out" PATH="$WORK/bin:$PATH" bash "$WORK/harness.sh" 2>&1)
   got=$(verdict_of "$out")
   local wf wn wframe wvoice wwarn gf gn gframe gvoice gwarn
   IFS=' ' read -r wf wn wframe wvoice wwarn <<< "$want"

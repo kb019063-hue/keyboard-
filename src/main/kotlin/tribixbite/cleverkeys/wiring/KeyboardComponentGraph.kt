@@ -104,6 +104,7 @@ class KeyboardComponentGraph(
         MemoryProbe.mark("init.contractionManager", settle = true) {
             "known=${contractionManager.getTotalKnownCount()}"
         }
+        LatencyMeter.mark("contractions")
 
         // Clipboard manager (v1.32.349)
         val clipboardManager = ClipboardManager(service, config)
@@ -111,12 +112,14 @@ class KeyboardComponentGraph(
         // Prediction context tracker (v1.32.342)
         val contextTracker = PredictionContextTracker()
         MemoryProbe.mark("init.clipboard+contextTracker", settle = true)
+        LatencyMeter.mark("clipmgr")
 
         // Prediction coordinator (v1.32.346)
         val predictionCoordinator = PredictionCoordinator(service, config)
         // v1.1.90: CRITICAL - Must call initialize() to load the dictionary
         predictionCoordinator.initialize()
         MemoryProbe.mark("init.predictionCoordinator", settle = true)
+        LatencyMeter.mark("predict")
 
         // Input coordinator (v1.32.350). SuggestionBar is set later in onStartInputView.
         val inputCoordinator = InputCoordinator(
@@ -155,6 +158,7 @@ class KeyboardComponentGraph(
         // ML data collector (v1.32.370)
         val mlDataCollector = MLDataCollector(service)
         MemoryProbe.mark("init.done", settle = true)
+        LatencyMeter.mark("coordinators")
 
         Managers(
             contractionManager,

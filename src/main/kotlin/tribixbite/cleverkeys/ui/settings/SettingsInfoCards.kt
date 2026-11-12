@@ -34,6 +34,10 @@ import androidx.compose.ui.unit.sp
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.util.Properties
+import tribixbite.cleverkeys.BuildConfig
+import tribixbite.cleverkeys.LatencyMeter
+import tribixbite.cleverkeys.ProcessStartLog
+import tribixbite.cleverkeys.processStartLogFile
 import tribixbite.cleverkeys.R
 import tribixbite.cleverkeys.SettingsActivity
 
@@ -96,6 +100,94 @@ internal fun SettingsActivity.VersionInfoCard() {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
                 lineHeight = 16.sp
+            )
+        }
+    }
+}
+
+/**
+ * The keyboard's own timings ([LatencyMeter]): how long it took to start, to open, and to handle
+ * key presses since its process last started.
+ *
+ * "It feels slow" was answered twice from the code alone because nobody could read a number off
+ * the owner's phone. This card is that number. Tap refreshes it; a long-press copies the lines so
+ * they can be pasted into a report. The lines are numbers and counts only -- nothing typed is
+ * recorded -- and they are diagnostics, so, like the swipe debug log, they are not translated.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun SettingsActivity.LatencyInfoCard() {
+    val context = LocalContext.current
+    val title = stringResource(R.string.settings_latency_title)
+    val hint = stringResource(R.string.settings_latency_hint)
+    val toastCopied = stringResource(R.string.settings_latency_copied)
+    val versionInfo = remember { loadVersionInfo() }
+    var refresh by remember { mutableStateOf(0) }
+    val lines: List<String> = remember(refresh) {
+        val report = LatencyMeter.report(
+            LatencyMeter.buildLabel(
+                versionInfo.getProperty("version"),
+                versionInfo.getProperty("commit"),
+                BuildConfig.DEBUG
+            )
+        )
+        // How often the keyboard had to be set up from nothing lately (ProcessStartLog). Read
+        // from its file, not from memory: a phone that kills the keyboard is exactly the phone
+        // on which this screen opens in a process that has never seen it. A few hundred bytes.
+        val starts = try {
+            ProcessStartLog.summary(
+                ProcessStartLog.read(processStartLogFile(context.applicationContext)),
+                System.currentTimeMillis()
+            )
+        } catch (_: Exception) {
+            null
+        }
+        // Second line, right under the build: it is the first thing to look at.
+        if (starts == null) report else report.take(1) + starts + report.drop(1)
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            // No contentDescription, unlike the version card above: a description replaces the
+            // card's text for a screen reader, and here the text IS the content. The hint line
+            // at the bottom names both gestures.
+            .combinedClickable(
+                onClick = { refresh++ },
+                onLongClick = {
+                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.setPrimaryClip(ClipData.newPlainText("keyboard speed", lines.joinToString("\n")))
+                    Toast.makeText(context, toastCopied, Toast.LENGTH_SHORT).show()
+                }
+            ),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Text(
+                text = title,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground,
+                fontSize = 16.sp
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            for (line in lines) {
+                Text(
+                    text = line,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = hint,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                fontSize = 11.sp,
+                lineHeight = 14.sp
             )
         }
     }
