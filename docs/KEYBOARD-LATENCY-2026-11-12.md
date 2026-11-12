@@ -371,14 +371,18 @@ done, and still has the reason given below: it means making them safe to read wh
 load, in a class that the suggestion code reads in several places and that reloads on every
 change of language.
 
-The emulator does not show a win, and the reason is worth recording rather than leaving out:
-the `contractions` step measured 38 ms on `main` (run 43293833264, `create=130`), 50 ms on
-the first V2 commit (run 43312641372, `create=192`) and 31 ms on the second (run
-43316308878, `create=403`). The step is the same size before and after within the noise,
-because the runner's set-up total moved from 130 ms to 403 ms across runs of the SAME code
-path, and two cores of shared CI CPU will not resolve a 40 ms difference. The claim here is
-therefore the structural one, which the code proves: the parse is not on the path any more.
-The measurement that would settle the number is the one the phone has not given.
+The emulator does not show a win, and the reason is worth recording rather than leaving out.
+The `contractions` step measured **38 ms on `main`** (run 43293833264, `create=130`) and
+**31, 50 and 76 ms on the three V2 commits** (runs 43316308878 `create=403`, 43312641372
+`create=192`, 43318913194 `create=324`). The branch's own spread, 31 to 76 ms, is twice the
+distance between the branch and `main`, and the runner's set-up total moved from 130 ms to
+403 ms across runs of the SAME code path: two cores of shared CI CPU do not resolve a
+40 ms difference. So the emulator neither confirms nor contradicts this change, and the
+number quoted from any one of those runs would be noise dressed as a measurement.
+
+The claim here is therefore the structural one, which the code proves: the parse is not on
+the path any more. The measurement that would settle the number is the one the phone has
+not given.
 
 It is paid only when the keyboard is set up from nothing, so it matters exactly as much as the
 phone kills the keyboard, and the card counts that. If the card's "Slowest set-up steps"
