@@ -31,27 +31,33 @@ Reading it:
   * The machine is at the end (processors, memory), because a small or busy runner is the other
     way a run gets slow.
 
-The first line it ever printed for the whole suite (run 43259344146, 2026-11-12, on Gradle's
-default 512 MB) would have been that warning: 61 full collections, 27 s paused and 94 s of
-concurrent work in a 340 s run, and 475M of 512M still in use after a collection at the end.
-The whole-suite invocation was given `-PtestMaxHeap=1g` because of it, and the next run
-(43266527543) read 36 full collections, 15 s paused, 50 s of concurrent work and 554M of 1024M
-(docs/TEST-PITFALLS.md, CI traps 5 and 9). The split of the full collections was added after
-those two runs, when 36 turned out to be exactly what the one test asks for. That would leave
-25 for want of room in the first run, but it is arithmetic: the log could not be read, only
-its line. The third run (43270987868) printed the split: none for want of room, 36 asked for,
-6.1 s of the 12.1 s paused. It was also the first to print "at its fullest": 762M of 1024M,
-more than the whole of the old limit.
+What it has said so far, about the whole suite (docs/TEST-PITFALLS.md, CI traps 5 and 9):
+  * 43259344146, on Gradle's default 512 MB: 61 full collections, 27 s paused and 94 s of
+    concurrent work in a 340 s run, and 475M of 512M still in use after a collection at the
+    end. It would have been the warning. The invocation was given 1 GB because of it.
+  * 43266527543, at 1 GB: 36 full collections, 15 s paused, 50 s of concurrent work, 554M of
+    1024M at the end. 36 is exactly what the one test asks for, which is why the line now
+    counts those apart.
+  * 43270987868, at 1 GB, the first with the split: none for want of room, 36 asked for (6.1 s
+    of the 12.1 s paused).
+  * 43275303929, at 1 GB, the first with "at its fullest" as it is computed now: 842M of 1024M,
+    82%. More than the whole of the old limit, and three points short of the warning. The
+    invocation was given 2 GB because of it.
+
+"At its fullest" is not what the program needs. G1 lets old garbage lie until the heap is
+nearly half full before it starts to clean it, so a long run that makes a lot of garbage
+drifts up towards half its limit whatever the limit is. The figure means something near the
+top: at 85% and more, five collections in a row could not get the JVM back below that.
 
 How far the figures can be trusted. Each quarter's is the least that any collection left
 behind in the twelfth of the run before that point: what was in use, plus whatever garbage
-that collection did not look at. A program with room to spare reads the same under any limit: the Kotlin
-compiler, logged the same way under limits of 70M, 90M and 1200M, read 18/42/51/57M,
-17/40/52/56M and 16/43/51/59M. The suite did not: 475M under 512M, 554M under 1024M. Two
-things can do that, and they were not told apart: given room, the collector leaves more old
-garbage lying; pressed against its limit, a JVM drops what it is allowed to drop (soft
-references). So compare runs at the same limit, and do not read the smaller figure as a size
-the suite fits in.
+that collection did not look at. A program with room to spare reads the same under any
+limit: the Kotlin compiler, logged the same way under limits of 70M, 90M and 1200M, read
+18/42/51/57M, 17/40/52/56M and 16/43/51/59M. The suite did not: 475M under 512M, 554M under
+1024M. Two things can do that, and they were not told apart: given room, the collector
+leaves more old garbage lying; pressed against its limit, a JVM drops what it is allowed to
+drop (soft references). So compare runs at the same limit, and do not read the smaller
+figure as a size the suite fits in.
 """
 import re
 import sys

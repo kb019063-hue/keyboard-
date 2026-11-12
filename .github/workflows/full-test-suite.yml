@@ -126,26 +126,22 @@ jobs:
           set +e
           # -PtestGcLog: the test JVM logs its collections (build.gradle); summarised below.
           #
-          # -PtestMaxHeap=1g, since 2026-11-12. Until then this invocation ran on Gradle's default,
-          # 512 MB, and the first collection log ever read (run 43259344146) said the suite had
-          # grown to the edge of it: "61 full collections ... paused 27.3 s in all (8.0%) ...
-          # concurrent work 94.5 s; heap left after a collection: 100M, 162M, 283M, 475M at each
-          # quarter of the run, of a possible 512M". A JVM that full does not fail, it slows
-          # down, and a little fuller it slows down a great deal: that is the likeliest account
-          # of the run that sat here until the 45-minute bound (43242985447), though that run
-          # itself left nothing to prove it. The first run at 1 GB (43266527543) read "36 full
-          # collections ... paused 15.4 s in all (3.9%) ... concurrent work 50.0 s; ... 86M,
-          # 156M, 295M, 554M ..., of a possible 1024M": half the collector's work. (36 full
-          # collections are what one test asks for with System.gc(); the line counts those
-          # apart now.) The run after that (43270987868) was the first to say how full the
-          # JVM was at its fullest: 762M, three quarters of the new limit and more than the
-          # whole of the old one. The "Test JVM" annotation says after every run how much of
-          # the limit was used, and turns into a warning from 85%. docs/TEST-PITFALLS.md, CI
-          # traps 5 and 9.
+          # -PtestMaxHeap=2g. Until 2026-11-12 this invocation ran on Gradle's default, 512 MB,
+          # and the first collection log ever read (run 43259344146) said the suite had grown to
+          # the edge of it: "... paused 27.3 s in all (8.0%) ... concurrent work 94.5 s; heap
+          # left after a collection: 100M, 162M, 283M, 475M at each quarter of the run, of a
+          # possible 512M". A JVM that full does not fail, it slows down, and a little fuller
+          # it slows down a great deal: that is the likeliest account of the run that sat here
+          # until the 45-minute bound (43242985447), though that run itself left nothing to
+          # prove it. At 1 GB (three runs, 43266527543 to 43275303929) the collector did half
+          # the work and no full collection was for want of room; but once the line could say
+          # how full the JVM was at its fullest, it said 842M of the 1024M, three points short
+          # of the line's own warning. Hence 2 GB. The "Test JVM" annotation says after every
+          # run how much of the limit was used. docs/TEST-PITFALLS.md, CI traps 5 and 9.
           #
-          # Not 3 GB: that was tried for everything at once on 2026-10-31, engine classes
+          # Not everything in one JVM at 3 GB: that was tried on 2026-10-31, engine classes
           # included, and the run was abandoned after 70 minutes (see the next step).
-          ./gradlew testDebugUnitTest -PskipHeavy=true -PtestMaxHeap=1g \
+          ./gradlew testDebugUnitTest -PskipHeavy=true -PtestMaxHeap=2g \
             -PtestGcLog="$RUNNER_TEMP/test-gc-whole.log" \
             --stacktrace 2>&1 | tee unit-test-output.log
           gradle_exit=$?

@@ -346,9 +346,9 @@ Facts that keep costing time:
    - *Too little, unnoticed.* Everything else ran on Gradle's default, 512 MB, which no file
      here mentioned (one comment called it 2 GB). The first collection log (run 43259344146,
      2026-11-12) showed the suite at the edge of it; trap 9 has the line. The whole-suite
-     invocation now passes `-PtestMaxHeap=1g`. In its first two runs there the suite ended
-     with about 550M in use and stood at 762M at its fullest: more than the whole of the heap
-     it had before.
+     invocation was given 1 GB, and three runs there ended with about 550M in use and stood
+     at 842M at their fullest: more than the whole of the heap the suite had before, and 82%
+     of the new one. It now passes `-PtestMaxHeap=2g`.
 
    The line turns into a warning that says `NEARLY OUT OF ROOM` when, at the JVM's fullest,
    85% of the limit was still in use after a collection. Raising the number is the quick
@@ -427,9 +427,9 @@ Facts that keep costing time:
    of 2026-11-01. It is not proved for either: neither left a log, and the stand-in is not the
    suite.
 
-   What was done: the whole-suite invocation runs with `-PtestMaxHeap=1g` (trap 5), and the
-   line becomes a warning before the room runs out again. **The first run at 1 GB**
-   (43266527543, 4,797 run, 0 failed):
+   What was done: the whole-suite invocation was given more heap (trap 5), 1 GB at first
+   and 2 GB after the three runs described next, and the line becomes a warning before the
+   room runs out again. **The first run at 1 GB** (43266527543, 4,797 run, 0 failed):
 
    ```
    whole suite: test JVM ran 395 s (G1); 219 young and 36 full collections, 37 concurrent
@@ -475,14 +475,35 @@ Facts that keep costing time:
      account above. At 512 MB that moment could only be got through by the collector's last
      resort, and how long that took would have depended on what else was live just then.
      Which test class it is, nobody knows yet.
-   - The warning is at 85%, 870M. The suite's fullest moment is about a hundred megabytes
-     short of it, so expect the warning before long, and treat it as the prompt to look at
-     what the tests keep and not only to raise the number again.
-   - Two details of that line were corrected afterwards, and later lines differ in them. The
-     `-0.0` is a rounding slip. And "at its fullest" is the most that five collections in a
-     row all left behind, but it counted the two pauses inside a concurrent cycle as
-     collections, so the five could be as little as one real collection; it now counts young
-     and full collections only, and may read lower for it.
+   - Two details of that line were corrected afterwards. The `-0.0` is a rounding slip. And
+     "at its fullest" is the most that five collections in a row all left behind, but it
+     counted the two pauses inside a concurrent cycle as collections. Those can read lower
+     than the collections around them (they give back regions that marking found empty), so
+     the figure was too low.
+
+   **The third run at 1 GB** (43275303929, 4,797 run, 0 failed, 10.8 minutes), counting young
+   and full collections only:
+
+   ```
+   whole suite: test JVM ran 372 s (G1); 232 young and 36 full collections, 53 concurrent
+   cycles; the full ones: 0 for want of room (0.0 s), 36 asked for by the code (7.2 s);
+   paused 13.8 s in all (3.7%), longest 269 ms; concurrent work 59.9 s; heap left after a
+   collection: 92M, 156M, 301M, 543M at each quarter of the run and 842M at its fullest, of a
+   possible 1024M; machine: 2 processors, 7932M
+   ```
+
+   842M of 1024M is 82%, three points short of the line's own warning, in a run that showed
+   no other sign of trouble (no full collection for want of room, under 4% paused). That is
+   too close to leave, so **the whole-suite invocation now runs with `-PtestMaxHeap=2g`**.
+   The runner has 7.9 GB and the engine classes' invocation has run at 3 GB beside the same
+   Gradle and Kotlin daemons since 2026-11-02. Do not expect "at its fullest" to fall to
+   the 41% that 842M is of 2 GB: G1 lets old garbage lie until the heap is nearly half full
+   before it starts to clean it, so a long run drifts up towards half its limit whatever
+   the limit is. The figure means something near the top. The line of the first run at
+   2 GB is in pull request #29, and every run since prints its own.
+
+   When the warning does come, treat it as the prompt to look at what the tests keep, and
+   not only to raise the number again.
 
    What was not done: **nobody has looked at what the tests keep.** Half a gigabyte is a
    great deal for 424 classes of unit tests. Bringing it down would shorten every run (in

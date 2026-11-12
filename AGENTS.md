@@ -61,9 +61,10 @@ below is here because it already cost someone a day.
   (it has happened twice), read its **`Test JVM`** notice (how much of the run the garbage
   collector took and how full the heap was) and its **`Long test run`** annotations (a thread
   dump of the test JVM taken while it was stuck) before guessing: CI trap 9. The first such
-  notice found the suite at the edge of its heap, which is why the whole-suite step passes
-  `-PtestMaxHeap=1g`; when the notice comes back as a warning that says `NEARLY OUT OF ROOM`,
-  deal with it then (CI trap 5), not after the next run that does not finish.
+  notice found the suite at the edge of Gradle's default 512 MB, and at 1 GB it still reached
+  82% at its fullest, which is why the whole-suite step passes `-PtestMaxHeap=2g`; when the
+  notice comes back as a warning that says `NEARLY OUT OF ROOM`, deal with it then (CI trap
+  5), not after the next run that does not finish.
 - **When a test is red, read [`docs/TEST-PITFALLS.md`](docs/TEST-PITFALLS.md) before "fixing" it.**
   That file is the catalogue of the twelve ways tests in this repo have lied — entire classes
   passing with the feature switched off, assertions on a device path a stub cannot produce, source
