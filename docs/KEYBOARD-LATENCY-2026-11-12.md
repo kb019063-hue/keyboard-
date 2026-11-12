@@ -19,6 +19,7 @@ measured on a phone.
 | Re-reads of the app's text while typing 21 keys | 21 | 12 | `sync=`: 21 in run 43230232862; 12 in nine of the ten runs since, 10 in the one on a slow runner |
 | `onCreate` of the installed (CI) build | 742 ms (debuggable) | 271 ms | same boot, one sample each |
 | Sections shown by the settings drawer | the 11 that fit; the list did not scroll | all 19: the last one is reached with one drag | smoke 9b, two runs |
+| Apostrophe tables read at set-up | 154 KB of JSON parsed with `org.json` on the main thread | read from a 43 KB binary store: no parse | finding 8 |
 
 What the owner asked about, in order:
 
@@ -313,7 +314,7 @@ the worker has finished that word, the sweep runs on the main thread instead
 (`AutocorrectMemo.get` computes on a miss). A word that is in the dictionary returns at once
 and is not affected.
 
-### 8. Set-up reads its apostrophe tables on the main thread (measured, not changed)
+### 8. Set-up read its apostrophe tables on the main thread (fixed, 2026-11-12)
 
 In three runs running the slowest step of `onCreate` was `contractions`: 79 and 85 ms of 224,
 then 40 of 191; in the next it was second, 58 of 396. Before those it took 13 to 31 ms of 105
@@ -328,13 +329,40 @@ Which file the time goes to was not measured; the large one is the obvious candi
 parser that walks text character by character is the kind of code a debuggable build runs
 slowest, which fits the 395 ms.
 
+**What changed.** The file was not moved off the main thread; it was replaced by a compact
+form of it. `contractions.bin` — the store this repository already ships for the *other*
+contraction file — now carries the pairing STRUCTURE (base -> variants, with the pairing
+frequencies) instead of a flat set of forms with no base at all. The JSON stays the source of
+truth; `scripts/generate_binary_contractions.py` projects it into the store at build time, and
+the app reads 43 KB of bytes instead of parsing 154 KB of JSON.
+
+The point is not the bytes: it is that the parse is gone. `org.json` built a tree of 1,748
+arrays and 1,791 objects on the main thread, and then the loader walked that tree; the store
+is read once, straight into the maps it is going to be used as.
+
+**Why the data is still the data.** The suggestion bar's order is decided by the order of the
+variants under a base, so "the same table" has to mean the same table *in the same order*.
+`ContractionBinaryPairingsTest` reads the shipped store and the shipped JSON and requires
+them to agree on the bases, their order, the variants, their order, and each pairing
+frequency — including "no frequency", which the JSON expresses by omitting the field and the
+store by a sentinel. It also requires the set of known contraction forms to be the same,
+because that set is what the loader's DERIVATION step runs on: a contraction with an
+apostrophe implies a base, and a different set would silently change which bases the keyboard
+offers a variant for. The store is V1-compatible: an old store carries no structure, and the
+loader then reads the JSON, exactly as before.
+
+**What is not claimed.** The phone has not said anything yet, so nothing is claimed about
+what this is worth on it. What can be said is that 154 KB of JSON parsing no longer happens
+on the main thread before the first picture, at every cold start. The other half of this
+finding — loading the tables *beside* the first picture rather than before it — is still not
+done, and still has the reason given below: it means making them safe to read while they
+load, in a class that the suggestion code reads in several places and that reloads on every
+change of language.
+
 It is paid only when the keyboard is set up from nothing, so it matters exactly as much as the
-phone kills the keyboard, and the card counts that. Nothing was changed, for two reasons.
-Loading the tables beside the first picture instead of before it means making them safe to
-read while they load, in a class that the suggestion code reads in several places and that
-reloads on every change of language. And there is no number from the phone. If the card's "Slowest set-up steps" names
-`contractions`, this is the place: a compact form of the large file, or loading it off the
-main thread.
+phone kills the keyboard, and the card counts that. If the card's "Slowest set-up steps"
+names `contractions` on the phone, the remaining half is the place: the same tables, loaded
+beside the first picture instead of before it.
 
 ## What the emulator cannot show
 

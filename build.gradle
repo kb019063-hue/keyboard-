@@ -998,6 +998,11 @@ tasks.register('runPureTests', JavaExec) {
     // `id -> i'd` relaxation to exactly one shipped base, and pins the two English paired
     // sources' overlap (the doubled `I'll` at bar ranks 0+1) as deduped after the merge.
     'tribixbite.cleverkeys.ContractionInjectionPolicyTest',
+    // 2026-11-12: the shipped contraction STORE must say exactly what the shipped JSON says.
+    // The store replaced a 154 KB org.json parse on the main thread at every cold start (the
+    // slowest step of onCreate in three CI runs running), so the substitution is proven here:
+    // same bases in the same order, same variants with the same frequencies, same known set.
+    'tribixbite.cleverkeys.ContractionBinaryPairingsTest',
     'tribixbite.cleverkeys.swipe.geometric.GeoPurityDriftTest',
     'tribixbite.cleverkeys.swipe.geometric.CkdtReaderTest',
     'tribixbite.cleverkeys.swipe.geometric.GeoProjectionTest',

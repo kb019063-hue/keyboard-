@@ -6,10 +6,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
-import java.io.RandomAccessFile
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
-import java.nio.charset.StandardCharsets
 
 /**
  * Pins [ContractionInjectionPolicy] — which PAIRED contraction variants the tap path may inject
@@ -156,8 +152,12 @@ class ContractionInjectionPolicyTest {
 
     /**
      * Re-derives the English paired map the way `ContractionManager.loadEnglishBase` does
-     * (binary-derived pairs, then `contraction_pairings.json` merged earlier-wins) and asserts
+     * (binary-derived pairs, then the true pairing structure merged earlier-wins) and asserts
      * that relaxing the floor to two characters changes the injected set for exactly ONE base.
+     *
+     * The true structure is read here from `contraction_pairings.json`; the app reads it from
+     * the binary store since 2026-11-12. `ContractionBinaryPairingsTest` proves the two are
+     * the same data, base for base and variant for variant, so this map is the app's map.
      *
      * If a future data change adds another two-letter first-person base this test fails loudly
      * and the new entry has to be justified — which is the point.
@@ -215,33 +215,32 @@ class ContractionInjectionPolicyTest {
     // Shipped-data readers — mirror ContractionManager's load order exactly
     // ---------------------------------------------------------------------------------------
 
-    /** `contractions.bin`: non-paired `key -> value` pairs, then the paired contraction list. */
+    /**
+     * `contractions.bin`, read by the PRODUCTION parser ([ContractionBinaryReader]).
+     *
+     * There is one parser, and this test uses it: a second hand-rolled reader here is a
+     * second thing to keep in step with the format, and this one already had to change when
+     * the store went from V1 (a flat set of paired forms) to V2 (the pairing structure).
+     *
+     * Returns the non-paired map and the paired FORMS the store carries. V2 keeps the
+     * forms as the union of the variants of every base; V1 keeps them as its own flat
+     * list. Either way the caller puts them into a set and drops the non-paired values,
+     * which is what `ContractionManager.loadBinaryContractions` does with them.
+     */
     private fun readBinary(): Pair<Map<String, String>, List<String>> {
-        val file = File("$DICT_DIR/contractions.bin")
-        val bytes = RandomAccessFile(file, "r").use { raf ->
-            ByteArray(raf.length().toInt()).also { raf.readFully(it) }
+        val bytes = File("$DICT_DIR/contractions.bin").readBytes()
+        val payload = ContractionBinaryReader.parse(bytes)
+        val paired = ArrayList<String>()
+        if (payload.paired.isNotEmpty()) {
+            payload.paired.values.forEach { entries ->
+                entries.forEach { paired.add(it.contraction) }
+            }
+        } else {
+            // V1: no structure, so the known set is all the store has beyond the
+            // non-paired values. The caller filters those out again.
+            paired.addAll(payload.known)
         }
-        val buf = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
-        assertEquals("contractions.bin magic", 0x42525443, buf.int)
-        assertEquals("contractions.bin version", 1, buf.int)
-        val nonPairedCount = buf.int
-        val pairedCount = buf.int
-
-        fun readString(): String {
-            val len = buf.short.toInt() and 0xFFFF
-            val out = ByteArray(len)
-            buf.get(out)
-            return String(out, StandardCharsets.UTF_8)
-        }
-
-        val nonPaired = LinkedHashMap<String, String>(nonPairedCount * 2)
-        repeat(nonPairedCount) {
-            val k = readString()
-            nonPaired[k] = readString()
-        }
-        val paired = ArrayList<String>(pairedCount)
-        repeat(pairedCount) { paired.add(readString()) }
-        return nonPaired to paired
+        return payload.nonPaired to paired
     }
 
     /** `ContractionManager.loadBinaryContractions`'s derivation, verbatim. */
@@ -269,7 +268,11 @@ class ContractionInjectionPolicyTest {
         }
     }
 
-    /** Binary-derived pairs, then the pairings file merged earlier-wins (post-fix loader). */
+    /**
+     * Binary-derived pairs, then the true pairing structure merged earlier-wins (post-fix
+     * loader). The structure comes from the JSON here and from the binary store in the app;
+     * the two are the same data (`ContractionBinaryPairingsTest`).
+     */
     private fun shippedEnglishPairedMap(): Map<String, List<String>> {
         val out = LinkedHashMap<String, MutableList<String>>()
         binaryDerivedPairedMap().forEach { (k, v) -> out[k] = v.toMutableList() }
