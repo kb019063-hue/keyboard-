@@ -133,9 +133,13 @@ jobs:
           # quarter of the run, of a possible 512M". A JVM that full does not fail, it slows
           # down, and a little fuller it slows down a great deal: that is the likeliest account
           # of the run that sat here until the 45-minute bound (43242985447), though that run
-          # itself left nothing to prove it. 1 GB is about twice what the suite holds at its
-          # end; the "Test JVM" annotation says after every run how much of it was used, and
-          # turns into a warning from 85%. docs/TEST-PITFALLS.md, CI traps 5 and 9.
+          # itself left nothing to prove it. The first run at 1 GB (43266527543) read "36 full
+          # collections ... paused 15.4 s in all (3.9%) ... concurrent work 50.0 s; ... 86M,
+          # 156M, 295M, 554M ..., of a possible 1024M": half the collector's work, and the
+          # suite a little over half way to the new limit. (36 full collections are what one
+          # test asks for with System.gc(); the line counts those apart now.) The "Test JVM"
+          # annotation says after every run how much of the limit was used, and turns into a
+          # warning from 85%. docs/TEST-PITFALLS.md, CI traps 5 and 9.
           #
           # Not 3 GB: that was tried for everything at once on 2026-10-31, engine classes
           # included, and the run was abandoned after 70 minutes (see the next step).
@@ -187,7 +191,7 @@ jobs:
       #
       #  * "Test JVM", on every run: one line per invocation from its collection log
       #    (scripts/ci/test-gc-summary.py says how to read it). A notice, or a warning when the
-      #    JVM ended the run with 85% or more of its heap still in use.
+      #    JVM, at its fullest, still had 85% or more of its limit in use after a collection.
       #  * "Long test run", only when a run went on too long: what it was doing at the time. An
       #    error when the run then failed; a warning when it was merely slow and finished.
       - name: Say how the test JVMs spent their time
