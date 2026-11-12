@@ -721,8 +721,12 @@ class ContractionManager(private val context: Context) {
      * so the parse is gone. The JSON is still read when the store is V1, unreadable, or
      * absent — the fallback is the behaviour that existed before.
      *
-     * `ContractionBinaryPairingsTest` proves the two agree, base for base and variant
-     * for variant, in the same order.
+     * `ContractionBinaryPairingsTest` proves the two agree: the same bases, and under
+     * each base the same variants in the same order with the same frequencies. (The
+     * bases are compared as a SET, not in order: `org.json` keeps an object's keys in
+     * a `HashMap` on the JVM and a `LinkedHashMap` on Android, so the two parsers do
+     * not agree about the base order even before this change. Nothing observes it —
+     * every consumer looks a base up by name.)
      *
      * ADDITIVE and EARLIER-WINS on the variant list, mirroring
      * [loadLanguagePairedContractions]. The dedup is not cosmetic: this loader runs AFTER
