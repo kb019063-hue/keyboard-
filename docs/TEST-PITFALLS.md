@@ -325,8 +325,10 @@ Facts that keep costing time:
 1. **Two `./gradlew testDebugUnitTest` invocations are the same Gradle task.** The second deletes the
    first's JUnit XML, so a run that executed 500 tests can report "no JUnit XML found". The first
    run's results are copied to `build/full-suite-xml/` between the two — do not remove that copy.
-2. **`bash -e` + `set -o pipefail` aborts the step at the first failing test.** Both Gradle lines end
-   with `|| true`; the verdict is decided by the report step, which reads the XML.
+2. **`bash -e` + `set -o pipefail` aborts the step at the first failing test.** So neither Gradle
+   line is allowed to fail its step: each records its exit code in a file instead, the report step
+   reads the XML, and the last step (`scripts/ci/full-suite-verdict.sh`) decides. See trap 8 for
+   what happened while nothing decided.
 3. **`isFailOnNoMatchingTests` is not a property of `DefaultTestFilter` in this Gradle version.**
    Adding it fails the build in ~60 s naming the unknown property. The `filter { }` block stays
    exactly `heavyEngineTests.each { … }`.
@@ -337,9 +339,28 @@ Facts that keep costing time:
    70-minute GC crawl; the hungry engine classes get their own invocation via `-PonlyHeavy` /
    `-PtestMaxHeap` / `-PjunitXmlDir`.
 6. **The job timeout destroys the report.** It was 180 minutes; a stalled class meant the report step
-   never ran. It is 75 minutes with a 45-minute test-task cap, and the XML is uploaded.
+   never ran. It is 75 minutes with a 45-minute test-task cap, and the XML is uploaded. See trap 9
+   for what a run that hits the cap leaves behind (no XML).
 7. **`gh pr edit --body` fails** on the deprecated Projects GraphQL field — use
    `gh api -X PATCH repos/{owner}/{repo}/pulls/<n> --input <json>`.
+8. **The check was green with failing tests until 2026-11-12.** The step named "Fail the job when
+   tests failed" asked whether the test step had failed, and the test step cannot fail (trap 2).
+   The report printed `FAILING TESTS` and the job concluded `success`: runs 41766203725,
+   41774492055, 41828565272, 41840073362, 42558434610 and 42559739283, all on pull requests, each
+   report one or two failed tests in their annotations under a green tick. Every run on `main`
+   among the 55 looked at reports `0 failed`, so nothing red is known to have been merged because
+   of it, but only because whoever merged read the notice. The gate is now
+   `scripts/ci/full-suite-verdict.sh`, which was run against eleven made-up outcomes first: green needs
+   both Gradle exit codes to be 0, XML to exist, and the report's count of failures to be 0.
+   **Still quote the notice (`unit tests: N run, 0 failed`) and the run id, not the colour.**
+9. **A run that hits the 45-minute cap leaves no XML at all**, not "everything but the class that
+   stalled": run 43242985447 (2026-11-12) ended with `Timeout has been exceeded` and
+   `no JUnit XML found`, on a commit whose code had passed the same suite in nine minutes an hour
+   before. It could not be diagnosed, and neither could the one of 2026-11-01. Since then
+   `scripts/ci/test-wedge-watchdog.sh` runs beside Gradle: at 15 and 30 minutes it writes down the
+   test JVM's thread dump (the "Test worker" stack names the class and method), its collector
+   occupancy, and disk and memory. They arrive as **`Long test run`** annotations: errors when the
+   run then failed, warnings when it was only slow. Read those first when a run stalls.
 
 ---
 

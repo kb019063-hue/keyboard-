@@ -53,6 +53,13 @@ below is here because it already cost someone a day.
   problem in this repository** — do not explain one away as "upstream drift". The 204 skips are
   22 classes that assert on artefacts this fork does not vendor; they report SKIPPED through
   `UpstreamArtefacts`, not failed and not passed.
+- **Quote the notice, not the tick.** Until 2026-11-12 the full-suite check stayed green while
+  tests failed: the step meant to fail the job could not
+  ([`docs/TEST-PITFALLS.md`](docs/TEST-PITFALLS.md), CI trap 8). It is gated now
+  (`scripts/ci/full-suite-verdict.sh`), and the habit stands: report
+  `unit tests: N run, 0 failed` with the run id. When a run stalls instead of failing (it has
+  happened twice), its **`Long test run`** annotations hold a thread dump of the test JVM taken
+  while it was stuck (CI trap 9); read those before guessing.
 - **When a test is red, read [`docs/TEST-PITFALLS.md`](docs/TEST-PITFALLS.md) before "fixing" it.**
   That file is the catalogue of the twelve ways tests in this repo have lied — entire classes
   passing with the feature switched off, assertions on a device path a stub cannot produce, source

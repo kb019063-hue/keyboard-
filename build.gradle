@@ -583,9 +583,14 @@ android {
 
 // A wedged test must not eat the whole job. Measured 2026-11-01: one full-suite run sat inside
 // `testDebugUnitTest` for 90 minutes and produced no result at all, and the job's 180-minute
-// timeout then discarded the entire report (no annotations, no XML). Gradle writes one JUnit XML
-// per class the moment that class finishes, so with a bound in place everything completed is
-// still reported and the missing XML names the class that stalled.
+// timeout then discarded the entire report (no annotations, no XML). The bound below stops the
+// task so that the job's later steps still run and say so.
+//
+// It does NOT leave "everything but the class that stalled", as this comment used to promise.
+// The first time the bound was hit (2026-11-12, run 43242985447) there was no JUnit XML at all,
+// which fits Gradle writing its XML when the task ends rather than class by class. What a
+// stalled run is doing is written down while it is still running, by
+// scripts/ci/test-wedge-watchdog.sh, and reaches the check run as "Long test run" annotations.
 // Memory-hungry engine classes. They decode against the full 98k-word lexicon (and, for the CtC
 // sweeps, every bundled lexicon at once), which the default test heap cannot hold: they fail with
 // `OutOfMemoryError` while the rest of the suite runs in seconds. Giving the whole suite 3 GB was
