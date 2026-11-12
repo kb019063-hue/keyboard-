@@ -228,4 +228,68 @@ class ContractionBinaryPairingsTest {
             assertThat(expected.message.orEmpty()).contains("magic")
         }
     }
+
+    /**
+     * A V1 store is still READABLE, and it still carries no pairing STRUCTURE — which is
+     * what makes the loader fall back to `contraction_pairings.json`, exactly as it did
+     * before this format existed. That fallback is the safety net for a store that is
+     * missing, corrupt or old, so the property that makes it work is pinned here: a V1
+     * store parses, and its pairing structure is EMPTY.
+     *
+     * (`ContractionManager.pairedVariantsFromBinary` returns null for an empty structure,
+     * and `loadPairedContractions` then reads the JSON. That is the fallback; this test
+     * pins the half of it that is pure — the reader — because the other half needs a
+     * Context.)
+     */
+    @Test
+    fun `a V1 store is readable and carries no pairing structure, so the loader falls back to the JSON`() {
+        val v1 = v1Store(
+            nonPaired = listOf("dont" to "don't"),
+            pairedForms = listOf("it's", "we'll"),
+        )
+        val payload = ContractionBinaryReader.parse(v1)
+        assertWithMessage("a V1 store must still be readable")
+            .that(payload.nonPaired["dont"]).isEqualTo("don't")
+        assertWithMessage(
+            "a V1 store carries no pairing structure — that empty map is what tells the " +
+                "loader to read contraction_pairings.json instead"
+        ).that(payload.paired).isEmpty()
+        assertWithMessage("a V1 store still knows its forms")
+            .that(payload.known).containsExactly("don't", "it's", "we'll")
+    }
+
+    /** A V1 store: the same header, version 1, and the paired section as a FLAT set. */
+    private fun v1Store(
+        nonPaired: List<Pair<String, String>>,
+        pairedForms: List<String>,
+    ): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        fun writeInt(value: Int) = out.write(
+            byteArrayOf(
+                (value and 0xFF).toByte(),
+                ((value shr 8) and 0xFF).toByte(),
+                ((value shr 16) and 0xFF).toByte(),
+                ((value shr 24) and 0xFF).toByte(),
+            )
+        )
+        fun writeShort(value: Int) = out.write(
+            byteArrayOf((value and 0xFF).toByte(), ((value shr 8) and 0xFF).toByte())
+        )
+        fun writeString(value: String) {
+            val bytes = value.toByteArray(Charsets.UTF_8)
+            writeShort(bytes.size)
+            out.write(bytes)
+        }
+
+        writeInt(ContractionBinaryReader.MAGIC)
+        writeInt(ContractionBinaryReader.VERSION_V1)
+        writeInt(nonPaired.size)
+        writeInt(pairedForms.size)
+        for ((key, value) in nonPaired) {
+            writeString(key)
+            writeString(value)
+        }
+        for (form in pairedForms) writeString(form)
+        return out.toByteArray()
+    }
 }
