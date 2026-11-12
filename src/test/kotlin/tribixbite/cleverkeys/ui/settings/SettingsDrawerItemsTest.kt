@@ -33,6 +33,34 @@ class SettingsDrawerItemsTest {
         assertEquals(SettingsDrawerItems.ORDER.first(), SettingsDrawerItems.DEFAULT)
     }
 
+    /**
+     * 2026-11-12. A Material drawer sheet is a plain Column: it does not scroll, and a Column
+     * gives a child that does not fit a height of zero. A drawer item is 56dp high, so this list
+     * needs more height than any phone has, and until it was put in a scrolling container the
+     * sections at the end of it were simply absent from the drawer -- reachable through search
+     * and nothing else. The emulator found it: it could not find "Information & Actions" to tap.
+     */
+    @Test
+    fun `the list is taller than a phone, so it has to scroll`() {
+        val itemHeightDp = 56            // Material 3 NavigationDrawerItem
+        val tallPhoneDp = 915            // a 1080x2400 screen at 420dpi, before any system bar
+        assertEquals(
+            "if this ever fits, the scroll container is harmless; while it does not, it is required",
+            true,
+            SettingsDrawerItems.ORDER.size * itemHeightDp > tallPhoneDp
+        )
+
+        val screen = java.io.File("src/main/kotlin/tribixbite/cleverkeys/ui/settings/SettingsScreen.kt").readText()
+        val sheet = screen.indexOf("ModalDrawerSheet {")
+        val items = screen.indexOf("SettingsDrawerItems.ORDER.forEach", sheet)
+        assertEquals("drawer block not found in SettingsScreen.kt", true, sheet > 0 && items > sheet)
+        assertEquals(
+            "the drawer's items must sit inside a vertically scrolling container",
+            true,
+            ".verticalScroll(" in screen.substring(sheet, items)
+        )
+    }
+
     @Test
     fun `every item resolves to its own section title, never to another item's`() {
         // sectionTitleRes falls back to the Advanced title for a key it does not know; with all

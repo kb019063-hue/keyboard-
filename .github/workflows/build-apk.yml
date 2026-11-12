@@ -173,6 +173,7 @@ jobs:
             --tests '*LatencyMeterTest' \
             --tests '*InputViewInstallTest' \
             --tests '*SuggestionStripPolicyTest' \
+            --tests '*SettingsDrawerItemsTest' \
             --tests '*Autocapitalisation*' \
             --tests '*ClipboardSearchRegexTest' \
             --tests '*DeadKeyMarksBelowTest' \

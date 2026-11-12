@@ -152,20 +152,35 @@ internal fun SettingsActivity.SettingsScreen() {
                         modifier = Modifier.padding(horizontal = 16.dp)
                     )
                     Spacer(Modifier.height(8.dp))
-                    SettingsDrawerItems.ORDER.forEach { key ->
-                        NavigationDrawerItem(
-                            // Section titles carry their leading emoji ("🎨 Appearance"), which is
-                            // exactly how the collapsible headers have always read.
-                            label = { Text(stringResource(sectionTitleRes(key))) },
-                            selected = key == selectedSectionKey,
-                            onClick = {
-                                selectedSectionKey = key
-                                // Selecting a collapsed section would show its header and nothing
-                                // else; the drawer promises the section, so open it.
-                                expanderFor(key)()
-                                scope.launch { drawerState.close() }
-                            }
-                        )
+                    // The list scrolls; the title above it stays. A drawer sheet is a plain
+                    // Column and does NOT scroll by itself: nineteen items at 56dp are 1064dp, a
+                    // phone has 800-900dp, and a Column gives whatever does not fit a height of
+                    // zero. So the last sections -- Privacy, Advanced, Information, Help on a
+                    // tall phone, more on a short one -- were not in the drawer at all, and could
+                    // be reached only through search (found 2026-11-12, when the emulator could
+                    // not find "Information & Actions" to open the Keyboard speed card).
+                    // weight(fill = false): the list takes what is left under the title and no
+                    // more, so on a screen tall enough for all of it nothing changes.
+                    Column(
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        SettingsDrawerItems.ORDER.forEach { key ->
+                            NavigationDrawerItem(
+                                // Section titles carry their leading emoji ("🎨 Appearance"), which
+                                // is exactly how the collapsible headers have always read.
+                                label = { Text(stringResource(sectionTitleRes(key))) },
+                                selected = key == selectedSectionKey,
+                                onClick = {
+                                    selectedSectionKey = key
+                                    // Selecting a collapsed section would show its header and
+                                    // nothing else; the drawer promises the section, so open it.
+                                    expanderFor(key)()
+                                    scope.launch { drawerState.close() }
+                                }
+                            )
+                        }
                     }
                     Spacer(Modifier.height(16.dp))
                 }
