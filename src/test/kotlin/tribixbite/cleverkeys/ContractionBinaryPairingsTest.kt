@@ -2,8 +2,10 @@ package tribixbite.cleverkeys
 
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
+import com.google.gson.JsonParser
 import java.io.File
 import java.io.IOException
+import org.json.JSONObject
 import org.junit.Test
 
 /**
@@ -17,21 +19,50 @@ import org.junit.Test
  * path to the first picture.
  *
  * So the substitution has to be PROVEN, not asserted. This class reads the shipped
- * binary and the shipped JSON and requires them to agree on:
+ * store and the shipped JSON and requires them to agree on:
  *
- *  - the same bases, in the same order (the order decides which variant the suggestion
- *    bar offers first — `ContractionManager.parsePairings` builds a LinkedHashMap in
- *    the file's order, and the binary was written in that order for exactly this
- *    reason);
- *  - the same variants per base, in the same order;
+ *  - the same BASES (the same set of keys);
+ *  - the same VARIANTS under each base, in the same order — this is the order that is
+ *    observed: `SuggestionHandler` injects `getPairedContractions(partial)` into the
+ *    suggestion bar in list order, so a reordering would change what the bar offers
+ *    first;
  *  - the same pairing frequency for each variant, including "no frequency" (the JSON
- *    omits the field; the binary stores a sentinel for it);
+ *    omits the field; the store stores a sentinel for it);
  *  - the same set of known contraction forms, which is what the loader's DERIVATION
  *    step (a contraction without an apostrophe implies its base) runs on — a different
  *    set here would silently change which bases the keyboard offers a variant for.
  *
  * A stale binary (the JSON regenerated, the binary not) fails here, which is the point:
  * the binary is a build product of the JSON and must never disagree with it.
+ *
+ * ## Two comparisons, two orders
+ *
+ * The store is compared against the JSON TWICE, because the JSON has two orders and only
+ * one of them is the file's:
+ *
+ *  1. Against the PRODUCTION parser, `ContractionManager.parsePairings` (org.json): the
+ *     same bases, the same variants per base in the same order, the same frequencies.
+ *     This is the contract that matters at runtime — the store stands in for that parser.
+ *  2. Against the FILE's own order (read with Gson, which keeps insertion order): the
+ *     bases in the order the JSON file lists them, and each base's variants in the order
+ *     the file lists them. This is what "order is part of the data" means, and it is the
+ *     order the store has to carry.
+ *
+ * The base order differs between the two comparisons and that is NOT a defect: org.json
+ * keeps its keys in a `HashMap` on the JVM and in a `LinkedHashMap` on Android, so the
+ * production parser yields the bases in a different order on the two platforms already —
+ * before this change, on the same data. (Reproduced: the JVM's `HashMap` iteration order
+ * over these 1,748 keys begins `hall, clinton, owners, yous, assassin, childs`, while the
+ * file begins `a, aaron, abbott, abc, academy, act`.) Nothing observes the base order:
+ * `getPairedContractions(base)`, `getPairedVariantFrequency(base, variant)`,
+ * `getPairedFrequencyBases()` (a `Set`, and `PairingBaseFrequencies.select` writes it
+ * into a `HashMap`) and `getAliasKeys()` (a `HashSet`) all look a base up BY NAME. The
+ * only order the app sees is the order of the VARIANTS under a base, and that is compared
+ * exactly, against both readings of the JSON.
+ *
+ * The store's base order is the FILE's base order, and on Android that is also what the
+ * org.json parser used to yield — so the store preserves the shipping platform's order
+ * exactly, and the difference above is a property of the JVM test classpath alone.
  */
 class ContractionBinaryPairingsTest {
 
@@ -53,8 +84,28 @@ class ContractionBinaryPairingsTest {
     private fun payload(): ContractionBinaryReader.Payload =
         ContractionBinaryReader.parse(binaryFile().readBytes())
 
+    /** The JSON as the PRODUCTION parser sees it (org.json). */
     private fun jsonPairings(): Map<String, List<ContractionManager.PairedVariant>> =
         ContractionManager.parsePairings(File(DICT_DIR, PAIRINGS_JSON).readText())
+
+    /**
+     * The JSON in the FILE's order, lowercased — the reading
+     * `ContractionInjectionPolicyTest` makes of the same file.
+     *
+     * Gson keeps an object's keys in INSERTION order, so this is the order the file
+     * lists its bases in. (org.json does not: it keeps them in a `HashMap` on the JVM
+     * and in a `LinkedHashMap` on Android, which is why the production parser and the
+     * store disagree about the base order under the JVM — see the class doc.)
+     */
+    private fun fileOrderPairings(): Map<String, List<String>> {
+        val json = JsonParser.parseString(File(DICT_DIR, PAIRINGS_JSON).readText())
+            .asJsonObject
+        return json.entrySet().associate { (base, arr) ->
+            base.lowercase() to arr.asJsonArray.map {
+                it.asJsonObject.get("contraction").asString.lowercase()
+            }
+        }
+    }
 
     @Test
     fun `the shipped store is V2`() {
@@ -72,12 +123,9 @@ class ContractionBinaryPairingsTest {
     }
 
     @Test
-    fun `the store carries every paired base the JSON does, in the same order`() {
-        val fromBinary = payload().paired
-        val fromJson = jsonPairings()
-
+    fun `the store carries every paired base the JSON does`() {
         assertWithMessage("the store must carry the pairing structure at all")
-            .that(fromBinary.keys.toList()).isEqualTo(fromJson.keys.toList())
+            .that(payload().paired.keys).isEqualTo(jsonPairings().keys)
     }
 
     @Test
@@ -89,8 +137,10 @@ class ContractionBinaryPairingsTest {
             val binaryVariants = fromBinary[base]
             assertWithMessage("base '$base' must be in the store")
                 .that(binaryVariants).isNotNull()
-            assertWithMessage("base '$base' must carry the same variants in the same order")
-                .that(binaryVariants!!.map { it.contraction })
+            assertWithMessage(
+                "base '$base' must carry the same variants in the same order — the bar " +
+                    "offers them in list order"
+            ).that(binaryVariants!!.map { it.contraction })
                 .isEqualTo(jsonVariants.map { it.contraction })
             assertWithMessage("base '$base' must carry the same frequencies")
                 .that(binaryVariants.map { it.frequency })
@@ -99,10 +149,32 @@ class ContractionBinaryPairingsTest {
     }
 
     @Test
+    fun `the store keeps the bases in the JSON file's order`() {
+        val fromBinary = payload().paired.keys.toList()
+        val fromFile = fileOrderPairings().keys.toList()
+        assertWithMessage(
+            "the store must carry the bases in the order the JSON file lists them — the " +
+                "store is the file's projection, and on Android that order is what the " +
+                "org.json parser used to yield"
+        ).that(fromBinary).isEqualTo(fromFile)
+    }
+
+    @Test
+    fun `the store keeps each base's variants in the JSON file's order`() {
+        val fromBinary = payload().paired
+        for ((base, variants) in fileOrderPairings()) {
+            val binaryVariants = fromBinary[base]
+            assertWithMessage("base '$base' must be in the store").that(binaryVariants).isNotNull()
+            assertWithMessage("base '$base' must carry its variants in the file's order")
+                .that(binaryVariants!!.map { it.contraction })
+                .isEqualTo(variants)
+        }
+    }
+
+    @Test
     fun `the known forms are the non-paired values plus every paired variant`() {
         val store = payload()
-        val nonPaired = File(DICT_DIR, NON_PAIRED_JSON).readText()
-            .let { org.json.JSONObject(it) }
+        val nonPaired = JSONObject(File(DICT_DIR, NON_PAIRED_JSON).readText())
         val expected = HashSet<String>()
         val keys = nonPaired.keys()
         while (keys.hasNext()) {
@@ -121,7 +193,7 @@ class ContractionBinaryPairingsTest {
     @Test
     fun `the non-paired mappings are the ones the JSON file holds`() {
         val store = payload()
-        val json = org.json.JSONObject(File(DICT_DIR, NON_PAIRED_JSON).readText())
+        val json = JSONObject(File(DICT_DIR, NON_PAIRED_JSON).readText())
         val expected = HashMap<String, String>()
         val keys = json.keys()
         while (keys.hasNext()) {

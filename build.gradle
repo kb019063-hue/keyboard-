@@ -1815,18 +1815,37 @@ tasks.register('generateBinaryDictionaries') {
   }
 }
 
+// The contraction store is a BUILD PRODUCT of the two JSON files, which are the source of
+// truth (`scripts/generate_binary_contractions.py` only projects them). It is TRACKED, so it
+// has to be refreshed whenever the source or the generator changes.
+//
+// It used to be generated only when ABSENT, which is wrong for a tracked file: a change to
+// `contraction_pairings.json` (or to the generator itself) left the shipped `contractions.bin`
+// stale, and the app then ran on pairings the JSON no longer says. `ContractionBinaryPairingsTest`
+// catches that, but only in the test suite — the fix belongs in the build.
+//
+// The generator is deterministic (regeneration is byte-identical) and takes ~40 ms, so it runs
+// on EVERY build and the tracked file is rewritten only when the bytes actually differ. That
+// keeps a correct tree clean and makes a drifted one self-healing.
 tasks.register('generateBinaryContractions') {
   doLast {
     def dictDir = file("src/main/assets/dictionaries")
     def binFile = new File(dictDir, "contractions.bin")
-    if (!binFile.exists()) {
-      exec {
-        workingDir = projectDir
-        commandLine "python3", "scripts/generate_binary_contractions.py",
-                    new File(dictDir, "contractions_non_paired.json").absolutePath,
-                    new File(dictDir, "contraction_pairings.json").absolutePath,
-                    binFile.absolutePath
-      }
+    def tempFile = new File(buildDir, "generated/contractions/contractions.bin")
+    tempFile.parentFile.mkdirs()
+    exec {
+      workingDir = projectDir
+      commandLine "python3", "scripts/generate_binary_contractions.py",
+                  new File(dictDir, "contractions_non_paired.json").absolutePath,
+                  new File(dictDir, "contraction_pairings.json").absolutePath,
+                  tempFile.absolutePath
+    }
+    def changed = !binFile.exists() ||
+        !java.util.Arrays.equals(binFile.bytes, tempFile.bytes)
+    if (changed) {
+      logger.lifecycle("Refreshing ${binFile.name}: it no longer matches the contraction JSON " +
+                       "(regenerated ${tempFile.length()} bytes).")
+      binFile.bytes = tempFile.bytes
     }
   }
 }

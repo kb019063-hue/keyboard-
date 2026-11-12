@@ -343,13 +343,25 @@ is read once, straight into the maps it is going to be used as.
 **Why the data is still the data.** The suggestion bar's order is decided by the order of the
 variants under a base, so "the same table" has to mean the same table *in the same order*.
 `ContractionBinaryPairingsTest` reads the shipped store and the shipped JSON and requires
-them to agree on the bases, their order, the variants, their order, and each pairing
-frequency — including "no frequency", which the JSON expresses by omitting the field and the
-store by a sentinel. It also requires the set of known contraction forms to be the same,
-because that set is what the loader's DERIVATION step runs on: a contraction with an
+them to agree on the bases, the variants, each pairing frequency — including "no frequency",
+which the JSON expresses by omitting the field and the store by a sentinel — and the order of
+the variants under every base. It also requires the set of known contraction forms to be the
+same, because that set is what the loader's DERIVATION step runs on: a contraction with an
 apostrophe implies a base, and a different set would silently change which bases the keyboard
 offers a variant for. The store is V1-compatible: an old store carries no structure, and the
 loader then reads the JSON, exactly as before.
+
+The order of the BASES is the one thing the test does not take from the production parser,
+and the reason is worth stating because it is a property of the JSON library, not of the
+store: `org.json` keeps an object's keys in a `HashMap` on the JVM and in a `LinkedHashMap`
+on Android. The store therefore keeps the bases in the order the JSON FILE lists them, which
+on Android is exactly the order the old parser produced, and the test asserts that order
+directly against the file. Under the JVM the two readings differ — the `HashMap` order over
+these 1,748 keys begins `hall, clinton, owners, …` while the file begins `a, aaron,
+abbott, …` — and nothing observes it: every consumer looks a base up by name
+(`getPairedContractions(base)`, `getPairedVariantFrequency(base, variant)`,
+`getPairedFrequencyBases()`, which is a `Set`). The order the app does see, the order of the
+variants under a base, is compared exactly, against both readings of the JSON.
 
 **What is not claimed.** The phone has not said anything yet, so nothing is claimed about
 what this is worth on it. What can be said is that 154 KB of JSON parsing no longer happens

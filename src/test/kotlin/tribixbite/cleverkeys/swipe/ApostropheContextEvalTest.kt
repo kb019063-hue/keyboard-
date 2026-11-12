@@ -5,6 +5,7 @@ import com.google.gson.JsonParser
 import org.json.JSONObject
 import org.junit.Assume
 import org.junit.Test
+import tribixbite.cleverkeys.ContractionBinaryReader
 import tribixbite.cleverkeys.ContractionManager
 import tribixbite.cleverkeys.StaticContextLm
 import tribixbite.cleverkeys.StaticLmLanguageData
@@ -12,8 +13,6 @@ import tribixbite.cleverkeys.swipe.ContractionContextChooser.Evidence
 import tribixbite.cleverkeys.swipe.ContractionContextChooser.Params
 import tribixbite.cleverkeys.swipe.ctc.CtcLexiconMerge
 import java.io.File
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.util.Locale
 import kotlin.math.ln
 import kotlin.math.sqrt
@@ -38,9 +37,11 @@ import kotlin.math.sqrt
  * `ood_dev_en.txt` / `ood_test_en.txt` (UD English-EWT surface text). Assume-skips without them.
  *
  * The English swipe display mappings are rebuilt here from the shipped assets exactly as
- * `ContractionManager.loadSwipeDisplayMappings("en")` holds them — `contractions.bin` (non-paired
- * map + DERIVED paired bases), then `contraction_pairings.json` (variants appended
- * earlier-wins, frequencies earlier-wins), paired bases reclassified out of the non-paired map,
+ * `ContractionManager.loadSwipeDisplayMappings("en")` holds them — `contractions.bin` read by the
+ * PRODUCTION parser ([ContractionBinaryReader]: non-paired map + known forms + the pairing
+ * structure), the DERIVED paired bases (every known contraction that is not a non-paired value
+ * implies its apostrophe-removed base), the structure's variants appended earlier-wins with
+ * earlier-wins frequencies, paired bases reclassified out of the non-paired map,
  * then `contractions_en.json` skipping paired bases — and the overlay runs with the CTC adapter's
  * ordinals and base frequencies (`CtcLexiconMerge` over `en_enhanced.json`,
  * `PairingBaseFrequencies.select`). Decoding is an ORACLE: the surface is the confident rank-0
@@ -59,30 +60,36 @@ class ApostropheContextEvalTest {
         val nonPaired: Map<String, String>,
     )
 
+    /** One pairing variant: the contraction and its pairing frequency (null = none). */
+    private class Variant(val contraction: String, val frequency: Int?)
+
     private fun loadMappings(): Mappings {
-        val buf = ByteBuffer.wrap(File(dictDir, "contractions.bin").readBytes()).order(ByteOrder.LITTLE_ENDIAN)
-        fun readString(): String {
-            val bytes = ByteArray(buf.short.toInt() and 0xFFFF)
-            buf.get(bytes)
-            return String(bytes, Charsets.UTF_8)
-        }
-        buf.position(8) // magic + version
-        val nonPairedCount = buf.int
-        val pairedCount = buf.int
-        val nonPaired = LinkedHashMap<String, String>()
-        repeat(nonPairedCount) { val k = readString(); nonPaired[k] = readString() }
-        val known = LinkedHashSet<String>(nonPaired.values)
-        repeat(pairedCount) { known += readString() }
+        // The PRODUCTION reader, not a second hand-rolled one: the store is V2 (it carries
+        // the pairing structure), and a reader written for V1 read the paired section as a
+        // flat set of forms and read past the end of the buffer.
+        val store = ContractionBinaryReader.parse(File(dictDir, "contractions.bin").readBytes())
+        val nonPaired = LinkedHashMap<String, String>(store.nonPaired)
+        val known = LinkedHashSet<String>(store.known)
 
         val paired = LinkedHashMap<String, MutableList<String>>()
         val nonPairedValues = nonPaired.values.toSet()
+        // The DERIVED paired bases: every known contraction that is not a non-paired value
+        // implies the base that is its apostrophe-removed form.
         for (contraction in known) {
             if (contraction !in nonPairedValues) {
                 paired.getOrPut(contraction.replace("'", "")) { mutableListOf() }.add(contraction)
             }
         }
         val frequencies = HashMap<String, MutableMap<String, Int>>()
-        for ((base, variants) in ContractionManager.parsePairings(File(dictDir, "contraction_pairings.json").readText())) {
+        // The pairing STRUCTURE, from the store (V2 carries it; a V1 store carries none and
+        // production then parses contraction_pairings.json — the mirror below would too).
+        val structure: Map<String, List<Variant>> = if (store.paired.isNotEmpty()) {
+            store.paired.mapValues { (_, entries) -> entries.map { Variant(it.contraction, it.frequency) } }
+        } else {
+            ContractionManager.parsePairings(File(dictDir, "contraction_pairings.json").readText())
+                .mapValues { (_, variants) -> variants.map { Variant(it.contraction, it.frequency) } }
+        }
+        for ((base, variants) in structure) {
             for (v in variants) {
                 val list = paired.getOrPut(base) { mutableListOf() }
                 if (v.contraction !in list) list.add(v.contraction)
