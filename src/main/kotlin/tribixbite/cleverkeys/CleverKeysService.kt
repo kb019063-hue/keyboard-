@@ -568,7 +568,8 @@ class CleverKeysService : InputMethodService(),
                 drawNanos = fm.getMetric(android.view.FrameMetrics.DRAW_DURATION),
                 syncNanos = fm.getMetric(android.view.FrameMetrics.SYNC_DURATION),
                 gpuNanos = fm.getMetric(android.view.FrameMetrics.COMMAND_ISSUE_DURATION) +
-                    fm.getMetric(android.view.FrameMetrics.SWAP_BUFFERS_DURATION)
+                    fm.getMetric(android.view.FrameMetrics.SWAP_BUFFERS_DURATION),
+                windowShown = fm.getMetric(android.view.FrameMetrics.FIRST_DRAW_FRAME) != 0L
             )
         }
 

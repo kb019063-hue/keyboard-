@@ -17,7 +17,10 @@ import java.util.Locale
  *  - **each showing**: `onStartInputView` and its steps, and from its entry to the end of the
  *    keyboard's first draw;
  *  - **typing**: how long each touch took to handle, how long the keys took to draw, and the
- *    platform's own per-frame timing for the keyboard window (`FrameMetrics`);
+ *    platform's own per-frame timing for the keyboard window (`FrameMetrics`), stage by stage;
+ *  - **the keyboard's own layout work**: every measure and layout pass of its outermost view,
+ *    which is its share of a frame's layout stage (the platform's figure for that stage also
+ *    holds the window manager's work);
  *  - **work that should not repeat**: how often the key view was re-attached, re-measured, the
  *    input view re-installed, and the keyboard's height changed while it was open.
  *
@@ -96,7 +99,11 @@ object LatencyMeter {
         val frame = Stat()   // FrameMetrics TOTAL_DURATION
         val ui = Stat()      // the UI-thread share of a frame
         val gpu = Stat()     // the render-thread share: sync, issuing commands, swapping buffers
+        val stages = LongArray(6)    // summed over all frames: wait, input, layout, draw, sync, gpu
         var worst: LongArray? = null // the slowest frame, by stage (see [frame])
+        var appear: LongArray? = null // the frame in which the window became visible, by stage
+        val treeMeasure = Stat() // measure passes of the keyboard's outermost view
+        val treeLayout = Stat()  // layout passes of the same
         val strip = Stat()   // suggestion strip rebinds
         var attaches = 0
         var measures = 0
@@ -109,8 +116,13 @@ object LatencyMeter {
             presses += o.presses
             touch.add(o.touch); move.add(o.move); draw.add(o.draw)
             frame.add(o.frame); ui.add(o.ui); gpu.add(o.gpu); strip.add(o.strip)
+            for (i in stages.indices) stages[i] += o.stages[i]
             val theirs = o.worst
             if (theirs != null && theirs[0] > (worst?.get(0) ?: -1L)) worst = theirs.copyOf()
+            // Over several showings, keep the slowest appearance: that is the one to explain.
+            val theirAppear = o.appear
+            if (theirAppear != null && theirAppear[0] > (appear?.get(0) ?: -1L)) appear = theirAppear.copyOf()
+            treeMeasure.add(o.treeMeasure); treeLayout.add(o.treeLayout)
             attaches += o.attaches; measures += o.measures
             installs += o.installs; resizes += o.resizes
         }
@@ -119,18 +131,27 @@ object LatencyMeter {
             shows = 0; presses = 0; attaches = 0; measures = 0; installs = 0; resizes = 0
             start.clear(); shown.clear(); touch.clear(); move.clear(); draw.clear()
             frame.clear(); ui.clear(); gpu.clear(); strip.clear()
-            worst = null
+            stages.fill(0L)
+            worst = null; appear = null
+            treeMeasure.clear(); treeLayout.clear()
         }
 
-        /** The slowest frame as `total:wait:input:layout:draw:sync:gpu`, whole milliseconds. */
-        fun worstFrame(): String =
-            worst?.joinToString(":") { (it / 1_000_000L).toString() } ?: "none"
+        /** One frame as `total:wait:input:layout:draw:sync:gpu`, whole milliseconds. */
+        fun stagesOf(frame: LongArray?): String =
+            frame?.joinToString(":") { (it / 1_000_000L).toString() } ?: "none"
+
+        /** The average frame's stages, `wait:input:layout:draw:sync:gpu`, one decimal. */
+        fun averageStages(): String =
+            if (frame.count == 0) "none" else stages.joinToString(":") { ms1(it / frame.count) }
 
         fun line(): String =
             "shows=$shows start=${start.pair()} shown=${shown.pair()} presses=$presses " +
                 "touch=${touch.pair()} move=${move.count}:${move.pair()} " +
                 "draw=${draw.count}:${draw.pair()} frames=${frame.count} frame=${frame.pair()} " +
-                "ui=${ui.pair()} gpu=${gpu.pair()} slow=${frame.slow} worst=${worstFrame()} " +
+                "ui=${ui.pair()} gpu=${gpu.pair()} slow=${frame.slow} avg=${averageStages()} " +
+                "worst=${stagesOf(worst)} appear=${stagesOf(appear)} " +
+                "tm=${treeMeasure.count}:${treeMeasure.pair()} " +
+                "tl=${treeLayout.count}:${treeLayout.pair()} " +
                 "strip=${strip.count}:${strip.pair()} " +
                 "attach=$attaches measure=$measures install=$installs resize=$resizes"
     }
@@ -244,6 +265,12 @@ object LatencyMeter {
      * The platform timed one frame of the keyboard window, stage by stage: [waitNanos] is how
      * long the frame waited for the UI thread to get to it, [inputNanos]..[drawNanos] are the UI
      * thread's own work, and [syncNanos] and [gpuNanos] belong to the render thread.
+     *
+     * [windowShown] is the platform's flag for the frame in which the window became visible
+     * (`FrameMetrics.FIRST_DRAW_FRAME`). The first such frame of a showing is the one the user
+     * is waiting for after tapping a text field, so its stages are kept separately. Its layout
+     * stage includes the window manager preparing the window, which is not the keyboard's code;
+     * [treeMeasured] and [treeLaidOut] say how much of it is.
      */
     fun frame(
         totalNanos: Long,
@@ -252,17 +279,27 @@ object LatencyMeter {
         layoutNanos: Long,
         drawNanos: Long,
         syncNanos: Long,
-        gpuNanos: Long
+        gpuNanos: Long,
+        windowShown: Boolean = false
     ) = synchronized(lock) {
         session.frame.add(totalNanos)
         session.ui.add(waitNanos + inputNanos + layoutNanos + drawNanos)
         session.gpu.add(syncNanos + gpuNanos)
+        val stages = longArrayOf(waitNanos, inputNanos, layoutNanos, drawNanos, syncNanos, gpuNanos)
+        for (i in stages.indices) if (stages[i] > 0L) session.stages[i] += stages[i]
         if (totalNanos > (session.worst?.get(0) ?: -1L)) {
-            session.worst = longArrayOf(
-                totalNanos, waitNanos, inputNanos, layoutNanos, drawNanos, syncNanos, gpuNanos
-            )
+            session.worst = longArrayOf(totalNanos) + stages
+        }
+        if (windowShown && sessionOpen && session.appear == null) {
+            session.appear = longArrayOf(totalNanos) + stages
         }
     }
+
+    /** The keyboard's outermost view finished a measure pass of [nanos], children included. */
+    fun treeMeasured(nanos: Long) = synchronized(lock) { session.treeMeasure.add(nanos) }
+
+    /** The keyboard's outermost view finished a layout pass of [nanos], children included. */
+    fun treeLaidOut(nanos: Long) = synchronized(lock) { session.treeLayout.add(nanos) }
 
     /** The suggestion strip rebound its views in [nanos]. */
     fun stripUpdated(nanos: Long) = synchronized(lock) { session.strip.add(nanos) }
@@ -338,11 +375,19 @@ object LatencyMeter {
         if (all.frame.count > 0) {
             out.add("Frames: ${all.frame.count}, ${ms(all.frame.avgMs)} ms on average, " +
                 "${ms(all.frame.maxMs)} ms at worst, ${all.frame.slow} slower than 16.7 ms")
-            all.worst?.let { w ->
+            fun stages(w: LongArray): String {
                 fun part(i: Int) = w[i] / 1_000_000L
-                out.add("Slowest frame: ${part(0)} ms (waiting ${part(1)}, input ${part(2)}, " +
-                    "layout ${part(3)}, drawing ${part(4)}, sync ${part(5)}, graphics ${part(6)})")
+                return "${part(0)} ms (waiting ${part(1)}, input ${part(2)}, layout ${part(3)}, " +
+                    "drawing ${part(4)}, sync ${part(5)}, graphics ${part(6)})"
             }
+            all.appear?.let { out.add("Slowest frame that showed the keyboard: ${stages(it)}") }
+            all.worst?.let { out.add("Slowest frame: ${stages(it)}") }
+        }
+        if (all.treeMeasure.count + all.treeLayout.count > 0) {
+            out.add("The keyboard's own layout: measured ${all.treeMeasure.count} times, " +
+                "${ms(all.treeMeasure.avgMs)} ms on average, ${ms(all.treeMeasure.maxMs)} ms at " +
+                "worst; laid out ${all.treeLayout.count} times, ${ms(all.treeLayout.avgMs)} ms " +
+                "on average, ${ms(all.treeLayout.maxMs)} ms at worst")
         }
         out.add("While open: height changed ${all.resizes} times, keys re-attached " +
             "${all.attaches} times, view re-installed ${all.installs} times")

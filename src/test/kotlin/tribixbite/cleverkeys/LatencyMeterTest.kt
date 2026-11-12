@@ -117,9 +117,13 @@ class LatencyMeterTest {
         LatencyMeter.touched(20_000_000L, press = false, move = false)
         LatencyMeter.touched(500_000L, press = false, move = true)
         LatencyMeter.drawn(2_000_000L)
-        // total, wait, input, layout, draw, sync, gpu
-        LatencyMeter.frame(10_000_000L, 1_000_000L, 0L, 1_000_000L, 1_000_000L, 2_000_000L, 4_000_000L)
+        // total, wait, input, layout, draw, sync, gpu; the first is the frame that showed the window
+        LatencyMeter.frame(10_000_000L, 1_000_000L, 0L, 1_000_000L, 1_000_000L, 2_000_000L, 4_000_000L,
+            windowShown = true)
         LatencyMeter.frame(40_000_000L, 2_000_000L, 1_000_000L, 1_000_000L, 1_000_000L, 5_000_000L, 25_000_000L)
+        // the keyboard's own tree: two measure passes and one layout pass
+        LatencyMeter.treeMeasured(600_000L); LatencyMeter.treeMeasured(200_000L)
+        LatencyMeter.treeLaidOut(300_000L)
         LatencyMeter.stripUpdated(1_500_000L)
         LatencyMeter.resized()
 
@@ -136,13 +140,38 @@ class LatencyMeterTest {
         assertEquals("4.00/5.00", field(line, "ui"))
         assertEquals("18.00/30.00", field(line, "gpu"))
         assertEquals("1", field(line, "slow"))
+        assertEquals("the average frame's stages", "1.5:0.5:1.0:1.0:3.5:14.5", field(line, "avg"))
         assertEquals("the slowest frame, stage by stage", "40:2:1:1:1:5:25", field(line, "worst"))
+        assertEquals("the frame that showed the keyboard", "10:1:0:1:1:2:4", field(line, "appear"))
+        assertEquals("2:0.40/0.60", field(line, "tm"))
+        assertEquals("1:0.30/0.30", field(line, "tl"))
         assertEquals("none", field(line, "steps"))
         assertEquals("1:1.50/1.50", field(line, "strip"))
         assertEquals("1", field(line, "attach"))
         assertEquals("2", field(line, "measure"))
         assertEquals("1", field(line, "install"))
         assertEquals("1", field(line, "resize"))
+    }
+
+    @Test
+    fun onlyTheFirstWindowFrameOfAShowing_isTheOneThatShowedIt() {
+        LatencyMeter.createBegin(0)
+        LatencyMeter.createEnd()
+        // A frame reported while nothing is showing (the tail of the last showing arrives late,
+        // on its own thread) is not an appearance.
+        LatencyMeter.frame(90_000_000L, 0L, 0L, 0L, 0L, 0L, 0L, windowShown = true)
+        LatencyMeter.showBegin()
+        LatencyMeter.showStarted()
+        LatencyMeter.frame(5_000_000L, 0L, 0L, 1_000_000L, 0L, 0L, 0L)                      // not flagged
+        LatencyMeter.frame(30_000_000L, 4_000_000L, 0L, 20_000_000L, 1_000_000L, 0L, 3_000_000L, windowShown = true)
+        LatencyMeter.frame(70_000_000L, 0L, 0L, 0L, 0L, 0L, 0L, windowShown = true)        // a later one
+        val line = LatencyMeter.sessionEnd().last()
+        assertEquals("30:4:0:20:1:0:3", field(line, "appear"))
+
+        // A showing with no such frame says so rather than repeating the last one.
+        LatencyMeter.showBegin()
+        LatencyMeter.showStarted()
+        assertEquals("none", field(LatencyMeter.sessionEnd().last(), "appear"))
     }
 
     @Test
@@ -210,7 +239,9 @@ class LatencyMeterTest {
         advanceMs(10); LatencyMeter.showStarted()
         advanceMs(10); LatencyMeter.drawn(1_000_000L)
         LatencyMeter.touched(2_000_000L, press = true, move = false)
-        LatencyMeter.frame(8_000_000L, 1_000_000L, 0L, 0L, 1_000_000L, 1_000_000L, 5_000_000L)
+        LatencyMeter.frame(8_000_000L, 1_000_000L, 0L, 0L, 1_000_000L, 1_000_000L, 5_000_000L,
+            windowShown = true)
+        LatencyMeter.treeMeasured(1_000_000L)
         LatencyMeter.sessionEnd()
 
         // Still open: the settings screen is usually read with the keyboard up.
@@ -218,7 +249,10 @@ class LatencyMeterTest {
         advanceMs(20); LatencyMeter.showStarted()
         advanceMs(20); LatencyMeter.drawn(1_000_000L)
         LatencyMeter.touched(4_000_000L, press = true, move = false)
-        LatencyMeter.frame(30_000_000L, 12_000_000L, 0L, 3_000_000L, 2_000_000L, 4_000_000L, 9_000_000L)
+        LatencyMeter.frame(30_000_000L, 12_000_000L, 0L, 3_000_000L, 2_000_000L, 4_000_000L, 9_000_000L,
+            windowShown = true)
+        LatencyMeter.treeMeasured(3_000_000L)
+        LatencyMeter.treeLaidOut(2_000_000L)
         LatencyMeter.resized()
 
         val text = LatencyMeter.report("9.9").joinToString("\n")
@@ -230,6 +264,12 @@ class LatencyMeterTest {
         assertTrue(text, text.contains("Frames: 2, 19.00 ms on average, 30.00 ms at worst, 1 slower"))
         assertTrue(text, text.contains(
             "Slowest frame: 30 ms (waiting 12, input 0, layout 3, drawing 2, sync 4, graphics 9)"))
+        assertTrue("of two showings, the slower appearance is the one reported", text.contains(
+            "Slowest frame that showed the keyboard: 30 ms (waiting 12, input 0, layout 3, " +
+                "drawing 2, sync 4, graphics 9)"))
+        assertTrue(text, text.contains(
+            "The keyboard's own layout: measured 2 times, 2.00 ms on average, 3.00 ms at worst; " +
+                "laid out 1 times, 2.00 ms on average, 2.00 ms at worst"))
         assertTrue(text, text.contains("height changed 1 times"))
         assertFalse(text, text.contains("No key has been pressed"))
     }

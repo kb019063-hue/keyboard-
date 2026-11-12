@@ -73,6 +73,22 @@ class FloatingRoot(context: Context) : FrameLayout(context) {
         }
     }
 
+    // This is the outermost view of the keyboard, so timing its measure and its layout times the
+    // whole tree's: the keys, the suggestion strip, the toolbar, a content pane. That is the
+    // keyboard's own share of a frame's layout stage -- the platform's figure for the stage also
+    // contains the window manager's work, and the two could not be told apart (LatencyMeter).
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val began = System.nanoTime()
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        LatencyMeter.treeMeasured(System.nanoTime() - began)
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        val began = System.nanoTime()
+        super.onLayout(changed, left, top, right, bottom)
+        LatencyMeter.treeLaidOut(System.nanoTime() - began)
+    }
+
     /**
      * Make [v] the wrapped keyboard content. Idempotent, like [OneHandedRoot.host]: theme changes,
      * pane swaps and minimize/expand all reach setInputView again, and nesting a holder inside a
