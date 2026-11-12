@@ -352,6 +352,54 @@ class LatencyMeterTest {
     }
 
     @Test
+    fun report_saysHowMuchOfAnOpeningIsTheKeyboardsOwnWork_andWhereTheSlowestWent() {
+        LatencyMeter.createBegin(100); LatencyMeter.createEnd()
+
+        // A quick opening ...
+        LatencyMeter.showBegin()
+        advanceMs(2); LatencyMeter.showMark("clip")
+        advanceMs(2); LatencyMeter.showMark("strip")
+        LatencyMeter.showStarted()
+        advanceMs(30); LatencyMeter.drawn(1_000_000L)
+        LatencyMeter.sessionEnd()
+
+        // ... a slow one, most of it in one step ...
+        LatencyMeter.showBegin()
+        advanceMs(54); LatencyMeter.showMark("clip")
+        advanceMs(4); LatencyMeter.showMark("install")
+        LatencyMeter.showMark("field") // took no time: not worth naming
+        LatencyMeter.showStarted()
+        advanceMs(42); LatencyMeter.drawn(1_000_000L)
+        LatencyMeter.sessionEnd()
+
+        // ... and a later quick one, still open, which must not replace the slow one's steps.
+        LatencyMeter.showBegin()
+        advanceMs(1); LatencyMeter.showMark("clip")
+        LatencyMeter.showStarted()
+
+        val text = LatencyMeter.report("9.9").joinToString("\n")
+        assertTrue(text, text.contains(
+            "The keyboard's own work in an opening: 21.00 ms on average, 58.00 ms at worst; " +
+                "the slowest spent clip 54.0 ms, install 4.0 ms"))
+        assertFalse("a step that took no time is not named", text.contains("field"))
+        // The opening itself is counted to the first picture, which the third has not had yet.
+        assertTrue(text, text.contains("Opening: 2 times, 67.00 ms on average, 100.00 ms at worst"))
+    }
+
+    @Test
+    fun report_namesNoStepsWhenTheSlowestOpeningHadNoneWorthNaming() {
+        LatencyMeter.createBegin(-1); LatencyMeter.createEnd()
+        LatencyMeter.showBegin()
+        LatencyMeter.showMark("clip") // no time passed
+        advanceMs(3)
+        LatencyMeter.showStarted()
+        val text = LatencyMeter.report("9.9").joinToString("\n")
+        assertTrue(text, text.contains(
+            "The keyboard's own work in an opening: 3.00 ms on average, 3.00 ms at worst"))
+        assertFalse(text, text.contains("the slowest spent"))
+    }
+
+    @Test
     fun report_leavesTheEditorReadsOutWhenThereWereNone() {
         LatencyMeter.createBegin(-1); LatencyMeter.createEnd()
         LatencyMeter.showBegin(); LatencyMeter.showStarted(); LatencyMeter.drawn(1_000_000L)

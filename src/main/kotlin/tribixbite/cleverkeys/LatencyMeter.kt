@@ -205,6 +205,11 @@ object LatencyMeter {
     private val showSteps = ArrayList<Pair<String, Long>>()
     private var firstShowSteps: String? = null
 
+    // The slowest `onStartInputView` since the process started, and where its time went: the
+    // one showing worth explaining when the owner says the keyboard came up late.
+    private var slowestStartNanos = -1L
+    private var slowestStartSteps: String? = null
+
     /**
      * `onCreate` has begun. [msSinceProcessStart] is how long the process had already been alive
      * (class loading, providers), or a negative value when the platform cannot say.
@@ -268,6 +273,13 @@ object LatencyMeter {
         if (coldStartMs < 0L) {
             coldStartMs = took / 1_000_000L
             firstShowSteps = stepList(showSteps)
+        }
+        if (took > slowestStartNanos) {
+            slowestStartNanos = took
+            slowestStartSteps = showSteps.filter { it.second >= 500_000L }
+                .sortedByDescending { it.second }.take(4)
+                .joinToString(", ") { "${it.first} ${ms1(it.second)} ms" }
+                .ifEmpty { null }
         }
     }
 
@@ -422,6 +434,15 @@ object LatencyMeter {
             out.add("Opening: ${all.shown.count} times, ${ms(all.shown.avgMs)} ms on average, " +
                 "${ms(all.shown.maxMs)} ms at worst")
         }
+        // How much of an opening is this keyboard's code (`onStartInputView`), as opposed to
+        // the system making the window and the first frame being drawn -- and, for the slowest
+        // one, which of its steps took the time. Without this a slow "Opening" on the phone
+        // could not be acted on without asking the owner for a second reading.
+        if (all.start.count > 0) {
+            out.add("The keyboard's own work in an opening: ${ms(all.start.avgMs)} ms on " +
+                "average, ${ms(all.start.maxMs)} ms at worst" +
+                (slowestStartSteps?.let { "; the slowest spent $it" } ?: ""))
+        }
         if (all.presses > 0) {
             out.add("Key presses: ${all.presses}, handled in ${ms(all.touch.avgMs)} ms on " +
                 "average, ${ms(all.touch.maxMs)} ms at worst")
@@ -476,6 +497,7 @@ object LatencyMeter {
         preCreateMs = -1L; creating = false; createBeginNanos = 0L; lastMarkNanos = 0L
         steps.clear()
         createMs = -1L; coldStartMs = -1L; coldShownMs = -1L; coldLogged = false
+        slowestStartNanos = -1L; slowestStartSteps = null
         session.clear(); total.clear(); sessionOpen = false; showBeginNanos = 0L
         awaitingDraw = false
         lastShowMarkNanos = 0L; showSteps.clear(); firstShowSteps = null

@@ -89,6 +89,7 @@ per run. Times in ms; `a/b` is average/worst.
 | 43230232862 | `46731a0` counter added | 537 / 420 | 12.7 / 156 | 0.85/4.10 | 34 | 21 | 0 / 0 / 1 |
 | 43234083019 | `00e258d` re-read change | 105 / 432 | 4.0 / 54 | 0.97/9.17 | 33 | 12 | 0 / 0 / 1 |
 | 43239991683 | `ee66dc1` card wording only | 111 / 287 | 5.6 / 101 | 1.09/21.28 | 33 | 12 | 0 / 0 / 1 |
+| 43254347006 | `aef226d` CI files only | 224 / 393 | 58.7 / 115 | 1.06/9.06 | 27 | 10 | 0 / 0 / 1 |
 
 Notes on the table:
 
@@ -103,9 +104,26 @@ Notes on the table:
 - That run also failed, on two focus checks: the emulator's own launcher stopped responding
   and was in front when the script expected this app. Everything after them passed, and the
   same script passed whole on the runs before and after it.
-- The last two rows have `predict=`: `21:34.87/248.72` and `21:31.69/121.19`. The average
-  repeats; the worst case halves from one run to the next, so it is one slow search on a busy
-  runner as much as anything about the code.
+- The last three rows have `predict=`: `21:34.87/248.72`, `21:31.69/121.19` and
+  `22:75.42/360.66`. The first two averages agree; the worst case halves from one to the next,
+  so it is one slow search on a busy runner as much as anything about the code.
+- The last row is another slow runner (frames averaged 213 ms against 143 to 174), with no
+  change to the app, and it shows two limits of the probe:
+  - **Counts move too when the runner is slow.** `sync=10` and `strip=27` against 12 and 33.
+    The likely reason, not confirmed: the emulator stalled, taps arrived in a bunch, and two
+    re-reads due within 100 ms of each other become one. So counts are comparable between runs
+    of similar speed only. `predict=22` is the full count for this sentence, sixteen letters
+    plus the second search that follows each of the six first letters (finding 5); 21 in the
+    two runs before means one search was overtaken by the next key.
+  - **One step of an opening follows the system's speed, not the keyboard's.** The warm
+    `start=58.73` was almost all `clip:54.2`, the look at the system clipboard that every
+    showing begins with (`ClipboardHistoryService.on_keyboard_shown`). In the four runs on
+    ordinary runners that step took 0.6 to 0.9 ms; on the other slow runner (43230232862) it
+    took 5.2 of that showing's 12.7 ms. It is a call into the system on the main thread, before
+    the first picture, so it takes as long as the system takes to answer. Nothing was changed:
+    it is two samples, and moving the look behind the first picture changes when a copy reaches
+    the clipboard history. The card now names the steps of the slowest opening, so the phone
+    will say whether this is a cost there; if it names `clip`, that move is the fix.
 
 The whole of two runs. 43154964666, before the re-read change:
 
@@ -290,7 +308,21 @@ the last time the keyboard's process started, except the first two lines. The li
   keyboard had been used in between, or the settings screen was opened first). There is then no
   "before set-up" figure, and the set-up is quicker than one from a dead process, so it is not
   the number to judge a late appearance by.
-- **Opening: N times, X ms on average, Y ms at worst.** Warm showings.
+- **Opening: N times, X ms on average, Y ms at worst.** Every showing, from the keyboard being
+  asked for to its first picture.
+- **The keyboard's own work in an opening: X ms on average, Y ms at worst; the slowest spent
+  ...** The part of an opening that is this keyboard's code; the rest is the system making the
+  window and drawing the first frame. On the emulator it is 4 to 6 ms of a 54 to 166 ms opening.
+  If it is a large part on the phone, the steps named after "the slowest spent" say where to
+  look:
+  `clip` one look at the system clipboard for a copy the keyboard missed;
+  `view` checking the theme and attaching the keys;
+  `receiver` the layout manager and the key-event receiver;
+  `layout` choosing the layout for this field and giving it to the keys;
+  `editor` the per-field resets;
+  `strip` the suggestion strip and the panes around it;
+  `install` the strip's height and handing the view to the system;
+  `field` password mode and the learning switch for this field.
 - **Key presses: N, handled in X ms on average, Y ms at worst.**
 - **Frames: ...** and the slowest frame by stage.
 - **Reading the app's text after the caret moved: N times, X ms on average, Y ms at worst.** The
