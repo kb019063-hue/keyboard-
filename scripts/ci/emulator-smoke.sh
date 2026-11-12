@@ -1555,33 +1555,52 @@ echo "== 9b. the Keyboard speed card in settings, and the drawer that leads to i
 # the owner can read a number off the phone and paste it into a report. Nobody but the owner can
 # look at the phone, so prove here that the card composes and carries numbers. The settings
 # screen lives in the keyboard's process and keys were pressed in 6c, so a "Key presses: N" line
-# is due. The card is one clickable element, which Compose reports as ONE node with its lines
-# joined, hence no text=" anchor.
+# is due, and the keyboard was set up at least once, so a "Set up from nothing: ..." line is due
+# too (ProcessStartLog). The card is one clickable element, which Compose reports as ONE node
+# with its lines joined, hence no text=" anchor.
 #
-# Run 43151960834 could not get there: "card not-reached", with this same hunt. The reading of
-# that (its dumps cannot be read from where the code is written): the drawer lists nineteen
-# sections at 56dp each, a Material drawer sheet does not scroll by itself, and "Information &
-# Actions" is the eighteenth, so on this 915dp screen it had no height to be tapped at. The
-# list scrolls now. The drawer part of the note is the evidence either way: how many of the
-# nineteen items the open drawer shows before anything is scrolled, the lowest of them, and how
-# many dumps the hunt took in each of its two rounds (every dump after a round's first follows
-# one scroll). Fewer than nineteen on the first screen, and the item found only after a scroll,
-# is what "it needed to scroll" looks like.
+# Two runs could not get there with the shared drawer hunt (43151960834 and 43154964666, "card
+# not-reached"). The second said why, as far as two numbers can: eleven of the nineteen sections
+# on the first screen, four dumps in the first round and none in the second. Read together with
+# what this script did before it: the keyboard was still up from 7d-7g, and FLOATING, its
+# window starting at 54% of the screen's height -- and the shared hunt drags from 55%. So its
+# three drags started on the keyboard and scrolled nothing; then its BACK hid the keyboard
+# instead of closing the sheet, and the second round found no hamburger behind the open sheet.
+# That is a reading of two numbers, not something seen. And it says nothing yet about whether
+# the sheet's list scrolls (it is meant to since 8dbb88c; "Information & Actions" is the
+# eighteenth of nineteen), which is the thing to find out.
+#
+# So this section makes its own trip:
+#   1. a keyboard that is up is put away first (BACK; the activity stays), and the note says
+#      whether that worked;
+#   2. a sheet that is already open is used as it is;
+#   3. each drag runs from the lowest item to the highest item of the dump just taken, at the
+#      left edge of the sheet, so it lands on the list whatever the geometry is -- beside a
+#      floating keyboard that would not go away, above a docked one;
+#   4. the note carries what the open sheet showed before any drag and after the last one, and
+#      how many drags it took. Fewer than nineteen at first, another lowest item after a drag,
+#      and the item found: that is what "the list scrolls and needed to" looks like. The same
+#      lowest item before and after is what "it does not scroll" looks like.
 #
 # Written to latency.txt and never failed: this is a diagnostic about a diagnostic, and this
 # run must not go red over it.
 
-# "N lowest" for a dump of the open drawer: N section items on screen, and the label of the
-# lowest. An item is a node at the sheet's left edge whose text is an emoji and a section
+# For a dump of the open drawer ($1), and the height above which a touch reaches the sheet ($2):
+#   "N lowest x from to"
+# N section items on screen and the label of the lowest; then a drag that scrolls the list by
+# as much as one drag can -- x, and the y to start and end at: the centre of the lowest item
+# that is clear of $2, and the centre of the highest. "0 0 0" when there are not two to drag
+# between. An item is a node at the sheet's left edge whose text is an emoji and a section
 # title; one that was given no height is not on screen, whatever the tree says.
 drawer_items() {
-  python3 - "$1" <<'PY' 2>/dev/null || echo "0 unreadable"
+  python3 - "$1" "${2:-99999}" <<'PY' 2>/dev/null || echo "0 unreadable 0 0 0"
 import html, re, sys
 names = ["Test Keyboard", "Activities", "Swipe Typing", "Appearance", "Swipe Trail", "Toolbar",
          "One-Handed Mode", "Input Behavior", "Auto-Correction", "Gesture Tuning", "Accessibility",
          "Clipboard", "GIF Panel", "Backup & Restore", "Multi-Language", "Privacy & Data",
          "Advanced", "Information & Actions", "Help & FAQ"]
 xml = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+limit = int(sys.argv[2])
 seen = {}
 for m in re.finditer(r'<node[^>]*>', xml):
     tag = m.group(0)
@@ -1593,29 +1612,99 @@ for m in re.finditer(r'<node[^>]*>', xml):
     x1, y1, x2, y2 = map(int, b.groups())
     for n in names:
         if label.endswith(n) and len(label) <= len(n) + 4 and x1 <= 60 and (y2 - y1) > 10:
-            seen[n] = y1
-lowest = max(seen, key=seen.get) if seen else "none"
-print(len(seen), lowest.replace(" & ", "-and-").replace(" ", "-"))
+            seen[n] = (x1, y1, x2, y2)
+if not seen:
+    print("0 none 0 0 0"); sys.exit(0)
+order = sorted(seen, key=lambda n: seen[n][1])
+lowest = order[-1].replace(" & ", "-and-").replace(" ", "-")
+clear = [n for n in order if (seen[n][1] + seen[n][3]) // 2 < limit - 20]
+drag = "0 0 0"
+if len(clear) >= 2:
+    top, bottom = seen[clear[0]], seen[clear[-1]]
+    # Near the left edge: a floating keyboard that stayed up starts a tenth of the way in.
+    drag = "%d %d %d" % (top[0] + 40, (bottom[1] + bottom[3]) // 2, (top[1] + top[3]) // 2)
+print(len(seen), lowest, drag)
 PY
 }
 
-CARD="not-reached"; DRAWER="not-opened"
+CARD="not-reached"; DRAWER="not-opened"; CARD_KB=none; CARD_DRAGS=0; CARD_FOUND=no
 dismiss_anr || true
 focus_activity "$PKG/$NS.SettingsActivity" "SettingsActivity" "am-card" || true
-# The item reads "Information & Actions"; the dump escapes the ampersand. "Information" alone
-# would also match the version card's title in a pane behind the sheet.
-if nf_drawer_section card 'Information.{1,9}Actions'; then
+# 1. Put a keyboard that is up away. BACK goes to the keyboard first whenever one is showing,
+#    so this cannot leave the activity; and it is only pressed when one is showing, because
+#    without one it WOULD leave (run 39783242401).
+CARD_TOUCH=99999
+CARD_KB=$(shown); CARD_KB=${CARD_KB#mInputShown=}; CARD_KB=${CARD_KB:-unknown}
+if [ "$CARD_KB" = "true" ]; then
+  adb shell input keyevent KEYCODE_BACK; sleep 3
+  CARD_AFTER=$(shown); CARD_AFTER=${CARD_AFTER#mInputShown=}
+  CARD_KB="true>${CARD_AFTER:-unknown}"
+  if [ "$CARD_AFTER" = "true" ]; then
+    # It would not go. This section touches the screen 40px from the left edge. A floating
+    # keyboard starts further in than that (a tenth of the width), so it is simply beside the
+    # touches; a docked one spans the width, and then drags and taps must stay above it.
+    CARD_RECT=$(ime_frame_rect)
+    set -- $CARD_RECT
+    [ -n "${2:-}" ] && [ "${1:-0}" -le 60 ] && CARD_TOUCH=$2
+  fi
+  # Had the report of a keyboard been stale, that BACK left the activity. Come back to it.
+  case "$(focus)" in
+    *SettingsActivity*) ;;
+    *) CARD_KB="$CARD_KB(left-activity)"
+       focus_activity "$PKG/$NS.SettingsActivity" "SettingsActivity" "am-card-again" || true ;;
+  esac
+fi
+# 2. Open the sheet, unless it is open already (no hamburger, section items on screen).
+dumpui "$OUT/ui-card-land.xml"
+C=$(nodecenter_desc "$OUT/ui-card-land.xml" 'sections menu')
+read -r DI_N _rest <<< "$(drawer_items "$OUT/ui-card-land.xml")"
+if [ -n "$C" ]; then
+  adb shell input tap $C; sleep 3
+elif [ "${DI_N:-0}" -lt 3 ]; then
+  info "card: neither the hamburger nor an open sheet is on screen ($(texts "$OUT/ui-card-land.xml"))"
+fi
+# 3. Find the item, dragging the list from its lowest item to its highest until it shows.
+for attempt in 1 2 3 4 5 6; do
+  E="$OUT/ui-card-sheet-$attempt.xml"; dumpui "$E"
+  read -r DI_N DI_LOW DI_X DI_FROM DI_TO <<< "$(drawer_items "$E" "$CARD_TOUCH")"
+  [ "$attempt" -eq 1 ] && DRAWER="first-screen=${DI_N:-0}/19 lowest=${DI_LOW:-none}"
+  DI_LAST="${DI_N:-0}:${DI_LOW:-none}"
+  # The item reads "Information & Actions"; the dump escapes the ampersand. "Information" alone
+  # would also match the version card's title in a pane behind the sheet.
+  C=$(nodecenter "$E" 'Information.{1,9}Actions')
+  if [ -n "$C" ]; then
+    set -- $C
+    if [ "$2" -lt $(( CARD_TOUCH - 20 )) ]; then
+      # Tapped near the left edge for the same reason the drags run there.
+      CARD_X=$1; [ "${DI_X:-0}" -gt 0 ] && CARD_X=$DI_X
+      adb shell input tap "$CARD_X" "$2"; sleep 3
+      CARD_FOUND=yes
+      break
+    fi
+  fi
+  [ "$attempt" -eq 6 ] && break
+  if [ "${DI_FROM:-0}" -gt "${DI_TO:-0}" ] && [ "${DI_TO:-0}" -gt 0 ]; then
+    adb shell input swipe "$DI_X" "$DI_FROM" "$DI_X" "$DI_TO" 600; sleep 2
+    CARD_DRAGS=$(( CARD_DRAGS + 1 ))
+  else
+    info "card: nothing to drag between in dump $attempt (${DI_N:-0} items)"
+    break
+  fi
+done
+[ "$DRAWER" = "not-opened" ] || DRAWER="kb=$CARD_KB $DRAWER drags=$CARD_DRAGS last-screen=${DI_LAST:-none} item=$CARD_FOUND"
+# 4. The pane that the item opened.
+if [ "$CARD_FOUND" = "yes" ]; then
   dumpui "$OUT/ui-card.xml"
-  ct=no; cb=no; ck=no
+  ct=no; cb=no; ck=no; cs=no
   grep -q 'Keyboard speed' "$OUT/ui-card.xml" 2>/dev/null && ct=yes
   grep -q 'Build: ' "$OUT/ui-card.xml" 2>/dev/null && cb=yes
   grep -qE 'Key presses: [0-9]+' "$OUT/ui-card.xml" 2>/dev/null && ck=yes
-  CARD="title=$ct build-line=$cb presses-line=$ck"
+  grep -qE 'Set up from nothing: (once|[0-9]+ times)' "$OUT/ui-card.xml" 2>/dev/null && cs=yes
+  CARD="title=$ct build-line=$cb presses-line=$ck starts-line=$cs"
   shot 12-speed-card
-fi
-if [ -f "$OUT/ui-card-drawer-1-1.xml" ]; then
-  read -r DI_N DI_LOW <<< "$(drawer_items "$OUT/ui-card-drawer-1-1.xml")"
-  DRAWER="first-screen=${DI_N:-0}/19 lowest=${DI_LOW:-none} dumps=$(ls "$OUT"/ui-card-drawer-1-*.xml 2>/dev/null | wc -l | tr -d ' ')+$(ls "$OUT"/ui-card-drawer-2-*.xml 2>/dev/null | wc -l | tr -d ' ')"
+elif [ "${DI_N:-0}" -ge 3 ]; then
+  # The sheet is still open (its items were in the last dump): close it behind us.
+  adb shell input keyevent KEYCODE_BACK; sleep 2
 fi
 lat_note "card $CARD drawer $DRAWER"
 
