@@ -251,8 +251,18 @@ dismiss_anr() {
 # stuck on the killed Quickstep window, and `dismiss_anr` correctly found nothing to dismiss. In
 # that state an ordinary `am start` reports WARM/ok without changing focus. Restart the launcher,
 # return HOME, and retry the start; three failures still produce the original FAIL annotation.
+#
+# The third start then gets what the first two were not given: time. Run 43278438056 failed the
+# check that follows this call, twice, with focus on a launcher that was restarting (three
+# "isn't responding" dialogs in that run, the first one Quickstep's by its own subject line).
+# The first time, the app was on screen moments later with nothing having started it again:
+# section 5 found its text field and the keyboard came up over it. So the activity does arrive,
+# and five seconds after the start is too soon to look on a slow runner. Nothing is started or
+# stopped in the wait, only watched, with any dialog in the way dismissed. A run that passed
+# therefore passes exactly as before, and an activity that never arrives still fails, about
+# half a minute later.
 focus_activity() {
-  local component="$1" label="$2" prefix="$3" try f
+  local component="$1" label="$2" prefix="$3" try f look
   for try in 1 2 3; do
     dismiss_anr || true
     adb shell am start -W -n "$component" > "$OUT/$prefix-$try.log" 2>&1
@@ -267,6 +277,13 @@ focus_activity() {
         adb shell input keyevent KEYCODE_HOME > /dev/null 2>&1 || true
         sleep 3
         ;;
+    esac
+  done
+  for look in 1 2 3 4 5 6; do
+    dismiss_anr || true
+    sleep 3
+    case "$(focus)" in
+      *"$label"*) info "$label took focus on look $look after the third start"; return 0 ;;
     esac
   done
   return 1
