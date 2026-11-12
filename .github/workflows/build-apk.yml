@@ -175,6 +175,12 @@ jobs:
             --tests '*SuggestionStripPolicyTest' \
             --tests '*SettingsDrawerItemsTest' \
             --tests '*ProcessStartLogTest' \
+            --tests '*TerminalTypedWordTrackingTest' \
+            --tests '*BlindFieldPolicyTest' \
+            --tests '*BackspaceUndoTest' \
+            --tests '*DictionaryAddUndoTest' \
+            --tests '*SuggestionHandlerOwnedCallbackTest' \
+            --tests '*InputCoordinator*' \
             --tests '*Autocapitalisation*' \
             --tests '*ClipboardSearchRegexTest' \
             --tests '*DeadKeyMarksBelowTest' \
