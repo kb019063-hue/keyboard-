@@ -1292,6 +1292,9 @@ tasks.register('runPureTests', JavaExec) {
     'tribixbite.cleverkeys.KeyFillAlphaTest',
     // 2026-11-12: the keyboard's own timing instrument; its arithmetic and its log format.
     'tribixbite.cleverkeys.LatencyMeterTest',
+    // 2026-11-12: the input view is handed to the platform once, and moved (not re-added)
+    // after a configuration change.
+    'tribixbite.cleverkeys.InputViewInstallTest',
   ]
 
   mainClass = 'org.junit.runner.JUnitCore'

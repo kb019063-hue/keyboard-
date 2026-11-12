@@ -978,13 +978,14 @@ class CleverKeysService : InputMethodService(),
         // While minimized the requested view is remembered as the one to expand back to, and
         // the minimized view stays (gh #175).
         val shown = _minimizer.resolve(v)
-        val parent = shown.parent
-        if (parent != null && parent is ViewGroup) {
-            parent.removeView(shown)
-        }
         // One-handed mode (HeliBoard gap analysis phase 2): the platform gets the wrapper, and the
         // requested view becomes its scaled child. host() is idempotent, so the repeated calls this
         // sees — theme change, pane swap, minimize/expand — never nest a root inside a root.
+        //
+        // `shown` is NOT pulled out of its parent first, as it used to be. host() moves a view
+        // that lives somewhere else by itself; and removing one that is already hosted defeated
+        // the idempotence host() was written for -- every call, i.e. every focused text field,
+        // took the keyboard out of the window and put it back.
         //
         // WindowLayoutUtils is unaffected: it configures android.R.id.inputArea, the platform
         // container this root sits inside, and sets that container's background transparent, which
@@ -997,8 +998,23 @@ class CleverKeysService : InputMethodService(),
         root.scaleSuppressed = _minimizer.style != null || floatingActive()
         val floated = floatingRoot().host(root)
         floated.setState(floatingActive())
-        LatencyMeter.installed()
-        super.setInputView(floated)
+        // Hand the outermost view to the platform only when it is not already where the
+        // platform keeps it -- and when it is still attached to a frame the platform has since
+        // replaced (any configuration change does that), detach it first, or the add throws and
+        // takes the keyboard's process with it. Both cases are spelled out in InputViewInstall.
+        val frame = window?.window?.findViewById<View>(android.R.id.inputArea)
+        when (InputViewInstall.decide(floated.parent, frame)) {
+            InputViewInstall.Action.KEEP -> Unit
+            InputViewInstall.Action.INSTALL -> {
+                LatencyMeter.installed()
+                super.setInputView(floated)
+            }
+            InputViewInstall.Action.MOVE -> {
+                (floated.parent as? ViewGroup)?.removeView(floated)
+                LatencyMeter.installed()
+                super.setInputView(floated)
+            }
+        }
         updateSoftInputWindowLayoutParams()
         applyBackdropBlur()
         root.requestApplyInsets()

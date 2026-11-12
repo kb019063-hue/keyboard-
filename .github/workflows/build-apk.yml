@@ -171,6 +171,8 @@ jobs:
             --tests 'tribixbite.cleverkeys.clipboard.*' \
             --tests '*FloatingConfigTest' \
             --tests '*LatencyMeterTest' \
+            --tests '*InputViewInstallTest' \
+            --tests '*SuggestionStripPolicyTest' \
             --tests '*Autocapitalisation*' \
             --tests '*ClipboardSearchRegexTest' \
             --tests '*DeadKeyMarksBelowTest' \
