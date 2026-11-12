@@ -343,30 +343,45 @@ lat_type() {
     case "$ch" in
       a) x=$(( l + w * 1 / 10 )) ;; s) x=$(( l + w * 2 / 10 )) ;; d) x=$(( l + w * 3 / 10 )) ;;
       h) x=$(( l + w * 6 / 10 )) ;; l) x=$(( l + w * 9 / 10 )) ;;
-      _) cmd="$cmd input tap $(( l + w / 2 )) $ysp;"; n=$(( n + 1 )); continue ;;
+      _) cmd="$cmd input tap $(( l + w / 2 )) $ysp; sleep 0.7;"; n=$(( n + 1 )); continue ;;
     esac
-    cmd="$cmd input tap $x $ya;"; n=$(( n + 1 ))
+    # The pause is for the measurement, not the keyboard: every `input` is a fresh process that
+    # takes most of a core to start, and on a two-core emulator the next one starting may
+    # compete with the keyboard for the very press being timed. Run 43142217574, without the
+    # pause, reported 230-310 ms of UI-thread time per frame on every build alike; whether the
+    # taps' own processes were the cause is a suspicion this pause is here to test, not a finding.
+    cmd="$cmd input tap $x $ya; sleep 0.7;"; n=$(( n + 1 ))
   done
   adb shell "$cmd" > /dev/null 2>&1
   echo "$n"
 }
 
 # One timed showing. $1 labels the build in latency.txt. Needs CENTER (the launcher's text field).
+# Two showings per call. The first is a warm-up that is only waited on: it lets a process that
+# has just started finish loading its dictionary (run 43142217574: a fresh process produced one
+# suggestion update in 21 presses, a warm one twelve), and ending it is what writes that process's
+# start-up line. The second is the one that is typed in and reported, so every build's session
+# line describes a WARM showing of a keyboard whose predictions work.
 latency_probe() {
   local label="$1" s0 sent cold sess
   dismiss_anr || true
-  # Whatever showing is open ends here, so the one below is counted from a clean start. On a
-  # process's first showing that is also the moment its start-up line is written.
+  # Whatever showing is open ends here. On a process's first showing that is also the moment
+  # its start-up line is written.
   adb shell input keyevent KEYCODE_BACK; sleep 3
   focus_activity "$PKG/$NS.LauncherActivity" "LauncherActivity" "am-lat-$label" || true
+  adb shell input tap $CENTER; sleep 8
+  [ -n "$LAT_ROWH" ] || lat_measure_rows || true
+  # Empty the field (Ctrl+A, Del) so every build types the same sentence into the same text.
+  adb shell input keycombination 113 29 > /dev/null 2>&1; adb shell input keyevent 67 > /dev/null 2>&1
+  adb shell input keyevent KEYCODE_BACK; sleep 3
+  cold=$(lat_last cold)
   s0=$(lat_count session)
   adb shell input tap $CENTER; sleep 5
-  [ -n "$LAT_ROWH" ] || lat_measure_rows || true
   sent=$(lat_type) || sent=0
   sleep 3
   shot "lat-$label"
   adb shell input keyevent KEYCODE_BACK; sleep 3
-  cold=$(lat_last cold); sess=$(lat_last session)
+  sess=$(lat_last session)
   if [ "$(lat_count session)" -gt "${s0:-0}" ] && [ -n "$sess" ]; then
     lat_note "$label taps-sent=$sent $sess"
   else
@@ -1527,8 +1542,11 @@ else
 fi
 
 echo "== 9. clipboard subsystem (informational) =="
-# run-as works because the debug build is debuggable. clipboard_history.db may legitimately not
-# exist until the first copy, so this is reported, never failed.
+# run-as needs a debuggable build, and since 2026-11-12 the APK this run installs is not one
+# (build.gradle, debugBuildDebuggable): the listing below is then "run-as: package not
+# debuggable", which is the expected answer and is only printed. It still lists the databases
+# for a build made with LOCAL_BUILD=true or -PckDebuggable=true. clipboard_history.db may
+# legitimately not exist until the first copy. Reported, never failed.
 adb shell run-as "$PKG" ls -la databases/ > "$OUT/app-databases.txt" 2>&1
 info "databases: $(grep -oE '[a-z_]+\.db' "$OUT/app-databases.txt" 2>/dev/null | tr '\n' ' ')$(peek "$OUT/app-databases.txt" 80)"
 

@@ -14,8 +14,8 @@ import java.util.Locale
  *
  *  - **start-up**, once per process: the time before `onCreate`, `onCreate` itself broken down by
  *    step, and the first showing;
- *  - **each showing**: `onStartInputView`, and from its entry to the end of the keyboard's first
- *    draw;
+ *  - **each showing**: `onStartInputView` and its steps, and from its entry to the end of the
+ *    keyboard's first draw;
  *  - **typing**: how long each touch took to handle, how long the keys took to draw, and the
  *    platform's own per-frame timing for the keyboard window (`FrameMetrics`);
  *  - **work that should not repeat**: how often the key view was re-attached, re-measured, the
@@ -95,6 +95,8 @@ object LatencyMeter {
         val draw = Stat()    // Keyboard2View.onDraw
         val frame = Stat()   // FrameMetrics TOTAL_DURATION
         val ui = Stat()      // the UI-thread share of a frame
+        val gpu = Stat()     // the render-thread share: sync, issuing commands, swapping buffers
+        var worst: LongArray? = null // the slowest frame, by stage (see [frame])
         val strip = Stat()   // suggestion strip rebinds
         var attaches = 0
         var measures = 0
@@ -106,7 +108,9 @@ object LatencyMeter {
             start.add(o.start); shown.add(o.shown)
             presses += o.presses
             touch.add(o.touch); move.add(o.move); draw.add(o.draw)
-            frame.add(o.frame); ui.add(o.ui); strip.add(o.strip)
+            frame.add(o.frame); ui.add(o.ui); gpu.add(o.gpu); strip.add(o.strip)
+            val theirs = o.worst
+            if (theirs != null && theirs[0] > (worst?.get(0) ?: -1L)) worst = theirs.copyOf()
             attaches += o.attaches; measures += o.measures
             installs += o.installs; resizes += o.resizes
         }
@@ -114,14 +118,20 @@ object LatencyMeter {
         fun clear() {
             shows = 0; presses = 0; attaches = 0; measures = 0; installs = 0; resizes = 0
             start.clear(); shown.clear(); touch.clear(); move.clear(); draw.clear()
-            frame.clear(); ui.clear(); strip.clear()
+            frame.clear(); ui.clear(); gpu.clear(); strip.clear()
+            worst = null
         }
+
+        /** The slowest frame as `total:wait:input:layout:draw:sync:gpu`, whole milliseconds. */
+        fun worstFrame(): String =
+            worst?.joinToString(":") { (it / 1_000_000L).toString() } ?: "none"
 
         fun line(): String =
             "shows=$shows start=${start.pair()} shown=${shown.pair()} presses=$presses " +
                 "touch=${touch.pair()} move=${move.count}:${move.pair()} " +
                 "draw=${draw.count}:${draw.pair()} frames=${frame.count} frame=${frame.pair()} " +
-                "ui=${ui.pair()} slow=${frame.slow} strip=${strip.count}:${strip.pair()} " +
+                "ui=${ui.pair()} gpu=${gpu.pair()} slow=${frame.slow} worst=${worstFrame()} " +
+                "strip=${strip.count}:${strip.pair()} " +
                 "attach=$attaches measure=$measures install=$installs resize=$resizes"
     }
 
@@ -144,6 +154,11 @@ object LatencyMeter {
     private var sessionOpen = false
     private var showBeginNanos = 0L
     private var awaitingDraw = false
+
+    // The steps of the showing in progress (or the last one), and of the process's first.
+    private var lastShowMarkNanos = 0L
+    private val showSteps = ArrayList<Pair<String, Long>>()
+    private var firstShowSteps: String? = null
 
     /**
      * `onCreate` has begun. [msSinceProcessStart] is how long the process had already been alive
@@ -178,7 +193,17 @@ object LatencyMeter {
         sessionOpen = true
         session.shows++
         showBeginNanos = clock()
+        lastShowMarkNanos = showBeginNanos
+        showSteps.clear()
         awaitingDraw = true
+    }
+
+    /** The step of `onStartInputView` named [step] has just finished. */
+    fun showMark(step: String) = synchronized(lock) {
+        if (!sessionOpen) return@synchronized
+        val now = clock()
+        showSteps.add(step to (now - lastShowMarkNanos))
+        lastShowMarkNanos = now
     }
 
     /** `onStartInputView` has returned. */
@@ -186,8 +211,17 @@ object LatencyMeter {
         if (!sessionOpen) return@synchronized
         val took = clock() - showBeginNanos
         session.start.add(took)
-        if (coldStartMs < 0L) coldStartMs = took / 1_000_000L
+        if (coldStartMs < 0L) {
+            coldStartMs = took / 1_000_000L
+            firstShowSteps = stepList(showSteps)
+        }
     }
+
+    /** `name:ms` for the slowest steps first; steps under half a millisecond are left out. */
+    private fun stepList(steps: List<Pair<String, Long>>): String =
+        steps.filter { it.second >= 500_000L }.sortedByDescending { it.second }.take(8)
+            .joinToString(",") { "${it.first}:${ms1(it.second)}" }
+            .ifEmpty { "none" }
 
     /** The key view finished a draw that took [nanos]. The first one after a showing ends it. */
     fun drawn(nanos: Long) = synchronized(lock) {
@@ -206,10 +240,28 @@ object LatencyMeter {
         if (move) session.move.add(nanos) else session.touch.add(nanos)
     }
 
-    /** The platform timed one frame of the keyboard window. */
-    fun frame(totalNanos: Long, uiNanos: Long) = synchronized(lock) {
+    /**
+     * The platform timed one frame of the keyboard window, stage by stage: [waitNanos] is how
+     * long the frame waited for the UI thread to get to it, [inputNanos]..[drawNanos] are the UI
+     * thread's own work, and [syncNanos] and [gpuNanos] belong to the render thread.
+     */
+    fun frame(
+        totalNanos: Long,
+        waitNanos: Long,
+        inputNanos: Long,
+        layoutNanos: Long,
+        drawNanos: Long,
+        syncNanos: Long,
+        gpuNanos: Long
+    ) = synchronized(lock) {
         session.frame.add(totalNanos)
-        session.ui.add(uiNanos)
+        session.ui.add(waitNanos + inputNanos + layoutNanos + drawNanos)
+        session.gpu.add(syncNanos + gpuNanos)
+        if (totalNanos > (session.worst?.get(0) ?: -1L)) {
+            session.worst = longArrayOf(
+                totalNanos, waitNanos, inputNanos, layoutNanos, drawNanos, syncNanos, gpuNanos
+            )
+        }
     }
 
     /** The suggestion strip rebound its views in [nanos]. */
@@ -238,7 +290,7 @@ object LatencyMeter {
             coldLogged = true
             out.add(coldLine())
         }
-        out.add("session ${session.line()}")
+        out.add("session ${session.line()} steps=${stepList(showSteps)}")
         total.add(session)
         session.clear()
         sessionOpen = false
@@ -250,7 +302,7 @@ object LatencyMeter {
         val slowest = steps.sortedByDescending { it.second }.take(8)
             .joinToString(",") { "${it.first}:${it.second}" }
         return "cold pre=$preCreateMs create=$createMs start=$coldStartMs shown=$coldShownMs " +
-            "steps=$slowest"
+            "steps=$slowest first=${firstShowSteps ?: "none"}"
     }
 
     /**
@@ -286,11 +338,28 @@ object LatencyMeter {
         if (all.frame.count > 0) {
             out.add("Frames: ${all.frame.count}, ${ms(all.frame.avgMs)} ms on average, " +
                 "${ms(all.frame.maxMs)} ms at worst, ${all.frame.slow} slower than 16.7 ms")
+            all.worst?.let { w ->
+                fun part(i: Int) = w[i] / 1_000_000L
+                out.add("Slowest frame: ${part(0)} ms (waiting ${part(1)}, input ${part(2)}, " +
+                    "layout ${part(3)}, drawing ${part(4)}, sync ${part(5)}, graphics ${part(6)})")
+            }
         }
         out.add("While open: height changed ${all.resizes} times, keys re-attached " +
             "${all.attaches} times, view re-installed ${all.installs} times")
         out
     }
+
+    /**
+     * The build line of [report]: version, commit when the build recorded one, and whether the
+     * build is debuggable -- the one build property that changes how fast the same code runs,
+     * and so the first thing to check when two reports disagree.
+     */
+    fun buildLabel(version: String?, commit: String?, debuggable: Boolean): String =
+        listOfNotNull(
+            version?.takeIf { it.isNotBlank() } ?: "?",
+            commit?.takeIf { it.isNotBlank() },
+            if (debuggable) "debuggable" else "not debuggable"
+        ).joinToString(", ")
 
     /** Tests only: forget everything, as a new process would. */
     internal fun resetForTest() = synchronized(lock) {
@@ -299,8 +368,12 @@ object LatencyMeter {
         createMs = -1L; coldStartMs = -1L; coldShownMs = -1L; coldLogged = false
         session.clear(); total.clear(); sessionOpen = false; showBeginNanos = 0L
         awaitingDraw = false
+        lastShowMarkNanos = 0L; showSteps.clear(); firstShowSteps = null
         clock = { System.nanoTime() }
     }
 
     private fun ms(v: Double): String = String.format(Locale.ROOT, "%.2f", v)
+
+    /** Nanoseconds as milliseconds with one decimal. */
+    private fun ms1(nanos: Long): String = String.format(Locale.ROOT, "%.1f", nanos / 1e6)
 }

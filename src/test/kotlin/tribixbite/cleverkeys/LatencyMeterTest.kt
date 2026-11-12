@@ -63,7 +63,10 @@ class LatencyMeterTest {
         LatencyMeter.mark("after-the-end") // ignored: onCreate is over
 
         LatencyMeter.showBegin()
-        advanceMs(22)
+        advanceMs(4); LatencyMeter.showMark("clip")
+        advanceMs(16); LatencyMeter.showMark("receiver")
+        advanceMs(2); LatencyMeter.showMark("install")
+        LatencyMeter.showMark("nothing") // too quick to be worth a place in the line
         LatencyMeter.showStarted()
         advanceMs(30)
         LatencyMeter.drawn(3_000_000L)
@@ -77,13 +80,19 @@ class LatencyMeterTest {
         assertEquals("22", field(cold, "start"))
         assertEquals("52", field(cold, "shown"))
         assertEquals("predict:120,inflate:40,compose:5", field(cold, "steps"))
+        assertEquals("receiver:16.0,clip:4.0,install:2.0", field(cold, "first"))
+        assertEquals("the showing's own line names its steps too",
+            "receiver:16.0,clip:4.0,install:2.0", field(first[1], "steps"))
 
-        // The process started once; a second showing must not report start-up again.
+        // The process started once; a second showing must not report start-up again, and its
+        // steps are its own, not the first showing's.
         LatencyMeter.showBegin()
+        advanceMs(3); LatencyMeter.showMark("clip")
         LatencyMeter.showStarted()
         val second = LatencyMeter.sessionEnd()
         assertEquals(1, second.size)
         assertTrue(second[0], second[0].startsWith("session "))
+        assertEquals("clip:3.0", field(second[0], "steps"))
     }
 
     @Test
@@ -108,8 +117,9 @@ class LatencyMeterTest {
         LatencyMeter.touched(20_000_000L, press = false, move = false)
         LatencyMeter.touched(500_000L, press = false, move = true)
         LatencyMeter.drawn(2_000_000L)
-        LatencyMeter.frame(10_000_000L, 3_000_000L)
-        LatencyMeter.frame(40_000_000L, 5_000_000L)
+        // total, wait, input, layout, draw, sync, gpu
+        LatencyMeter.frame(10_000_000L, 1_000_000L, 0L, 1_000_000L, 1_000_000L, 2_000_000L, 4_000_000L)
+        LatencyMeter.frame(40_000_000L, 2_000_000L, 1_000_000L, 1_000_000L, 1_000_000L, 5_000_000L, 25_000_000L)
         LatencyMeter.stripUpdated(1_500_000L)
         LatencyMeter.resized()
 
@@ -124,7 +134,10 @@ class LatencyMeterTest {
         assertEquals("2", field(line, "frames"))
         assertEquals("25.00/40.00", field(line, "frame"))
         assertEquals("4.00/5.00", field(line, "ui"))
+        assertEquals("18.00/30.00", field(line, "gpu"))
         assertEquals("1", field(line, "slow"))
+        assertEquals("the slowest frame, stage by stage", "40:2:1:1:1:5:25", field(line, "worst"))
+        assertEquals("none", field(line, "steps"))
         assertEquals("1:1.50/1.50", field(line, "strip"))
         assertEquals("1", field(line, "attach"))
         assertEquals("2", field(line, "measure"))
@@ -172,6 +185,14 @@ class LatencyMeterTest {
     }
 
     @Test
+    fun buildLabel_namesTheVersionTheCommitAndWhetherTheBuildIsDebuggable() {
+        assertEquals("1.2.3, abc1234, not debuggable", LatencyMeter.buildLabel("1.2.3", "abc1234", false))
+        assertEquals("1.2.3, debuggable", LatencyMeter.buildLabel("1.2.3", null, true))
+        assertEquals("1.2.3, not debuggable", LatencyMeter.buildLabel("1.2.3", " ", false))
+        assertEquals("?, not debuggable", LatencyMeter.buildLabel(null, null, false))
+    }
+
+    @Test
     fun report_saysSoWhenNothingHasBeenMeasuredYet() {
         val lines = LatencyMeter.report("1.2.3")
         assertEquals("Build: 1.2.3", lines[0])
@@ -189,7 +210,7 @@ class LatencyMeterTest {
         advanceMs(10); LatencyMeter.showStarted()
         advanceMs(10); LatencyMeter.drawn(1_000_000L)
         LatencyMeter.touched(2_000_000L, press = true, move = false)
-        LatencyMeter.frame(8_000_000L, 2_000_000L)
+        LatencyMeter.frame(8_000_000L, 1_000_000L, 0L, 0L, 1_000_000L, 1_000_000L, 5_000_000L)
         LatencyMeter.sessionEnd()
 
         // Still open: the settings screen is usually read with the keyboard up.
@@ -197,7 +218,7 @@ class LatencyMeterTest {
         advanceMs(20); LatencyMeter.showStarted()
         advanceMs(20); LatencyMeter.drawn(1_000_000L)
         LatencyMeter.touched(4_000_000L, press = true, move = false)
-        LatencyMeter.frame(30_000_000L, 2_000_000L)
+        LatencyMeter.frame(30_000_000L, 12_000_000L, 0L, 3_000_000L, 2_000_000L, 4_000_000L, 9_000_000L)
         LatencyMeter.resized()
 
         val text = LatencyMeter.report("9.9").joinToString("\n")
@@ -207,6 +228,8 @@ class LatencyMeterTest {
         assertTrue(text, text.contains("Opening: 2 times, 30.00 ms on average, 40.00 ms at worst"))
         assertTrue(text, text.contains("Key presses: 2, handled in 3.00 ms on average, 4.00 ms at worst"))
         assertTrue(text, text.contains("Frames: 2, 19.00 ms on average, 30.00 ms at worst, 1 slower"))
+        assertTrue(text, text.contains(
+            "Slowest frame: 30 ms (waiting 12, input 0, layout 3, drawing 2, sync 4, graphics 9)"))
         assertTrue(text, text.contains("height changed 1 times"))
         assertFalse(text, text.contains("No key has been pressed"))
     }

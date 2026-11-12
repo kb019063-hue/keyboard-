@@ -560,12 +560,15 @@ class CleverKeysService : InputMethodService(),
     private val _frameTimingListener =
         android.view.Window.OnFrameMetricsAvailableListener { _, fm, _ ->
             LatencyMeter.frame(
-                fm.getMetric(android.view.FrameMetrics.TOTAL_DURATION),
-                fm.getMetric(android.view.FrameMetrics.UNKNOWN_DELAY_DURATION) +
-                    fm.getMetric(android.view.FrameMetrics.INPUT_HANDLING_DURATION) +
-                    fm.getMetric(android.view.FrameMetrics.ANIMATION_DURATION) +
-                    fm.getMetric(android.view.FrameMetrics.LAYOUT_MEASURE_DURATION) +
-                    fm.getMetric(android.view.FrameMetrics.DRAW_DURATION)
+                totalNanos = fm.getMetric(android.view.FrameMetrics.TOTAL_DURATION),
+                waitNanos = fm.getMetric(android.view.FrameMetrics.UNKNOWN_DELAY_DURATION),
+                inputNanos = fm.getMetric(android.view.FrameMetrics.INPUT_HANDLING_DURATION) +
+                    fm.getMetric(android.view.FrameMetrics.ANIMATION_DURATION),
+                layoutNanos = fm.getMetric(android.view.FrameMetrics.LAYOUT_MEASURE_DURATION),
+                drawNanos = fm.getMetric(android.view.FrameMetrics.DRAW_DURATION),
+                syncNanos = fm.getMetric(android.view.FrameMetrics.SYNC_DURATION),
+                gpuNanos = fm.getMetric(android.view.FrameMetrics.COMMAND_ISSUE_DURATION) +
+                    fm.getMetric(android.view.FrameMetrics.SWAP_BUFFERS_DURATION)
             )
         }
 
@@ -836,6 +839,7 @@ class CleverKeysService : InputMethodService(),
         // Pass the editor's package so password-manager exclusion identifies the app the user
         // is actually typing into, instead of a cached UsageStats guess from another app.
         ClipboardHistoryService.on_keyboard_shown(info.packageName)
+        LatencyMeter.showMark("clip")
         // NOTE: Config refresh is handled by SharedPreferences listener (onSharedPreferenceChanged)
         // We only do initial config load here if config is completely null (shouldn't happen normally)
         if (_config == null) {
@@ -863,6 +867,8 @@ class CleverKeysService : InputMethodService(),
             setInputView(_keyboardView)
         }
 
+        LatencyMeter.showMark("view")
+
         // Initialize subtype and layout if not already done (v1.32.413: ensure layoutManager is ready)
         // This is needed for receiver initialization which depends on layoutManager
         if (_layoutManager == null) {
@@ -874,6 +880,7 @@ class CleverKeysService : InputMethodService(),
         // Lazy initialization: creates receiver on first call, returns existing on subsequent calls
         // Note: createReceiverIfNeeded() may return null if layoutManager not ready (rare edge case)
         _receiver = _graph.createReceiverIfNeeded(_receiver, _layoutManager, _subtypeManager)
+        LatencyMeter.showMark("receiver")
 
         // NOTE: Content pane state is now managed by KeyboardReceiver.resetContentPaneState()
         // which is called in onFinishInputView. No visibility manipulation needed here.
@@ -891,15 +898,18 @@ class CleverKeysService : InputMethodService(),
         }
 
         _keyboardView.setKeyboard(layout ?: current_layout())
+        LatencyMeter.showMark("layout")
         // WP9 R-1 step 8: background-warm the geometric engine when this layout routes to it,
         // so the first non-QWERTY swipe avoids the synchronous template-index build. No-op
         // unless swipe typing is on AND swipe_engine_mode is hybrid/geometric.
         if (::_inputCoordinator.isInitialized) _inputCoordinator.prewarmGeometricEngine()
         _keyeventhandler.started(info)
+        LatencyMeter.showMark("editor")
 
         // Setup prediction views (v1.32.400: extracted prediction/swipe setup logic)
         // Handles initialization, suggestion bar creation, keyboard dimensions, and cleanup
         installPredictionViews(info)
+        LatencyMeter.showMark("field")
 
         // Key positions are read per swipe from Keyboard2View.geometryParams()
         // The manual post() call here was causing redundant "key positions set" logs and layout updates
@@ -930,6 +940,7 @@ class CleverKeysService : InputMethodService(),
             _receiver,
             _emojiPane
         ).setupPredictionViews(_suggestionBar, _inputViewContainer, _contentPaneContainer, _topPane, _scrollView)
+        LatencyMeter.showMark("strip")
 
         // Update components from setup result
         _suggestionBar = predictionSetup.suggestionBar
@@ -954,6 +965,7 @@ class CleverKeysService : InputMethodService(),
         val stripOccupied = _suggestionBar?.isOccupied() == true
         applyStripHeight(stripOccupied)
         setInputView(predictionSetup.inputView)
+        LatencyMeter.showMark("install")
 
         // #41 v5: Emoji search manager persists across onStartInputView calls
         // Only create once; it gets initialized when emoji pane is first opened
