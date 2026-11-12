@@ -338,6 +338,25 @@ All reversible. They are also in [`OWNER-DECISIONS.md`](OWNER-DECISIONS.md).
   private file that is not backed up).
 - The settings drawer scrolls.
 
+## What the owner was asked to check
+
+Asked on 2026-11-12, with the build of that day. No answer is recorded here yet; when one comes,
+write it under each item.
+
+1. Install the new build over the old one. It should keep its settings and learned words.
+2. Type a few sentences in the apps used most. Does the keyboard come up sooner? Does typing
+   still lag? Do the suggestions keep up with the letters?
+3. The band of suggestions now stays open while a field is typed in. Is that right, or should it
+   close at every space as it did before?
+4. Turn the phone on its side and back with the keyboard open. The keyboard should stay.
+5. In the keyboard's settings, open the side list of sections and drag it up: it should scroll
+   to the last one, "Help & FAQ".
+6. After a day of ordinary use: Settings, Information & Actions, long-press "Keyboard speed",
+   and paste the copied text into the chat, together with the phone's Android version.
+
+The checks still open from the day before are in
+[`BUG-HUNT-2026-11-11-PART-2.md`](BUG-HUNT-2026-11-11-PART-2.md), under "Not verified".
+
 ## If the phone still feels slow
 
 Send the card's text. What it will decide:
