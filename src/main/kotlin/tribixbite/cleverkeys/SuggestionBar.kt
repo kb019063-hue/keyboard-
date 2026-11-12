@@ -1185,7 +1185,8 @@ class SuggestionBar : LinearLayout {
      */
     fun setAllowSwipeInPasswordMode(allow: Boolean) {
         allowSwipeInPasswordMode = allow
-        Log.d(TAG, "Swipe in password mode: ${if (allow) "enabled" else "disabled"}")
+        // Called for every text field that takes focus, whatever the value.
+        if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "Swipe in password mode: ${if (allow) "enabled" else "disabled"}")
     }
 
     /**

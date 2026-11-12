@@ -186,7 +186,9 @@ class PredictionViewSetup(
                     config.clipboard_pane_height_percent
                 )
 
-                android.util.Log.i("PredictionViewSetup", "Else branch: topPane=$topPane, scrollView=$scrollView, suggestionBarHeight=$suggestionBarHeight, contentPaneHeight=$contentPaneHeight")
+                // Every text field that takes focus comes through here, and this line formatted
+                // two whole views (View.toString looks their resource names up) to say so.
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) android.util.Log.i("PredictionViewSetup", "Else branch: topPane=$topPane, scrollView=$scrollView, suggestionBarHeight=$suggestionBarHeight, contentPaneHeight=$contentPaneHeight")
 
                 val suggestionBarPropagator = SuggestionBarPropagator.create(
                     inputCoordinator,

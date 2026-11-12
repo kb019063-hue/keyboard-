@@ -32,8 +32,10 @@ class VerboseLogRatchetTest {
      * Measured 2026-10-31 on the tree that gates SuggestionBar's per-update calls: 246.
      * This is a CEILING, not a target — when a slice removes more, lower it in the same commit.
      * 2026-11-11: 244, after gating the two SuggestionBar calls that printed the bar's message.
+     * 2026-11-12: 242, after gating the two lines written for every text field that takes focus
+     * (PredictionViewSetup's "Else branch", SuggestionBar.setAllowSwipeInPasswordMode).
      */
-    private val MAX_UNGUARDED_LOG_CALLS = 244
+    private val MAX_UNGUARDED_LOG_CALLS = 242
 
     private val logCall = Regex("""\bLog\.[div]\(""")
 
