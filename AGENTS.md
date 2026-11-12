@@ -91,6 +91,29 @@ A minified release APK is faster but has a different `applicationId`, so it cann
 the debug app — it arrives as a fresh app and loses settings, learned words and clipboard history
 unless they are migrated through backup/restore.
 
+## Measuring speed
+
+"It feels slow" is answered with a number or not at all
+([`docs/KEYBOARD-LATENCY-2026-11-12.md`](docs/KEYBOARD-LATENCY-2026-11-12.md)).
+
+- `LatencyMeter` times the keyboard from inside: one `CKLatency` log line per process start and
+  one per showing. Durations and counts only. Never put text, a word or an app's name in it.
+- The emulator smoke test (section 6c) types a fixed sentence and ships those lines as `Latency`
+  notices on the check run. **Compare counts between runs** (`sync=`, `strip=`, `resize=`,
+  `install=`, `attach=`), **not durations**: one runner was three times slower than the next, and
+  the emulator draws in software and keeps its test field in the keyboard's own process.
+- The owner reads the same numbers on the phone: Settings, Information & Actions, "Keyboard
+  speed" (tap refreshes, long-press copies). Its second line comes from `ProcessStartLog` and says
+  how often the keyboard was set up from nothing and how often that followed a kill. Ask for that
+  text before theorising about the phone.
+- The phone is a Huawei with a 1080x2280 screen; its Android version is not recorded. Do not
+  assume that anything needing Android 12 or later (window blur, for one) runs there, and do not
+  assume the emulator's API 34 behaviour either.
+- While a word is being typed, the app's text is not re-read after each letter
+  (`TypedLetterEcho`, `CursorSyncPace`). Anything new that writes to the editor from
+  `SuggestionHandler` must say so first (`noteNotATypedLetter()`), or a letter's caret report
+  could be mistaken for it; `TypedLetterEchoTest` pins the existing ones.
+
 ## Layout files
 
 - `loc <key>` in a layout is a **placement marker, not a printed label** ("Symbols prefixed with

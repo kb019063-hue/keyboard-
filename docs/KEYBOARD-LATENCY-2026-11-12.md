@@ -1,0 +1,333 @@
+# Keyboard latency, second pass: measured (2026-11-12)
+
+The report: the keyboard is slow, lags while typing, and appears late.
+
+The first pass ([`KEYBOARD-LATENCY-2026-11-10.md`](KEYBOARD-LATENCY-2026-11-10.md)) reduced work
+that looked wasteful in the code and said so plainly: no measurement, no demonstrated cause. This
+pass built the instruments first, measured, and changed only what a number pointed at.
+
+Read the limits section before quoting any figure from here. Nothing in this document was
+measured on a phone.
+
+## Summary
+
+| | Before | After | Evidence |
+|---|---|---|---|
+| Rotating the screen with the keyboard open | the keyboard's process died | survives, same pid | smoke section 10, four runs since the fix |
+| Input view re-installed for each focused field | 1 per field, keys re-attached 2x | 0 and 0 | `install=`, `attach=` |
+| Keyboard height changes while typing one sentence | 5 | 1 | `resize=` |
+| Re-reads of the app's text while typing 21 keys | 21 | 12 | `sync=`, runs 43230232862 and 43234083019 |
+| `onCreate` of the installed (CI) build | 742 ms (debuggable) | 271 ms | same boot, one sample each |
+| Sections shown by the settings drawer | the 11 that fit; the list did not scroll | all 19: the last one is reached with one drag | smoke 9b, two runs |
+
+What the owner asked about, in order:
+
+- **Appears late.** With the keyboard's process alive, its own share of a showing is about 5 ms
+  (`onStartInputView`) plus a few milliseconds of layout; the rest of the 54-166 ms measured is the
+  system's window and the emulator's software renderer. With the process dead, everything is set
+  up from nothing: about half a second on an ordinary CI runner (73 ms before `onCreate`, 166 ms
+  in it, 301 ms from the first request to the first picture), 1.1 s on a slow one, and a phone
+  as old as the owner's is likely slower than either. So the question that decides it is how
+  often the phone throws the keyboard away, and only the phone can answer it. The Keyboard speed
+  card now records that. See "The phone" below.
+- **Lags while typing.** Handling a key takes under a millisecond here and drawing the keys about
+  as long. What was wrong is around the key, not in it: the keyboard's height changed five times
+  in one sentence (each one resizes the app behind it too), and after every single letter the
+  keyboard went back to the app to re-read the text and searched the dictionary a second time.
+  Both are fixed. One thing was measured and left alone: finding a letter's suggestions takes
+  35 ms on average and 249 ms at worst on the runner (finding 7), which on a slow phone is long
+  enough to be the lag. Whether any of this is what the owner feels is for the phone to say.
+- **Slow in general.** The build the owner installs was debuggable, which makes ART run the same
+  code without its optimised form. That is off now. (Before this pass it had also logged
+  verbosely on every touch; that was switched off earlier, see `ENABLE_VERBOSE_LOGGING` in
+  `build.gradle`.)
+
+## The instruments
+
+- **`LatencyMeter`** (`src/main/kotlin/tribixbite/cleverkeys/LatencyMeter.kt`). Pure Kotlin, a
+  handful of clock reads on paths that already run. Durations and counts only; never text, never
+  an app's name. Logged under the tag `CKLatency`: one line per process start (`cold ...`) and one
+  per showing (`session ...`).
+- **Smoke probe 6c** (`scripts/ci/emulator-smoke.sh`, `latency_probe`). A warm-up showing, then a
+  timed one in which "a sad lad had a salad" is tapped on the real keys, 0.7 s apart: 21 presses,
+  16 letters, 5 spaces. The lines reach the check run as `Latency` notices, which is the only
+  channel readable from the development sandbox.
+- **The Keyboard speed card** (Settings, Information & Actions). The same numbers as sentences.
+  Tap refreshes, long-press copies. This is how a number comes back from the phone.
+- **`ProcessStartLog`**. A line for every time the keyboard is created and one for every time it
+  is let go of normally, in a private file. The card's second line is made from it.
+
+Fields of the `session` line, in the order they appear:
+
+| Field | Meaning |
+|---|---|
+| `start=` | `onStartInputView`, ms |
+| `shown=` | from `onStartInputView` to the end of the first draw |
+| `presses=`, `touch=avg/max` | key presses, and the time to handle a touch |
+| `draw=N:avg/max` | draws of the key view |
+| `frames=`, `frame=`, `ui=`, `gpu=`, `slow=` | the platform's per-frame timing (`FrameMetrics`) for the keyboard window; `slow` counts frames over 16.7 ms |
+| `avg=` | the average frame by stage: wait, input, layout, draw, sync, gpu |
+| `worst=`, `appear=` | the slowest frame, and the slowest frame that showed the window: total first, then the same stages |
+| `tm=N:avg/max`, `tl=N:avg/max` | measure and layout passes of the keyboard's own outermost view |
+| `strip=N:avg/max` | rebinds of the suggestion strip (a rebind with identical content is skipped and not counted) |
+| `sync=N:avg/max` | re-reads of the app's text after a caret report, and how long each held the main thread |
+| `predict=N:avg/max` | from a typed letter being handed to the predictor to its suggestions being ready |
+| `attach=`, `measure=`, `install=`, `resize=` | work that should not repeat: key view re-attached, re-measured, input view re-installed, height changed while open |
+
+## What was measured
+
+All on the CI emulator: Pixel 7 profile, API 34, x86_64, two cores, 2 GB, software GPU. One sample
+per run. Times in ms; `a/b` is average/worst.
+
+| Run | Commit | Cold: create / shown | Warm: start / shown | touch | strip | sync | attach / install / resize |
+|---|---|---|---|---|---|---|---|
+| 43142217574 | `8c6517c` before the fixes | 202 / 431 | 45.9 / 150 | 7.09/142.76 | 12 | - | 2 / 1 / 5 |
+| same run | same, debuggable build | 742 / 585 | | | | | |
+| same run | same, non-debuggable again | 271 / 382 | | | | | |
+| 43151960834 | `c3bb0b8` band + install fixes | 144 / 460 | 5.8 / 166 | 0.80/7.53 | 33 | - | 0 / 0 / 1 |
+| 43154964666 | `7b94c79` | 166 / 301 | 4.8 / 66 | 0.69/9.99 | 33 | - | 0 / 0 / 1 |
+| 43230232862 | `46731a0` counter added | 537 / 420 | 12.7 / 156 | 0.85/4.10 | 34 | 21 | 0 / 0 / 1 |
+| 43234083019 | `00e258d` re-read change | 105 / 432 | 4.0 / 54 | 0.97/9.17 | 33 | 12 | 0 / 0 / 1 |
+
+Notes on the table:
+
+- The first row's probe typed without pauses and without a warm-up showing; from the second row
+  on the probe is the one described above. `strip=12` against `33` is that difference (a process
+  that has just started has not loaded its dictionary), not a regression.
+- Run 43230232862 landed on a runner about three times slower than the others: every duration in
+  it is two to four times the previous run's, including the 187 ms that passed before `onCreate`
+  began. It is the reason durations are not compared across runs here. It is also the nearest
+  thing in this table to a slow device: set up from nothing took 187 + 537 ms and the first
+  picture came 420 ms after that.
+- That run also failed, on two focus checks: the emulator's own launcher stopped responding
+  and was in front when the script expected this app. Everything after them passed, and the
+  same script passed whole on the runs before and after it.
+- The last row is the first with `predict=`: `predict=21:34.87/248.72`.
+
+The whole of two runs. 43154964666, before the re-read change:
+
+```
+cold pre=73 create=166 start=83 shown=301
+  steps=listeners:39,predict:26,theme:24,prefs:17,contractions:17,inflate:15,config:11,clipboard:9
+  first=strip:30.2,view:16.8,layout:12.6,receiver:10.8,editor:6.8,clip:5.7
+session start=4.83 shown=66.42 presses=21 touch=0.69/9.99 draw=23:0.53/0.81
+  frames=67 frame=142.97/368.27 ui=49.08/216.58 gpu=47.97/130.77 slow=63
+  avg=33.2:2.0:13.1:0.7:1.6:46.4 worst=368:138:0:77:0:10:59 appear=253:96:3:51:1:0:91
+  tm=39:0.22/2.01 tl=36:0.06/1.09 strip=33:0.29/2.20 attach=0 measure=7 install=0 resize=1
+```
+
+43234083019, after it:
+
+```
+cold pre=28 create=105 start=81 shown=432
+  steps=predict:24,prefs:20,theme:18,contractions:13,clipboard:10,config:8,inflate:4,compose:1
+  first=view:44.3,receiver:15.6,strip:8.4,layout:7.0,clip:3.8,editor:2.0
+session start=3.95 shown=54.26 presses=21 touch=0.97/9.17 draw=23:1.03/3.70
+  frames=66 frame=174.13/502.41 ui=62.42/427.53 gpu=49.79/141.04 slow=66
+  avg=43.4:4.0:14.2:0.7:1.2:48.6 worst=502:115:0:306:4:0:24 appear=212:113:1:41:3:0:52
+  tm=39:0.30/5.38 tl=36:0.04/0.69 strip=33:0.65/7.08 sync=12:1.01/4.87
+  predict=21:34.87/248.72 attach=0 measure=7 install=0 resize=1
+card title=yes build-line=yes presses-line=yes starts-line=yes
+drawer kb=true>false first-screen=11/19 lowest=Accessibility drags=1 last-screen=11:Help-and-FAQ item=yes
+rotate verdict=ok pid=2440>2440>2440 shown=true>false>true new-crash=none
+```
+
+Twelve re-reads for that sentence is the number worked out beforehand: six first letters, five
+spaces, and the one check that runs when typing stops.
+
+## What was found, and what was done about each
+
+### 1. Rotating the screen killed the keyboard (fixed, `85892eb`)
+
+A configuration change makes `InputMethodService` build a new input frame. The keyboard's view
+still had its old parent, adding it again threw out of `onStartInputView`, and the process died.
+The user then waited for a cold start. `InputViewInstall` decides between keep, install and move.
+Smoke section 10 rotates there and back and checks the process id: `pid=2440>2440>2440`.
+
+### 2. The input view was re-installed for every field (fixed, same commit)
+
+`setInputView` pulled the keyboard out of its window and put it back each time a text field took
+focus: `install=1 attach=2` per showing. Now `install=0 attach=0`. A side effect that is a fix in
+its own right: a touch that arrives while an app restarts input is no longer lost.
+
+### 3. The keyboard changed height five times in a sentence (fixed, `1671a46`)
+
+The suggestion band collapsed whenever the strip was empty, which is at every space. Each change
+of height is a resize of the keyboard's window and of the app behind it. Now the band stays open
+once suggestions have shown in a field that has text, and closes when the field is emptied or
+another field takes focus: `resize=5` became `resize=1`.
+
+### 4. The installed build was debuggable (fixed, `8c6517c`)
+
+On the same boot, same commit, one sample each: `onCreate` 742 ms debuggable, 271 ms not. See
+`AGENTS.md`, "The installed build is the DEBUG variant".
+
+### 5. The app's text was re-read after every letter (fixed, `00e258d`)
+
+Every caret report is followed 100 ms later by `synchronizeWithCursor`: two reads of the app's
+text on the keyboard's main thread, then a second prediction and a second correction sweep for
+the word. Typing a letter moves the caret, so this ran after every key: `sync=21` for 21 keys.
+
+On the emulator each of those took 1 to 2 ms, but the emulator's test field lives in the
+keyboard's own process and answers at once. On a phone the read waits for the app, and 100 ms
+after a key the app is often still busy with the letter it was just given. That wait is on the
+thread that handles the next key press.
+
+The second search had a cost of its own that the emulator hides. It was started by cancelling
+whatever search was running (`PredictionTaskRunner.cancelAndSubmit`). Here a search is done in
+35 ms, long before the 100 ms are up. On a processor where it takes longer than 100 ms, the
+re-read cancelled the first search while it was still working and began again, so every
+letter's suggestions came later than if nothing had been done. That is read from the code and
+from the 35 ms; it has not been observed.
+
+Now a letter added to the end of a word does not cause a prompt re-read. `TypedLetterEcho`
+recognises the caret report that merely answers such a letter, and `CursorSyncPace` lets the
+re-read wait for a pause of 1.5 s; when it then finds the word the keyboard already holds, it
+stops there. The first letter of a word, a letter typed inside a word, space, punctuation,
+Backspace, Enter, a suggestion, a swipe, any caret move and any restart of input keep the prompt
+re-read. The safeguards are listed in the commit message and pinned by `TypedLetterEchoTest`.
+
+An earlier reading of `strip=33` was that the strip was rebound twice per letter. That was
+wrong: a rebind with identical content is skipped in `SuggestionBar.setSuggestionsWithScores`
+and is not counted, so the second search cost a search and no rebind. The count agrees: `strip=`
+stayed at 33 when the re-reads went from 21 to 12.
+
+What remains of it: the first letter of every word, every Backspace and every caret move still
+re-read and search again. For the first letter of a new word the search is cheap (one letter is
+below `autocorrect_min_word_length`, so there is no correction sweep). They were left as they
+are because that re-read is where real work is done.
+
+### 6. The end of the settings drawer could not be reached (fixed, `8dbb88c`)
+
+Found on the way to the card. The drawer lists nineteen sections in a plain column, and a
+Material drawer sheet does not scroll by itself: what does not fit gets no height. Smoke 9b now
+reports what the open drawer shows, with the keyboard put away first (`kb=true>false`):
+`first-screen=11/19 lowest=Accessibility`, and after one drag `last-screen=11:Help-and-FAQ`, the
+nineteenth. So on that screen eleven fit at a time, and before the list scrolled the eight from
+Clipboard down, Information & Actions among them, could be reached through search only. That
+the old column gave them no height is read from the library's layout rule, not seen; that the
+list scrolls now, and that eleven fit, is seen.
+
+### 7. A letter's suggestions take 35 ms on the runner (measured, not changed)
+
+`predict=21:34.87/248.72`: from a typed letter being handed to the predictor to its suggestions
+being ready took 35 ms on average and 249 ms at worst, on a runner that was fast that day. This
+is the dictionary search plus the correction sweep that runs for every word-in-progress that is
+not itself a word (`WordPredictor.autoCorrect`, so that the strip can show what space would
+commit). It runs on a worker thread and does not hold up a key press.
+
+It is the largest piece of work per key by a wide margin: handling the touch is 1 ms. On a
+processor several times slower it is plausibly 150 ms or more per letter, which is a strip that
+visibly trails the typing, and a core kept busy the whole time. Nothing was changed, for two
+reasons: the sweep is tuned against its own evaluation suite (`docs/eval/`), and there is no
+number from the phone yet. The card has the line now.
+
+One more consequence, also read and not seen: when space is pressed on a misspelt word before
+the worker has finished that word, the sweep runs on the main thread instead
+(`AutocorrectMemo.get` computes on a miss). A word that is in the dictionary returns at once
+and is not affected.
+
+## What the emulator cannot show
+
+- **How long the app takes to answer.** The test field is in the keyboard's process. `sync=` and
+  the time inside it mean something only on a phone, in a real app.
+- **Rendering.** The emulator draws in software: `gpu=` near 50 ms a frame is the emulator, and so
+  is most of `shown=`.
+- **The phone's CPU.** The runner's cores are several times faster than an old phone's, and vary
+  threefold from run to run.
+- **What the phone does to background apps.** See below.
+- **Anything on Android below 12 or on EMUI.** The emulator is API 34.
+
+## The phone
+
+The repository records that the owner's phone is a Huawei (`PHASE4-POLISH-DESIGN.md`). Its
+screenshots are 1080x2280, a panel size of around 2018, and one of them, from 2026-11-05, has
+what looks like the power-saving leaf in the battery icon. The Android version is not recorded
+anywhere. What follows are inferences until the phone confirms them:
+
+- Features that need Android 12 probably do not apply. In particular the 24dp blur behind the
+  default theme (`blurRadius`, applied through `Window.setBackgroundBlurRadius`) is API 31 and
+  up, so it costs nothing on a phone older than that. It was looked at as a suspect and set aside
+  for that reason; it has not been measured on any device.
+- Huawei's EMUI is known for stopping background apps to save power, more so in power-saving
+  mode. A keyboard that has been stopped must be set up from nothing the next time a text field
+  is tapped, and on a phone of that age that is plausibly seconds rather than the emulator's
+  half second.
+- A build that has just been installed has not been compiled ahead of time. Android does that in
+  the background while the phone is idle and charging, so the same build is quicker the next
+  day than in its first hour. This is how Android works in general, not something measured
+  here; it matters because every new build starts from there again.
+
+### Reading the card
+
+Settings, Information & Actions, "Keyboard speed". Long-press copies it. The lines:
+
+- **Set up from nothing: N times in the last 24 hours (M in the last hour), K after being killed;
+  the latest ... ago.** Every creation of the keyboard is counted. "After being killed" counts
+  the ones that followed another creation with no ordinary shutdown between them: the phone
+  killed it, or it crashed, was updated, or the phone restarted. Switching to another keyboard
+  and back is an ordinary shutdown and is not counted as a kill.
+  - Many, most after a kill: the phone is throwing the keyboard away. The remedy is in the
+    phone's settings (below), not in this code.
+  - Many, none after a kill: something keeps switching keyboards. EMUI's secure input, which puts
+    Huawei's own keyboard up for password fields, does that.
+  - A handful: being set up from nothing is not why it appears late.
+- **Starting: A ms before set-up, set-up B ms, first picture C ms after being asked.** What one
+  cold start cost on this phone.
+- **Opening: N times, X ms on average, Y ms at worst.** Warm showings.
+- **Key presses: N, handled in X ms on average, Y ms at worst.**
+- **Frames: ...** and the slowest frame by stage.
+- **Reading the app's text after the caret moved: N times, X ms on average, Y ms at worst.** The
+  one to look at for lag while typing. Tens of milliseconds here means the app answers slowly.
+- **From a letter to its suggestions: N times, X ms on average, Y ms at worst.** The dictionary
+  search. Hundreds of milliseconds here means the strip, not the keys, is what lags.
+
+### Phone settings to check on EMUI
+
+Names differ between EMUI versions. These are the places:
+
+1. Settings, Battery, App launch: find the keyboard, turn off "Manage automatically", and allow
+   Auto-launch, Secondary launch and Run in background.
+2. Settings, Apps, special access, Ignore battery optimisation: allow it for the keyboard.
+3. Settings, Battery: power-saving mode off while judging speed. It limits background work and
+   on some models the processor.
+
+None of this has been tried on the owner's phone. The card's "Set up from nothing" line says
+whether it is needed.
+
+## Limits
+
+- Every figure is one sample on a shared CI runner. A row three times slower than its neighbour
+  is in the table above. Counts (`sync`, `strip`, `resize`, `install`, `attach`) are comparable
+  between runs; durations are not.
+- The probe types slowly and evenly. It does not type fast, swipe, correct, or use an app that
+  restarts input.
+- The typing change is verified by its unit tests, by the count on the emulator, and by the
+  existing typing tests still passing. It has not been used by a person.
+- The probe changed once between runs (a warm-up showing and pauses between taps were added
+  after the first run), as noted under the table.
+
+## Decisions taken without asking
+
+All reversible. They are also in [`OWNER-DECISIONS.md`](OWNER-DECISIONS.md).
+
+- The CI-built APK is not debuggable. Same applicationId, keystore and versionCode: it installs
+  over the old app and keeps its data.
+- The suggestion band stays open while a field with text is being typed in.
+- After a letter that extends a word, the re-read of the app's text waits for a pause.
+- The keyboard writes down when it is created and when it is let go of (times only, 120 lines, a
+  private file that is not backed up).
+- The settings drawer scrolls.
+
+## If the phone still feels slow
+
+Send the card's text. What it will decide:
+
+| The card says | Then |
+|---|---|
+| Many starts after a kill | phone settings above; if they do not help, shorten `onCreate` (the `steps=` list says where) |
+| Few starts, "Opening" slow | the showing itself: look at the slowest frame that showed the keyboard, stage by stage |
+| "Reading the app's text" slow | the remaining prompt re-reads (first letter, space) and `rememberVerifiedWord`, which still reads the editor three times per word |
+| "From a letter to its suggestions" slow | the dictionary search and the correction sweep on the worker thread |
+| "Key presses" or "Frames" slow | the key view's own drawing |
+| All fast | the delay is outside what the keyboard can see; compare with Gboard on the same phone at the same moment |
