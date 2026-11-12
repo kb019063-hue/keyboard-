@@ -25,6 +25,9 @@ import java.util.Locale
  *    round trips to the app on the keyboard's main thread, so on a phone this is how long the
  *    app took to answer; the emulator's test field lives in the keyboard's own process and
  *    answers at once, which makes the COUNT the only part of this the emulator can show;
+ *  - **suggestions**: from a typed letter being handed to the predictor to its suggestions being
+ *    ready for the strip -- the dictionary search on its worker thread, and any wait for the
+ *    previous letter's search to let go of that thread;
  *  - **work that should not repeat**: how often the key view was re-attached, re-measured, the
  *    input view re-installed, and the keyboard's height changed while it was open.
  *
@@ -110,6 +113,7 @@ object LatencyMeter {
         val treeLayout = Stat()  // layout passes of the same
         val strip = Stat()   // suggestion strip rebinds
         val sync = Stat()    // re-reads of the editor after a caret move, on the main thread
+        val predict = Stat() // a typed letter's wait for its suggestions (worker thread)
         var attaches = 0
         var measures = 0
         var installs = 0
@@ -128,7 +132,7 @@ object LatencyMeter {
             val theirAppear = o.appear
             if (theirAppear != null && theirAppear[0] > (appear?.get(0) ?: -1L)) appear = theirAppear.copyOf()
             treeMeasure.add(o.treeMeasure); treeLayout.add(o.treeLayout)
-            sync.add(o.sync)
+            sync.add(o.sync); predict.add(o.predict)
             attaches += o.attaches; measures += o.measures
             installs += o.installs; resizes += o.resizes
         }
@@ -140,7 +144,7 @@ object LatencyMeter {
             stages.fill(0L)
             worst = null; appear = null
             treeMeasure.clear(); treeLayout.clear()
-            sync.clear()
+            sync.clear(); predict.clear()
         }
 
         /** One frame as `total:wait:input:layout:draw:sync:gpu`, whole milliseconds. */
@@ -160,6 +164,7 @@ object LatencyMeter {
                 "tm=${treeMeasure.count}:${treeMeasure.pair()} " +
                 "tl=${treeLayout.count}:${treeLayout.pair()} " +
                 "strip=${strip.count}:${strip.pair()} sync=${sync.count}:${sync.pair()} " +
+                "predict=${predict.count}:${predict.pair()} " +
                 "attach=$attaches measure=$measures install=$installs resize=$resizes"
     }
 
@@ -317,6 +322,13 @@ object LatencyMeter {
      */
     fun synced(nanos: Long) = synchronized(lock) { session.sync.add(nanos) }
 
+    /**
+     * A typed letter's suggestions were ready [nanos] after they were asked for. Called from the
+     * prediction worker thread, for searches that ran to the end (one that a newer letter
+     * overtook is not counted: nobody waited for it).
+     */
+    fun predicted(nanos: Long) = synchronized(lock) { session.predict.add(nanos) }
+
     /** The key view was attached to a window. Once per view is the healthy number. */
     fun attached() = synchronized(lock) { session.attaches++ }
 
@@ -405,6 +417,10 @@ object LatencyMeter {
         if (all.sync.count > 0) {
             out.add("Reading the app's text after the caret moved: ${all.sync.count} times, " +
                 "${ms(all.sync.avgMs)} ms on average, ${ms(all.sync.maxMs)} ms at worst")
+        }
+        if (all.predict.count > 0) {
+            out.add("From a letter to its suggestions: ${all.predict.count} times, " +
+                "${ms(all.predict.avgMs)} ms on average, ${ms(all.predict.maxMs)} ms at worst")
         }
         out.add("While open: height changed ${all.resizes} times, keys re-attached " +
             "${all.attaches} times, view re-installed ${all.installs} times")

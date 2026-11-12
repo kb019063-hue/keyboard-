@@ -3640,6 +3640,9 @@ class SuggestionHandler(
 
             // Copy context to be thread-safe
             val contextWords = contextTracker.getContextWords().toList()
+            // Timed from here to the result being ready for the strip (LatencyMeter): how long a
+            // typed letter waits for its suggestions, the worker thread's queue included.
+            val predictionAsked = System.nanoTime()
 
             // Cancel previous task if running, then submit new prediction task
             predictionTasks.cancelAndSubmit {
@@ -3835,6 +3838,7 @@ class SuggestionHandler(
                 // bar can show the correction it is about to commit.)
                 if ((barRows.words.isNotEmpty() || wouldCorrect) && suggestionBar != null &&
                     !Thread.currentThread().isInterrupted && !specialPromptActive) {
+                    LatencyMeter.predicted(System.nanoTime() - predictionAsked)
                     // Use Handler.post() instead of View.post() — View.post() silently
                     // drops runnables when the View is not attached to a window
                     mainHandler.post {

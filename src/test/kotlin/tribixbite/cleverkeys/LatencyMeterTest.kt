@@ -127,6 +127,8 @@ class LatencyMeterTest {
         LatencyMeter.stripUpdated(1_500_000L)
         // the editor was re-read twice after the caret moved
         LatencyMeter.synced(3_000_000L); LatencyMeter.synced(9_000_000L)
+        // three letters got their suggestions
+        LatencyMeter.predicted(4_000_000L); LatencyMeter.predicted(8_000_000L); LatencyMeter.predicted(30_000_000L)
         LatencyMeter.resized()
 
         val line = LatencyMeter.sessionEnd().last()
@@ -150,6 +152,7 @@ class LatencyMeterTest {
         assertEquals("none", field(line, "steps"))
         assertEquals("1:1.50/1.50", field(line, "strip"))
         assertEquals("2:6.00/9.00", field(line, "sync"))
+        assertEquals("3:14.00/30.00", field(line, "predict"))
         assertEquals("1", field(line, "attach"))
         assertEquals("2", field(line, "measure"))
         assertEquals("1", field(line, "install"))
@@ -246,6 +249,7 @@ class LatencyMeterTest {
             windowShown = true)
         LatencyMeter.treeMeasured(1_000_000L)
         LatencyMeter.synced(2_000_000L)
+        LatencyMeter.predicted(20_000_000L)
         LatencyMeter.sessionEnd()
 
         // Still open: the settings screen is usually read with the keyboard up.
@@ -258,6 +262,7 @@ class LatencyMeterTest {
         LatencyMeter.treeMeasured(3_000_000L)
         LatencyMeter.treeLaidOut(2_000_000L)
         LatencyMeter.synced(10_000_000L)
+        LatencyMeter.predicted(60_000_000L)
         LatencyMeter.resized()
 
         val text = LatencyMeter.report("9.9").joinToString("\n")
@@ -277,6 +282,8 @@ class LatencyMeterTest {
                 "laid out 1 times, 2.00 ms on average, 2.00 ms at worst"))
         assertTrue(text, text.contains(
             "Reading the app's text after the caret moved: 2 times, 6.00 ms on average, 10.00 ms at worst"))
+        assertTrue(text, text.contains(
+            "From a letter to its suggestions: 2 times, 40.00 ms on average, 60.00 ms at worst"))
         assertTrue(text, text.contains("height changed 1 times"))
         assertFalse(text, text.contains("No key has been pressed"))
     }
@@ -287,5 +294,6 @@ class LatencyMeterTest {
         LatencyMeter.showBegin(); LatencyMeter.showStarted(); LatencyMeter.drawn(1_000_000L)
         val text = LatencyMeter.report("9.9").joinToString("\n")
         assertFalse(text, text.contains("Reading the app's text"))
+        assertFalse(text, text.contains("From a letter to its suggestions"))
     }
 }
