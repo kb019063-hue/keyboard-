@@ -13,10 +13,10 @@ measured on a phone.
 
 | | Before | After | Evidence |
 |---|---|---|---|
-| Rotating the screen with the keyboard open | the keyboard's process died | survives, same pid | smoke section 10, four runs since the fix |
+| Rotating the screen with the keyboard open | the keyboard's process died | survives, same pid | smoke section 10, five runs since the fix |
 | Input view re-installed for each focused field | 1 per field, keys re-attached 2x | 0 and 0 | `install=`, `attach=` |
 | Keyboard height changes while typing one sentence | 5 | 1 | `resize=` |
-| Re-reads of the app's text while typing 21 keys | 21 | 12 | `sync=`, runs 43230232862 and 43234083019 |
+| Re-reads of the app's text while typing 21 keys | 21 | 12 | `sync=`: 21 in run 43230232862, 12 in 43234083019 and 43239991683 |
 | `onCreate` of the installed (CI) build | 742 ms (debuggable) | 271 ms | same boot, one sample each |
 | Sections shown by the settings drawer | the 11 that fit; the list did not scroll | all 19: the last one is reached with one drag | smoke 9b, two runs |
 
@@ -35,8 +35,8 @@ What the owner asked about, in order:
   in one sentence (each one resizes the app behind it too), and after every single letter the
   keyboard went back to the app to re-read the text and searched the dictionary a second time.
   Both are fixed. One thing was measured and left alone: finding a letter's suggestions takes
-  35 ms on average and 249 ms at worst on the runner (finding 7), which on a slow phone is long
-  enough to be the lag. Whether any of this is what the owner feels is for the phone to say.
+  about 35 ms on average on the runner and up to 249 ms (finding 7), which on a slow phone is
+  long enough to be the lag. Whether any of this is what the owner feels is for the phone to say.
 - **Slow in general.** The build the owner installs was debuggable, which makes ART run the same
   code without its optimised form. That is off now. (Before this pass it had also logged
   verbosely on every touch; that was switched off earlier, see `ENABLE_VERBOSE_LOGGING` in
@@ -88,6 +88,7 @@ per run. Times in ms; `a/b` is average/worst.
 | 43154964666 | `7b94c79` | 166 / 301 | 4.8 / 66 | 0.69/9.99 | 33 | - | 0 / 0 / 1 |
 | 43230232862 | `46731a0` counter added | 537 / 420 | 12.7 / 156 | 0.85/4.10 | 34 | 21 | 0 / 0 / 1 |
 | 43234083019 | `00e258d` re-read change | 105 / 432 | 4.0 / 54 | 0.97/9.17 | 33 | 12 | 0 / 0 / 1 |
+| 43239991683 | `ee66dc1` card wording only | 111 / 287 | 5.6 / 101 | 1.09/21.28 | 33 | 12 | 0 / 0 / 1 |
 
 Notes on the table:
 
@@ -102,7 +103,9 @@ Notes on the table:
 - That run also failed, on two focus checks: the emulator's own launcher stopped responding
   and was in front when the script expected this app. Everything after them passed, and the
   same script passed whole on the runs before and after it.
-- The last row is the first with `predict=`: `predict=21:34.87/248.72`.
+- The last two rows have `predict=`: `21:34.87/248.72` and `21:31.69/121.19`. The average
+  repeats; the worst case halves from one run to the next, so it is one slow search on a busy
+  runner as much as anything about the code.
 
 The whole of two runs. 43154964666, before the re-read change:
 
@@ -133,7 +136,8 @@ rotate verdict=ok pid=2440>2440>2440 shown=true>false>true new-crash=none
 ```
 
 Twelve re-reads for that sentence is the number worked out beforehand: six first letters, five
-spaces, and the one check that runs when typing stops.
+spaces, and the one check that runs when typing stops. The run after it (43239991683, a change
+to the card's wording only) counted twelve again, with `strip=33 attach=0 install=0 resize=1`.
 
 ## What was found, and what was done about each
 
@@ -211,16 +215,19 @@ list scrolls now, and that eleven fit, is seen.
 ### 7. A letter's suggestions take 35 ms on the runner (measured, not changed)
 
 `predict=21:34.87/248.72`: from a typed letter being handed to the predictor to its suggestions
-being ready took 35 ms on average and 249 ms at worst, on a runner that was fast that day. This
-is the dictionary search plus the correction sweep that runs for every word-in-progress that is
-not itself a word (`WordPredictor.autoCorrect`, so that the strip can show what space would
-commit). It runs on a worker thread and does not hold up a key press.
+being ready took 35 ms on average and 249 ms at worst, on a runner that was fast that day (the
+next run: 32 ms and 121 ms). This is the dictionary search plus the correction sweep that runs
+for every word-in-progress that is not itself a word (`WordPredictor.autoCorrect`, so that the
+strip can show what space would commit). It runs on a worker thread and does not hold up a key
+press.
 
 It is the largest piece of work per key by a wide margin: handling the touch is 1 ms. On a
 processor several times slower it is plausibly 150 ms or more per letter, which is a strip that
 visibly trails the typing, and a core kept busy the whole time. Nothing was changed, for two
-reasons: the sweep is tuned against its own evaluation suite (`docs/eval/`), and there is no
-number from the phone yet. The card has the line now.
+reasons. The sweep's rules and thresholds were tuned with on-demand evaluations (the `*Eval.kt`
+classes in `src/test/kotlin/tribixbite/cleverkeys/autocorrect/`), whose corpora are not in this
+repository, so a change to what it searches cannot be re-scored here. And there is no number
+from the phone yet. The card has the line now.
 
 One more consequence, also read and not seen: when space is pressed on a misspelt word before
 the worker has finished that word, the sweep runs on the main thread instead
