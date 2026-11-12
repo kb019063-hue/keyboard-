@@ -20,10 +20,20 @@ Reading it:
   * "heap left after a collection" at a quarter, half, three quarters and the end of the run,
     against "of a possible N M" (the JVM's limit): if the last figure is near N, the JVM is out
     of room, and the next test class that is added may be the one that turns a slow run into
-    one that does not finish.
+    one that does not finish. From 85% of the limit the line says "NEARLY OUT OF ROOM" and
+    the workflow raises it from a notice to a warning.
   * "full" collections are the collector's last resort; more than a handful means the same.
   * The machine is at the end (processors, memory), because a small or busy runner is the other
     way a run gets slow.
+
+The first line it ever printed for the whole suite (run 43259344146, 2026-11-12, on Gradle's
+default 512 MB) was that warning: 61 full collections, 27 s paused and 94 s of concurrent work
+in a 340 s run, and 475M of 512M still in use after a collection at the end. The whole-suite
+invocation was given `-PtestMaxHeap=1g` because of it (docs/TEST-PITFALLS.md, CI traps 5 and 9).
+
+The figure does not depend much on the limit, which is what makes it comparable from run to
+run: the Kotlin compiler, logged the same way under limits of 70M, 90M and 1200M, read
+18/42/51/57M, 17/40/52/56M and 16/43/51/59M.
 """
 import re
 import sys
@@ -35,6 +45,10 @@ STAMP = re.compile(r'^\[(\d+\.\d+)s\]')
 MAX_HEAP = re.compile(r'Heap Max Capacity: (\d+)([MG])')
 CPUS = re.compile(r'CPUs: (\d+) total, (\d+) available')
 MEMORY = re.compile(r'Memory: (\d+)([MG])')
+# The share of the limit still in use after a collection at the end of a run from which the
+# line says so in capitals. The run that crawled to its bound was measured at 93% the next time
+# the same code ran; the Kotlin compiler finishes untroubled at 81% of a 70M limit.
+NEARLY_FULL = 0.85
 
 
 def summarise(label, text):
@@ -98,7 +112,13 @@ def summarise(label, text):
         % (quarters[0], quarters[1], quarters[2], quarters[3],
            'of a possible %dM' % limit_mb if limit_mb else 'of %dM in use at most' % capacity),
     ]
-    return '; '.join(parts) + machine
+    line = '; '.join(parts) + machine
+    if limit_mb and quarters[3] >= NEARLY_FULL * limit_mb:
+        line += ('; NEARLY OUT OF ROOM: %d%% of the limit was still in use after a collection at '
+                 'the end of the run. Raise -PtestMaxHeap for this invocation, or find what the '
+                 'tests keep (docs/TEST-PITFALLS.md, CI trap 9)'
+                 % round(100.0 * quarters[3] / limit_mb))
+    return line
 
 
 def main(argv):

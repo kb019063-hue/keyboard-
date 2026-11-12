@@ -13,9 +13,12 @@
 # happening again: everything runs at least once a day, and a failure means something in THIS
 # repository is wrong.
 #
-# Measured 2026-11-01 (run 41369205687): 4,650 tests in 413 classes, 22 minutes wall clock on the
-# default 2 GB test heap with the heavy classes split into a second invocation. That is the number
-# the 75-minute job timeout is sized against; a run that approaches it is a signal, not noise.
+# Measured 2026-11-01 (run 41369205687): 4,650 tests in 413 classes, 22 minutes wall clock on
+# Gradle's default test heap with the heavy classes split into a second invocation. That is the
+# number the 75-minute job timeout is sized against; a run that approaches it is a signal, not
+# noise. (This paragraph used to call that heap "the default 2 GB". Nothing ever set 2 GB: the
+# default is 512 MB, which is what the JVM itself reported the first time it was asked, on
+# 2026-11-12. The whole-suite step below says what was found then and what the heap is now.)
 #
 # State at the end of the 2026-11-01 pass: 4,650 run, 0 failed, 204 skipped — the skips are the 22
 # upstream-artefact classes reporting SKIPPED rather than passing. From here a red run means a real
@@ -122,7 +125,22 @@ jobs:
           watchdog=$!
           set +e
           # -PtestGcLog: the test JVM logs its collections (build.gradle); summarised below.
-          ./gradlew testDebugUnitTest -PskipHeavy=true -PtestGcLog="$RUNNER_TEMP/test-gc-whole.log" \
+          #
+          # -PtestMaxHeap=1g, since 2026-11-12. Until then this invocation ran on Gradle's default,
+          # 512 MB, and the first collection log ever read (run 43259344146) said the suite had
+          # grown to the edge of it: "61 full collections ... paused 27.3 s in all (8.0%) ...
+          # concurrent work 94.5 s; heap left after a collection: 100M, 162M, 283M, 475M at each
+          # quarter of the run, of a possible 512M". A JVM that full does not fail, it slows
+          # down, and a little fuller it slows down a great deal: that is the likeliest account
+          # of the run that sat here until the 45-minute bound (43242985447), though that run
+          # itself left nothing to prove it. 1 GB is about twice what the suite holds at its
+          # end; the "Test JVM" annotation says after every run how much of it was used, and
+          # turns into a warning from 85%. docs/TEST-PITFALLS.md, CI traps 5 and 9.
+          #
+          # Not 3 GB: that was tried for everything at once on 2026-10-31, engine classes
+          # included, and the run was abandoned after 70 minutes (see the next step).
+          ./gradlew testDebugUnitTest -PskipHeavy=true -PtestMaxHeap=1g \
+            -PtestGcLog="$RUNNER_TEMP/test-gc-whole.log" \
             --stacktrace 2>&1 | tee unit-test-output.log
           gradle_exit=$?
           set -e
@@ -168,7 +186,8 @@ jobs:
       # cannot drop these behind the report's.
       #
       #  * "Test JVM", on every run: one line per invocation from its collection log
-      #    (scripts/ci/test-gc-summary.py says how to read it).
+      #    (scripts/ci/test-gc-summary.py says how to read it). A notice, or a warning when the
+      #    JVM ended the run with 85% or more of its heap still in use.
       #  * "Long test run", only when a run went on too long: what it was doing at the time. An
       #    error when the run then failed; a warning when it was merely slow and finished.
       - name: Say how the test JVMs spent their time
@@ -181,7 +200,9 @@ jobs:
           for which in whole heavy; do
             label="whole suite"; [ "$which" = "heavy" ] && label="memory-hungry classes"
             line=$(python3 scripts/ci/test-gc-summary.py "$label" "$RUNNER_TEMP/test-gc-$which.log" 2>/dev/null || true)
-            if [ -n "$line" ]; then echo "::notice title=Test JVM::${line//%/%25}"; fi
+            # A warning when the line itself says the JVM is nearly out of room; a notice otherwise.
+            how=notice; case "$line" in *"NEARLY OUT OF ROOM"*) how=warning ;; esac
+            if [ -n "$line" ]; then echo "::$how title=Test JVM::${line//%/%25}"; fi
           done
           level=warning
           for f in build/unit-test-gradle-exit.txt build/heavy-test-gradle-exit.txt; do
