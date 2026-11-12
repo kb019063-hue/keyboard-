@@ -821,6 +821,12 @@ class CleverKeysService : InputMethodService(),
 
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         LatencyMeter.showBegin()
+        // A different field earns its suggestion band afresh. `restarting` is the SAME field
+        // (many editors restart input while being typed in), where the band must not move --
+        // unless the restart is the app emptying the field (a sent message), which the caret
+        // position says: 0 lets the band go. See StripBandLatch.
+        if (!restarting) _stripBand.onNewField()
+        _stripBand.onCaret(info.initialSelStart, info.initialSelEnd, _suggestionBar?.hasSuggestions() == true)
         _formAtFinishView = null
         _viewEditor = editorRefOf(info)
         _keyboardView.cancelContinuousSwipe()
@@ -1627,6 +1633,12 @@ class CleverKeysService : InputMethodService(),
         candidatesEnd: Int
     ) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
+        // The suggestion band is held open while a field is typed in and let go when the caret
+        // is back at the very start (the field was emptied). Uses the position just reported:
+        // no call to the app. False on an ordinary keystroke, so nothing is resized then.
+        if (_stripBand.onCaret(newSelStart, newSelEnd, _suggestionBar?.hasSuggestions() == true)) {
+            applyStripHeight(_suggestionBar?.isOccupied() == true)
+        }
         // Selection UI sees every callback, including ranges owned by a suffix
         // edit. Only manual/unowned movement reaches phrase and cursor tracking.
         _keyeventhandler.selection_updated(oldSelStart, newSelStart)
@@ -1934,11 +1946,15 @@ class CleverKeysService : InputMethodService(),
      * [KeyboardReceiver.hideContentPane] asks this when it puts the strip back after a content
      * pane, so closing the clipboard cannot resurrect an empty band.
      */
-    fun suggestionStripHeight(fullHeightPx: Int): Int = SuggestionStripPolicy.heightPx(
+    fun suggestionStripHeight(fullHeightPx: Int): Int = _stripBand.heightPx(
         _suggestionBar?.isOccupied() == true,
+        _suggestionBar?.hasSuggestions() == true,
         _config?.suggestion_strip_always_visible ?: false,
         fullHeightPx
     )
+
+    /** Keeps the strip's band open for the rest of a field once it has been typed in; see the class. */
+    private val _stripBand = StripBandLatch()
 
     private fun applyStripHeight(occupied: Boolean) {
         val top = _topPane ?: return
@@ -1946,8 +1962,9 @@ class CleverKeysService : InputMethodService(),
         if (top.childCount > 0 && top.getChildAt(0) !== _scrollView) return
         val full = _stripFullHeightPx
         if (full <= 0) return
-        val target = SuggestionStripPolicy.heightPx(
+        val target = _stripBand.heightPx(
             occupied,
+            _suggestionBar?.hasSuggestions() == true,
             _config?.suggestion_strip_always_visible ?: false,
             full
         )
