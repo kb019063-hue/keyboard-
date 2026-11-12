@@ -33,6 +33,11 @@ name: Emulator smoke test
 
 on:
   workflow_dispatch:
+    inputs:
+      compare_debuggable:
+        description: 'Also build the debuggable variant and time both builds on the same emulator'
+        type: boolean
+        default: false
   push:
     branches:
       # Every Arena session works on its own branch; the old single-branch list meant a new
@@ -80,6 +85,20 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       # x86_64 split specifically: the emulator is x86_64 and cannot load the ARM splits.
+      # Optional A/B for the latency probe (emulator-smoke.sh, section 6c). On a manual run with
+      # compare_debuggable ticked, or on a push whose commit message contains [ab-debuggable],
+      # the same commit is first built DEBUGGABLE and its x86_64 APK set aside; the script then
+      # times that build and the shipped one on the same emulator boot. It must run BEFORE the
+      # ordinary build below: both write build/outputs/apk/debug, and the ordinary one has to be
+      # the one left there. Costs one extra (mostly incremental) Gradle build, so it is opt-in.
+      - name: Build the debuggable variant for comparison (optional)
+        if: ${{ inputs.compare_debuggable || contains(github.event.head_commit.message, '[ab-debuggable]') }}
+        run: |
+          ./gradlew assembleDebug -PckDebuggable=true --stacktrace
+          mkdir -p build/ab
+          cp "$(find build/outputs/apk/debug -name '*x86_64*.apk' | head -1)" build/ab/debuggable-x86_64.apk
+          ls -l build/ab
+
       - name: Build debug APKs
         run: ./gradlew assembleDebug --stacktrace
 
@@ -193,6 +212,23 @@ jobs:
           S=$(cat artifacts/summary.txt 2>/dev/null | head -1)
           [ -n "$S" ] || S="no-summary (see the run log)"
           echo "::notice title=Smoke verdict::${S//%/%25}"
+
+      # The keyboard's own timings (LatencyMeter) for the probe in section 6c, and the rotation
+      # verdict from section 10. A step of its own because annotations are budgeted per step and
+      # the smoke step spends its whole budget; without this the numbers would exist only in a
+      # log and an artifact the development sandbox cannot read.
+      - name: Report latency
+        if: always()
+        shell: bash
+        run: |
+          if [ -s artifacts/latency.txt ]; then
+            while IFS= read -r line; do
+              [ -n "$line" ] || continue
+              echo "::notice title=Latency::${line//%/%25}"
+            done < artifacts/latency.txt
+          else
+            echo "::notice title=Latency::no latency.txt -- the probe did not run"
+          fi
 
       - name: Upload evidence (diagnostics, screenshots, dumps, logcat)
         if: always()
