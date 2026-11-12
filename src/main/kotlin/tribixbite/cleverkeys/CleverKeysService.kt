@@ -388,6 +388,7 @@ class CleverKeysService : InputMethodService(),
         // Write down that the keyboard was set up from nothing just now (ProcessStartLog): how
         // often that happens on the owner's phone is the one thing about "it appears late" that
         // neither the code nor the emulator can say. A few bytes, on a thread of its own.
+        // onDestroy writes the matching "let go of normally" line.
         val startLogContext = applicationContext
         Thread({
             try {
@@ -608,6 +609,15 @@ class CleverKeysService : InputMethodService(),
 
     override fun onDestroy() {
         super.onDestroy()
+        // The keyboard is being let go of in the ordinary way (another keyboard was chosen, the
+        // system unbound this one). Written down so that the next start is not mistaken for one
+        // that follows a kill (ProcessStartLog). At once, not on a thread: nothing promises this
+        // process another second. A few hundred bytes, and never on a typing path.
+        try {
+            ProcessStartLog.recordStop(processStartLogFile(applicationContext), System.currentTimeMillis())
+        } catch (_: Exception) {
+            // No storage, no record.
+        }
         stopFrameTiming()
         // Tile: stop the deferred-show loop so no callback outlives the service.
         _tileShow.cancel()
