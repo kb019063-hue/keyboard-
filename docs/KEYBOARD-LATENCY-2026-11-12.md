@@ -260,8 +260,11 @@ anywhere. What follows are inferences until the phone confirms them:
 
 ### Reading the card
 
-Settings, Information & Actions, "Keyboard speed". Long-press copies it. The lines:
+Settings, Information & Actions, "Keyboard speed". Long-press copies it. The numbers count from
+the last time the keyboard's process started, except the first two lines. The lines:
 
+- **Build: version, commit, "not debuggable".** Which build the numbers belong to. "debuggable"
+  here means a build that runs slower by design (finding 4).
 - **Set up from nothing: N times in the last 24 hours (M in the last hour), K after being killed;
   the latest ... ago.** Every creation of the keyboard is counted. "After being killed" counts
   the ones that followed another creation with no ordinary shutdown between them: the phone
@@ -269,11 +272,17 @@ Settings, Information & Actions, "Keyboard speed". Long-press copies it. The lin
   and back is an ordinary shutdown and is not counted as a kill.
   - Many, most after a kill: the phone is throwing the keyboard away. The remedy is in the
     phone's settings (below), not in this code.
-  - Many, none after a kill: something keeps switching keyboards. EMUI's secure input, which puts
-    Huawei's own keyboard up for password fields, does that.
+  - Many, none after a kill: something keeps switching keyboards. One candidate is EMUI's
+    "Secure input", a setting that puts Huawei's own keyboard up for password fields. That is
+    general knowledge of EMUI, not something checked on this phone.
   - A handful: being set up from nothing is not why it appears late.
-- **Starting: A ms before set-up, set-up B ms, first picture C ms after being asked.** What one
-  cold start cost on this phone.
+- **Starting: A ms before set-up, set-up B ms, first picture C ms after being asked.** What the
+  latest set-up cost on this phone, followed by a line naming its slowest steps. When the line
+  begins "Starting again in a process that was still running" or "Starting in a process that
+  was already running", the keyboard was set up inside a process that existed already (another
+  keyboard had been used in between, or the settings screen was opened first). There is then no
+  "before set-up" figure, and the set-up is quicker than one from a dead process, so it is not
+  the number to judge a late appearance by.
 - **Opening: N times, X ms on average, Y ms at worst.** Warm showings.
 - **Key presses: N, handled in X ms on average, Y ms at worst.**
 - **Frames: ...** and the slowest frame by stage.
@@ -281,6 +290,9 @@ Settings, Information & Actions, "Keyboard speed". Long-press copies it. The lin
   one to look at for lag while typing. Tens of milliseconds here means the app answers slowly.
 - **From a letter to its suggestions: N times, X ms on average, Y ms at worst.** The dictionary
   search. Hundreds of milliseconds here means the strip, not the keys, is what lags.
+- **While open: height changed N times, keys re-attached N times, view re-installed N times.**
+  Work that should not repeat. The last two should be 0, and the first about one per field
+  typed in.
 
 ### Phone settings to check on EMUI
 

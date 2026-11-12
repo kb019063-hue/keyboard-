@@ -50,6 +50,14 @@ object LatencyMeter {
     /** A frame, or a touch, that takes longer than this has cost the user a 60 Hz frame. */
     const val SLOW_NANOS = 16_666_667L
 
+    /**
+     * A process older than this when `onCreate` began was not started for the keyboard: the
+     * settings screen or the launcher icon started it, and the keyboard was asked for later.
+     * [report] then does not call the process's age start-up time. Ten seconds is far above the
+     * slowest start seen (187 ms on a slow CI runner) and far below any human pause.
+     */
+    const val ALREADY_RUNNING_MS = 10_000L
+
     /** Monotonic nanosecond clock. Tests replace it. */
     @Volatile
     internal var clock: () -> Long = { System.nanoTime() }
@@ -171,6 +179,10 @@ object LatencyMeter {
     private val lock = Any()
 
     // ── start-up, once per process ───────────────────────────────────────────────────────────────
+    // How many times `onCreate` has run in this process. More than once is ordinary: switching
+    // to another keyboard destroys the service and usually leaves the process alive, and
+    // switching back creates the service again inside it.
+    private var creations = 0
     private var preCreateMs = -1L
     private var creating = false
     private var createBeginNanos = 0L
@@ -198,12 +210,21 @@ object LatencyMeter {
      * (class loading, providers), or a negative value when the platform cannot say.
      */
     fun createBegin(msSinceProcessStart: Long) = synchronized(lock) {
+        creations++
         preCreateMs = msSinceProcessStart
         creating = true
         createBeginNanos = clock()
         lastMarkNanos = createBeginNanos
         steps.clear()
         createMs = -1L
+        if (creations > 1) {
+            // Set up again in a process that stayed alive. The first showing's figures belong
+            // to the set-up before this one; the next showing supplies this one's, so that
+            // [report] never pairs one set-up's time with another's first picture.
+            coldStartMs = -1L
+            coldShownMs = -1L
+            firstShowSteps = null
+        }
     }
 
     /** The step of `onCreate` named [step] has just finished. */
@@ -380,8 +401,18 @@ object LatencyMeter {
             out.add("The keyboard has not been opened since it was installed or restarted.")
             return@synchronized out
         }
-        val pre = if (preCreateMs >= 0L) "$preCreateMs ms before set-up, " else ""
-        out.add("Starting: ${pre}set-up $createMs ms" +
+        // "N ms before set-up" is the process's age when onCreate began. That is start-up time
+        // only when the process was started for the keyboard. Created again after a switch of
+        // keyboards, or first created long after the settings screen started the process, the
+        // age is minutes or hours and says nothing about speed -- so it is not printed as if it
+        // did.
+        val head = when {
+            creations > 1 -> "Starting again in a process that was still running: "
+            preCreateMs >= ALREADY_RUNNING_MS -> "Starting in a process that was already running: "
+            preCreateMs >= 0L -> "Starting: $preCreateMs ms before set-up, "
+            else -> "Starting: "
+        }
+        out.add("${head}set-up $createMs ms" +
             (if (coldShownMs >= 0L) ", first picture $coldShownMs ms after being asked" else ""))
         if (steps.isNotEmpty()) {
             out.add("Slowest set-up steps: " + steps.sortedByDescending { it.second }.take(4)
@@ -441,6 +472,7 @@ object LatencyMeter {
 
     /** Tests only: forget everything, as a new process would. */
     internal fun resetForTest() = synchronized(lock) {
+        creations = 0
         preCreateMs = -1L; creating = false; createBeginNanos = 0L; lastMarkNanos = 0L
         steps.clear()
         createMs = -1L; coldStartMs = -1L; coldShownMs = -1L; coldLogged = false

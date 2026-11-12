@@ -289,6 +289,69 @@ class LatencyMeterTest {
     }
 
     @Test
+    fun report_doesNotCallTheAgeOfAnOldProcessStartUpTime() {
+        // The settings screen started the process an hour before a text field asked for the
+        // keyboard. "3600000 ms before set-up" would read as an hour-long start.
+        LatencyMeter.createBegin(3_600_000)
+        advanceMs(70)
+        LatencyMeter.createEnd()
+
+        val text = LatencyMeter.report("9.9").joinToString("\n")
+        assertTrue(text, text.contains(
+            "Starting in a process that was already running: set-up 70 ms"))
+        assertFalse(text, text.contains("3600000"))
+        assertFalse(text, text.contains("before set-up"))
+
+        // Just under the bound it is still a start, however slow.
+        LatencyMeter.resetForTest()
+        LatencyMeter.clock = { now }
+        LatencyMeter.createBegin(LatencyMeter.ALREADY_RUNNING_MS - 1)
+        LatencyMeter.createEnd()
+        assertTrue(LatencyMeter.report("9.9").joinToString("\n")
+            .contains("Starting: 9999 ms before set-up, set-up 0 ms"))
+    }
+
+    @Test
+    fun report_afterASecondSetUpInTheSameProcess_describesThatOneAlone() {
+        // First set-up, in a process started for the keyboard, and its first showing.
+        LatencyMeter.createBegin(120)
+        advanceMs(200)
+        LatencyMeter.createEnd()
+        LatencyMeter.showBegin()
+        advanceMs(10); LatencyMeter.showStarted()
+        advanceMs(30); LatencyMeter.drawn(1_000_000L)
+        LatencyMeter.sessionEnd()
+        assertTrue(LatencyMeter.report("9.9").joinToString("\n").contains(
+            "Starting: 120 ms before set-up, set-up 200 ms, first picture 40 ms after being asked"))
+
+        // Another keyboard was chosen and this one chosen again: the service is created a
+        // second time inside the same process, which is by now 500 s old.
+        LatencyMeter.createBegin(500_000)
+        advanceMs(45)
+        LatencyMeter.createEnd()
+
+        var text = LatencyMeter.report("9.9").joinToString("\n")
+        assertTrue(text, text.contains(
+            "Starting again in a process that was still running: set-up 45 ms"))
+        assertFalse("the process's age is not a start-up time", text.contains("500000"))
+        assertFalse("the earlier set-up's first picture is not this one's",
+            text.contains("first picture"))
+
+        // Its own first showing supplies the rest of the line.
+        LatencyMeter.showBegin()
+        advanceMs(5); LatencyMeter.showStarted()
+        advanceMs(7); LatencyMeter.drawn(1_000_000L)
+        text = LatencyMeter.report("9.9").joinToString("\n")
+        assertTrue(text, text.contains("Starting again in a process that was still running: " +
+            "set-up 45 ms, first picture 12 ms after being asked"))
+
+        // The log is unchanged by any of this: the start-up line is written once per process.
+        val lines = LatencyMeter.sessionEnd()
+        assertEquals(1, lines.size)
+        assertTrue(lines[0], lines[0].startsWith("session "))
+    }
+
+    @Test
     fun report_leavesTheEditorReadsOutWhenThereWereNone() {
         LatencyMeter.createBegin(-1); LatencyMeter.createEnd()
         LatencyMeter.showBegin(); LatencyMeter.showStarted(); LatencyMeter.drawn(1_000_000L)
