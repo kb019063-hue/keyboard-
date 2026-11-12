@@ -714,11 +714,13 @@ class SuggestionBar : LinearLayout {
         // rebound in place; only the child-count delta is added/removed. Click
         // listeners are bound once at pool-creation with an index-stable closure
         // (pool slot i always renders suggestion i), preserving click semantics.
+        val rebindStart = System.nanoTime()
         try {
             rebindSuggestionViews()
         } catch (e: Exception) {
             Log.e("SuggestionBar", "Error updating suggestion views: ${e.message}")
         }
+        LatencyMeter.stripUpdated(System.nanoTime() - rebindStart)
 
         // Show or hide the entire bar based on suggestions (unless always visible mode)
         // NOTE: Visibility is now controlled by the parent HorizontalScrollView

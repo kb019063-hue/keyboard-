@@ -382,14 +382,19 @@ class CleverKeysService : InputMethodService(),
 
     override fun onCreate() {
         super.onCreate()
+        // Start-up timing (LatencyMeter): each mark below closes the step named in it. They are
+        // plain statements between the existing ones on purpose -- nothing is wrapped or moved.
+        LatencyMeter.createBegin(msSinceProcessStart())
 
         // Store instance for static access (needed by ShortSwipeCustomizationActivity)
         _instance = this
 
         // Initialize ComposeKeyData early (required for shift key modifier operations)
         ComposeKeyData.initialize(this)
+        LatencyMeter.mark("compose")
 
         val prefs = DirectBootAwarePreferences.get_shared_preferences(this)
+        LatencyMeter.mark("prefs")
         _handler = Handler(mainLooper)
 
         // Create bridge for KeyEventHandler to KeyboardReceiver delegation (v1.32.390)
@@ -410,9 +415,11 @@ class CleverKeysService : InputMethodService(),
         // Installed BEFORE initGlobalConfig, whose refresh resolves the first effective theme.
         val themeProvider = tribixbite.cleverkeys.theme.ThemeProvider.getInstance(this)
         Config.themeAvailability = themeProvider::isAvailable
+        LatencyMeter.mark("theme")
 
         // Initialize global config for KeyEventHandler
         Config.initGlobalConfig(prefs, resources, _keyeventhandler, foldStateTracker.isUnfolded())
+        LatencyMeter.mark("config")
 
         // Prewarm emoji keyword index for fast search (loads in background on IO thread)
         EmojiKeywordIndex.prewarm(this)
@@ -465,10 +472,13 @@ class CleverKeysService : InputMethodService(),
 
         // Check if we're the default IME and remind user if not
         checkAndPromptDefaultIME()
+        LatencyMeter.mark("listeners")
         _keyboardView = inflate_view(R.layout.keyboard) as Keyboard2View
         _keyboardView.reset()
+        LatencyMeter.mark("inflate")
         Logs.set_debug_logs(resources.getBoolean(R.bool.debug_logs))
         ClipboardHistoryService.on_startup(this, _keyeventhandler)
+        LatencyMeter.mark("clipboard")
 
         // Fold state change callback is handled by ConfigurationManager
 
@@ -500,9 +510,11 @@ class CleverKeysService : InputMethodService(),
 
         // Suggestion bridge (v1.32.406: extracted to SuggestionBridge; built by the graph)
         _suggestionBridge = _graph.suggestionBridge
+        LatencyMeter.mark("graph")
 
         // Wire the view's service handle (unconditional) and load prediction models if enabled
         _graph.wireSwipeTypingComponents()
+        LatencyMeter.mark("swipe")
 
         // Initialize debug logging manager (v1.32.384)
         _debugLoggingManager = DebugLoggingManager(this, packageName)
@@ -530,10 +542,58 @@ class CleverKeysService : InputMethodService(),
 
         // Register broadcast receiver for debug mode control (v1.32.384: delegated to DebugLoggingManager)
         _debugLoggingManager.registerDebugModeReceiver(this)
+        LatencyMeter.mark("propagate")
+        startFrameTiming()
+        LatencyMeter.createEnd()
+    }
+
+    /** How long this process had been alive when `onCreate` began; negative when unknown. */
+    private fun msSinceProcessStart(): Long = try {
+        android.os.SystemClock.elapsedRealtime() - android.os.Process.getStartElapsedRealtime()
+    } catch (_: Throwable) {
+        -1L
+    }
+
+    // The platform's own per-frame timing for the keyboard window, delivered on a thread of its
+    // own so that measuring the UI thread does not add work to it. API 24, which is minSdk.
+    private var _frameTimingThread: android.os.HandlerThread? = null
+    private val _frameTimingListener =
+        android.view.Window.OnFrameMetricsAvailableListener { _, fm, _ ->
+            LatencyMeter.frame(
+                fm.getMetric(android.view.FrameMetrics.TOTAL_DURATION),
+                fm.getMetric(android.view.FrameMetrics.UNKNOWN_DELAY_DURATION) +
+                    fm.getMetric(android.view.FrameMetrics.INPUT_HANDLING_DURATION) +
+                    fm.getMetric(android.view.FrameMetrics.ANIMATION_DURATION) +
+                    fm.getMetric(android.view.FrameMetrics.LAYOUT_MEASURE_DURATION) +
+                    fm.getMetric(android.view.FrameMetrics.DRAW_DURATION)
+            )
+        }
+
+    private fun startFrameTiming() {
+        try {
+            val win = window?.window ?: return
+            val thread = android.os.HandlerThread("ck-frame-timing").also { it.start() }
+            _frameTimingThread = thread
+            win.addOnFrameMetricsAvailableListener(_frameTimingListener, Handler(thread.looper))
+        } catch (t: Throwable) {
+            // Timing is an instrument. It must never be the reason the keyboard fails to start.
+            Log.w(LatencyMeter.TAG, "frame timing unavailable: ${t.javaClass.simpleName}")
+        }
+    }
+
+    private fun stopFrameTiming() {
+        try {
+            window?.window?.removeOnFrameMetricsAvailableListener(_frameTimingListener)
+        } catch (_: Throwable) {
+            // Never registered, or the window is already gone.
+        }
+        _frameTimingThread?.quitSafely()
+        _frameTimingThread = null
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        stopFrameTiming()
         // Tile: stop the deferred-show loop so no callback outlives the service.
         _tileShow.cancel()
         if (::_handler.isInitialized) _handler.removeCallbacks(_tileShowTick)
@@ -760,6 +820,7 @@ class CleverKeysService : InputMethodService(),
     }
 
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
+        LatencyMeter.showBegin()
         _formAtFinishView = null
         _viewEditor = editorRefOf(info)
         _keyboardView.cancelContinuousSwipe()
@@ -838,6 +899,7 @@ class CleverKeysService : InputMethodService(),
         // The manual post() call here was causing redundant "key positions set" logs and layout updates
 
         _config?.let { Logs.debug_startup_input_view(info, it) }
+        LatencyMeter.showStarted()
     }
 
     /**
@@ -935,6 +997,7 @@ class CleverKeysService : InputMethodService(),
         root.scaleSuppressed = _minimizer.style != null || floatingActive()
         val floated = floatingRoot().host(root)
         floated.setState(floatingActive())
+        LatencyMeter.installed()
         super.setInputView(floated)
         updateSoftInputWindowLayoutParams()
         applyBackdropBlur()
@@ -983,6 +1046,13 @@ class CleverKeysService : InputMethodService(),
         fr.onDragEnd = { persistFloatingPosition() }
         fr.onResize = { dx -> resizeFloating(dx) }
         fr.onResizeEnd = { persistFloatingWidth() }
+        // The input view's own height is the keyboard's height. Count the times it changes
+        // while the keyboard is open: each one resizes the app behind it as well.
+        fr.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+            val height = bottom - top
+            val oldHeight = oldBottom - oldTop
+            if (height > 0 && oldHeight > 0 && height != oldHeight) LatencyMeter.resized()
+        }
         // The window is WRAP_CONTENT around this root, so the height the y clamp needs only exists
         // after the first layout pass -- and changes when the suggestion strip, toolbar or a
         // rotation changes it. Re-resolve the geometry when that happens, otherwise a stored
@@ -1563,6 +1633,14 @@ class CleverKeysService : InputMethodService(),
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
+        // One or two lines of numbers per showing (LatencyMeter): durations and counts only,
+        // never text. This is the channel the emulator smoke test reads.
+        // On unless someone lowers the tag (`setprop log.tag.CKLatency WARN`).
+        if (Log.isLoggable(LatencyMeter.TAG, Log.INFO)) {
+            for (line in LatencyMeter.sessionEnd()) Log.i(LatencyMeter.TAG, line)
+        } else {
+            LatencyMeter.sessionEnd()
+        }
         _keyboardView.cancelContinuousSwipe()
         _suggestionHandler.onEditorSessionChanged()
         super.onFinishInputView(finishingInput)

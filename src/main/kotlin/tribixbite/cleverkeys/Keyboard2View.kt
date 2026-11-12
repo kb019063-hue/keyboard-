@@ -266,6 +266,7 @@ class Keyboard2View @JvmOverloads constructor(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        if (!_previewMode) LatencyMeter.attached()
         if (!_shortSwipeListenerRegistered) {
             _shortSwipeManager.addChangeListener(_shortSwipeMappingsChanged)
             _shortSwipeListenerRegistered = true
@@ -1501,6 +1502,7 @@ class Keyboard2View @JvmOverloads constructor(
         if (event == null) return false
 
         val action = event.actionMasked
+        val touchStart = System.nanoTime()
 
         when (action) {
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
@@ -1524,6 +1526,14 @@ class Keyboard2View @JvmOverloads constructor(
                 _pointers.onTouchCancel()
             }
             else -> return false
+        }
+        // How long this event held the UI thread, key handling and commit included.
+        if (!_previewMode) {
+            LatencyMeter.touched(
+                System.nanoTime() - touchStart,
+                press = action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN,
+                move = action == MotionEvent.ACTION_MOVE
+            )
         }
         return true
     }
@@ -1688,6 +1698,7 @@ class Keyboard2View @JvmOverloads constructor(
     // lookup. Both are dwarfed by the Theme.Computed build on a cache miss.
     @SuppressLint("DrawAllocation")
     override fun onMeasure(wSpec: Int, hSpec: Int) {
+        if (!_previewMode) LatencyMeter.measured()
         val keyboard = _keyboard
         if (keyboard == null) {
             // CRITICAL: Must call setMeasuredDimension even when keyboard is null
@@ -1866,6 +1877,7 @@ class Keyboard2View @JvmOverloads constructor(
     }
 
     override fun onDraw(canvas: Canvas) {
+        val drawStart = System.nanoTime()
         val keyboard = _keyboard ?: return
         val tc = _tc ?: return
 
@@ -2019,6 +2031,7 @@ class Keyboard2View @JvmOverloads constructor(
                 postInvalidateOnAnimation()
             }
         }
+        if (!_previewMode) LatencyMeter.drawn(System.nanoTime() - drawStart)
     }
 
     /**

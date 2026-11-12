@@ -1261,6 +1261,8 @@ tasks.register('runPureTests', JavaExec) {
     // KeyFillAlpha is a pure ARGB bit operation (2026-11-01: it no longer calls
     // android.graphics.Color, which the stub answers with 0 in a JVM test).
     'tribixbite.cleverkeys.KeyFillAlphaTest',
+    // 2026-11-12: the keyboard's own timing instrument; its arithmetic and its log format.
+    'tribixbite.cleverkeys.LatencyMeterTest',
   ]
 
   mainClass = 'org.junit.runner.JUnitCore'
