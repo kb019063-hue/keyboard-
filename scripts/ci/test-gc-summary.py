@@ -38,8 +38,10 @@ The whole-suite invocation was given `-PtestMaxHeap=1g` because of it, and the n
 (43266527543) read 36 full collections, 15 s paused, 50 s of concurrent work and 554M of 1024M
 (docs/TEST-PITFALLS.md, CI traps 5 and 9). The split of the full collections was added after
 those two runs, when 36 turned out to be exactly what the one test asks for. That would leave
-25 for want of room in the first run and none in the second, but it is arithmetic: neither log
-could be read, only its line.
+25 for want of room in the first run, but it is arithmetic: the log could not be read, only
+its line. The third run (43270987868) printed the split: none for want of room, 36 asked for,
+6.1 s of the 12.1 s paused. It was also the first to print "at its fullest": 762M of 1024M,
+more than the whole of the old limit.
 
 How far the figures can be trusted. Each quarter's is the least that any collection left
 behind in the twelfth of the run before that point: what was in use, plus whatever garbage
@@ -124,12 +126,17 @@ def summarise(label, text):
     longest = max(p[4] for p in pauses)
 
     def left_at(fraction):
-        # The smallest heap any collection left behind near that point of the run: the nearest
-        # thing a GC log has to "what is really still in use".
+        # The smallest heap any pause left behind near that point of the run: the nearest
+        # thing a GC log has to "what is really still in use". Every kind of pause counts,
+        # the two in a concurrent cycle included ("Pause Remark", "Pause Cleanup"): they give
+        # back the regions that marking found empty, and so read lowest of all.
         upto = last * fraction
         window = [p[2] for p in pauses if upto - last * 0.08 <= p[0] <= upto] or \
                  [p[2] for p in pauses if p[0] <= upto][-5:] or [pauses[0][2]]
         return min(window)
+
+    def count(n, noun):
+        return '%d %s%s' % (n, noun, '' if n == 1 else 's')
 
     quarters = [left_at(f) for f in (0.25, 0.5, 0.75, 1.0)]
     # The fullest the JVM was at any moment: the most that five collections in a row all left
@@ -137,7 +144,12 @@ def summarise(label, text):
     # peak between two quarters and fall again (the engine classes' does). And a JVM that dies
     # of OutOfMemoryError lets go of everything as it ends: the stand-in that did read 16M at
     # the end and 99% of its limit by this measure.
-    after = [p[2] for p in pauses]
+    #
+    # Young and full collections only. The two pauses of a concurrent cycle log the heap as it
+    # stands between collections, with whatever has been allocated since the last one, and
+    # counting them (as run 43270987868's line did) let "five in a row" be as little as one
+    # real collection.
+    after = [p[2] for p in pauses if p[1] in ('Young', 'Full')] or [p[2] for p in pauses]
     fullest = max(min(after[max(0, i - 4):i + 1]) for i in range(len(after)))
     # A quarter's window can hold fewer than five collections and so read higher than that;
     # the line must not print an end that is fuller than "its fullest".
@@ -145,11 +157,14 @@ def summarise(label, text):
     share = 100.0 * paused / last if last > 0 else 0.0
     parts = [
         '%s: test JVM ran %.0f s (%s)' % (label, last, collector or '?'),
-        '%d young and %d full collections, %d concurrent cycles' % (young, full, cycles),
+        '%d young and %s, %s' % (young, count(full, 'full collection'),
+                                 count(cycles, 'concurrent cycle')),
     ]
     if full:
+        # max(): the two sums are floats, and their difference can be a hair below zero.
         parts.append('the full ones: %d for want of room (%.1f s), %d asked for by the code (%.1f s)'
-                     % (full - asked, (full_ms - asked_ms) / 1000.0, asked, asked_ms / 1000.0))
+                     % (full - asked, max(0.0, full_ms - asked_ms) / 1000.0,
+                        asked, asked_ms / 1000.0))
     parts += [
         'paused %.1f s in all (%.1f%%), longest %.0f ms' % (paused, share, longest),
         'concurrent work %.1f s' % (concurrent_ms / 1000.0),

@@ -346,8 +346,9 @@ Facts that keep costing time:
    - *Too little, unnoticed.* Everything else ran on Gradle's default, 512 MB, which no file
      here mentioned (one comment called it 2 GB). The first collection log (run 43259344146,
      2026-11-12) showed the suite at the edge of it; trap 9 has the line. The whole-suite
-     invocation now passes `-PtestMaxHeap=1g`, and its first run there ended with 554M of the
-     1024M in use.
+     invocation now passes `-PtestMaxHeap=1g`. In its first two runs there the suite ended
+     with about 550M in use and stood at 762M at its fullest: more than the whole of the heap
+     it had before.
 
    The line turns into a warning that says `NEARLY OUT OF ROOM` when, at the JVM's fullest,
    85% of the limit was still in use after a collection. Raising the number is the quick
@@ -453,8 +454,35 @@ Facts that keep costing time:
      collector with room to spare leaves more of it lying; a JVM against its limit also drops
      what it may (soft references). Which of the two the 79M is was not determined, so
      compare runs at the same limit only.
-   - What the tests keep still nearly doubles from each quarter of the run to the next. At
-     554M of 1024M the warning (85%, 870M) is some way off. It will come.
+   - What the tests keep still nearly doubles from each quarter of the run to the next.
+
+   **The second run at 1 GB** (43270987868, 4,797 run, 0 failed, 8.6 minutes) was the first
+   to print the two additions to the line:
+
+   ```
+   whole suite: test JVM ran 308 s (G1); 231 young and 36 full collections, 56 concurrent
+   cycles; the full ones: 0 for want of room (-0.0 s), 36 asked for by the code (6.1 s);
+   paused 12.1 s in all (3.9%), longest 238 ms; concurrent work 61.4 s; heap left after a
+   collection: 96M, 156M, 297M, 551M at each quarter of the run and 762M at its fullest, of a
+   possible 1024M; machine: 2 processors, 7932M
+   ```
+
+   - The subtraction is now a reading: no full collection for want of room, and the 36 that
+     the one test asks for are half of all the time the tests were stopped (6.1 of 12.1 s).
+   - **762M at its fullest.** At some moment in the run the suite had three quarters of a
+     gigabyte in use after collections: 200M more than at its end, and half as much again as
+     the whole of the 512 MB it used to run in. This is the best evidence there is for the
+     account above. At 512 MB that moment could only be got through by the collector's last
+     resort, and how long that took would have depended on what else was live just then.
+     Which test class it is, nobody knows yet.
+   - The warning is at 85%, 870M. The suite's fullest moment is about a hundred megabytes
+     short of it, so expect the warning before long, and treat it as the prompt to look at
+     what the tests keep and not only to raise the number again.
+   - Two details of that line were corrected afterwards, and later lines differ in them. The
+     `-0.0` is a rounding slip. And "at its fullest" is the most that five collections in a
+     row all left behind, but it counted the two pauses inside a concurrent cycle as
+     collections, so the five could be as little as one real collection; it now counts young
+     and full collections only, and may read lower for it.
 
    What was not done: **nobody has looked at what the tests keep.** Half a gigabyte is a
    great deal for 424 classes of unit tests. Bringing it down would shorten every run (in
