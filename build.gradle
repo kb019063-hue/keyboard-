@@ -1295,6 +1295,8 @@ tasks.register('runPureTests', JavaExec) {
     // 2026-11-12: the input view is handed to the platform once, and moved (not re-added)
     // after a configuration change.
     'tribixbite.cleverkeys.InputViewInstallTest',
+    // 2026-11-12: how often the keyboard was set up from nothing (the Keyboard speed card).
+    'tribixbite.cleverkeys.ProcessStartLogTest',
   ]
 
   mainClass = 'org.junit.runner.JUnitCore'

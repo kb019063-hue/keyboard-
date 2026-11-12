@@ -36,6 +36,8 @@ import java.io.InputStreamReader
 import java.util.Properties
 import tribixbite.cleverkeys.BuildConfig
 import tribixbite.cleverkeys.LatencyMeter
+import tribixbite.cleverkeys.ProcessStartLog
+import tribixbite.cleverkeys.processStartLogFile
 import tribixbite.cleverkeys.R
 import tribixbite.cleverkeys.SettingsActivity
 
@@ -122,13 +124,26 @@ internal fun SettingsActivity.LatencyInfoCard() {
     val versionInfo = remember { loadVersionInfo() }
     var refresh by remember { mutableStateOf(0) }
     val lines: List<String> = remember(refresh) {
-        LatencyMeter.report(
+        val report = LatencyMeter.report(
             LatencyMeter.buildLabel(
                 versionInfo.getProperty("version"),
                 versionInfo.getProperty("commit"),
                 BuildConfig.DEBUG
             )
         )
+        // How often the keyboard had to be set up from nothing lately (ProcessStartLog). Read
+        // from its file, not from memory: a phone that kills the keyboard is exactly the phone
+        // on which this screen opens in a process that has never seen it. A few hundred bytes.
+        val starts = try {
+            ProcessStartLog.summary(
+                ProcessStartLog.read(processStartLogFile(context.applicationContext)),
+                System.currentTimeMillis()
+            )
+        } catch (_: Exception) {
+            null
+        }
+        // Second line, right under the build: it is the first thing to look at.
+        if (starts == null) report else report.take(1) + starts + report.drop(1)
     }
 
     Card(

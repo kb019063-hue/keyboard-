@@ -385,6 +385,17 @@ class CleverKeysService : InputMethodService(),
         // Start-up timing (LatencyMeter): each mark below closes the step named in it. They are
         // plain statements between the existing ones on purpose -- nothing is wrapped or moved.
         LatencyMeter.createBegin(msSinceProcessStart())
+        // Write down that the keyboard was set up from nothing just now (ProcessStartLog): how
+        // often that happens on the owner's phone is the one thing about "it appears late" that
+        // neither the code nor the emulator can say. A few bytes, on a thread of its own.
+        val startLogContext = applicationContext
+        Thread({
+            try {
+                ProcessStartLog.record(processStartLogFile(startLogContext), System.currentTimeMillis())
+            } catch (_: Exception) {
+                // No storage yet, no record: never the keyboard's problem.
+            }
+        }, "ck-start-log").start()
 
         // Store instance for static access (needed by ShortSwipeCustomizationActivity)
         _instance = this
