@@ -13,10 +13,10 @@ measured on a phone.
 
 | | Before | After | Evidence |
 |---|---|---|---|
-| Rotating the screen with the keyboard open | the keyboard's process died | survives, same pid | smoke section 10, five runs since the fix |
+| Rotating the screen with the keyboard open | the keyboard's process died | survives, same pid | smoke section 10, seven runs since the fix |
 | Input view re-installed for each focused field | 1 per field, keys re-attached 2x | 0 and 0 | `install=`, `attach=` |
 | Keyboard height changes while typing one sentence | 5 | 1 | `resize=` |
-| Re-reads of the app's text while typing 21 keys | 21 | 12 | `sync=`: 21 in run 43230232862, 12 in 43234083019 and 43239991683 |
+| Re-reads of the app's text while typing 21 keys | 21 | 12 | `sync=`: 21 in run 43230232862, 12 in 43234083019, 43239991683 and 43259328923 |
 | `onCreate` of the installed (CI) build | 742 ms (debuggable) | 271 ms | same boot, one sample each |
 | Sections shown by the settings drawer | the 11 that fit; the list did not scroll | all 19: the last one is reached with one drag | smoke 9b, two runs |
 
@@ -29,7 +29,8 @@ What the owner asked about, in order:
   in it, 301 ms from the first request to the first picture), 1.1 s on a slow one, and a phone
   as old as the owner's is likely slower than either. So the question that decides it is how
   often the phone throws the keyboard away, and only the phone can answer it. The Keyboard speed
-  card now records that. See "The phone" below.
+  card now records that. See "The phone" below. One step of that set-up was the slowest in the
+  two latest runs and was left alone until the phone has given a number (finding 8).
 - **Lags while typing.** Handling a key takes under a millisecond here and drawing the keys about
   as long. What was wrong is around the key, not in it: the keyboard's height changed five times
   in one sentence (each one resizes the app behind it too), and after every single letter the
@@ -90,6 +91,7 @@ per run. Times in ms; `a/b` is average/worst.
 | 43234083019 | `00e258d` re-read change | 105 / 432 | 4.0 / 54 | 0.97/9.17 | 33 | 12 | 0 / 0 / 1 |
 | 43239991683 | `ee66dc1` card wording only | 111 / 287 | 5.6 / 101 | 1.09/21.28 | 33 | 12 | 0 / 0 / 1 |
 | 43254347006 | `aef226d` CI files only | 224 / 393 | 58.7 / 115 | 1.06/9.06 | 27 | 10 | 0 / 0 / 1 |
+| 43259328923 | `5ea41d3` a line on the card, CI files | 224 / 397 | 5.6 / 114 | 0.75/8.30 | 33 | 12 | 0 / 0 / 1 |
 
 Notes on the table:
 
@@ -104,11 +106,18 @@ Notes on the table:
 - That run also failed, on two focus checks: the emulator's own launcher stopped responding
   and was in front when the script expected this app. Everything after them passed, and the
   same script passed whole on the runs before and after it.
-- The last three rows have `predict=`: `21:34.87/248.72`, `21:31.69/121.19` and
-  `22:75.42/360.66`. The first two averages agree; the worst case halves from one to the next,
-  so it is one slow search on a busy runner as much as anything about the code.
-- The last row is another slow runner (frames averaged 213 ms against 143 to 174), with no
-  change to the app, and it shows two limits of the probe:
+- The last four rows have `predict=`: `21:34.87/248.72`, `21:31.69/121.19`, `22:75.42/360.66`
+  and `21:50.38/247.26`. The average runs from 32 to 75 ms and the worst case from 121 to
+  361 ms with no change to the search between them, so both follow the runner as much as the
+  code.
+- The last row's `create=224` is mostly one step. Its `onCreate` steps read
+  `contractions:85,compose:26,inflate:23,predict:20,…`. That step took 13 to 31 ms in the six
+  samples from ordinary runners and 76 and 79 ms on the two slow ones. Nothing in the commit
+  touches it, and the process itself started quickly (`pre=25`). A single sample cannot tell
+  that from a regression; the step names printed beside the total can, which is what they are
+  for. Finding 8 says what the step is.
+- The row before the last (43254347006) is another slow runner (frames averaged 213 ms against
+  143 to 187), with no change to the app, and it shows two limits of the probe:
   - **Counts move too when the runner is slow.** `sync=10` and `strip=27` against 12 and 33.
     The likely reason, not confirmed: the emulator stalled, taps arrived in a bunch, and two
     re-reads due within 100 ms of each other become one. So counts are comparable between runs
@@ -119,11 +128,12 @@ Notes on the table:
     `start=58.73` was almost all `clip:54.2`, the look at the system clipboard that every
     showing begins with (`ClipboardHistoryService.on_keyboard_shown`). In the four runs on
     ordinary runners that step took 0.6 to 0.9 ms; on the other slow runner (43230232862) it
-    took 5.2 of that showing's 12.7 ms. It is a call into the system on the main thread, before
-    the first picture, so it takes as long as the system takes to answer. Nothing was changed:
-    it is two samples, and moving the look behind the first picture changes when a copy reaches
-    the clipboard history. The card now names the steps of the slowest opening, so the phone
-    will say whether this is a cost there; if it names `clip`, that move is the fix.
+    took 5.2 of that showing's 12.7 ms, and in the run after this one (43259328923) 4.7 of
+    5.6 ms. It is a call into the system on the main thread, before the first picture, so it
+    takes as long as the system takes to answer. Nothing was changed: it is three samples, and
+    moving the look behind the first picture changes when a copy reaches the clipboard history.
+    The card now names the steps of the slowest opening, so the phone will say whether this is
+    a cost there; if it names `clip`, that move is the fix.
 
 The whole of two runs. 43154964666, before the re-read change:
 
@@ -252,6 +262,28 @@ the worker has finished that word, the sweep runs on the main thread instead
 (`AutocorrectMemo.get` computes on a miss). A word that is in the dictionary returns at once
 and is not affected.
 
+### 8. Set-up reads its apostrophe tables on the main thread (measured, not changed)
+
+In the last two runs the slowest step of `onCreate` was `contractions`: 79 and 85 ms of 224.
+On ordinary runners it took 13 to 31 ms of 105 to 271. In the debuggable build it was 395 ms of
+742, more than half (run 43142217574, where the two builds were timed on one boot).
+
+The step loads the tables that put the apostrophe into `dont` and offer `we'll` beside `well`
+(`ContractionManager.loadTypingMappings`, called from `KeyboardComponentGraph`). For English
+that is a few small files and one large one, `contraction_pairings.json`: 154 KB, 1,748 entries,
+parsed with `org.json`. All of it runs on the main thread before the keyboard can be shown.
+Which file the time goes to was not measured; the large one is the obvious candidate, and a
+parser that walks text character by character is the kind of code a debuggable build runs
+slowest, which fits the 395 ms.
+
+It is paid only when the keyboard is set up from nothing, so it matters exactly as much as the
+phone kills the keyboard, and the card counts that. Nothing was changed, for two reasons.
+Loading the tables beside the first picture instead of before it means making them safe to
+read while they load, in a class that the suggestion code reads in several places and that
+reloads on every change of language. And there is no number from the phone. If the card's "Slowest set-up steps" names
+`contractions`, this is the place: a compact form of the large file, or loading it off the
+main thread.
+
 ## What the emulator cannot show
 
 - **How long the app takes to answer.** The test field is in the keyboard's process. `sync=` and
@@ -308,6 +340,21 @@ the last time the keyboard's process started, except the first two lines. The li
   keyboard had been used in between, or the settings screen was opened first). There is then no
   "before set-up" figure, and the set-up is quicker than one from a dead process, so it is not
   the number to judge a late appearance by.
+  The steps that "Slowest set-up steps" can name, in the order they run:
+  `compose` the table of key combinations;
+  `prefs` opening the stored settings;
+  `theme` the key handler and the theme;
+  `config` reading every setting;
+  `listeners` the emoji index, installed language packs and the receivers for changes;
+  `inflate` building the key view;
+  `clipboard` starting the clipboard history;
+  `contractions` the apostrophe tables (finding 8);
+  `clipmgr` the clipboard manager;
+  `predict` the predictor, which starts loading the dictionary;
+  `coordinators` the parts that handle input and suggestions;
+  `graph` handing those parts to the service;
+  `swipe` wiring swipe typing;
+  `propagate` the last wiring, and logging for debugging.
 - **Opening: N times, X ms on average, Y ms at worst.** Every showing, from the keyboard being
   asked for to its first picture.
 - **The keyboard's own work in an opening: X ms on average, Y ms at worst; the slowest spent
