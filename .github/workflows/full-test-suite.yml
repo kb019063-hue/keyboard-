@@ -136,8 +136,10 @@ jobs:
           # prove it. At 1 GB (three runs, 43266527543 to 43275303929) the collector did half
           # the work and no full collection was for want of room; but once the line could say
           # how full the JVM was at its fullest, it said 842M of the 1024M, three points short
-          # of the line's own warning. Hence 2 GB. The "Test JVM" annotation says after every
-          # run how much of the limit was used. docs/TEST-PITFALLS.md, CI traps 5 and 9.
+          # of the line's own warning. Hence 2 GB, where the first run (43278706137) had 7 s
+          # of concurrent collector work against 50 to 61 and stood at 1160M of 2048M at its
+          # fullest. The "Test JVM" annotation says after every run how much of the limit was
+          # used. docs/TEST-PITFALLS.md, CI traps 5 and 9.
           #
           # Not everything in one JVM at 3 GB: that was tried on 2026-10-31, engine classes
           # included, and the run was abandoned after 70 minutes (see the next step).

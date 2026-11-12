@@ -43,11 +43,14 @@ What it has said so far, about the whole suite (docs/TEST-PITFALLS.md, CI traps 
   * 43275303929, at 1 GB, the first with "at its fullest" as it is computed now: 842M of 1024M,
     82%. More than the whole of the old limit, and three points short of the warning. The
     invocation was given 2 GB because of it.
+  * 43278706137, at 2 GB: 7 s of concurrent work (50 to 61 at 1 GB, 94 at 512 MB), 12 s
+    paused of which 7 asked for, 616M at the end and 1160M of 2048M at its fullest.
 
 "At its fullest" is not what the program needs. G1 lets old garbage lie until the heap is
 nearly half full before it starts to clean it, so a long run that makes a lot of garbage
-drifts up towards half its limit whatever the limit is. The figure means something near the
-top: at 85% and more, five collections in a row could not get the JVM back below that.
+drifts up towards half its limit whatever the limit is: the suite read 842M under 1024M and
+1160M under 2048M. The figure means something near the top: at 85% and more, five
+collections in a row could not get the JVM back below that.
 
 How far the figures can be trusted. Each quarter's is the least that any collection left
 behind in the twelfth of the run before that point: what was in use, plus whatever garbage
