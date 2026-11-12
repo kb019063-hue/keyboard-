@@ -13,24 +13,26 @@ measured on a phone.
 
 | | Before | After | Evidence |
 |---|---|---|---|
-| Rotating the screen with the keyboard open | the keyboard's process died | survives, same pid | smoke section 10, seven runs since the fix |
+| Rotating the screen with the keyboard open | the keyboard's process died | survives, same pid | smoke section 10, eight runs since the fix |
 | Input view re-installed for each focused field | 1 per field, keys re-attached 2x | 0 and 0 | `install=`, `attach=` |
 | Keyboard height changes while typing one sentence | 5 | 1 | `resize=` |
-| Re-reads of the app's text while typing 21 keys | 21 | 12 | `sync=`: 21 in run 43230232862, 12 in 43234083019, 43239991683 and 43259328923 |
+| Re-reads of the app's text while typing 21 keys | 21 | 12 | `sync=`: 21 in run 43230232862, 12 in 43234083019, 43239991683, 43259328923 and 43266514425 |
 | `onCreate` of the installed (CI) build | 742 ms (debuggable) | 271 ms | same boot, one sample each |
 | Sections shown by the settings drawer | the 11 that fit; the list did not scroll | all 19: the last one is reached with one drag | smoke 9b, two runs |
 
 What the owner asked about, in order:
 
 - **Appears late.** With the keyboard's process alive, its own share of a showing is about 5 ms
-  (`onStartInputView`) plus a few milliseconds of layout; the rest of the 54-166 ms measured is the
-  system's window and the emulator's software renderer. With the process dead, everything is set
-  up from nothing: about half a second on an ordinary CI runner (73 ms before `onCreate`, 166 ms
-  in it, 301 ms from the first request to the first picture), 1.1 s on a slow one, and a phone
-  as old as the owner's is likely slower than either. So the question that decides it is how
-  often the phone throws the keyboard away, and only the phone can answer it. The Keyboard speed
-  card now records that. See "The phone" below. One step of that set-up was the slowest in the
-  two latest runs and was left alone until the phone has given a number (finding 8).
+  (`onStartInputView`) plus a few milliseconds of layout; the rest of the 54-209 ms measured is the
+  system's window and the emulator's software renderer. (In two of the last five runs it was 31
+  and 59 ms, one step held up each time and not the same one; see the notes under the table.)
+  With the process dead, everything is set up from nothing: about half a second on an ordinary
+  CI runner (73 ms before `onCreate`, 166 ms in it, 301 ms from the first request to the first
+  picture), 1.1 s on a slow one, and a phone as old as the owner's is likely slower than
+  either. So the question that decides it is how often the phone throws the keyboard away, and
+  only the phone can answer it. The Keyboard speed card now records that. See "The phone"
+  below. One step of that set-up was the slowest in the three latest runs and was left alone
+  until the phone has given a number (finding 8).
 - **Lags while typing.** Handling a key takes under a millisecond here and drawing the keys about
   as long. What was wrong is around the key, not in it: the keyboard's height changed five times
   in one sentence (each one resizes the app behind it too), and after every single letter the
@@ -92,6 +94,7 @@ per run. Times in ms; `a/b` is average/worst.
 | 43239991683 | `ee66dc1` card wording only | 111 / 287 | 5.6 / 101 | 1.09/21.28 | 33 | 12 | 0 / 0 / 1 |
 | 43254347006 | `aef226d` CI files only | 224 / 393 | 58.7 / 115 | 1.06/9.06 | 27 | 10 | 0 / 0 / 1 |
 | 43259328923 | `5ea41d3` a line on the card, CI files | 224 / 397 | 5.6 / 114 | 0.75/8.30 | 33 | 12 | 0 / 0 / 1 |
+| 43266514425 | `d6f1c3b` CI files and documents only | 191 / 369 | 31.1 / 209 | 0.58/3.49 | 33 | 12 | 0 / 0 / 1 |
 
 Notes on the table:
 
@@ -106,16 +109,17 @@ Notes on the table:
 - That run also failed, on two focus checks: the emulator's own launcher stopped responding
   and was in front when the script expected this app. Everything after them passed, and the
   same script passed whole on the runs before and after it.
-- The last four rows have `predict=`: `21:34.87/248.72`, `21:31.69/121.19`, `22:75.42/360.66`
-  and `21:50.38/247.26`. The average runs from 32 to 75 ms and the worst case from 121 to
-  361 ms with no change to the search between them, so both follow the runner as much as the
-  code.
-- The last row's `create=224` is mostly one step. Its `onCreate` steps read
-  `contractions:85,compose:26,inflate:23,predict:20,…`. That step took 13 to 31 ms in the six
-  samples from ordinary runners and 76 and 79 ms on the two slow ones. Nothing in the commit
-  touches it, and the process itself started quickly (`pre=25`). A single sample cannot tell
-  that from a regression; the step names printed beside the total can, which is what they are
-  for. Finding 8 says what the step is.
+- The last five rows have `predict=`: `21:34.87/248.72`, `21:31.69/121.19`, `22:75.42/360.66`,
+  `21:50.38/247.26` and `22:45.44/231.81`. The average runs from 32 to 75 ms and the worst case
+  from 121 to 361 ms with no change to the search between them, so both follow the runner as
+  much as the code.
+- In the last three rows the slowest step of `onCreate` is the same one: `contractions`, at 79,
+  85 and 40 ms (the second reads `contractions:85,compose:26,inflate:23,predict:20,…` of
+  `create=224`). In the seven samples before them it took 13 to 31 ms six times and 76 ms on
+  the slow runner. Nothing in those three commits touches it, and in the middle one the process
+  itself started quickly (`pre=25`), so "a slow runner" does not cover it. A single sample
+  cannot tell that from a regression; the step names printed beside the total can, which is
+  what they are for. Finding 8 says what the step is.
 - The row before the last (43254347006) is another slow runner (frames averaged 213 ms against
   143 to 187), with no change to the app, and it shows two limits of the probe:
   - **Counts move too when the runner is slow.** `sync=10` and `strip=27` against 12 and 33.
@@ -134,6 +138,16 @@ Notes on the table:
     moving the look behind the first picture changes when a copy reaches the clipboard history.
     The card now names the steps of the slowest opening, so the phone will say whether this is
     a cost there; if it names `clip`, that move is the fix.
+  - **And one step can be held up from outside.** In the last row the warm `start=31.12` was
+    almost all `strip:29.2`. On a showing after the first, the keyboard's code in that step
+    is a few assignments and the comparison of one short list (`PredictionViewSetup`, the
+    branch for a strip that exists already): nothing that leaves the process, and 2.3 ms or
+    less in the other runs. So for most of those 29 ms the main thread was held up by
+    something other than this code. What it was has not been determined; the emulator has
+    two cores, and the renderer and the keyboard's own background threads share them. With
+    `clip:54.2` that makes two of the last five runs in which a warm opening spent 29 and
+    54 ms in one step, a different step each time. The card's "at worst … the slowest spent"
+    is the line that will show whether openings on the phone have such a tail.
 
 The whole of two runs. 43154964666, before the re-read change:
 
@@ -264,9 +278,10 @@ and is not affected.
 
 ### 8. Set-up reads its apostrophe tables on the main thread (measured, not changed)
 
-In the last two runs the slowest step of `onCreate` was `contractions`: 79 and 85 ms of 224.
-On ordinary runners it took 13 to 31 ms of 105 to 271. In the debuggable build it was 395 ms of
-742, more than half (run 43142217574, where the two builds were timed on one boot).
+In the last three runs the slowest step of `onCreate` was `contractions`: 79 and 85 ms of 224,
+then 40 of 191. Before that it took 13 to 31 ms of 105 to 271 on ordinary runners. In the
+debuggable build it was 395 ms of 742, more than half (run 43142217574, where the two builds
+were timed on one boot).
 
 The step loads the tables that put the apostrophe into `dont` and offer `we'll` beside `well`
 (`ContractionManager.loadTypingMappings`, called from `KeyboardComponentGraph`). For English
@@ -359,7 +374,8 @@ the last time the keyboard's process started, except the first two lines. The li
   asked for to its first picture.
 - **The keyboard's own work in an opening: X ms on average, Y ms at worst; the slowest spent
   ...** The part of an opening that is this keyboard's code; the rest is the system making the
-  window and drawing the first frame. On the emulator it is 4 to 6 ms of a 54 to 166 ms opening.
+  window and drawing the first frame. On the emulator it is usually 4 to 6 ms of a 54 to 209 ms
+  opening.
   If it is a large part on the phone, the steps named after "the slowest spent" say where to
   look:
   `clip` one look at the system clipboard for a copy the keyboard missed;
