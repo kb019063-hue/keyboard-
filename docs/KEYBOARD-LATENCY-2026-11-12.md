@@ -13,10 +13,10 @@ measured on a phone.
 
 | | Before | After | Evidence |
 |---|---|---|---|
-| Rotating the screen with the keyboard open | the keyboard's process died | survives, same pid | smoke section 10, nine runs since the fix |
+| Rotating the screen with the keyboard open | the keyboard's process died | survives, same pid | smoke section 10, ten runs since the fix |
 | Input view re-installed for each focused field | 1 per field, keys re-attached 2x | 0 and 0 | `install=`, `attach=` |
 | Keyboard height changes while typing one sentence | 5 | 1 | `resize=` |
-| Re-reads of the app's text while typing 21 keys | 21 | 12 | `sync=`: 21 in run 43230232862; 12 in five of the six runs since, 10 in the one on a slow runner |
+| Re-reads of the app's text while typing 21 keys | 21 | 12 | `sync=`: 21 in run 43230232862; 12 in six of the seven runs since, 10 in the one on a slow runner |
 | `onCreate` of the installed (CI) build | 742 ms (debuggable) | 271 ms | same boot, one sample each |
 | Sections shown by the settings drawer | the 11 that fit; the list did not scroll | all 19: the last one is reached with one drag | smoke 9b, two runs |
 
@@ -24,7 +24,7 @@ What the owner asked about, in order:
 
 - **Appears late.** With the keyboard's process alive, its own share of a showing is about 5 ms
   (`onStartInputView`) plus a few milliseconds of layout; the rest of the 54-209 ms measured is the
-  system's window and the emulator's software renderer. (In two of the six runs that name the
+  system's window and the emulator's software renderer. (In two of the seven runs that name the
   steps it was 31 and 59 ms, one step held up each time and not the same one; see the notes
   under the table.) With the process dead, everything is set up from nothing: about half a
   second on an ordinary CI runner (73 ms before `onCreate`, 166 ms in it, 301 ms from the first
@@ -99,6 +99,7 @@ per run. Times in ms; `a/b` is average/worst.
 | 43259328923 | `5ea41d3` a line on the card, CI files | 224 / 397 | 5.6 / 114 | 0.75/8.30 | 33 | 12 | 0 / 0 / 1 |
 | 43266514425 | `d6f1c3b` CI files and documents only | 191 / 369 | 31.1 / 209 | 0.58/3.49 | 33 | 12 | 0 / 0 / 1 |
 | 43270968715 | `5dacda5` CI files and documents only | 396 / 361 | 6.1 / 98 | 0.75/6.71 | 33 | 12 | 0 / 0 / 1 |
+| 43275071825 | `15f8f8a` CI files and documents only | 124 / 500 | 4.8 / 126 | 0.58/2.83 | 33 | 12 | 0 / 0 / 1 |
 
 Notes on the table:
 
@@ -113,10 +114,10 @@ Notes on the table:
 - That run also failed, on two focus checks: the emulator's own launcher stopped responding
   and was in front when the script expected this app. Everything after them passed, and the
   same script passed whole on the runs before and after it.
-- The last six rows have `predict=`: `21:34.87/248.72`, `21:31.69/121.19`, `22:75.42/360.66`,
-  `21:50.38/247.26`, `22:45.44/231.81` and `21:48.69/224.25`. The average runs from 32 to 75 ms
-  and the worst case from 121 to 361 ms with no change to the search between them, so both
-  follow the runner as much as the code.
+- The last seven rows have `predict=`: `21:34.87/248.72`, `21:31.69/121.19`, `22:75.42/360.66`,
+  `21:50.38/247.26`, `22:45.44/231.81`, `21:48.69/224.25` and `22:39.94/214.87`. The average
+  runs from 32 to 75 ms and the worst case from 121 to 361 ms with no change to the search
+  between them, so both follow the runner as much as the code.
 - In three rows running (43254347006, 43259328923, 43266514425) the slowest step of `onCreate`
   is the same one: `contractions`, at 79, 85 and 40 ms (the second reads
   `contractions:85,compose:26,inflate:23,predict:20,…` of `create=224`). In the seven samples
@@ -125,7 +126,7 @@ Notes on the table:
   the process itself started quickly (`pre=25`), so "a slow runner" does not cover it. A
   single sample cannot tell that from a regression; the step names printed beside the total
   can, which is what they are for. Finding 8 says what the step is.
-- The last row (43270968715) started slowly and then ran at ordinary speed. The process took
+- Run 43270968715 started slowly and then ran at ordinary speed. The process took
   356 ms to reach `onCreate` (19 to 91 ms in six other runs, 187 in the first slow one), the
   set-up steps took several times their usual (`theme:79,contractions:58,config:52,
   predict:49,prefs:48`), and the smoke script dismissed a "not responding" dialog once
@@ -148,9 +149,12 @@ Notes on the table:
     showing begins with (`ClipboardHistoryService.on_keyboard_shown`). In the four runs on
     ordinary runners that step took 0.6 to 0.9 ms; on the other slow runner (43230232862) it
     took 5.2 of that showing's 12.7 ms, and in the run after this one (43259328923) 4.7 of
-    5.6 ms. It is a call into the system on the main thread, before the first picture, so it
-    takes as long as the system takes to answer. Nothing was changed: it is three samples, and
-    moving the look behind the first picture changes when a copy reaches the clipboard history.
+    5.6 ms. In the last row (43275071825) it was 3.6 of 4.8 ms, and in that run's first
+    showing after the process started it was the largest step of all (`first=clip:33.7`; 3
+    to 12 ms in the other runs' first showings). It is a call into the system on the main
+    thread, before the first picture, so it takes as long as the system takes to answer.
+    Nothing was changed: these are single samples, and moving the look behind the first
+    picture changes when a copy reaches the clipboard history.
     The card now names the steps of the slowest opening, so the phone will say whether this is
     a cost there; if it names `clip`, that move is the fix.
   - **And one step can be held up from outside.** In run 43266514425 the warm `start=31.12` was
@@ -160,7 +164,7 @@ Notes on the table:
     less in the other runs. So for most of those 29 ms the main thread was held up by
     something other than this code. What it was has not been determined; the emulator has
     two cores, and the renderer and the keyboard's own background threads share them. With
-    `clip:54.2` that makes two of the six runs that name the steps in which a warm opening
+    `clip:54.2` that makes two of the seven runs that name the steps in which a warm opening
     spent 29 and 54 ms in one step, a different step each time. The card's "at worst … the slowest spent"
     is the line that will show whether openings on the phone have such a tail.
 
