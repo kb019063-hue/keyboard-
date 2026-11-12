@@ -433,6 +433,9 @@ android {
     // LOCAL_BUILD env var enables verbose logging for local development
     // Set by build-on-termux.sh, not set by GitHub Actions
     def isLocalBuild = System.env.LOCAL_BUILD == "true"
+    // Whether the `debug` build type is debuggable; see the comment on `debug` below.
+    def debuggableOverride = project.findProperty('ckDebuggable')
+    def debugBuildDebuggable = debuggableOverride != null ? debuggableOverride.toString().toBoolean() : isLocalBuild
 
     release {
       // REPRODUCIBILITY: Disable VCS info to prevent version-control-info.textproto (AGP 8.3+)
@@ -471,7 +474,23 @@ android {
       applicationIdSuffix '.debug'
       minifyEnabled false
       shrinkResources false
-      debuggable true
+      // NOT debuggable when CI builds it (2026-11-12). This build type is the APK the owner
+      // installs and types on all day, and `android:debuggable="true"` is not a label: it tells
+      // ART to run the app in its debuggable mode -- compiled code keeps every local alive and
+      // gives up inlining so a debugger can attach at any line -- and Android's own benchmark
+      // documentation tells people never to time such a build. The comment further down has
+      // said since 2026-11-01 that this flag is "a large part of laggy and kinda slow"; the
+      // flag itself was left on.
+      //
+      // What does NOT change: the applicationId (.debug), the committed debug keystore and the
+      // versionCode, so the new APK installs over the old one and keeps its data. What does:
+      // `adb shell run-as` no longer reaches the app's files, which also means a cable and USB
+      // debugging are no longer enough to read a keyboard's clipboard history and learned words.
+      //
+      // A developer at a desk keeps the debugger: LOCAL_BUILD=true (build-on-termux.sh sets it)
+      // or -PckDebuggable=true turns it back on. The emulator smoke test uses the property to
+      // time both variants on one emulator.
+      debuggable debugBuildDebuggable
       // Translation QA (2026-09-29): generate en-XA (accented, ~30% longer) and ar-XB (RTL)
       // pseudolocales for visual long-text/RTL checks. DEBUG ONLY — release stays false.
       pseudoLocalesEnabled true
@@ -538,6 +557,16 @@ android {
     // F-Droid recipe, which invokes `assembleRelease` on their builders). ci.yml additionally
     // calls `lintVitalRelease` directly so PRs get the same gate without assembling release.
     checkReleaseBuilds = true
+  }
+
+  // `checkReleaseBuilds` wires a lint-vital pass into `assemble` for every NON-DEBUGGABLE
+  // variant, and since 2026-11-12 the CI-built `debug` type is one (see buildTypes). That gate
+  // was written for release, as the comment above says. `assembleDebug` is what every push
+  // builds; it should not grow a lint pass, or a new way to fail, because of a speed flag.
+  project.tasks.configureEach { t ->
+    if (t.name.startsWith('lintVital') && t.name.endsWith('Debug')) {
+      t.enabled = false
+    }
   }
 
   testOptions {
