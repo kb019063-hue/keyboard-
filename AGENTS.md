@@ -62,11 +62,24 @@ below is here because it already cost someone a day.
 
 ## The installed build is the DEBUG variant
 
-`build.gradle` gives debug `applicationIdSuffix ".debug"`, `minifyEnabled false`,
-`debuggable true`, and a stable committed keystore so builds install as upgrades. That is the APK
-the owner actually uses, so **debug-only costs are user-visible costs** — verbose logging used to
-be forced on here and made typing feel slow. Keep `ENABLE_VERBOSE_LOGGING` opt-in
-(`LOCAL_BUILD=true`), and gate anything per-frame or per-touch behind it.
+`build.gradle` gives debug `applicationIdSuffix ".debug"`, `minifyEnabled false`, and a stable
+committed keystore so builds install as upgrades. That is the APK the owner actually uses, so
+**debug-only costs are user-visible costs** — verbose logging used to be forced on here and made
+typing feel slow. Keep `ENABLE_VERBOSE_LOGGING` opt-in (`LOCAL_BUILD=true`), and gate anything
+per-frame or per-touch behind it.
+
+Since 2026-11-12 that APK is **not debuggable** when CI builds it (`debuggable
+debugBuildDebuggable`). ART runs a debuggable app without its optimised code, and the owner had
+been typing on exactly that. Measured on the CI emulator, same commit, one sample each (run
+43142217574): `onCreate` 271 ms against 742 ms, first picture 382 ms against 585 ms. What follows
+from it:
+
+- `adb shell run-as` does not reach the app's files, a debugger cannot attach, and
+  `BuildConfig.DEBUG` is false in the installed app. Do not hang behaviour on `BuildConfig.DEBUG`.
+- `LOCAL_BUILD=true` or `-PckDebuggable=true` builds the debuggable variant again. A commit whose
+  message contains `[ab-debuggable]` makes the emulator smoke test build both and time both.
+- applicationId, keystore and versionCode did not change: it installs over the old app and keeps
+  its data.
 
 The same goes for what a log line says. `R.bool.debug_logs` (the dump of each focused field's
 `EditorInfo`) follows the same switch, and an ungated line must not carry what the user typed or
