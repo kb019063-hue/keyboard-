@@ -202,6 +202,18 @@ dismiss_anr() {
       foreign="$subj"
     fi
   fi
+  # Whose dialog it was, where the sandbox can read it: a line in latency.txt, which the
+  # workflow ships as a `Latency` notice from a step with its own annotation budget (this
+  # step's is spent). The first dialog of a run only -- a wedged launcher has produced
+  # twenty-one. Run 43270968715 ended fails=0 with anr=1 and nothing to say whether that dialog
+  # was the launcher's, as every one identified so far had been, or this app's -- which, in a
+  # run that measures how quick the keyboard is, would be the finding.
+  if [ "$ANR_SEEN" -eq 1 ] && [ -n "${LAT:-}" ]; then
+    local whose="ours-or-unknown"; [ -z "$foreign" ] || whose="not-ours"
+    printf "anr first-dialog whose=%s subject='%s' package='%s' via=%s events=%s\n" \
+      "$whose" "${subj:-none}" "${apkg:-none}" "$hit" "$(anrln)" \
+      | tr '\r' ' ' | cut -c1-400 >> "$LAT" 2>/dev/null || true
+  fi
   if [ -n "$foreign" ]; then
     info "ANR belongs to $foreign, not $PKG -- closing it so the device recovers"
     c=$(nodecenter "$f" '^close app$'); [ -n "${c:-}" ] || c=$(nodecenter "$f" 'close app')
