@@ -244,6 +244,12 @@
     <string name="settings_version_title">📱 Version Information</string>
     <string name="settings_version_build">Build: %1$s</string>
     <string name="settings_version_copied">Version info copied</string>
+    <!-- Keyboard speed card (2026-11-12): diagnostics the owner copies into a report, like the
+         swipe debug log below. The lines under the title are numbers produced by LatencyMeter,
+         in English by design, so the three strings around them are not translated either. -->
+    <string name="settings_latency_title" translatable="false">⏱ Keyboard speed</string>
+    <string name="settings_latency_hint" translatable="false">Since the keyboard last started. Tap to refresh. Long-press to copy these lines so you can paste them into a report.</string>
+    <string name="settings_latency_copied" translatable="false">Keyboard speed copied</string>
     <string name="settings_reset_button">🔄 Reset All</string>
 
     <!-- Dialog Messages -->

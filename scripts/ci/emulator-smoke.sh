@@ -1550,6 +1550,30 @@ echo "== 9. clipboard subsystem (informational) =="
 adb shell run-as "$PKG" ls -la databases/ > "$OUT/app-databases.txt" 2>&1
 info "databases: $(grep -oE '[a-z_]+\.db' "$OUT/app-databases.txt" 2>/dev/null | tr '\n' ' ')$(peek "$OUT/app-databases.txt" 80)"
 
+echo "== 9b. the Keyboard speed card in settings (informational) =="
+# Settings > Information & Actions shows what LatencyMeter has measured in this process, so that
+# the owner can read a number off the phone and paste it into a report. Nobody but the owner can
+# look at the phone, so prove here that the card composes and carries numbers. The settings
+# screen lives in the keyboard's process and keys were pressed in 6c, so a "Key presses: N" line
+# is due. The card is one clickable element, which Compose reports as ONE node with its lines
+# joined, hence no text=" anchor. Written to latency.txt and never failed: the card is a
+# diagnostic, and this run must not go red over one.
+CARD="not-reached"
+dismiss_anr || true
+focus_activity "$PKG/$NS.SettingsActivity" "SettingsActivity" "am-card" || true
+# The item reads "Information & Actions"; the dump escapes the ampersand. "Information" alone
+# would also match the version card's title in a pane behind the sheet.
+if nf_drawer_section card 'Information.{1,9}Actions'; then
+  dumpui "$OUT/ui-card.xml"
+  ct=no; cb=no; ck=no
+  grep -q 'Keyboard speed' "$OUT/ui-card.xml" 2>/dev/null && ct=yes
+  grep -q 'Build: ' "$OUT/ui-card.xml" 2>/dev/null && cb=yes
+  grep -qE 'Key presses: [0-9]+' "$OUT/ui-card.xml" 2>/dev/null && ck=yes
+  CARD="title=$ct build-line=$cb presses-line=$ck"
+  shot 12-speed-card
+fi
+lat_note "card $CARD"
+
 echo "== 10. a configuration change with the keyboard open (rotation) =="
 # Rotating the screen is the commonest configuration change, and it makes InputMethodService
 # discard its window content and build a new input frame (initViews). The keyboard's own views
