@@ -26,7 +26,7 @@ copying Gboard's expiry policy.
   runs, the rows already on screen stay there and bulk selection is disabled; only the newest
   result publishes. The unfiltered case uses the existing list directly. The test-only
   unattached view path remains synchronous because no view coroutine scope exists.
-- **Changed 2026-11-11** (`docs/BUG-HUNT-2026-11-11.md`, part 2, F1). As first shipped, the old
+- **Changed 2026-11-11** (`docs/BUG-HUNT-2026-11-11-PART-2.md`, F1). As first shipped, the old
   rows were *hidden* while a job ran, and a job ran for every filter, not only a text query.
   Emptying the list resets it to page 1 and collapses every expanded row, so each reload, each
   swiped row and each keystroke did that; the To-do tab, which always has a status filter, did it

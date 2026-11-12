@@ -42,6 +42,13 @@ to `NOTHING_HEARD` ("Didn't catch that. Try again.").
 * `DictationController`:
   * negotiates the language once per process (the query is cached) and logs what the service
     advertises;
+    **Correction, 2026-11-11** (`docs/BUG-HUNT-2026-11-11-PART-2.md`, D-b): the query never
+    returns anything. It reads the reply from the intent instead of the broadcast's result
+    extras, and it is sent without a target, which is not delivered to a manifest receiver of
+    an app built for Android 8 or later. So the advertised list is always empty and `pick()`
+    passes the keyboard's tag through unchanged; of the two language mechanisms described
+    here, only the silent retry acts. Not fixed: the fix changes which language real dictation
+    starts with, and that needs a phone;
   * the three `*_SPEECH_INPUT_*_MILLIS` extras are gone — the recogniser's own endpointing is what
     Gboard gets;
   * after the service-default retry also fails, the language override is disabled for the rest of

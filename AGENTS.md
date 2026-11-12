@@ -68,6 +68,12 @@ the owner actually uses, so **debug-only costs are user-visible costs** — verb
 be forced on here and made typing feel slow. Keep `ENABLE_VERBOSE_LOGGING` opt-in
 (`LOCAL_BUILD=true`), and gate anything per-frame or per-touch behind it.
 
+The same goes for what a log line says. `R.bool.debug_logs` (the dump of each focused field's
+`EditorInfo`) follows the same switch, and an ungated line must not carry what the user typed or
+which app and field they are in ([`docs/BUG-HUNT-2026-11-11-PART-2.md`](docs/BUG-HUNT-2026-11-11-PART-2.md),
+F2 and F8). `VerboseLogRatchetTest` holds the number of ungated lines; lower its ceiling when you
+gate one.
+
 A minified release APK is faster but has a different `applicationId`, so it cannot install over
 the debug app — it arrives as a fresh app and loses settings, learned words and clipboard history
 unless they are migrated through backup/restore.
