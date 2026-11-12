@@ -1550,15 +1550,56 @@ echo "== 9. clipboard subsystem (informational) =="
 adb shell run-as "$PKG" ls -la databases/ > "$OUT/app-databases.txt" 2>&1
 info "databases: $(grep -oE '[a-z_]+\.db' "$OUT/app-databases.txt" 2>/dev/null | tr '\n' ' ')$(peek "$OUT/app-databases.txt" 80)"
 
-echo "== 9b. the Keyboard speed card in settings (informational) =="
+echo "== 9b. the Keyboard speed card in settings, and the drawer that leads to it (informational) =="
 # Settings > Information & Actions shows what LatencyMeter has measured in this process, so that
 # the owner can read a number off the phone and paste it into a report. Nobody but the owner can
 # look at the phone, so prove here that the card composes and carries numbers. The settings
 # screen lives in the keyboard's process and keys were pressed in 6c, so a "Key presses: N" line
 # is due. The card is one clickable element, which Compose reports as ONE node with its lines
-# joined, hence no text=" anchor. Written to latency.txt and never failed: the card is a
-# diagnostic, and this run must not go red over one.
-CARD="not-reached"
+# joined, hence no text=" anchor.
+#
+# Run 43151960834 could not get there: "card not-reached", with this same hunt. The reading of
+# that (its dumps cannot be read from where the code is written): the drawer lists nineteen
+# sections at 56dp each, a Material drawer sheet does not scroll by itself, and "Information &
+# Actions" is the eighteenth, so on this 915dp screen it had no height to be tapped at. The
+# list scrolls now. The drawer part of the note is the evidence either way: how many of the
+# nineteen items the open drawer shows before anything is scrolled, the lowest of them, and how
+# many dumps the hunt took in each of its two rounds (every dump after a round's first follows
+# one scroll). Fewer than nineteen on the first screen, and the item found only after a scroll,
+# is what "it needed to scroll" looks like.
+#
+# Written to latency.txt and never failed: this is a diagnostic about a diagnostic, and this
+# run must not go red over it.
+
+# "N lowest" for a dump of the open drawer: N section items on screen, and the label of the
+# lowest. An item is a node at the sheet's left edge whose text is an emoji and a section
+# title; one that was given no height is not on screen, whatever the tree says.
+drawer_items() {
+  python3 - "$1" <<'PY' 2>/dev/null || echo "0 unreadable"
+import html, re, sys
+names = ["Test Keyboard", "Activities", "Swipe Typing", "Appearance", "Swipe Trail", "Toolbar",
+         "One-Handed Mode", "Input Behavior", "Auto-Correction", "Gesture Tuning", "Accessibility",
+         "Clipboard", "GIF Panel", "Backup & Restore", "Multi-Language", "Privacy & Data",
+         "Advanced", "Information & Actions", "Help & FAQ"]
+xml = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+seen = {}
+for m in re.finditer(r'<node[^>]*>', xml):
+    tag = m.group(0)
+    t = re.search(r'text="([^"]*)"', tag)
+    b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', tag)
+    if not t or not b:
+        continue
+    label = html.unescape(t.group(1)).strip()
+    x1, y1, x2, y2 = map(int, b.groups())
+    for n in names:
+        if label.endswith(n) and len(label) <= len(n) + 4 and x1 <= 60 and (y2 - y1) > 10:
+            seen[n] = y1
+lowest = max(seen, key=seen.get) if seen else "none"
+print(len(seen), lowest.replace(" & ", "-and-").replace(" ", "-"))
+PY
+}
+
+CARD="not-reached"; DRAWER="not-opened"
 dismiss_anr || true
 focus_activity "$PKG/$NS.SettingsActivity" "SettingsActivity" "am-card" || true
 # The item reads "Information & Actions"; the dump escapes the ampersand. "Information" alone
@@ -1572,7 +1613,11 @@ if nf_drawer_section card 'Information.{1,9}Actions'; then
   CARD="title=$ct build-line=$cb presses-line=$ck"
   shot 12-speed-card
 fi
-lat_note "card $CARD"
+if [ -f "$OUT/ui-card-drawer-1-1.xml" ]; then
+  read -r DI_N DI_LOW <<< "$(drawer_items "$OUT/ui-card-drawer-1-1.xml")"
+  DRAWER="first-screen=${DI_N:-0}/19 lowest=${DI_LOW:-none} dumps=$(ls "$OUT"/ui-card-drawer-1-*.xml 2>/dev/null | wc -l | tr -d ' ')+$(ls "$OUT"/ui-card-drawer-2-*.xml 2>/dev/null | wc -l | tr -d ' ')"
+fi
+lat_note "card $CARD drawer $DRAWER"
 
 echo "== 10. a configuration change with the keyboard open (rotation) =="
 # Rotating the screen is the commonest configuration change, and it makes InputMethodService
