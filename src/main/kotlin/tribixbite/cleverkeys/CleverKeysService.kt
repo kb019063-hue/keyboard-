@@ -836,6 +836,14 @@ class CleverKeysService : InputMethodService(),
      */
     override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
         super.onStartInput(attribute, restarting)
+        // A new input session, or the same field restarted by its app (which apps do after
+        // changing the text themselves): nothing the keyboard believed about the word at the
+        // caret is known to hold, so the next caret report gets a prompt re-read whatever it
+        // looks like (TypedLetterEcho, CursorSyncPace).
+        if (::_contextTracker.isInitialized) {
+            _contextTracker.noteInputStarted(attribute?.initialSelStart ?: -1, attribute?.initialSelEnd ?: -1)
+        }
+        if (::_inputCoordinator.isInitialized) _inputCoordinator.onInputStarted()
         // Tile: a deferred show armed for another app's editor must not land here.
         if (_tileShow.hasPending) tileLog { "onStartInput ${attribute?.packageName} while a deferred show is armed" }
         _tileShow.onStartInput(attribute?.packageName)
@@ -1667,6 +1675,10 @@ class CleverKeysService : InputMethodService(),
         candidatesEnd: Int
     ) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
+        // Is this report only the caret arriving where a letter just typed put it? Asked of
+        // every report, before anything filters them, so the bookkeeping never misses one
+        // (TypedLetterEcho). The answer changes one thing: how soon the editor is re-read below.
+        val afterTypedLetter = _contextTracker.noteSelection(newSelStart, newSelEnd)
         // The suggestion band is held open while a field is typed in and let go when the caret
         // is back at the very start (the field was emptied). Uses the position just reported:
         // no call to the app. False on an ordinary keystroke, so nothing is resized then.
@@ -1688,7 +1700,8 @@ class CleverKeysService : InputMethodService(),
                     newPosition = newSelStart,
                     ic = currentInputConnection,
                     language = _config?.primary_language ?: "en",
-                    editorInfo = currentInputEditorInfo
+                    editorInfo = currentInputEditorInfo,
+                    afterTypedLetter = afterTypedLetter
                 )
             }
         }

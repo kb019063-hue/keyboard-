@@ -141,7 +141,7 @@ class PredictionTaskRunner(
  *   [performCtcSwipeTyping] / [performGeometricSwipeTyping], incl. the stale-input guard)
  * - Swipe ML trace capture ([getCurrentSwipeData] / [resetSwipeData]) — consumed by
  *   SuggestionHandler (auto-insert path) and SuggestionBridge (tap path) via MLDataCollector
- * - Cursor-sync bookkeeping: SAS-1 position invalidation, the 100ms debounce, and
+ * - Cursor-sync bookkeeping: SAS-1 position invalidation, the debounce ([CursorSyncPace]), and
  *   [PredictionContextTracker.synchronizeWithCursor] ([onCursorMoved])
  * - View-side helpers for the unified commit path (haptics, latched-shift clear,
  *   keyboard height)
@@ -176,9 +176,8 @@ class InputCoordinator(
     companion object {
         private const val TAG = "InputCoordinator"
 
-        // v1.2.6: Debounce delay for cursor sync (ms)
-        // Prevents excessive IPC calls during drag selection
-        private const val CURSOR_SYNC_DEBOUNCE_MS = 100L
+        // v1.2.6: a caret move is followed, after a debounce, by a re-read of the editor. The
+        // debounce (100 ms; 1.5 s after the echo of a typed letter) is CursorSyncPace's.
 
         /**
          * Pure identity check for the cold-start swipe replay guard (F4), extracted so it is
@@ -210,6 +209,16 @@ class InputCoordinator(
     // v1.2.6: Handler for debouncing cursor sync
     private val syncHandler = Handler(Looper.getMainLooper())
     private var pendingSyncRunnable: Runnable? = null
+
+    // How soon a caret report is followed up, and whether the word this keyboard holds is known
+    // to match the editor (CursorSyncPace). Created on first use, not in the constructor: a test
+    // builds this class without running it.
+    private var syncPaceOrNull: CursorSyncPace? = null
+    private val syncPace: CursorSyncPace
+        get() = syncPaceOrNull ?: CursorSyncPace().also { syncPaceOrNull = it }
+
+    // True while the pending re-read is one that is waiting for a pause in typing.
+    private var pendingSyncIsPatient = false
 
     // Debug logger for SwipeDebugActivity integration
     // Only active when debug mode is enabled in settings
@@ -314,12 +323,17 @@ class InputCoordinator(
      * @param ic InputConnection to read text from
      * @param language Primary language code (for CJK detection)
      * @param editorInfo Editor info for input type checks
+     * @param afterTypedLetter This report is only the caret arriving where a letter typed onto
+     *   the word in progress put it ([TypedLetterEcho]). The re-read then tells the keyboard
+     *   what it already knows, so it waits for a pause instead of running between every two
+     *   letters -- provided the word was in step with the editor to begin with ([CursorSyncPace]).
      */
     fun onCursorMoved(
         newPosition: Int,
         ic: InputConnection?,
         language: String = "en",
-        editorInfo: EditorInfo? = null
+        editorInfo: EditorInfo? = null,
+        afterTypedLetter: Boolean = false
     ) {
         if (closed) return
         // SAS-1: cursor movement invalidates the pending auto-space swallow unless
@@ -330,13 +344,38 @@ class InputCoordinator(
         // Cancel any pending sync
         pendingSyncRunnable?.let { syncHandler.removeCallbacks(it) }
 
-        // Schedule new sync with debounce delay
+        // Schedule new sync with debounce delay: prompt for a caret that moved, patient for one
+        // that only followed a typed letter.
+        val delayMs = syncPace.delayFor(afterTypedLetter)
+        val patient = delayMs != CursorSyncPace.PROMPT_MS
+        pendingSyncIsPatient = patient
         pendingSyncRunnable = Runnable {
             if (closed) return@Runnable
+            pendingSyncIsPatient = false
             // Timed: these are round trips to the app on the main thread, the one cost of
             // typing that the emulator cannot show (its test field lives in this process).
             val syncBegan = System.nanoTime()
+            val wordAsTyped = contextTracker.getCurrentWord()
             contextTracker.synchronizeWithCursor(ic, language, editorInfo)
+            // Did the editor hold what typing produced (CursorSyncPace.agrees)? If not -- an app
+            // that upper-cases or reformats what is typed, a caret that went elsewhere -- the
+            // letters that follow keep their prompt re-read. And only a read through the
+            // connection that is still the live one says anything about this field.
+            val provider = currentInputProvider
+            val live = ic != null && (provider == null || provider.current().first === ic)
+            val wordRead = contextTracker.getCurrentWord()
+            syncPace.onSynced(wordAsTyped = wordAsTyped, wordRead = wordRead, live = live)
+            // A re-read that waited for a pause was a check, and this one found what the
+            // keyboard already held: typing has predicted for exactly this word and the strip
+            // shows it. Nothing below would change anything, so nothing below runs -- no second
+            // prediction, and no rebinding of a strip the user may be reaching for.
+            if (CursorSyncPace.confirmsOnly(
+                    patient, live, wordAsTyped, wordRead, contextTracker.getCurrentWordSuffixLength()
+                )
+            ) {
+                LatencyMeter.synced(System.nanoTime() - syncBegan)
+                return@Runnable
+            }
 
             // Trigger predictions for the synced word
             // v1.2.7 FIX: Use PREFIX ONLY for prediction lookup, not fullWord
@@ -381,7 +420,7 @@ class InputCoordinator(
             debugLogger?.invoke("🎯 Cursor sync: pos=$newPosition, prefix='$prefix', suffix='$suffix'")
             LatencyMeter.synced(System.nanoTime() - syncBegan)
         }
-        syncHandler.postDelayed(pendingSyncRunnable!!, CURSOR_SYNC_DEBOUNCE_MS)
+        syncHandler.postDelayed(pendingSyncRunnable!!, delayMs)
     }
 
     /**
@@ -391,6 +430,21 @@ class InputCoordinator(
     fun cancelPendingCursorSync() {
         pendingSyncRunnable?.let { syncHandler.removeCallbacks(it) }
         pendingSyncRunnable = null
+        pendingSyncIsPatient = false
+        // The re-read that would have confirmed the word is gone: nothing is known.
+        syncPace.reset()
+    }
+
+    /**
+     * An input session began, or an app restarted input on the field being typed in (which
+     * apps do after changing the text themselves). What was known about the word at the caret
+     * is not known any more, so the next caret report is followed up promptly whatever it looks
+     * like. A re-read that was waiting for a pause is dropped: it belongs to a letter typed in
+     * the session that just ended, and would read through a connection that is finished. A
+     * prompt one that is pending is left to run, as it always has.
+     */
+    fun onInputStarted() {
+        if (pendingSyncIsPatient) cancelPendingCursorSync() else syncPace.reset()
     }
 
     /**

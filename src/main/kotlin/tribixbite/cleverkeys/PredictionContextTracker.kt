@@ -206,6 +206,25 @@ class PredictionContextTracker {
         resolveTrailingSpaceWatch(newPosition)
     }
 
+    // ==================== The caret report a typed letter is owed ====================
+    // See TypedLetterEcho: a report that only answers a letter typed onto the word in progress
+    // tells the keyboard nothing new, and CursorSyncPace lets the re-read after it wait for a
+    // pause. Kept here because both ends hold this tracker: SuggestionHandler knows what was
+    // typed, the service sees every selection report.
+    private val typedEcho = TypedLetterEcho()
+
+    /** Typed text was committed; [extendsWord] only for one letter added to a word in progress. */
+    fun noteTyped(extendsWord: Boolean) = typedEcho.onTyped(extendsWord)
+
+    /**
+     * The editor reported its selection (every report, owned or not). True when it is only the
+     * caret arriving where a typed letter put it.
+     */
+    fun noteSelection(selStart: Int, selEnd: Int): Boolean = typedEcho.onSelection(selStart, selEnd)
+
+    /** A new input session starts with this selection: no letter is owed a report. */
+    fun noteInputStarted(selStart: Int, selEnd: Int) = typedEcho.reset(selStart, selEnd)
+
     // ==================== #151 TSR: trailing-space repair state ====================
     // Some composing-less editors (URL bars, GPTAssist-class fields) drop the TRAILING
     // space of a committed "word " app-side. The SAS-1 state can't drive a repair:
@@ -548,6 +567,7 @@ class PredictionContextTracker {
         rawSuffixForDeletion = ""
         wasSyncedFromCursor = false
         expectingSelectionUpdate = false
+        typedEcho.reset()
         // SAS-1: field switch invalidates the pending auto-space swallow
         invalidateAutoSpacePending()
         // #151 TSR: field switch also drops any trailing-space watch / owed space
