@@ -13,10 +13,10 @@ measured on a phone.
 
 | | Before | After | Evidence |
 |---|---|---|---|
-| Rotating the screen with the keyboard open | the keyboard's process died | survives, same pid | smoke section 10, eleven runs since the fix |
+| Rotating the screen with the keyboard open | the keyboard's process died | survives, same pid | smoke section 10, thirteen runs since the fix |
 | Input view re-installed for each focused field | 1 per field, keys re-attached 2x | 0 and 0 | `install=`, `attach=` |
 | Keyboard height changes while typing one sentence | 5 | 1 | `resize=` |
-| Re-reads of the app's text while typing 21 keys | 21 | 12 | `sync=`: 21 in run 43230232862; 12 in seven of the eight runs since, 10 in the one on a slow runner |
+| Re-reads of the app's text while typing 21 keys | 21 | 12 | `sync=`: 21 in run 43230232862; 12 in nine of the ten runs since, 10 in the one on a slow runner |
 | `onCreate` of the installed (CI) build | 742 ms (debuggable) | 271 ms | same boot, one sample each |
 | Sections shown by the settings drawer | the 11 that fit; the list did not scroll | all 19: the last one is reached with one drag | smoke 9b, two runs |
 
@@ -24,7 +24,7 @@ What the owner asked about, in order:
 
 - **Appears late.** With the keyboard's process alive, its own share of a showing is about 5 ms
   (`onStartInputView`) plus a few milliseconds of layout; the rest of the 54-209 ms measured is the
-  system's window and the emulator's software renderer. (In three of the eight runs that name the
+  system's window and the emulator's software renderer. (In three of the ten runs that name the
   steps it was 31 to 59 ms, with one step held up each time: the look at the clipboard twice,
   the strip once; see the notes under the table.) With the process dead, everything is set up
   from nothing: about half a second on an ordinary CI runner (73 ms before `onCreate`, 166 ms
@@ -101,6 +101,8 @@ per run. Times in ms; `a/b` is average/worst.
 | 43270968715 | `5dacda5` CI files and documents only | 396 / 361 | 6.1 / 98 | 0.75/6.71 | 33 | 12 | 0 / 0 / 1 |
 | 43275071825 | `15f8f8a` CI files and documents only | 124 / 500 | 4.8 / 126 | 0.58/2.83 | 33 | 12 | 0 / 0 / 1 |
 | 43278438056 | `d85ea25` CI files and documents only | 139 / 417 | 33.2 / 126 | 0.59/3.16 | 34 | 12 | 0 / 0 / 1 |
+| 43282791015 | `e8b633d` CI files and documents only | 101 / 367 | 1.5 / 98 | 0.76/13.11 | 33 | 12 | 0 / 0 / 1 |
+| 43285608845 | `eed8f71` the merge into `main` | 466 / 473 | 2.5 / 103 | 0.89/6.89 | 34 | 12 | 0 / 0 / 1 |
 
 Notes on the table:
 
@@ -115,17 +117,24 @@ Notes on the table:
 - That run also failed, on two focus checks: the emulator's own launcher stopped responding
   and was in front when the script expected this app. Everything after them passed, and the
   same script passed whole on the runs before and after it.
-- The last row (43278438056) failed the same two checks the same way, and is the first run to
-  say so itself: `anr first-dialog whose=not-ours subject='Quickstep isn't responding'`, three
-  dialogs in all (`anr=3`). Its keyboard, typing, card and rotation checks passed and its
-  numbers are in the table. After the first of the two failures the app's text field was on
-  screen moments later with nothing having started it again, so `focus_activity` in the smoke
-  script now watches for up to half a minute after its third start before it reports that
-  the app is not in front.
-- The last eight rows have `predict=`: `21:34.87/248.72`, `21:31.69/121.19`, `22:75.42/360.66`,
-  `21:50.38/247.26`, `22:45.44/231.81`, `21:48.69/224.25`, `22:39.94/214.87` and
-  `21:37.44/255.52`. The average runs from 32 to 75 ms and the worst case from 121 to 361 ms
-  with no change to the search between them, so both follow the runner as much as the code.
+- Runs 43278438056 and 43285608845 (the second is `main` after the merge) failed the same two
+  checks the same way, and are the first to say so themselves: `anr first-dialog whose=not-ours
+  subject='Quickstep isn't responding'`, three dialogs each (`anr=3`). Their keyboard, typing,
+  card and rotation checks passed and their numbers are in the table; the second also started
+  slowly (192 ms before `onCreate`, 466 in it). What the two checks ask is which window the
+  system says has focus, and in both runs the answer was one and the same launcher window
+  from the first check to the last section, through at least six restarts of the launcher, while this
+  app was on screen and being typed into. So the answer was stale, and the checks were
+  failing a keyboard that worked. They now take a second witness when the first names
+  something else: the activity the system holds resumed, together with this app's own nodes
+  on screen (`in_front` in the smoke script). A first attempt at this, a longer wait after
+  starting the app, was wrong about the cause, did nothing in the run on `main`, and has been
+  removed.
+- The last ten rows have `predict=`: `21:34.87/248.72`, `21:31.69/121.19`, `22:75.42/360.66`,
+  `21:50.38/247.26`, `22:45.44/231.81`, `21:48.69/224.25`, `22:39.94/214.87`,
+  `21:37.44/255.52`, `21:37.93/198.60` and `21:61.31/272.38`. The average runs from 32 to 75 ms
+  and the worst case from 121 to 361 ms with no change to the search between them, so both
+  follow the runner as much as the code.
 - In three rows running (43254347006, 43259328923, 43266514425) the slowest step of `onCreate`
   is the same one: `contractions`, at 79, 85 and 40 ms (the second reads
   `contractions:85,compose:26,inflate:23,predict:20,…` of `create=224`). In the seven samples
@@ -173,7 +182,7 @@ Notes on the table:
     less in the other runs. So for most of those 29 ms the main thread was held up by
     something other than this code. What it was has not been determined; the emulator has
     two cores, and the renderer and the keyboard's own background threads share them. With
-    the two slow looks at the clipboard that makes three of the eight runs that name the
+    the two slow looks at the clipboard that makes three of the ten runs that name the
     steps in which a warm opening spent 29 to 54 ms in one step. The card's "at worst … the
     slowest spent" is the line that will show whether openings on the phone have such a tail.
 
@@ -402,7 +411,7 @@ the last time the keyboard's process started, except the first two lines. The li
   asked for to its first picture.
 - **The keyboard's own work in an opening: X ms on average, Y ms at worst; the slowest spent
   ...** The part of an opening that is this keyboard's code; the rest is the system making the
-  window and drawing the first frame. On the emulator it is usually 4 to 6 ms of a 54 to 209 ms
+  window and drawing the first frame. On the emulator it is usually 2 to 6 ms of a 54 to 209 ms
   opening.
   If it is a large part on the phone, the steps named after "the slowest spent" say where to
   look:

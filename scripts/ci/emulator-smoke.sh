@@ -88,6 +88,12 @@ shown()   { adb shell dumpsys input_method 2>/dev/null | grep -oE 'mInputShown=[
 focus()   { adb shell dumpsys window 2>/dev/null | grep -oE 'mCurrentFocus=Window\{[^}]*\}' | head -1 | tr -d '\r'; }
 crashln() { adb logcat -d -b crash -v brief 2>/dev/null | grep -vE '^[[:space:]]*$' | head -4 | tr '\n' ' ' | tr -d '\r'; }
 dispsz()  { adb shell wm size 2>/dev/null | tr -d '\r' | grep -oE '[0-9]+x[0-9]+' | tail -1; }
+# What the system holds resumed, as "package/class" (comma-joined if the dump names several).
+# The second witness of "our activity is in front", for when mCurrentFocus lies: see in_front.
+resumed() { adb shell dumpsys activity activities 2>/dev/null | tr -d '\r' \
+              | grep -E 'ResumedActivity|Resumed:' | grep -vi 'last' \
+              | grep -oE '[A-Za-z0-9_.]+/[A-Za-z0-9_.$]+' \
+              | sort -u | head -4 | tr '\n' ',' | sed 's/,$//'; }
 
 # Which process stopped responding. THE decisive probe for an ANR dialog: it distinguishes "the
 # emulator's launcher is slow" (system flakiness, 2 vCPU + software GL) from "our IME hung the
@@ -246,44 +252,64 @@ dismiss_anr() {
   return 0
 }
 
+# Is our activity $1 in front? Sets FRONT_BY to the witness that said so.
+#
+# The first witness is mCurrentFocus. It can go stale. When the emulator's launcher stops
+# responding at boot and its dialog is closed, the launcher's dead window can stay
+# mCurrentFocus for the rest of the run: runs 43278438056 and 43285608845 reported the same
+# Quickstep window, by its id, from section 4 to the last section, through at least six
+# restarts of the launcher -- while this app's activities were started, drawn, tapped and typed
+# into, and every check that looks at the screen passed. Both runs failed on the two checks
+# that ask mCurrentFocus, and on nothing else.
+#
+# So when mCurrentFocus names something else there is a second witness, in two parts that must
+# both hold: the system reports the activity as resumed, and the screen's own accessibility dump
+# is made of this app's nodes. The second part is what keeps a dialog lying over a resumed
+# activity (a "not responding" box, a permission prompt) from passing: its nodes are not ours.
+FRONT_BY=""
+in_front() {
+  local label="$1" r
+  FRONT_BY=""
+  case "$(focus)" in *"$label"*) FRONT_BY=focus; return 0 ;; esac
+  [ -n "${PKG:-}" ] || return 1
+  r=$(resumed)
+  case ",$r," in *",$PKG/"*"$label,"*) ;; *) return 1 ;; esac
+  # Both copies are removed first: a dump that fails must not leave an earlier screen to be read.
+  rm -f "$OUT/ui-front.xml"
+  adb shell rm -f /sdcard/ui-front.xml > /dev/null 2>&1
+  adb shell uiautomator dump /sdcard/ui-front.xml > /dev/null 2>&1
+  adb pull /sdcard/ui-front.xml "$OUT/ui-front.xml" > /dev/null 2>&1
+  grep -q "package=\"$PKG\"" "$OUT/ui-front.xml" 2>/dev/null || return 1
+  FRONT_BY=resumed
+  return 0
+}
+
 # Bring one of OUR activities to the foreground. A foreign launcher ANR can leave NO dialog on
 # screen: run 40171181789 had only `am_kill ... launcher3 ... user request after error`, focus was
 # stuck on the killed Quickstep window, and `dismiss_anr` correctly found nothing to dismiss. In
 # that state an ordinary `am start` reports WARM/ok without changing focus. Restart the launcher,
 # return HOME, and retry the start; three failures still produce the original FAIL annotation.
 #
-# The third start then gets what the first two were not given: time. Run 43278438056 failed the
-# check that follows this call, twice, with focus on a launcher that was restarting (three
-# "isn't responding" dialogs in that run, the first one Quickstep's by its own subject line).
-# The first time, the app was on screen moments later with nothing having started it again:
-# section 5 found its text field and the keyboard came up over it. So the activity does arrive,
-# and five seconds after the start is too soon to look on a slow runner. Nothing is started or
-# stopped in the wait, only watched, with any dialog in the way dismissed. A run that passed
-# therefore passes exactly as before, and an activity that never arrives still fails, about
-# half a minute later.
+# "In front" is asked of in_front, not of mCurrentFocus alone. Before that, a stale launcher
+# window sent every call down the restart-the-launcher path to no effect (six launcher restarts
+# in each of the two runs named above). An attempt to cure the same failure by waiting longer
+# after the third start (6e3cd1c) was wrong about the cause and did nothing for it: the next
+# run that met the dialog, 43285608845, failed the same two checks after the wait. It is gone.
 focus_activity() {
-  local component="$1" label="$2" prefix="$3" try f look
+  local component="$1" label="$2" prefix="$3" try
   for try in 1 2 3; do
     dismiss_anr || true
     adb shell am start -W -n "$component" > "$OUT/$prefix-$try.log" 2>&1
     sleep 5
-    f=$(focus)
-    case "$f" in *"$label"*) return 0 ;; esac
+    in_front "$label" && return 0
     [ "$try" -lt 3 ] || continue
-    case "$f" in
+    case "$(focus)" in
       *"$PKG"*) ;;  # our process is alive but the wrong activity has focus
       *)
         adb shell am force-stop com.android.launcher3 > /dev/null 2>&1 || true
         adb shell input keyevent KEYCODE_HOME > /dev/null 2>&1 || true
         sleep 3
         ;;
-    esac
-  done
-  for look in 1 2 3 4 5 6; do
-    dismiss_anr || true
-    sleep 3
-    case "$(focus)" in
-      *"$label"*) info "$label took focus on look $look after the third start"; return 0 ;;
     esac
   done
   return 1
@@ -500,10 +526,16 @@ FOCUS=$(focus)
 CRASH=$(crashln)
 if [ -n "$CRASH" ]; then
   fail "CRASH after launching LauncherActivity: $CRASH"
-elif printf '%s' "$FOCUS" | grep -q "LauncherActivity"; then
-  pass "LauncherActivity foreground: $FOCUS"
+elif in_front "LauncherActivity"; then
+  # resumed= is printed on the ordinary path too, so that every run shows what the second
+  # witness reads on this image; it decides nothing unless the first one fails.
+  if [ "$FRONT_BY" = focus ]; then
+    pass "LauncherActivity foreground: $FOCUS resumed=$(resumed)"
+  else
+    pass "LauncherActivity foreground by its resumed state and its nodes on screen (resumed=$(resumed)); window focus is stale: $FOCUS"
+  fi
 else
-  fail "LauncherActivity not foreground: focus='$FOCUS' anr='$(anrln)' am='$(peek "$OUT/am-start.log" 120)'"
+  fail "LauncherActivity not foreground: focus='$FOCUS' resumed='$(resumed)' anr='$(anrln)' am='$(peek "$OUT/am-start.log" 120)'"
 fi
 
 echo "== 5. reach a text field, then prove the keyboard renders and is bound =="
@@ -635,10 +667,14 @@ focus_activity "$PKG/$NS.SettingsActivity" "SettingsActivity" "am-settings"
 cp -f "$OUT/am-settings-1.log" "$OUT/am-settings.log" 2>/dev/null || true
 shot 04-settings
 FOCUS3=$(focus)
-if printf '%s' "$FOCUS3" | grep -q "SettingsActivity"; then
-  pass "SettingsActivity foreground"
+if in_front "SettingsActivity"; then
+  if [ "$FRONT_BY" = focus ]; then
+    pass "SettingsActivity foreground"
+  else
+    pass "SettingsActivity foreground by its resumed state and its nodes on screen (resumed=$(resumed)); window focus is stale: $FOCUS3"
+  fi
 else
-  fail "SettingsActivity not foreground: focus='$FOCUS3' anr='$(anrln)' am='$(peek "$OUT/am-settings.log" 120)'"
+  fail "SettingsActivity not foreground: focus='$FOCUS3' resumed='$(resumed)' anr='$(anrln)' am='$(peek "$OUT/am-settings.log" 120)'"
 fi
 # 7b. The toolbar settings screen (gap analysis phase 1). Unlike 6b above this is ASSERTABLE, not
 # merely reported: SettingsActivity is an ordinary app window, so uiautomator captures it. Three
@@ -1677,11 +1713,10 @@ if [ "$CARD_KB" = "true" ]; then
     [ -n "${2:-}" ] && [ "${1:-0}" -le 60 ] && CARD_TOUCH=$2
   fi
   # Had the report of a keyboard been stale, that BACK left the activity. Come back to it.
-  case "$(focus)" in
-    *SettingsActivity*) ;;
-    *) CARD_KB="$CARD_KB(left-activity)"
-       focus_activity "$PKG/$NS.SettingsActivity" "SettingsActivity" "am-card-again" || true ;;
-  esac
+  if ! in_front "SettingsActivity"; then
+    CARD_KB="$CARD_KB(left-activity)"
+    focus_activity "$PKG/$NS.SettingsActivity" "SettingsActivity" "am-card-again" || true
+  fi
 fi
 # 2. Open the sheet, unless it is open already (no hamburger, section items on screen).
 dumpui "$OUT/ui-card-land.xml"
