@@ -6,6 +6,7 @@ import android.content.ClipData
 // tribixbite.cleverkeys.ClipboardManager (same-package takes priority in Kotlin resolution).
 import android.content.ClipboardManager as SystemClipboardManager
 import android.content.Context
+import android.view.ContextThemeWrapper
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -1255,7 +1256,15 @@ class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListVi
         }
     }
 
-    /** Send the specified entry to the editor (position in current page). */
+    /**
+     * Send the specified entry to the editor (position in current page), then put the pane away
+     * (2026-11-13).
+     *
+     * The owner asked for Gboard's behaviour: *"tap on a clip to paste it"*. The pane is as tall
+     * as the keyboard now and the keys are not drawn under it, so pasting without closing it
+     * would leave the user looking at a list with no keyboard. Closing it puts the caret in the
+     * field with the clip pasted, ready for the next thing typed.
+     */
     fun paste_entry(pos: Int) {
         // D-10: bounds-guard stale click positions (see pin_entry).
         val entry = paginatedHistory.getOrNull(pos) ?: return
@@ -1277,6 +1286,63 @@ class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListVi
             // Text entry — use standard commitText path
             ClipboardHistoryService.paste(entry.content)
         }
+    }
+
+    /**
+     * Called after a clip has been sent to the editor, so the host can close the pane. Wired by
+     * `ClipboardManager` to the same close route the back arrow uses.
+     */
+    var onPasteDone: (() -> Unit)? = null
+
+    /**
+     * The actions a held clip offers (2026-11-13).
+     *
+     * The owner asked for a discoverable way to delete: *"there's no easy way or even a way to
+     * delete or discard the saved clipboards I don't need."* Deleting used to need an edit mode
+     * per row (the delete button only existed inside it), and clearing several needed selection
+     * mode first. Gboard's clipboard answers a hold with exactly this kind of short list.
+     *
+     * The sheet is also where Browse went: a tap pastes now, so "show all" of a long clip and
+     * the system-clipboard copy live here.
+     */
+    private fun showEntryActions(entry: ClipboardEntry, pos: Int, expand: () -> Unit) {
+        val labels = ArrayList<String>(6)
+        val actions = ArrayList<() -> Unit>(6)
+        fun offer(labelRes: Int, action: () -> Unit) {
+            labels.add(context.getString(labelRes))
+            actions.add(action)
+        }
+
+        offer(R.string.clipboard_action_paste) {
+            paste_entry(pos)
+            onPasteDone?.invoke()
+        }
+        if (entry.isMedia) {
+            // A media clip cannot be edited inline (edit_entry returns early); showing all is
+            // the only browse action it has.
+            offer(R.string.clipboard_action_expand) { expand() }
+        } else {
+            offer(R.string.clipboard_action_expand) { expand() }
+            offer(R.string.clipboard_action_edit) { if (!isEditing()) edit_entry(pos) }
+        }
+        when (currentTab) {
+            ClipboardTab.HISTORY -> offer(R.string.clipboard_action_pin) { pin_entry(pos) }
+            ClipboardTab.PINNED -> offer(R.string.clipboard_action_unpin) { pin_entry(pos) }
+            ClipboardTab.TODOS -> Unit
+        }
+        if (!entry.isMedia) {
+            // The pre-2026-11-13 long-press action, now one entry in the sheet.
+            offer(R.string.clipboard_action_copy) { copyEntryToSystemClipboard(entry) }
+        }
+        offer(R.string.clipboard_action_delete) { delete_entry(pos) }
+
+        val themed = ContextThemeWrapper(context, Config.globalConfig().theme)
+        val dialog = AlertDialog.Builder(themed)
+            .setTitle(entry.getFormattedText(context))
+            .setItems(labels.toTypedArray()) { _, which -> actions.getOrNull(which)?.invoke() }
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+        Utils.show_dialog_on_ime(dialog, windowToken)
     }
 
     /**
@@ -2116,10 +2182,24 @@ class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListVi
 
             // ── Click handlers ──
 
-            // Tap text to toggle expand/collapse (all entries, not just multi-line)
+            // Tap a clip to PASTE it (2026-11-13). The owner's instruction, and what Gboard's
+            // clipboard does: "tap on a clip to paste it". It used to expand the row instead,
+            // which meant the one obvious gesture did not do the one obvious thing, and pasting
+            // — the whole reason the pane exists — needed a small icon at the row's right edge.
+            // The pane closes behind the paste (see paste_entry), so the caret is back in the
+            // field the clip went to.
+            //
+            // Browsing did not lose its gesture: a LONG PRESS opens the row's actions (Paste,
+            // Pin/Unpin, Edit, Show all, Delete), and for a multi-line or media clip a long
+            // press is a reasonable way to ask to see all of it. Rows in the PINNED and TODOS
+            // tabs keep the same contract: a tap pastes.
             textView.setOnClickListener {
-                expandedStates[entry.timestamp] = !isExpanded
-                notifyDataSetChanged()
+                // One tap, one paste: the row can be recycled while the tap is dispatched, so the
+                // guard is the same isEditing() check every other row action uses.
+                if (!isEditing()) {
+                    paste_entry(pos)
+                    onPasteDone?.invoke()
+                }
             }
 
             // Expand chevron also toggles
@@ -2135,12 +2215,15 @@ class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListVi
                 notifyDataSetChanged()
             }
 
-            // Long-press copies entry text to system clipboard.
-            // #156: routed through copyEntryToSystemClipboard, which confirms first for private
-            // entries so the user can't accidentally leak a privately-copied clip to the OS.
+            // Long-press opens the clip's actions (2026-11-13): Paste, Pin/Unpin, Edit, Show
+            // all, Copy to the system clipboard, Delete. It used to copy straight to the system
+            // clipboard, which was one of only two things a row could do and not the one the
+            // owner asked for; the copy is one entry in the sheet now.
             textView.setOnLongClickListener {
                 if (isEditing()) return@setOnLongClickListener true  // Block during edit
-                copyEntryToSystemClipboard(entry)
+                showEntryActions(entry, pos) { expandedStates[entry.timestamp] = true
+                    notifyDataSetChanged()
+                }
                 true
             }
 

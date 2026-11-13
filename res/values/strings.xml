@@ -266,6 +266,20 @@
     <!-- Suggestion bar: swipe-correction offer (learning-system audit 2026-09-26) — shown after the
          user corrected the same swiped word twice; accept adds it to the personal dictionary -->
     <string name="suggestion_prefer_when_swiping">Prefer “%1$s” when swiping?</string>
+    <!-- Suggestion bar: the hint that fills the row while no words are offered and the field
+         has nothing before the caret. The row keeps its height all the time (2026-11-13), so it
+         needs something to say instead of a blank band. -->
+    <string name="suggestion_strip_hint_swipe">Swipe to type</string>
+    <!-- Clipboard pane: the back arrow that closes the pane and returns to typing (2026-11-13). -->
+    <string name="clipboard_back">Back to typing</string>
+    <!-- Clipboard pane: row actions offered by holding a clip (2026-11-13). -->
+    <string name="clipboard_action_paste">Paste</string>
+    <string name="clipboard_action_pin">Pin</string>
+    <string name="clipboard_action_unpin">Unpin</string>
+    <string name="clipboard_action_edit">Edit</string>
+    <string name="clipboard_action_expand">Show all</string>
+    <string name="clipboard_action_delete">Delete</string>
+    <string name="clipboard_action_copy">Copy</string>
     <string name="suggestion_prefer_when_swiping_decline">Don\'t ask</string>
     <string name="suggestion_prefer_when_swiping_added">Swiping now prefers “%1$s”</string>
     <string name="suggestion_prefer_when_swiping_raised">Swiping now strongly prefers “%1$s”</string>

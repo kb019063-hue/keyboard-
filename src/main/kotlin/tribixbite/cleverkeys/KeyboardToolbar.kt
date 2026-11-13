@@ -89,13 +89,21 @@ class KeyboardToolbar(
     private var opacity = 100
 
     /**
-     * Collapsed-row mode (phase 4 part 6/7), **no longer wired** as of 2026-11-04.
+     * Collapsed-row mode (phase 4 part 6/7): the two END buttons while the suggestion strip
+     * carries words.
      *
-     * It kept the two end buttons and hid the rest while the suggestion strip carried words.
-     * The owner's Gboard screenshots show every icon in the row while typing, and on his phone
-     * the collapse read as "part of the keyboard disappears when I type something", so
-     * `CleverKeysService` stopped calling [setCompactMode]. The mode and its pure policy stay
-     * because they are correct for a future single-row header; nothing turns them on today.
+     * History, because it was switched off and on again. It was wired from phase 4 until
+     * 2026-11-04, when the owner's report was "part of the keyboard disappears when I type
+     * something" — at the time the strip's band ALSO collapsed whenever it was empty, so the
+     * keyboard lost two rows at once as soon as typing began. It was taken off. On 2026-11-13 the
+     * owner asked for it by name (*"when the suggestions are active the only tools visible are
+     * the more tools sheet on the left and mic on the right"*), and the two-row collapse it was
+     * blamed for is gone: the strip keeps its height always, and its middle carries the word
+     * being typed. What is left is exactly Gboard's row: tools on the left, words in the middle,
+     * mic on the right.
+     *
+     * Positions, not command names, decide which buttons survive ([ToolbarCompactPolicy]), so a
+     * customised toolbar keeps its own first and last buttons.
      */
     private var compact = false
 

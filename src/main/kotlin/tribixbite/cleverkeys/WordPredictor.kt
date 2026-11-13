@@ -37,8 +37,28 @@ import kotlin.math.roundToInt
 class WordPredictor : Predictor {
     companion object {
         private const val TAG = "WordPredictor"
-        private const val MAX_PREDICTIONS_TYPING = 5
+        /**
+         * How many suggestions the row offers while a word is being typed.
+         *
+         * Gboard's strip offers THREE ("the suggestion strip offers three likely words as I
+         * type"), and the owner asked for that on 2026-11-13: *"the suggestion should be only 3
+         * or 4."* It was five, which on a 1080 px phone is four words squeezed into a row that
+         * also has to hold the last two behind a horizontal scroll.
+         *
+         * Only the row is affected: [MAX_PREDICTIONS_SWIPE] still governs what a swipe produces
+         * for the keyboard's own alternates.
+         */
+        private const val MAX_PREDICTIONS_TYPING = 3
         private const val MAX_PREDICTIONS_SWIPE = 10
+
+        /**
+         * Candidates the typo-tolerant search treats as "the row is already full".
+         *
+         * Held at FIVE, the number the row used to offer, so narrowing the row to Gboard's three
+         * does not make the fuzzy search run on every keystroke: that would be more work on the
+         * typing path, and this change is not allowed to cost any speed.
+         */
+        private const val FULL_ROW_FOR_FUZZY = 5
 
         /**
          * Frequency rank given to a contraction alias key that is NOT itself a word of the
@@ -2790,7 +2810,7 @@ class WordPredictor : Predictor {
     /**
      * Should the typo-tolerant search run for [seq]? Only for all-letter input whose length
      * [FuzzyPrefixMatcher.budgetFor] allows (3..24 letters), and only when the exact results
-     * cannot fill the bar ([exactCount] < [MAX_PREDICTIONS_TYPING]) or even the most frequent
+     * cannot fill a five-wide bar ([exactCount] < [FULL_ROW_FOR_FUZZY]) or even the most frequent
      * of them ([bestExactFrequency]) is outside the dictionary's top
      * [FUZZY_STRONG_EXACT_TOP_FRACTION]. Common prefixes ("pla", "the", "que") therefore pay
      * nothing for this feature. Apostrophes/digits skip it: the handler already retries an
@@ -2799,7 +2819,7 @@ class WordPredictor : Predictor {
     private fun shouldSearchFuzzy(seq: String, exactCount: Int, bestExactFrequency: Int): Boolean {
         if (FuzzyPrefixMatcher.budgetFor(seq.length) <= 0f) return false
         if (!seq.all { it.isLetter() }) return false
-        if (exactCount < MAX_PREDICTIONS_TYPING) return true
+        if (exactCount < FULL_ROW_FOR_FUZZY) return true
         return bestExactFrequency < strongExactFrequency(dictionary.get())
     }
 
