@@ -187,12 +187,28 @@ class KeyboardReceiver(
      */
     private var lastKeyboardTotalPx = 0
 
+    /** The keys were last shown to the user; the hidden state is only ever set from here. */
+    private var keysHidden = false
+
     private fun measuredKeyboardTotalPx(): Int {
         val containerHeight = (topPane?.parent as? View)?.height ?: 0
-        if (keyboardView.visibility == View.VISIBLE && containerHeight > 0) {
+        if (!keysHidden && containerHeight > 0) {
             lastKeyboardTotalPx = containerHeight
         }
         return lastKeyboardTotalPx
+    }
+
+    /**
+     * Show or hide the row of keys. Hidden, never removed: the typing state (shift, the layer, a
+     * swipe in progress) lives in that view, and removing it would drop all of it.
+     *
+     * Only called when the state changes, and only here, so the test double a host test hands the
+     * receiver never has to be a real view.
+     */
+    private fun setKeysVisible(visible: Boolean) {
+        if (keysHidden == !visible) return
+        keysHidden = !visible
+        keyboardView.visibility = if (visible) View.VISIBLE else View.GONE
     }
 
     /** The toolbar row's height now, or 0 when the toolbar is off. */
@@ -214,7 +230,7 @@ class KeyboardReceiver(
         // them cover the bottom of the list (2026-11-13, the owner's report). They are hidden,
         // never removed — the typing state lives in the view, and removing it would drop shift,
         // the layer and any swipe in progress.
-        keyboardView.visibility = if (hideKeys) View.GONE else View.VISIBLE
+        setKeysVisible(!hideKeys)
     }
 
     /**
@@ -253,7 +269,7 @@ class KeyboardReceiver(
 
         // Back to typing: the keys come back before the band is restored, so the first tap after
         // the clipboard closes lands on a key rather than on nothing.
-        keyboardView.visibility = View.VISIBLE
+        setKeysVisible(true)
 
         SuggestionBarPane.switchToSuggestionBarMode(
             top, content, scroll, keyboard2.suggestionStripHeight(suggestionBarHeight)
