@@ -148,6 +148,7 @@ is there. Write-up: [`KEYBOARD-LATENCY-2026-11-12.md`](KEYBOARD-LATENCY-2026-11-
 | A letter that extends a word no longer makes the keyboard re-read the app's text at once; that waits for a 1.5 s pause. First letters, spaces, Backspace, suggestions, swipes and caret moves are as before. | pass `afterTypedLetter = false` in `CleverKeysService.onUpdateSelection` |
 | The keyboard writes down when it is created and when it is let go of: times only, 120 lines, a private file that is not backed up. Shown on the Keyboard speed card. | remove the two `ProcessStartLog` calls in `CleverKeysService` |
 | The settings drawer's list of sections scrolls. | not something to reverse: sections at the end could not be reached |
+| The English contraction tables are read from a binary store instead of being parsed from 154 KB of JSON with `org.json` on the main thread at every cold start. The JSON stays the source of truth and the store is regenerated from it at build time; the same mappings, in the same order, reach the same places. | ship a V1 store (no pairing structure), which makes the loader read the JSON again, exactly as before |
 
 If the owner says the band should close at every space again, or that anything here feels worse,
 that is a decision and it moves up into the sections above.

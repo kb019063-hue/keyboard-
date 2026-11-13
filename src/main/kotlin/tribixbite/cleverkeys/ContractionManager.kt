@@ -49,6 +49,11 @@ class ContractionManager(private val context: Context) {
     // Used to identify contractions in predictions and prevent unwanted autocorrect
     private val knownContractions: MutableSet<String> = mutableSetOf()
 
+    // The pairing STRUCTURE (base -> variants) as it came out of the binary store.
+    // Empty when the store is V1 (a flat set of forms, no bases) or unreadable, and
+    // then the JSON file supplies the structure, exactly as before.
+    private var binaryPairedVariants: Map<String, List<ContractionBinaryReader.PairedEntry>> = emptyMap()
+
     private val assetManager: AssetManager = context.assets
 
     /**
@@ -71,6 +76,7 @@ class ContractionManager(private val context: Context) {
         pairedContractions.clear()
         pairedFrequencies.clear()
         knownContractions.clear()
+        binaryPairedVariants = emptyMap()
         loadEnglishBase()
     }
 
@@ -207,6 +213,7 @@ class ContractionManager(private val context: Context) {
         pairedContractions.clear()
         pairedFrequencies.clear()
         knownContractions.clear()
+        binaryPairedVariants = emptyMap()
 
         // Precedence order — see the KDoc. Primary first, always.
         if (!SwipeContractionPolicy.usesEnglishBase(primaryLang)) {
@@ -483,6 +490,11 @@ class ContractionManager(private val context: Context) {
             nonPairedContractions.putAll(data.nonPairedContractions)
             knownContractions.addAll(data.knownContractions)
 
+            // V2 carries the pairing structure itself (base -> variants, with the
+            // frequencies). V1 carries only a flat set of forms, and then this stays
+            // empty and the JSON file supplies the structure, as it always did.
+            binaryPairedVariants = data.pairedContractions
+
             // Derive paired contraction mappings from known contractions
             // Binary format doesn't store base→contraction mappings for paired entries,
             // so we derive them: for any contraction NOT in nonPaired values, the base
@@ -701,6 +713,21 @@ class ContractionManager(private val context: Context) {
      * contraction variants. Both forms should appear in predictions.
      * Example: "well" (adverb) and "we'll" (we will) are both valid.
      *
+     * THE SOURCE IS THE BINARY STORE (2026-11-12). `contraction_pairings.json` is 154 KB
+     * and parsing it with org.json on the main thread was the slowest step of `onCreate`
+     * in three CI runs running (79, 85 and 40 ms of a 191-224 ms set-up) — paid on the
+     * critical path to the first picture, at every cold start. The binary store carries
+     * the same structure (the JSON is the source of truth and the generator projects it),
+     * so the parse is gone. The JSON is still read when the store is V1, unreadable, or
+     * absent — the fallback is the behaviour that existed before.
+     *
+     * `ContractionBinaryPairingsTest` proves the two agree: the same bases, and under
+     * each base the same variants in the same order with the same frequencies. (The
+     * bases are compared as a SET, not in order: `org.json` keeps an object's keys in
+     * a `HashMap` on the JVM and a `LinkedHashMap` on Android, so the two parsers do
+     * not agree about the base order even before this change. Nothing observes it —
+     * every consumer looks a base up by name.)
+     *
      * ADDITIVE and EARLIER-WINS on the variant list, mirroring
      * [loadLanguagePairedContractions]. The dedup is not cosmetic: this loader runs AFTER
      * [loadBinaryContractions], which derives its own paired map from `contractions.bin`
@@ -715,12 +742,16 @@ class ContractionManager(private val context: Context) {
      * only ever surfaced on the tap path.
      */
     private fun loadPairedContractions() {
-        val inputStream = assetManager.open("dictionaries/contraction_pairings.json")
-        val jsonString = readStream(inputStream)
+        val variantsByBase = pairedVariantsFromBinary() ?: run {
+            val jsonString = assetManager.open("dictionaries/contraction_pairings.json").use {
+                readStream(it)
+            }
+            parsePairings(jsonString)
+        }
 
         var pairedCount = 0
 
-        for ((lowerBase, variants) in parsePairings(jsonString)) {
+        for ((lowerBase, variants) in variantsByBase) {
             for (variant in variants) {
                 val contraction = variant.contraction
 
@@ -741,6 +772,21 @@ class ContractionManager(private val context: Context) {
         }
 
         Log.d(TAG, "Loaded $pairedCount paired contractions (${pairedContractions.size} base words)")
+    }
+
+    /**
+     * The pairing structure carried by the binary store, or null when it carries none.
+     *
+     * Null means "read the JSON instead": a V1 store (a flat set of forms, no bases) or
+     * a store that could not be read at all. The map keeps the store's order — the bases
+     * in the JSON file's order, and each base's variants in the JSON file's order — which
+     * decides which variant the suggestion bar offers first.
+     */
+    private fun pairedVariantsFromBinary(): Map<String, List<PairedVariant>>? {
+        if (binaryPairedVariants.isEmpty()) return null
+        return binaryPairedVariants.mapValues { (_, entries) ->
+            entries.map { PairedVariant(it.contraction, it.frequency) }
+        }
     }
 
     /**

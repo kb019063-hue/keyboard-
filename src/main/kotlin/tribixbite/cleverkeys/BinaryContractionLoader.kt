@@ -3,8 +3,6 @@ package tribixbite.cleverkeys
 import android.content.Context
 import android.util.Log
 import java.io.IOException
-import java.nio.ByteBuffer
-import java.nio.charset.StandardCharsets
 
 /**
  * Fast binary contraction loader.
@@ -16,42 +14,53 @@ import java.nio.charset.StandardCharsets
  * - No JSON parsing overhead (faster startup)
  * - No JSONObject/JSONArray allocations
  * - Direct byte buffer access (memory-efficient)
- * - Single file instead of two JSON files
+ * - The pairing structure comes out of the store, so the 154 KB JSON is not read at all
+ *   on the normal path (it stays the fallback for a V1 store)
  *
- * Binary Format V1:
+ * Binary Format V2:
  * -----------------
- * Header (16 bytes):
- *   - Magic: b'CTRB' (4 bytes)
- *   - Version: uint32 (4 bytes)
- *   - Non-paired count: uint32 (4 bytes)
- *   - Paired count: uint32 (4 bytes)
+ * Header (16 bytes, little-endian):
+ *   - Magic: b'CTRB' (4)
+ *   - Version: uint32 (4) = 2
+ *   - Non-paired count: uint32 (4)
+ *   - Paired base count: uint32 (4)
  *
  * Non-Paired Section:
  *   - For each non-paired mapping:
- *     - Key length: uint16 (2 bytes)
+ *     - Key length: uint16 (2)
  *     - Key UTF-8 bytes
- *     - Value length: uint16 (2 bytes)
+ *     - Value length: uint16 (2)
  *     - Value UTF-8 bytes
  *
- * Paired Section:
- *   - For each paired contraction:
- *     - Contraction length: uint16 (2 bytes)
- *     - Contraction UTF-8 bytes
+ * Paired Section (V2):
+ *   - For each paired BASE, in the JSON file's order:
+ *     - Base length: uint16 (2) · Base UTF-8 bytes · Variant count: uint16 (2)
+ *   - For each variant, in the JSON file's order:
+ *     - Variant length: uint16 (2) · Variant UTF-8 bytes · Frequency: int32 (4)
  *
- * OPTIMIZATION v1 (perftodos2.md Todo 4): Eliminates slow JSON parsing at startup
+ * V1 carried the paired contractions as a FLAT SET of forms, with no base and no
+ * frequency, so the app had to parse `contraction_pairings.json` (154 KB) with
+ * org.json on the main thread at every cold start to recover them. V2 carries the
+ * structure itself, and that parse is gone. A V1 store is still readable: it simply
+ * carries no pairing structure, and the caller falls back to the JSON.
+ *
+ * The parsing lives in [ContractionBinaryReader], which imports no Android class, so
+ * the pure test classpath can read the SHIPPED asset and prove it says what the
+ * JSON says. This loader only does the asset I/O and the logging.
  */
 object BinaryContractionLoader {
     private const val TAG = "BinaryContractionLoader"
-    private const val MAGIC = 0x42525443 // "CTRB" in little-endian
-    private const val EXPECTED_VERSION = 1
-    private const val HEADER_SIZE = 16
 
     /**
      * Result container for loaded contraction data.
+     *
+     * @param pairedContractions the pairing STRUCTURE (base -> variants), empty for a
+     *   V1 store. [ContractionManager] uses it in place of parsing the JSON.
      */
     data class ContractionData(
         val nonPairedContractions: Map<String, String>,
-        val knownContractions: Set<String>
+        val knownContractions: Set<String>,
+        val pairedContractions: Map<String, List<ContractionBinaryReader.PairedEntry>> = emptyMap()
     )
 
     /**
@@ -67,72 +76,36 @@ object BinaryContractionLoader {
 
         try {
             context.assets.open(filename).use { inputStream ->
-                // Read the entire file into a byte buffer for fast access. Must be a read-fully
-                // (see readBinaryAssetFully) — an available()-sized single read can truncate.
-                val buffer = readBinaryAssetFully(
-                    inputStream, filename, MIN_BINARY_CONTRACTION_BYTES
-                )
-
-                // Parse header
-                val magic = buffer.int
-                if (magic != MAGIC) {
-                    Log.e(TAG, String.format("Invalid magic number: 0x%08X (expected 0x%08X)", magic, MAGIC))
-                    return null
+                // Read the entire file into a byte array for fast access. Must be a
+                // read-fully (an available()-sized single read can truncate).
+                val bytes = ContractionBinaryReader.readBoundedBytes(inputStream)
+                if (bytes.size < MIN_BINARY_CONTRACTION_BYTES) {
+                    throw IOException(
+                        "Binary asset '$filename' is implausibly small (${bytes.size} bytes < " +
+                            "$MIN_BINARY_CONTRACTION_BYTES) — truncated or corrupt stream"
+                    )
                 }
 
-                val version = buffer.int
-                if (version != EXPECTED_VERSION) {
-                    Log.e(TAG, String.format("Unsupported version: %d (expected %d)", version, EXPECTED_VERSION))
-                    return null
-                }
-
-                val nonPairedCount = buffer.int
-                val pairedCount = buffer.int
-
-                // Load non-paired contractions
-                val nonPaired = mutableMapOf<String, String>()
-                val known = mutableSetOf<String>()
-
-                repeat(nonPairedCount) {
-                    val key = readString(buffer)
-                    val value = readString(buffer)
-                    nonPaired[key] = value
-                    known.add(value) // Value is the contraction with apostrophe
-                }
-
-                // Load paired contractions
-                repeat(pairedCount) {
-                    val contraction = readString(buffer)
-                    known.add(contraction)
-                }
+                val payload = ContractionBinaryReader.parse(bytes)
 
                 val loadTime = System.currentTimeMillis() - startTime
 
                 if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
                     Log.d(TAG, String.format(
                         "Loaded %d non-paired, %d total known contractions in %dms",
-                        nonPaired.size, known.size, loadTime
+                        payload.nonPaired.size, payload.known.size, loadTime
                     ))
                 }
 
-                return ContractionData(nonPaired, known)
+                return ContractionData(
+                    payload.nonPaired,
+                    payload.known,
+                    payload.paired
+                )
             }
         } catch (e: IOException) {
             Log.e(TAG, "Failed to load binary contractions", e)
             return null
         }
-    }
-
-    /**
-     * Read a length-prefixed UTF-8 string from buffer.
-     *
-     * @param buffer ByteBuffer to read from
-     * @return Decoded string
-     */
-    private fun readString(buffer: ByteBuffer): String {
-        val length = buffer.short.toInt() and 0xFFFF // Unsigned short
-        val bytes = ByteArray(length)
-        buffer.get(bytes)
-        return String(bytes, StandardCharsets.UTF_8)
     }
 }

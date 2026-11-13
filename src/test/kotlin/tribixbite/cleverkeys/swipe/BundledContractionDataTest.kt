@@ -5,6 +5,7 @@ import com.google.common.truth.Truth.assertWithMessage
 import com.google.gson.JsonParser
 import org.junit.BeforeClass
 import org.junit.Test
+import tribixbite.cleverkeys.ContractionBinaryReader
 import tribixbite.cleverkeys.ContractionManager
 import tribixbite.cleverkeys.swipe.ctc.CtcDecodableLength
 import tribixbite.cleverkeys.swipe.ctc.CtcAzProjection
@@ -1086,20 +1087,11 @@ class BundledContractionDataTest {
      */
     @Test
     fun `every non-possessive pair derived from contractions bin carries a pairing frequency`() {
-        val buf = java.nio.ByteBuffer.wrap(File("$DICT_DIR/contractions.bin").readBytes())
-            .order(java.nio.ByteOrder.LITTLE_ENDIAN)
-        fun readString(): String {
-            val bytes = ByteArray(buf.short.toInt() and 0xFFFF)
-            buf.get(bytes)
-            return String(bytes, Charsets.UTF_8)
-        }
-        buf.position(8) // magic + version
-        val nonPairedCount = buf.int
-        val pairedCount = buf.int
-        val nonPairedValues = HashSet<String>()
-        repeat(nonPairedCount) { readString(); nonPairedValues += readString() }
-        val known = HashSet<String>(nonPairedValues)
-        repeat(pairedCount) { known += readString() }
+        // The PRODUCTION reader, not a second hand-rolled one: the store is V2 (it carries
+        // the pairing structure), and a reader written for V1 would read past the end.
+        val store = ContractionBinaryReader.parse(File("$DICT_DIR/contractions.bin").readBytes())
+        val nonPairedValues = HashSet<String>(store.nonPaired.values)
+        val known = HashSet<String>(store.known)
 
         val pairings = ContractionManager.parsePairings(
             File("$DICT_DIR/contraction_pairings.json").readText()
@@ -1125,19 +1117,8 @@ class BundledContractionDataTest {
     fun `etoo is a REPLACE mapping to eto'o in the json and the binary`() {
         assertThat(jsonObject("contractions_non_paired.json")["etoo"]).isEqualTo("eto'o")
 
-        val buf = java.nio.ByteBuffer.wrap(File("$DICT_DIR/contractions.bin").readBytes())
-            .order(java.nio.ByteOrder.LITTLE_ENDIAN)
-        fun readString(): String {
-            val bytes = ByteArray(buf.short.toInt() and 0xFFFF)
-            buf.get(bytes)
-            return String(bytes, Charsets.UTF_8)
-        }
-        buf.position(8) // magic + version
-        val nonPairedCount = buf.int
-        buf.int // paired count
-        val binNonPaired = HashMap<String, String>()
-        repeat(nonPairedCount) { binNonPaired[readString()] = readString() }
-        assertThat(binNonPaired["etoo"]).isEqualTo("eto'o")
+        val store = ContractionBinaryReader.parse(File("$DICT_DIR/contractions.bin").readBytes())
+        assertThat(store.nonPaired["etoo"]).isEqualTo("eto'o")
 
         val pairings = ContractionManager.parsePairings(
             File("$DICT_DIR/contraction_pairings.json").readText()
@@ -1170,18 +1151,7 @@ class BundledContractionDataTest {
         assertThat(jsonObject("contractions_non_paired.json")).doesNotContainKey("lets")
         assertThat(jsonObject("contractions_en.json")["lets"]).isEqualTo("let's")
 
-        val buf = java.nio.ByteBuffer.wrap(File("$DICT_DIR/contractions.bin").readBytes())
-            .order(java.nio.ByteOrder.LITTLE_ENDIAN)
-        fun readString(): String {
-            val bytes = ByteArray(buf.short.toInt() and 0xFFFF)
-            buf.get(bytes)
-            return String(bytes, Charsets.UTF_8)
-        }
-        buf.position(8) // magic + version
-        val nonPairedCount = buf.int
-        buf.int // paired count
-        val binNonPaired = HashMap<String, String>()
-        repeat(nonPairedCount) { binNonPaired[readString()] = readString() }
-        assertThat(binNonPaired).doesNotContainKey("lets")
+        val store = ContractionBinaryReader.parse(File("$DICT_DIR/contractions.bin").readBytes())
+        assertThat(store.nonPaired).doesNotContainKey("lets")
     }
 }

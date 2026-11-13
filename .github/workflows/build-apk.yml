@@ -158,6 +158,12 @@ jobs:
       # finishes in well under a second. They rot silently by nature (a renamed constant, a moved
       # composable, an unregistered class), which is why they belong on every push.
       #
+      # `ContractionBinaryPairingsTest` is here for the same reason: it is the pin that keeps the
+      # SHIPPED contraction store (`contractions.bin`) equal to the JSON it is generated from, and
+      # a store that has drifted from its source is silent — the app would simply offer
+      # contractions the JSON no longer says. It reads two files and does arithmetic, so it costs
+      # well under a second.
+      #
       - name: Unit tests (fast subset, advisory)
         continue-on-error: true
         shell: bash
@@ -215,6 +221,7 @@ jobs:
             --tests '*TestRunnerListDriftTest' \
             --tests '*HapticsBehaviorDriftTest' \
             --tests '*DictationPolicyTest' \
+            --tests '*ContractionBinaryPairingsTest' \
             2>&1 | tee unit-test-output.log
 
       # Reachable summary: per-class counts from the JUnit XML, plus any compiler diagnostic.
