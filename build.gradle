@@ -1289,6 +1289,11 @@ tasks.register('runPureTests', JavaExec) {
     'tribixbite.cleverkeys.MoreToolsPanelTest',
     'tribixbite.cleverkeys.OneHandedConfigTest',
     'tribixbite.cleverkeys.SuggestionStripPolicyTest',
+    // 2026-11-13: the row keeps its height all the time and fills itself, so the policy
+    // that decides what it says is pinned here; the clipboard pane's height and what it
+    // leaves of the keyboard are pinned beside it.
+    'tribixbite.cleverkeys.SuggestionStripBandPolicyTest',
+    'tribixbite.cleverkeys.ClipboardPanePolicyTest',
     'tribixbite.cleverkeys.SuggestionPillPolicyTest',
     'tribixbite.cleverkeys.ToolbarCompactPolicyTest',
     'tribixbite.cleverkeys.FloatingConfigTest',
