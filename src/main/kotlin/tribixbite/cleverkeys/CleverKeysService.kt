@@ -2016,6 +2016,18 @@ class CleverKeysService : InputMethodService(),
     }
 
     /**
+     * Show or hide the row of keys, without removing it (2026-11-13).
+     *
+     * The clipboard pane takes the whole keyboard, keys included, so the keys stop being drawn
+     * while it is open; they are hidden rather than removed because the typing state (shift, the
+     * active layer, a swipe in progress) lives in that view. The service owns the view, so this is
+     * the one door to it — the receiver asks, it does not reach in.
+     */
+    fun setKeysVisible(visible: Boolean) {
+        _keyboardView.visibility = if (visible) View.VISIBLE else View.GONE
+    }
+
+    /**
      * The height the row above the keys occupies, for [KeyboardReceiver.hideContentPane] when it
      * puts the row back after a pane.
      *

@@ -202,13 +202,16 @@ class KeyboardReceiver(
      * Show or hide the row of keys. Hidden, never removed: the typing state (shift, the layer, a
      * swipe in progress) lives in that view, and removing it would drop all of it.
      *
-     * Only called when the state changes, and only here, so the test double a host test hands the
-     * receiver never has to be a real view.
+     * The service owns the view, so it is asked rather than reached into (a host test hands this
+     * receiver a mock keyboard view), and it is asked only when the state changes.
      */
     private fun setKeysVisible(visible: Boolean) {
         if (keysHidden == !visible) return
         keysHidden = !visible
-        keyboardView.visibility = if (visible) View.VISIBLE else View.GONE
+        // The service draws or hides its own view. Reached through the service's companion-like
+        // instance method, which is a plain call on a reference the receiver already holds, so a
+        // test double of the service answers it without a real view existing.
+        keyboard2.setKeysVisible(visible)
     }
 
     /** The toolbar row's height now, or 0 when the toolbar is off. */
