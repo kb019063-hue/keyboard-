@@ -116,6 +116,24 @@ when the word actually changes, and it never resizes anything.
 Third-party descriptions, not a specification of the Gboard the owner has in front of them. Where
 they disagree with his screenshot or his eye, his eye wins.
 
+## What the emulator said
+
+Run of `8f89008` (Build APK 43519703007, Emulator smoke 43519703029, Full unit-test suite 43519704121):
+smoke `fails=0 … anr=0`, `resize=0`, `attach=0`, `install=0`, and the suite `4820 run, 0 failed`.
+
+`resize=0` is the number this change is about: the keyboard's height did not change once while a
+six-word sentence was typed. It was 5 before the 2026-11-12 latch and 1 on `main`.
+
+Gaps in CI, said plainly because they are what the phone has to answer:
+
+- The smoke script's tools-panel and microphone checks both **skipped** on this run ("toolbar may
+  not carry the more key at position 1", "no toolbar node carries content-desc 'Voice Typing'").
+  The compact toolbar keeps positions 1 and 7, so both keys are still where the simulator looks —
+  its coordinate guesses come from the seven-button default and missed. The two end buttons do
+  appear on screen; the script's taps did not land on them.
+- Nothing in CI opens the clipboard pane, so the pane's height, the back arrow, the tap-to-paste
+  and the hold-actions are **unverified** until the phone says otherwise.
+
 ## What is unverified
 
 Everything here needs a phone to be called done — this repository cannot build in the sandbox
