@@ -169,19 +169,69 @@ class KeyboardReceiver(
         clipboardManager.setOnCloseCallback {
             handle_event_key(KeyValue.Event.SWITCH_BACK_CLIPBOARD)
         }
+        // The clipboard pane is as tall as the WHOLE keyboard, keys included (2026-11-13):
+        // it takes their place instead of sitting over them. See ClipboardPanePolicy.
     }
+
+    /**
+     * The height the whole keyboard occupied, measured while the keys were showing (2026-11-13).
+     *
+     * The clipboard pane takes the keyboard's place, and it must take EXACTLY its place: if the
+     * window grew or shrank when the pane opened, the app behind would lay itself out again —
+     * which is the movement the owner has been reporting. So the total is measured, not derived:
+     * one-handed, split and floating layouts all give the keyboard a different height, and a
+     * screen percentage (what the pane used before) describes none of them.
+     *
+     * Cached because the keys are hidden while the pane is open, which zeroes the height that
+     * would be measured then.
+     */
+    private var lastKeyboardTotalPx = 0
+
+    private fun measuredKeyboardTotalPx(): Int {
+        val containerHeight = (topPane?.parent as? View)?.height ?: 0
+        if (keyboardView.visibility == View.VISIBLE && containerHeight > 0) {
+            lastKeyboardTotalPx = containerHeight
+        }
+        return lastKeyboardTotalPx
+    }
+
+    /** The toolbar row's height now, or 0 when the toolbar is off. */
+    private fun toolbarHeightPx(): Int =
+        (topPane?.parent as? ViewGroup)?.findViewById<View?>(R.id.keyboard_toolbar)?.height ?: 0
 
     /**
      * Show content pane and hide suggestion bar.
      * Uses simple view swapping in topPane.
      */
-    private fun showContentPane() {
+    private fun showContentPane(height: Int = contentPaneHeight, hideKeys: Boolean = false) {
         val top = topPane ?: return
         val content = contentPaneContainer ?: return
         val scroll = scrollView ?: return
 
-        SuggestionBarPane.switchToContentPaneMode(top, content, scroll, contentPaneHeight)
+        SuggestionBarPane.switchToContentPaneMode(top, content, scroll, height)
         isContentPaneShowing = true
+        // The clipboard owns the whole keyboard, keys included: hide the keys rather than let
+        // them cover the bottom of the list (2026-11-13, the owner's report). They are hidden,
+        // never removed — the typing state lives in the view, and removing it would drop shift,
+        // the layer and any swipe in progress.
+        keyboardView.visibility = if (hideKeys) View.GONE else View.VISIBLE
+    }
+
+    /**
+     * The clipboard pane's height: everything above the keys' bottom edge, i.e. the toolbar plus
+     * the band plus the keys — the window's height stays exactly what it was when the pane opens
+     * (ClipboardPanePolicy). Before the first layout nothing has been measured, and the pane keeps
+     * the percentage height it was built with.
+     */
+    private fun clipboardHeight(): Int {
+        val total = measuredKeyboardTotalPx()
+        if (total <= 0) return contentPaneHeight
+        val available = (total - toolbarHeightPx()).coerceAtLeast(0)
+        val height = ClipboardPanePolicy.paneHeightPx(
+            keyboardHeightPx = available,
+            screenHeightPx = context.resources.displayMetrics.heightPixels
+        )
+        return if (height > 0) height else contentPaneHeight
     }
 
     /**
@@ -200,6 +250,10 @@ class KeyboardReceiver(
         if (top == null || content == null || scroll == null) {
             return
         }
+
+        // Back to typing: the keys come back before the band is restored, so the first tap after
+        // the clipboard closes lands on a key rather than on nothing.
+        keyboardView.visibility = View.VISIBLE
 
         SuggestionBarPane.switchToSuggestionBarMode(
             top, content, scroll, keyboard2.suggestionStripHeight(suggestionBarHeight)
@@ -591,10 +645,12 @@ class KeyboardReceiver(
                 container.removeAllViews()
                 // Detach pane from any existing parent first
                 (clipboardPane.parent as? ViewGroup)?.removeView(clipboardPane)
-                // Set pane with explicit height
-                clipboardPane.layoutParams = paneLayoutParams(contentPaneHeight)
+                // The clipboard takes the whole keyboard: it is as tall as the toolbar, the band
+                // and the keys together, and the keys are not drawn while it is up (2026-11-13,
+                // ClipboardPanePolicy). Everything else keeps the percentage height it had.
+                clipboardPane.layoutParams = paneLayoutParams(clipboardHeight())
                 container.addView(clipboardPane)
-                showContentPane()
+                showContentPane(height = clipboardHeight(), hideKeys = true)
 
                 currentPaneType = PaneType.CLIPBOARD
             }

@@ -264,6 +264,10 @@ class ClipboardManager(
             clipboardHistoryView?.attachSelectionHolder(selectionHolder)
             // Swipe-to-delete hides rows through the service-scoped pending deletion.
             clipboardHistoryView?.attachPendingDeletion(pendingDeletion)
+            // A tap on a clip pastes it; the pane then closes so the field is ready to type in
+            // again (2026-11-13, the owner's chosen behaviour). Same close route as the back
+            // arrow, so the pane's state cannot disagree with what is on screen.
+            clipboardHistoryView?.onPasteDone = { onCloseCallback?.invoke() }
 
             // Set up search box click listener
             clipboardSearchBox?.setOnClickListener {

@@ -149,6 +149,14 @@ version, do not revert:
 
 - The target layout is the Gboard screenshot, not the dense October 23 CleverKeys photo.
   English defaults and the no-subtype fallback are `latn_qwerty_us_gboard_style`.
+- The suggestion row keeps its full height ALWAYS (2026-11-13), so the keyboard's height never
+  changes while typing; the row fills itself with the word being typed (dimmed) or `Swipe to type`.
+  Do not reintroduce size-follows-occupancy. Strip: three suggestions. While suggestions show, the
+  toolbar keeps its first and last buttons only (tools left, microphone right) — the owner asked for
+  that by name, having rejected it on 2026-11-04 for a reason that no longer applies.
+- The clipboard pane takes the keyboard's whole height and hides the keys, with a back arrow first
+  in its header; a tap pastes and closes it, a hold opens the row's actions, a sideways swipe
+  deletes. See `docs/KEYBOARD-UI-2026-11-13.md`.
 - The owner rejected the purple default. `Defaults.THEME` is `gboard` — the Gboard-glass
   light/dark pair, since 2026-10-30; it replaced `harbor`, which stays the fallback id when a
   custom theme is deleted. The Harbor wardrobe (Harbor, Daybreak, Signal, Ember, Kiln) and purple

@@ -33,6 +33,23 @@
         android:paddingEnd="4dp"
         android:background="?attr/colorKey">
 
+      <!-- Back to typing (2026-11-13). The pane is as tall as the keyboard and the keys are
+           not drawn under it, so this is the way back to them. It sits FIRST in the header,
+           top-left, where Gboard's own clip/emoji panes put theirs; the close control used to
+           be a small down-arrow between the filter and search icons, which is not where anyone
+           looks for "back". -->
+      <ImageButton
+          android:id="@+id/clipboard_close_button"
+          android:layout_width="40dp"
+          android:layout_height="40dp"
+          android:src="@drawable/ic_clipboard_back"
+          android:tint="?attr/colorLabel"
+          tools:ignore="UseAppTint"
+          android:background="?android:attr/selectableItemBackgroundBorderless"
+          android:contentDescription="@string/clipboard_back"
+          android:scaleType="centerInside"
+          android:padding="8dp"/>
+
       <!-- History tab (default, highlighted) — vector icon replaces emoji -->
       <ImageView
           android:id="@+id/tab_history"
@@ -144,18 +161,6 @@
           android:scaleType="centerInside"
           android:padding="4dp"/>
 
-      <!-- Close/dismiss clipboard pane button -->
-      <ImageButton
-          android:id="@+id/clipboard_close_button"
-          android:layout_width="32dp"
-          android:layout_height="32dp"
-          android:src="@android:drawable/arrow_down_float"
-          android:tint="?attr/colorLabel"
-          tools:ignore="UseAppTint"
-          android:background="?android:attr/selectableItemBackgroundBorderless"
-          android:contentDescription="@string/clipboard_close"
-          android:scaleType="centerInside"
-          android:padding="4dp"/>
 
     </LinearLayout>
 

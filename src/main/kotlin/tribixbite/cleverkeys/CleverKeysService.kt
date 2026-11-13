@@ -196,6 +196,13 @@ class CleverKeysService : InputMethodService(),
         /** How long a returned process-text result waits for an editor to restart input. */
         private const val PROCESS_TEXT_SETTLE_MS = 3_000L
 
+        /**
+         * Characters read before the caret for the suggestion row's placeholder (2026-11-13):
+         * the longest word it echoes plus the separator before it. One bounded read per caret
+         * change, never on the keystroke path beyond that.
+         */
+        private const val NEEDED_BEFORE_CHARS = SuggestionStripBandPolicy.MAX_WORD_CHARS + 8
+
         /** Flag indicating we're in short swipe customization mode (for UI to react) */
         @Volatile
         private var _customizationMode: Boolean = false
@@ -860,6 +867,10 @@ class CleverKeysService : InputMethodService(),
         // position says: 0 lets the band go. See StripBandLatch.
         if (!restarting) _stripBand.onNewField()
         _stripBand.onCaret(info.initialSelStart, info.initialSelEnd, _suggestionBar?.hasSuggestions() == true)
+        // The row keeps its height all the time now (2026-11-13), so the only thing a field
+        // changes about it is WHAT it shows: the word before the caret, or the swipe hint. The
+        // text itself is read on the caret reports below, never here on the set-up path.
+        applyStripHeight(_suggestionBar?.isOccupied() == true)
         _formAtFinishView = null
         _viewEditor = editorRefOf(info)
         _keyboardView.cancelContinuousSwipe()
@@ -991,6 +1002,15 @@ class CleverKeysService : InputMethodService(),
         // strip's own band height still follows occupancy (below).
         _suggestionBar?.onOccupancyChanged = { occupied ->
             applyStripHeight(occupied)
+            // Gboard's row while words are offered: the tools button on the left, the words in
+            // the middle, the microphone on the right — and the commands the user does not need
+            // at that moment out of the way. This is `ToolbarCompactPolicy`, switched off on
+            // 2026-11-04 because it read as "part of the keyboard disappears"; the owner asked
+            // for it by name on 2026-11-13 ("that's why when the suggestions are active the only
+            // tools visible are the more tools sheet on the left and mic on the right"), so it is
+            // wired again — now that the suggestion row beneath it never collapses, which is what
+            // made the 2026-11-04 collapse look like an empty band.
+            _keyboardToolbar?.setCompactMode(occupied && _suggestionBar?.hasSuggestions() == true)
         }
         val stripOccupied = _suggestionBar?.isOccupied() == true
         applyStripHeight(stripOccupied)
@@ -1685,6 +1705,14 @@ class CleverKeysService : InputMethodService(),
         if (_stripBand.onCaret(newSelStart, newSelEnd, _suggestionBar?.hasSuggestions() == true)) {
             applyStripHeight(_suggestionBar?.isOccupied() == true)
         }
+        // The row's dimmed placeholder echoes the word before the caret. This is the one place
+        // that already knows where the caret is, so the word is read here (a bounded read of a
+        // few characters, the same call `SuggestionBar` already makes for its password display)
+        // and pushed to the bar, which re-binds only when the word has changed. Nothing is
+        // resized: the row keeps its height whether or not the word changes.
+        if (newSelStart != oldSelStart || newSelEnd != oldSelEnd) {
+            _suggestionBar?.setTextBeforeCaret(textBeforeCaret(NEEDED_BEFORE_CHARS))
+        }
         // Selection UI sees every callback, including ranges owned by a suffix
         // edit. Only manual/unowned movement reaches phrase and cursor tracking.
         _keyeventhandler.selection_updated(oldSelStart, newSelStart)
@@ -1988,36 +2016,59 @@ class CleverKeysService : InputMethodService(),
     }
 
     /**
-     * The height the suggestion strip's band should occupy right now (phase 4 part 2): the full
-     * band while the bar shows something or the always-visible preference is on, zero otherwise.
-     * [KeyboardReceiver.hideContentPane] asks this when it puts the strip back after a content
-     * pane, so closing the clipboard cannot resurrect an empty band.
+     * The height the row above the keys occupies, for [KeyboardReceiver.hideContentPane] when it
+     * puts the row back after a pane.
+     *
+     * Since 2026-11-13 that is simply the row's full height: the owner chose a keyboard whose
+     * height never changes while typing, and the row fills itself with the word before the caret
+     * when it has no suggestions (SuggestionStripBandPolicy). A keyboard BUILT without a row
+     * (prediction and swipe typing both off) still has none, which is the only zero left.
      */
-    fun suggestionStripHeight(fullHeightPx: Int): Int = _stripBand.heightPx(
-        _suggestionBar?.isOccupied() == true,
-        _suggestionBar?.hasSuggestions() == true,
-        _config?.suggestion_strip_always_visible ?: false,
-        fullHeightPx
-    )
+    fun suggestionStripHeight(fullHeightPx: Int): Int = if (fullHeightPx > 0) fullHeightPx else 0
 
     /** Keeps the strip's band open for the rest of a field once it has been typed in; see the class. */
     private val _stripBand = StripBandLatch()
 
+    /**
+     * Size the row above the keys.
+     *
+     * Since 2026-11-13 the row keeps its full height ALL the time, which is the owner's chosen
+     * answer to *"it still moves when typing. Moving up and down when I start typing."* Every
+     * change of this height changes the height of the whole keyboard, and the platform then makes
+     * the app behind the keyboard lay itself out again — on the same UI thread that is trying to
+     * show the letter just typed. With the height fixed, that never happens, while the row is
+     * never blank: the bar fills it with the word before the caret or the swipe hint
+     * (SuggestionStripBandPolicy).
+     *
+     * The strip's own band is therefore no longer reserved-or-collapsed by occupancy, and neither
+     * the `always visible` preference nor [StripBandLatch] is consulted here any more. Both are
+     * kept: the latch still tells the service which fields have been typed in (the write-up and
+     * its tests describe it), and the preference is a user's stated wish for a keyboard whose
+     * height never moves — which is now what every keyboard does.
+     */
     private fun applyStripHeight(occupied: Boolean) {
         val top = _topPane ?: return
         // Pane mode (clipboard, emoji, GIF) owns the band's height; never fight it.
         if (top.childCount > 0 && top.getChildAt(0) !== _scrollView) return
         val full = _stripFullHeightPx
         if (full <= 0) return
-        val target = _stripBand.heightPx(
-            occupied,
-            _suggestionBar?.hasSuggestions() == true,
-            _config?.suggestion_strip_always_visible ?: false,
-            full
-        )
-        if (top.layoutParams.height != target) {
-            top.layoutParams.height = target
+        if (top.layoutParams.height != full) {
+            top.layoutParams.height = full
             top.requestLayout()
+        }
+    }
+
+    /**
+     * The characters before the caret that the row's placeholder needs: enough for the longest
+     * word it will echo (SuggestionStripBandPolicy.MAX_WORD_CHARS) plus the space before it.
+     * Null when the app will not report them, which is what the bar treats as "nothing to echo".
+     */
+    private fun textBeforeCaret(maxChars: Int): CharSequence? {
+        val ic = currentInputConnection ?: return null
+        return try {
+            ic.getTextBeforeCursor(maxChars, 0)
+        } catch (e: Exception) {
+            null
         }
     }
 

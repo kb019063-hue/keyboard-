@@ -254,10 +254,13 @@ class SuggestionStripPolicyTest {
         )
         val selection = body("override fun onUpdateSelection(")
         assertEquals(true, selection.contains("if (_stripBand.onCaret(newSelStart, newSelEnd,"))
+        // 2026-11-13: the row keeps its full height all the time (the owner's choice, to stop
+        // the keyboard moving while typing), so sizing it no longer consults the latch. What the
+        // latch still decides is which fields count as typed in; that is asserted above.
         assertEquals(
-            "both places that size the band must go through the latch",
-            2,
-            Regex("""_stripBand\.heightPx\(""").findAll(src).count()
+            "suggestionStripHeight is the row's one height now",
+            true,
+            src.contains("fun suggestionStripHeight(fullHeightPx: Int): Int = if (fullHeightPx > 0) fullHeightPx else 0")
         )
     }
 }

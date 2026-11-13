@@ -128,8 +128,114 @@ class SuggestionBar : LinearLayout {
     )
 
     private fun notifyOccupancy() {
+        rebindPlaceholder()
         onOccupancyChanged?.invoke(isOccupied())
     }
+
+    /**
+     * The field's text before the caret, as last reported by the app (2026-11-13).
+     *
+     * The row of suggestions keeps its height all the time now (see
+     * [SuggestionStripBandPolicy]); with no words to show it fills that height with the word
+     * before the caret instead of leaving a blank band. Read from reports the keyboard already
+     * receives (`onUpdateSelection`), never by asking the app for its text on the typing path.
+     */
+    private var textBeforeCaret: CharSequence? = null
+
+    /** The placeholder child drawn while there is nothing else to show, or null. */
+    private var placeholderView: TextView? = null
+
+    /** The word the placeholder is currently showing, to skip needless re-binds. */
+    private var placeholderWord: String? = null
+
+    /** What the row should show when it has no suggestions, message or chip. */
+    private fun placeholder(): SuggestionStripBandPolicy.Placeholder =
+        SuggestionStripBandPolicy.placeholder(isPasswordMode, textBeforeCaret)
+
+    /**
+     * The app reported the text before its caret (or null when it would not say). Called from
+     * the caret reports the keyboard already handles; it re-binds the placeholder only when the
+     * word it would show has changed, so the typing path pays one comparison per report.
+     */
+    fun setTextBeforeCaret(text: CharSequence?) {
+        textBeforeCaret = text
+        if (isOccupied()) return
+        rebindPlaceholder()
+    }
+
+    /**
+     * Keep the placeholder in step with the field and with what the bar is showing: shown when
+     * the bar has nothing else, gone when it has. Called after every content change.
+     *
+     * Only the placeholder's TEXT changes while it is up (a temporary message, a suggestion and
+     * the placeholder are mutually exclusive), so the row's height never changes because of
+     * this: that is the whole point of the placeholder existing.
+     */
+    private fun rebindPlaceholder() {
+        if (isShowingTemporaryMessage || currentSuggestions.isNotEmpty() || isPasswordMode) {
+            placeholderView?.let {
+                if (it.parent === this) removeView(it)
+            }
+            placeholderView = null
+            placeholderWord = null
+            return
+        }
+        when (val p = placeholder()) {
+            is SuggestionStripBandPolicy.Placeholder.None -> {
+                placeholderView?.let { if (it.parent === this) removeView(it) }
+                placeholderView = null
+                placeholderWord = null
+            }
+            is SuggestionStripBandPolicy.Placeholder.LastWord -> showPlaceholder(p.word, clickable = true)
+            is SuggestionStripBandPolicy.Placeholder.Hint -> showPlaceholder(
+                context.getString(R.string.suggestion_strip_hint_swipe), clickable = false
+            )
+        }
+    }
+
+    private fun showPlaceholder(text: String, clickable: Boolean) {
+        if (placeholderWord == text && placeholderView?.parent === this) return
+        placeholderWord = text
+        val view = placeholderView ?: TextView(context).apply {
+            layoutParams = LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            gravity = Gravity.CENTER_VERTICAL
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(dpToPx(context, 16), 0, dpToPx(context, 16), 0)
+            // A dimmed word, not a button: it is what the field already says, echoed back so
+            // the row is never a blank band. TalkBack reads it without announcing an action
+            // when it is not tappable.
+        }.also { placeholderView = it }
+        // The secondary (dimmed) ink, so it cannot be mistaken for a suggestion to tap — except
+        // that a word IS tappable, to put the caret back at the end of it (see below).
+        view.setTextColor(theme?.suggestionSecondaryTextColor?.takeIf { it != 0 } ?: Color.LTGRAY)
+        view.text = text
+        view.isClickable = clickable
+        view.setOnClickListener(
+            if (clickable) {
+                View.OnClickListener {
+                    // Put the caret back at the end of the word the row is echoing. Never
+                    // writes text, so it cannot disturb what is being typed.
+                    onRestoreCaretListener?.invoke()
+                }
+            } else null
+        )
+        if (view.parent !== this) addView(view)
+    }
+
+    /**
+     * Asked when the dimmed word in the placeholder is tapped: put the caret back at the end of
+     * that word. Wired by the service to the same route a suggestion tap uses, without a commit.
+     */
+    var onRestoreCaretListener: (() -> Unit)? = null
+
+    /** Test and diagnostics: the placeholder on screen, or null. */
+    internal fun placeholderText(): String? =
+        (placeholderView?.takeIf { it.parent === this })?.text?.toString()
 
     /**
      * Interface for providing InputConnection to read actual field content.
@@ -1170,6 +1276,10 @@ class SuggestionBar : LinearLayout {
         } else {
             clearPasswordModeViews()
         }
+
+        // The placeholder must follow the field: a password field may never show the word
+        // being typed, so the row goes without one there (SuggestionStripBandPolicy).
+        rebindPlaceholder()
 
         Log.d(TAG, "Password mode ${if (enabled) "enabled" else "disabled"}")
     }
