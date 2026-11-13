@@ -373,16 +373,22 @@ change of language.
 
 The emulator does not show a win, and the reason is worth recording rather than leaving out.
 The `contractions` step measured **38 ms on `main`** (run 43293833264, `create=130`) and
-**31, 50 and 76 ms on the three V2 commits** (runs 43316308878 `create=403`, 43312641372
-`create=192`, 43318913194 `create=324`). The branch's own spread, 31 to 76 ms, is twice the
-distance between the branch and `main`, and the runner's set-up total moved from 130 ms to
-403 ms across runs of the SAME code path: two cores of shared CI CPU do not resolve a
-40 ms difference. So the emulator neither confirms nor contradicts this change, and the
-number quoted from any one of those runs would be noise dressed as a measurement.
+**31, 50, 76 and 115 ms on the four V2 runs** (runs 43316308878 `create=403`, 43312641372
+`create=192`, 43318913194 `create=324`, 43321643993 `create=418`). The branch's own spread,
+31 to 115 ms, is three times the distance between the branch and `main`, so quoting any one
+of those runs would be noise dressed as a measurement.
+
+The spread is the RUNNER, not the change. In the slowest of those runs every step grew by
+about the same factor as the set-up total: `theme` 16 → 67 ms, `predict` 16 → 77 ms,
+`config` 13 → 42 ms, `prefs` 11 → 29 ms, `inflate` 7 → 17 ms, `contractions` 38 → 115 ms,
+`create` 130 → 418 ms. Two cores of shared CI CPU do not resolve a 40 ms difference, and the
+steps that had nothing to do with contractions moved as much as the one that did.
 
 The claim here is therefore the structural one, which the code proves: the parse is not on
-the path any more. The measurement that would settle the number is the one the phone has
-not given.
+the path any more, and the V2 path does strictly LESS work than the one it replaced (it
+reads 43 KB of bytes into the maps it will be used as, where the old path built a tree of
+1,748 arrays and 1,791 objects and then walked it). The measurement that would settle the
+number is the one the phone has not given.
 
 It is paid only when the keyboard is set up from nothing, so it matters exactly as much as the
 phone kills the keyboard, and the card counts that. If the card's "Slowest set-up steps"
