@@ -212,6 +212,19 @@ class ClipboardTextCleanerTest {
     }
 
     @Test
+    fun aLoneBulletLineStaysAStructuralBreak() {
+        // Trailing whitespace is stripped before the join decision, so a bullet with nothing
+        // after it was invisible to the "\s"-suffixed bullet pattern and got joined onto the
+        // previous line ("Here is the list:\n- \n- apples" -> "Here is the list: -\n- apples").
+        assertThat(clean("Here is the shopping list:\n- \n- apples\n- bread"))
+            .isEqualTo("Here is the shopping list:\n-\n- apples\n- bread")
+        assertThat(ClipboardTextCleaner.isStructural("-")).isTrue()
+        assertThat(ClipboardTextCleaner.isStructural("•")).isTrue()
+        // A hyphen inside prose is still prose.
+        assertThat(ClipboardTextCleaner.isStructural("well - known")).isFalse()
+    }
+
+    @Test
     fun structuralAndPreformattedHelpersMatchTheDocumentedRules() {
         assertThat(ClipboardTextCleaner.isStructural("- item")).isTrue()
         assertThat(ClipboardTextCleaner.isStructural("12. item")).isTrue()

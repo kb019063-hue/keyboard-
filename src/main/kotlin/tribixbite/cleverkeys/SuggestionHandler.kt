@@ -57,6 +57,15 @@ class SuggestionHandler(
     private val keyeventhandler: KeyEventHandler
 ) : KeyEventHandler.LearningHooks {
     companion object {
+        /**
+         * Decoder-output marker on a tapped raw prediction: "raw:word". A literal prefix, so it
+         * is stripped with [String.removePrefix]; this used to be a `Regex("^raw:")`, which
+         * compiled a Pattern on every suggestion tap and ran it over the whole candidate — for
+         * nothing a `startsWith` cannot do. `MLDataCollector` strips the same marker from the
+         * same strings and uses this constant, so the two cannot drift.
+         */
+        internal const val RAW_PREFIX = "raw:"
+
         private const val TAG = "SuggestionHandler"
 
         /** A suffix edit stamps at most: pre-edit caret, owned-tail selection, final caret. */
@@ -786,7 +795,7 @@ class SuggestionHandler(
             is SelectionRoute.ExactAdd -> route.word
             is SelectionRoute.PreferSwipeWord -> route.word
             is SelectionRoute.DeclineSwipePreference -> route.word
-            is SelectionRoute.CommitWord -> route.wire.removePrefix("raw:")
+            is SelectionRoute.CommitWord -> route.wire.removePrefix(RAW_PREFIX)
         }
 
         val predictor = predictionCoordinator.getWordPredictor()
@@ -1310,7 +1319,7 @@ class SuggestionHandler(
     private fun commitInlineSuggestionTap(target: InlineTextTarget, word: String): String? {
         nextWordSuggestionsActive = false
         if (routeSuggestionSelection(word) !is SelectionRoute.CommitWord) return null
-        val committed = capitalizeIWord(word.removePrefix("raw:"))
+        val committed = capitalizeIWord(word.removePrefix(RAW_PREFIX))
         return committed.takeIf { inlineSwipe.commitTap(target, it) }
     }
 
@@ -1530,11 +1539,11 @@ class SuggestionHandler(
 
         // Check if this is a raw prediction (user explicitly selected raw decoder output)
         // Raw predictions should skip autocorrect
-        val isRawPrediction = processedWord.startsWith("raw:")
+        val isRawPrediction = processedWord.startsWith(RAW_PREFIX)
 
-        // Strip "raw:" prefix before processing (v1.33.7: fixed regex to match actual prefix format)
-        // Prefix format: "raw:word" not " [raw:0.08]"
-        processedWord = processedWord.replace(Regex("^raw:"), "")
+        // Strip the marker before processing. Prefix format is "raw:word" (not the old
+        // " [raw:0.08]"), i.e. a literal prefix -- see [RAW_PREFIX].
+        processedWord = processedWord.removePrefix(RAW_PREFIX)
 
         // Issue #72: Capitalize "I" words (i → I, i'm → I'm, i'll → I'll)
         processedWord = capitalizeIWord(processedWord)

@@ -718,6 +718,9 @@ tasks.register('runPureTests', JavaExec) {
     'tribixbite.cleverkeys.CaseCycleTest',
     'tribixbite.cleverkeys.ProcessTextReturnTest',
     'tribixbite.cleverkeys.SuggestionSpanPolicyTest',
+    // 2026-11-15: the `raw:` marker is one constant (SuggestionHandler.RAW_PREFIX), used by
+    // the tap path, the ML recorder and the suggestion span — nothing spells it out again.
+    'tribixbite.cleverkeys.RawPrefixSingleDefinitionTest',
     'tribixbite.cleverkeys.AccentNormalizerTest',
     'tribixbite.cleverkeys.DictionaryWordTest',
     'tribixbite.cleverkeys.BeamSearchModelsTest',

@@ -1,5 +1,6 @@
 package tribixbite.cleverkeys.gif
 
+import tribixbite.cleverkeys.ClassifiedIoException
 import tribixbite.cleverkeys.IoFailureReason
 import tribixbite.cleverkeys.PackImportFailure
 import android.annotation.SuppressLint
@@ -59,7 +60,7 @@ class GifPackManager private constructor(private val context: Context) {
                     PackImportFailure.Io(IoFailureReason.FILE_NOT_FOUND, "Cannot open file")
                 )
 
-            extractZip(inputStream, tempDir)
+            extractZipBounded(inputStream, tempDir)
 
             // Step 2: Validate manifest.json
             val manifestFile = File(tempDir, MANIFEST_FILE)
@@ -258,36 +259,13 @@ class GifPackManager private constructor(private val context: Context) {
     // ==================== INTERNAL ====================
 
     /**
-     * Extract ZIP from InputStream to destination directory.
-     * Includes path traversal protection.
+     * A pack archive larger than the importer will extract. An [java.io.IOException] — so nothing
+     * that handled the old unbounded read changes behaviour — that carries
+     * [IoFailureReason.TOO_LARGE], which `IoFailureClassifier` prefers over the generic
+     * "read/write failed" it derives from a plain IOException.
      */
-    private fun extractZip(inputStream: java.io.InputStream, destDir: File) {
-        ZipInputStream(inputStream).use { zis ->
-            var entry = zis.nextEntry
-            while (entry != null) {
-                val destFile = File(destDir, entry.name)
-
-                // Path traversal protection
-                if (!destFile.canonicalFile.path.startsWith(destDir.canonicalPath)) {
-                    Log.w(TAG, "Skipping path traversal attempt: ${entry.name}")
-                    entry = zis.nextEntry
-                    continue
-                }
-
-                if (entry.isDirectory) {
-                    destFile.mkdirs()
-                } else {
-                    destFile.parentFile?.mkdirs()
-                    FileOutputStream(destFile).use { fos ->
-                        zis.copyTo(fos)
-                    }
-                }
-
-                zis.closeEntry()
-                entry = zis.nextEntry
-            }
-        }
-    }
+    internal class PackExtractionLimitException(reason: String) :
+        ClassifiedIoException(IoFailureReason.TOO_LARGE, "Refusing to extract pack: $reason")
 
     /**
      * Parse manifest.json into GifPackManifest.
@@ -323,11 +301,6 @@ class GifPackManager private constructor(private val context: Context) {
         private const val FULL_DIR = "full"
 
         /**
-         * ARC-038 / #149: rejection message for a pack that declares GIFs but ships no
-         * importable thumbnails. Named so the wording is pinned by test rather than
-         * duplicated at the two rejection sites.
-         */
-        /**
          * ARC-038: does [thumbsDir] hold at least one thumbnail
          * [GifAssetManager.importThumbnails] would actually copy?
          *
@@ -348,6 +321,11 @@ class GifPackManager private constructor(private val context: Context) {
                 it.isFile && it.extension == "webp" && it.nameWithoutExtension.toLongOrNull() != null
             }
 
+        /**
+         * ARC-038 / #149: rejection message for a pack that declares GIFs but ships no
+         * importable thumbnails. Named so the wording is pinned by test rather than
+         * duplicated at the two rejection sites.
+         */
         const val ERROR_MISSING_THUMBNAILS =
             "Legacy pack format — this pack has no thumbnails, so its GIFs cannot be shown. " +
                 "Download a current pack."
@@ -359,6 +337,93 @@ class GifPackManager private constructor(private val context: Context) {
         const val ERROR_PARTIAL_THUMBNAILS =
             "Import failed partway through copying thumbnails (storage full?). " +
                 "The pack was not installed — free up space and try again."
+
+        /**
+         * Extract a pack ZIP into [destDir]: path traversal refused per entry, and two bounds on
+         * what the archive may expand to (see [MAX_ENTRIES] and [MAX_EXTRACTED_BYTES]).
+         *
+         * In the companion so the bounds can be exercised with a real ZIP stream
+         * (`GifPackThumbnailValidationTest`) without constructing a manager.
+         *
+         * Two bounds, both borrowed from `langpack.LanguagePackManager`'s importer, which has had
+         * them since the v1.1.96 OOM fix:
+         *
+         *  - **Entry count**, because a bomb of empty entries costs almost nothing to build.
+         *  - **Bytes written**, because a ZIP's declared sizes are attacker-controlled and
+         *    `ZipInputStream.copyTo` is unbounded: a 1 MB download can expand until the cache
+         *    partition is full, and the importer runs from a file picker on a user-chosen file.
+         *
+         * Each entry is streamed in fixed-size chunks, so peak memory never scales with what the
+         * archive claims to hold. The bytes that failed the cap stay in the temp directory, which
+         * the caller deletes on every failure path.
+         */
+        @androidx.annotation.VisibleForTesting
+        internal fun extractZipBounded(
+            inputStream: java.io.InputStream,
+            destDir: File,
+            // Injectable so a test can pin both bounds on a few kilobytes instead of a gigabyte.
+            maxBytes: Long = MAX_EXTRACTED_BYTES,
+            maxEntries: Int = MAX_ENTRIES,
+        ) {
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            var entries = 0
+            var written = 0L
+            ZipInputStream(inputStream).use { zis ->
+                var entry = zis.nextEntry
+                while (entry != null) {
+                    if (++entries > maxEntries) {
+                        throw PackExtractionLimitException("more than $maxEntries entries")
+                    }
+                    val destFile = File(destDir, entry.name)
+
+                    // Path traversal protection. `base + File.separator` so a sibling whose name
+                    // merely STARTS with the destination's name is not treated as inside it.
+                    val base = destDir.canonicalPath
+                    val target = destFile.canonicalPath
+                    if (target != base && !target.startsWith(base + File.separator)) {
+                        Log.w(TAG, "Skipping path traversal attempt: ${entry.name}")
+                        entry = zis.nextEntry
+                        continue
+                    }
+
+                    if (entry.isDirectory) {
+                        destFile.mkdirs()
+                    } else {
+                        destFile.parentFile?.mkdirs()
+                        FileOutputStream(destFile).use { fos ->
+                            while (true) {
+                                val read = zis.read(buffer)
+                                if (read <= 0) break
+                                written += read
+                                if (written > maxBytes) {
+                                    throw PackExtractionLimitException(
+                                        "more than $maxBytes bytes extracted"
+                                    )
+                                }
+                                fos.write(buffer, 0, read)
+                            }
+                        }
+                    }
+
+                    zis.closeEntry()
+                    entry = zis.nextEntry
+                }
+            }
+        }
+
+        /**
+         * More entries than this and the archive is refused. A shipped pack is one manifest, one
+         * database and one small thumbnail per GIF; 250k leaves room for the largest pack the
+         * pipeline builds (a 130k-GIF pack, see [hasImportableThumbnails]) and no more.
+         */
+        private const val MAX_ENTRIES = 250_000
+
+        /**
+         * More extracted bytes than this and the archive is refused. Thumbnails are ~2-4 KB
+         * WebPs, so a 130k-GIF pack is a few hundred MB; 1 GiB refuses a bomb long before the
+         * cache partition, which is shared with the rest of the app, is in trouble.
+         */
+        private const val MAX_EXTRACTED_BYTES = 1024L * 1024 * 1024
 
         const val GITHUB_RELEASES_URL =
             "https://github.com/tribixbite/CleverKeys/releases/tag/CleverKeys-GIF"

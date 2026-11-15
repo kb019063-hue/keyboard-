@@ -42,6 +42,11 @@ object ClipboardTextCleaner {
     const val WRAP_RATIO = 0.6
 
     private val BULLET = Regex("""^[-*+•‣◦▪▫●○■□–—·]\s""")
+    // Trailing spaces of every line are stripped BEFORE joining, so a line consisting of a bullet
+    // and nothing else ("-   ") has already lost its whitespace by then. The join decision and
+    // [isStructural] both see it, so both must read it as a bullet; without the `$` arm it read as
+    // prose and was joined onto the previous line ("- \n- one" -> "- - one").
+    private val BULLET_ONLY = Regex("""^[-*+•‣◦▪▫●○■□–—·]$""")
     // Item labels: 1-3 digits, one letter, or a short roman numeral (i-xx) in one case.
     private const val LABEL = """(\d{1,3}|[A-Za-z]|[ivx]{1,4}|[IVX]{1,4})"""
     private val ENUMERATOR = Regex("""^$LABEL[.)]\s""")
@@ -59,6 +64,9 @@ object ClipboardTextCleaner {
         while (lines.size > 1 && lines.last().isEmpty()) lines.removeAt(lines.lastIndex)
         if (lines.size == 1 || isPreformatted(lines)) return lines.joinToString("\n")
 
+        // Keep this `length` (code points, not UTF-16 units) agreeing with the one `joinOf`
+        // compares against, or a line with astral characters is measured one way and judged
+        // another. `Math.ceil` so a full-width line is never one short.
         val wrapWidth = lines.filter { it.isNotEmpty() && !isStructural(it) }.maxOfOrNull(::length) ?: 0
         val minimum = maxOf(MIN_WRAP_CHARS, Math.ceil(wrapWidth * WRAP_RATIO).toInt())
         val out = StringBuilder(text.length)
@@ -82,7 +90,7 @@ object ClipboardTextCleaner {
     /** Whether [line] is a list item, checkbox, heading, quote, table row or rule. */
     fun isStructural(line: String): Boolean {
         val t = line.trimStart()
-        return BULLET.containsMatchIn(t) || ENUMERATOR.containsMatchIn(t) ||
+        return BULLET.containsMatchIn(t) || BULLET_ONLY.matches(t) || ENUMERATOR.containsMatchIn(t) ||
             PAREN_ENUMERATOR.containsMatchIn(t) || CHECKBOX.containsMatchIn(t) ||
             HEADING.containsMatchIn(t) || t.startsWith(">") || t.startsWith("|") || RULE.matches(t)
     }
