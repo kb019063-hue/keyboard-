@@ -683,6 +683,7 @@ tasks.matching {
   dependsOn 'copyScriptLatencyPacks'
 }
 
+// CI retrigger marker 2026-11-15 (billing block): see docs/BUG-HUNT-2026-11-15.md.
 // Pure JVM test runner — works on ARM64 where standard Test tasks are disabled.
 // Extract the BIONIC arm64 ONNX natives from the onnxruntime-android AAR so pure-JVM tests
 // can run the real encoder. See the systemProperty note in runPureTests for why the JAR's own
