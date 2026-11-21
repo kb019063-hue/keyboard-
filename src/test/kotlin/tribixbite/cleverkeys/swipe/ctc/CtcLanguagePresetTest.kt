@@ -3,8 +3,6 @@ package tribixbite.cleverkeys.swipe.ctc
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
 import org.junit.Test
-import org.junit.Before
-import tribixbite.cleverkeys.UpstreamArtefacts
 
 /**
  * The per-language CTC preset table — the app-side half of the λ sweep recorded in
@@ -20,14 +18,16 @@ import tribixbite.cleverkeys.UpstreamArtefacts
 class CtcLanguagePresetTest {
 
     /**
-     * 2026-10-31: the checks in this class decode against the SHIPPED language packs
-     * (`scripts/dictionaries/langpack-*.zip`), which this fork does not vendor. Skipped, not
-     * failed — and not silently green: see [UpstreamArtefacts].
+     * 2026-10-31: this class carried the `UpstreamArtefacts.LANGPACK_DIR` guard, and the
+     * 2026-11-15 audit removed it — because it was never needed. Every test here asserts the
+     * PRESET TABLE (`CtcScoringParams.presetFor` / `CtcLanguageSupport.SUPPORTED`), not the
+     * lexicon bytes: the file has no `File(`, `readText`, `readBytes` or asset access at all.
+     * `langpack-<code>.zip` appears only in comments explaining where a lexicon comes from.
+     *
+     * So all 25 tests were skipped for a dependency the class does not have, and the whole λ
+     * selection contract — which preset each language ships at, the case/region
+     * normalization, the "only λ varies" invariant — went unverified in this checkout.
      */
-    @Before
-    fun skipWhenLanguagePacksAreAbsent() {
-        UpstreamArtefacts.require(UpstreamArtefacts.LANGPACK_DIR)
-    }
 
     // ── λ selection ────────────────────────────────────────────────────────────────
 

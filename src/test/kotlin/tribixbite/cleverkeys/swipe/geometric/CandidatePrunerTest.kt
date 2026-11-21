@@ -7,7 +7,6 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 import kotlin.math.ln
 import org.junit.Test
-import org.junit.Before
 import tribixbite.cleverkeys.UpstreamArtefacts
 
 /**
@@ -30,12 +29,20 @@ import tribixbite.cleverkeys.UpstreamArtefacts
 class CandidatePrunerTest {
 
     /**
-     * 2026-10-31: the checks in this class decode against the SHIPPED language packs
-     * (`scripts/dictionaries/langpack-*.zip`), which this fork does not vendor. Skipped, not
-     * failed — and not silently green: see [UpstreamArtefacts].
+     * 2026-10-31: THREE of the tests in this class read the SHIPPED language packs
+     * (`scripts/dictionaries/langpack-*.zip`) — they decode against the 50k Russian JCUKEN
+     * dictionary, which this fork does not vendor. Skipped, not failed — and not silently green:
+     * see [UpstreamArtefacts].
+     *
+     * 2026-11-15: this guard is NO LONGER class-wide, and no longer a `@Before`. A `@Before`
+     * that fails an `Assume` skips EVERY test in the class, so the fifteen English-only tests
+     * were skipped with the three Russian ones — even though `en_enhanced.bin`/`.json` and the
+     * `fr`/`de` CKDT binaries ARE vendored here. That meant the deterministic-cap, tie-break,
+     * best-K, LRU-eviction, fingerprint-miss, memory-budget and 4-thread concurrency checks —
+     * the whole of Phase 3's behaviour — never ran in this checkout. Each of the three Russian
+     * cases now calls [requireLanguagePacks] itself.
      */
-    @Before
-    fun skipWhenLanguagePacksAreAbsent() {
+    private fun requireLanguagePacks() {
         UpstreamArtefacts.require(UpstreamArtefacts.LANGPACK_DIR)
     }
 
@@ -91,6 +98,7 @@ class CandidatePrunerTest {
 
     @Test
     fun idealTrace_recall_atLeast99_5pct_russian() {
+        requireLanguagePacks()
         recallSweep(GeoLayoutFixtures.loadShipped("cyrl_jcuken_ru"), GeoTestFixtures.russianCkdt(), "ru/JCUKEN")
     }
 
@@ -237,6 +245,7 @@ class CandidatePrunerTest {
 
     @Test
     fun index_bucketEntries_areOrdinalAscendingWithinBucket() {
+        requireLanguagePacks()
         // CSR entries within one bucket must be ordinal-ascending (deterministic scan
         // order; common words first). Verify across every non-empty bucket.
         val layout = GeoLayoutFixtures.loadShipped("cyrl_jcuken_ru")
@@ -354,6 +363,7 @@ class CandidatePrunerTest {
 
     @Test
     fun cache_lru_evictsBeyondCapacity() {
+        requireLanguagePacks()
         // Capacity 2: warming three DISTINCT (layout, dict) keys evicts the eldest.
         val cache = TemplateCache(config.copy(indexCacheCapacity = 2))
         val qwerty = GeoLayoutFixtures.loadShipped("latn_qwerty_us")

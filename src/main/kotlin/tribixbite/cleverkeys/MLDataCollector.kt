@@ -84,8 +84,10 @@ class MLDataCollector(private val context: Context) {
         }
 
         return try {
-            // Strip "raw:" prefix before storing ML data
-            val cleanWord = word.replace(Regex("^raw:"), "")
+            // Strip the decoder's raw-output marker before storing ML data. Same literal
+            // prefix as SuggestionHandler's tap path (one constant), so the two cannot drift;
+            // it used to compile a Pattern per recorded swipe.
+            val cleanWord = word.removePrefix(SuggestionHandler.RAW_PREFIX)
 
             // I-6 (comprehensive audit 2026-09-06): copy via SwipeMLData.copyWith — the
             // method that exists for exactly this selection-time-copy case. It carries

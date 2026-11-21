@@ -718,6 +718,9 @@ tasks.register('runPureTests', JavaExec) {
     'tribixbite.cleverkeys.CaseCycleTest',
     'tribixbite.cleverkeys.ProcessTextReturnTest',
     'tribixbite.cleverkeys.SuggestionSpanPolicyTest',
+    // 2026-11-15: the `raw:` marker is one constant (SuggestionHandler.RAW_PREFIX), used by
+    // the tap path, the ML recorder and the suggestion span — nothing spells it out again.
+    'tribixbite.cleverkeys.RawPrefixSingleDefinitionTest',
     'tribixbite.cleverkeys.AccentNormalizerTest',
     'tribixbite.cleverkeys.DictionaryWordTest',
     'tribixbite.cleverkeys.BeamSearchModelsTest',
@@ -1005,6 +1008,10 @@ tasks.register('runPureTests', JavaExec) {
     'tribixbite.cleverkeys.ContractionBinaryPairingsTest',
     'tribixbite.cleverkeys.swipe.geometric.GeoPurityDriftTest',
     'tribixbite.cleverkeys.swipe.geometric.CkdtReaderTest',
+    // 2026-11-15: the CKDT canonical section validated its record COUNT statistically but each
+    // record only via ByteBuffer.get, so a corrupt uint16 length threw a non-IOException
+    // (BufferUnderflowException) out of the parser that reads a user-installable language pack.
+    'tribixbite.cleverkeys.swipe.geometric.CkdtDictionaryReaderTest',
     'tribixbite.cleverkeys.swipe.geometric.GeoProjectionTest',
     'tribixbite.cleverkeys.swipe.geometric.TemplateGeneratorTest',
     'tribixbite.cleverkeys.swipe.geometric.CandidatePrunerTest',
@@ -1192,6 +1199,10 @@ tasks.register('runPureTests', JavaExec) {
     // load, read back by nothing) is gone; the loader now purges what old builds left in
     // cacheDir. Source-scan pin + purge behaviour.
     'tribixbite.cleverkeys.onnx.ModelLoaderOrtCacheTest',
+    // 2026-11-15: OrtSession.SessionOptions is native memory (createOptions/closeOptions) and
+    // must outlive the sessions built from it. Pins that the handle is carried out of
+    // loadModel, closed on the failure path, and released only AFTER the session.
+    'tribixbite.cleverkeys.onnx.ModelSessionOptionsLifetimeTest',
     'tribixbite.cleverkeys.LauncherSetupFlowTest',
     // MinSdkApiUsageDriftTest DELETED (ARC-113, 2026-09-03): it guarded the
     // API-24 Map/Set idioms that crash on Android 5.0–6.0 and self-asserted
@@ -1311,6 +1322,10 @@ tasks.register('runPureTests', JavaExec) {
     // 2026-11-09 UI/UX: a query matching nothing used to render nothing at all.
     'tribixbite.cleverkeys.ui.settings.SettingsSearchEmptyStateTest',
     'tribixbite.cleverkeys.VerboseLogRatchetTest',
+    // 2026-11-15: the skip ratchet. A guard in @Before/@BeforeClass skips the WHOLE class; that
+    // silently hid 70 tests here (docs/BUG-HUNT-2026-11-15-PART-4.md). Pins the lifecycle-guard
+    // count, the UpstreamArtefacts.require count and the direct Assume count.
+    'tribixbite.cleverkeys.SkipRatchetTest',
     // KeyFillAlpha is a pure ARGB bit operation (2026-11-01: it no longer calls
     // android.graphics.Color, which the stub answers with 0 in a JVM test).
     'tribixbite.cleverkeys.KeyFillAlphaTest',

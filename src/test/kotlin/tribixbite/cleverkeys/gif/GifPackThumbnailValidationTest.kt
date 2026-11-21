@@ -1,6 +1,8 @@
 package tribixbite.cleverkeys.gif
 
 import com.google.common.truth.Truth.assertThat
+import tribixbite.cleverkeys.IoFailureClassifier
+import tribixbite.cleverkeys.IoFailureReason
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -124,6 +126,69 @@ class GifPackThumbnailValidationTest {
         val notADir = File(root, "thumbs-as-file").apply { writeBytes(byteArrayOf(0)) }
 
         assertThat(GifPackManager.hasImportableThumbnails(notADir)).isFalse()
+    }
+
+    /**
+     * A ZIP that expands past the extraction budget must be refused, not extracted.
+     *
+     * `extractZip` used `ZipInputStream.copyTo`, which is unbounded: a one-megabyte download
+     * could expand until the cache partition was full, and the import runs on a file the user
+     * picked. The refusal has to carry `TOO_LARGE` (not the generic "read/write failed" an
+     * `IOException` maps to), or the UI says "could not read the file" for a file it read fine.
+     */
+    @Test
+    fun `an archive that expands past the byte cap is refused as too large`() {
+        val bomb = File(root, "bomb.zip")
+        java.util.zip.ZipOutputStream(bomb.outputStream()).use { zos ->
+            zos.putNextEntry(java.util.zip.ZipEntry("thumbs/000/000001.webp"))
+            zos.write(ByteArray(64 * 1024))
+            zos.closeEntry()
+        }
+
+        val failure = kotlin.runCatching {
+            GifPackManager.extractZipBounded(bomb.inputStream(), dir("out"), maxBytes = 1024)
+        }.exceptionOrNull()
+
+        assertThat(failure).isInstanceOf(java.io.IOException::class.java)
+        assertThat(IoFailureClassifier.classify(failure)).isEqualTo(IoFailureReason.TOO_LARGE)
+    }
+
+    @Test
+    fun `an archive with more entries than the cap is refused as too large`() {
+        val many = File(root, "many.zip")
+        java.util.zip.ZipOutputStream(many.outputStream()).use { zos ->
+            repeat(5) { i ->
+                zos.putNextEntry(java.util.zip.ZipEntry("thumbs/000/00000$i.webp"))
+                zos.write(byteArrayOf(0))
+                zos.closeEntry()
+            }
+        }
+
+        val failure = kotlin.runCatching {
+            GifPackManager.extractZipBounded(many.inputStream(), dir("out2"), maxEntries = 3)
+        }.exceptionOrNull()
+
+        assertThat(failure).isInstanceOf(java.io.IOException::class.java)
+        assertThat(IoFailureClassifier.classify(failure)).isEqualTo(IoFailureReason.TOO_LARGE)
+    }
+
+    @Test
+    fun `a normal archive extracts completely`() {
+        val good = File(root, "good.zip")
+        java.util.zip.ZipOutputStream(good.outputStream()).use { zos ->
+            zos.putNextEntry(java.util.zip.ZipEntry("manifest.json"))
+            zos.write("{}".toByteArray())
+            zos.closeEntry()
+            zos.putNextEntry(java.util.zip.ZipEntry("thumbs/000/000001.webp"))
+            zos.write(ByteArray(2048))
+            zos.closeEntry()
+        }
+        val out = dir("out")
+
+        GifPackManager.extractZipBounded(good.inputStream(), out)
+
+        assertThat(File(out, "manifest.json").exists()).isTrue()
+        assertThat(File(out, "thumbs/000/000001.webp").length()).isEqualTo(2048L)
     }
 
     /** The rejection message must name the cause, so a user can act on it. */

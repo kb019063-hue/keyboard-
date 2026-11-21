@@ -193,16 +193,45 @@ class ClipboardMediaManager(private val context: Context) {
         }
     }
 
-    /** Delete the media file at the given relative path */
+    /**
+     * Delete the media file at the given relative path.
+     *
+     * [mediaPath] comes from the database, and the database's value comes from an untrusted
+     * source: `media_path` is read verbatim out of a backup ZIP by
+     * `ClipboardDatabase.importHistoryEntries`, so a crafted backup could store
+     * `../databases/clipboard.db` (or any other path inside the app sandbox) and have this
+     * method delete it the next time the user removes that row, clears history or hits a
+     * storage limit. [getMediaFile] already refuses such a path; this now refuses it too, so
+     * both doors into the same stored string are guarded the same way. A refused path is logged
+     * and skipped — a bad row must not make deletion throw.
+     *
+     * The `isFile` gate below is not belt-and-braces. `File.delete()` returns false for a
+     * non-empty directory and SUCCEEDS for an empty one, so a row whose path was just
+     * `clipboard_media` used to delete that directory and then, via the cleanup branch, prune
+     * `filesDir` itself once it was empty — taking every database with it.
+     */
     fun deleteMedia(mediaPath: String) {
         if (!isDeviceUnlocked()) return
         try {
-            val file = File(context.filesDir, mediaPath)
-            if (file.exists()) {
+            val file = try {
+                getMediaFile(mediaPath)
+            } catch (e: SecurityException) {
+                Log.w(TAG, "Refusing to delete media outside $MEDIA_DIR: $mediaPath")
+                return
+            }
+            // `isFile`, not `exists`: the media directory itself passes the containment check,
+            // and deleting it (or, in the partition cleanup below, its parent) is not a delete.
+            if (file.isFile) {
                 val parentDir = file.parentFile
                 file.delete()
-                // Clean up empty partition directory
+                // Clean up the empty partition directory, but only a direct child of the media
+                // directory: `parentDir` of a path that resolved to the media dir itself is
+                // `filesDir`, which is never ours to remove. Compared canonically, because
+                // `getMediaFile` returns a canonical path and `filesDir` is not guaranteed to be
+                // one (`/data/user/0/<pkg>/files` is reached through a symlink on some devices),
+                // so plain File equality would compile and then silently never prune.
                 if (parentDir != null && parentDir.isDirectory &&
+                    isDirectChildOfMediaDir(parentDir) &&
                     (parentDir.listFiles()?.isEmpty() == true)) {
                     parentDir.delete()
                 }
@@ -210,6 +239,20 @@ class ClipboardMediaManager(private val context: Context) {
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to delete media: $mediaPath: ${e.message}")
+        }
+    }
+
+    /**
+     * Whether [dir] is a partition directory directly under the media directory — the only kind
+     * of directory [deleteMedia] may prune. Canonical on both sides, so a `filesDir` reached
+     * through a symlink does not defeat the comparison.
+     */
+    private fun isDirectChildOfMediaDir(dir: File): Boolean {
+        val parent = dir.parentFile ?: return false
+        return try {
+            parent.canonicalPath == mediaBaseDir.canonicalPath
+        } catch (e: java.io.IOException) {
+            false
         }
     }
 
@@ -223,7 +266,8 @@ class ClipboardMediaManager(private val context: Context) {
      * [MediaSaveResult.mediaPath]), so we confine the resolved target to the
      * `clipboard_media/` directory — this also blocks a crafted `clipboard_media/../<x>`
      * from dropping a file elsewhere in the app sandbox (e.g. overwriting
-     * short_swipe_customizations.json). Mirrors `gif/GifPackManager.extractZip`.
+     * short_swipe_customizations.json). Same containment rule as
+     * `gif/GifPackManager.extractZipBounded`.
      *
      * @throws SecurityException if the resolved path escapes the clipboard_media directory.
      */

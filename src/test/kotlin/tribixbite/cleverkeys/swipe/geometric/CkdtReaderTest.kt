@@ -3,7 +3,6 @@ package tribixbite.cleverkeys.swipe.geometric
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
 import org.junit.Test
-import org.junit.Before
 import tribixbite.cleverkeys.UpstreamArtefacts
 
 /**
@@ -19,9 +18,22 @@ class CkdtReaderTest {
      * 2026-10-31: the checks in this class decode against the SHIPPED language packs
      * (`scripts/dictionaries/langpack-*.zip`), which this fork does not vendor. Skipped, not
      * failed — and not silently green: see [UpstreamArtefacts].
+     *
+     * 2026-11-15: this `@Before` is NO LONGER class-wide. A JUnit `@Before` that fails an
+     * `Assume` skips every test in the class, so it was also skipping the ones that need no
+     * upstream artefact at all — including [interruptedReader_abortsBeforeAllocatingDictionary]
+     * (a cancellation path that can otherwise only be found on a device),
+     * [oversizedCountIsRejectedBeforeWordArrayAllocation],
+     * [streamByteCapDoesNotTrustAvailable] and [maximumWordCountRemainsReadable]. Those four
+     * pin input-validation safety of the parser that reads a user-installable language pack, and
+     * none of them reads a file. They now run.
+     *
+     * The English cases DO run here regardless: `src/main/assets/dictionaries/en_enhanced.bin`
+     * and `.json` are vendored in this fork, and the ordering / 98,140-word / set-equality
+     * assertions were re-verified against those assets on 2026-11-15. Only the two genuine
+     * langpack cases carry the guard, individually.
      */
-    @Before
-    fun skipWhenLanguagePacksAreAbsent() {
+    private fun requireLanguagePacks() {
         UpstreamArtefacts.require(UpstreamArtefacts.LANGPACK_DIR)
     }
 
@@ -126,6 +138,7 @@ class CkdtReaderTest {
 
     @Test
     fun englishCkdt_reload_isBitIdentical() {
+        requireLanguagePacks()
         // Determinism (NFR-4): two independent reads produce the same ordering.
         val a = GeoTestFixtures.englishCkdt()
         val b = CkdtDictionaryReader.read(
@@ -169,6 +182,7 @@ class CkdtReaderTest {
 
     @Test
     fun russianZip_hasAtLeast50kWords_notThe5kUnigramList() {
+        requireLanguagePacks()
         val dict = GeoTestFixtures.russianCkdt()
         assertWithMessage(
             "langpack-ru.zip dictionary.bin (CKDT) must hold >= 50,000 words — a size " +

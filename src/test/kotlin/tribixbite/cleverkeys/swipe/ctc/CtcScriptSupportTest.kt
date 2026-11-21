@@ -5,7 +5,6 @@ import com.google.common.truth.Truth.assertWithMessage
 import java.io.File
 import org.json.JSONObject
 import org.junit.Test
-import org.junit.Before
 import tribixbite.cleverkeys.UpstreamArtefacts
 
 /**
@@ -32,9 +31,15 @@ class CtcScriptSupportTest {
      * 2026-10-31: the checks in this class decode against the SHIPPED language packs
      * (`scripts/dictionaries/langpack-*.zip`), which this fork does not vendor. Skipped, not
      * failed — and not silently green: see [UpstreamArtefacts].
+     *
+     * 2026-11-15: this guard is NO LONGER class-wide, and no longer a `@Before`. Nine of the
+     * thirteen tests here are pure in-memory checks of [CtcScriptSupport]'s table — alphabet
+     * sorting/uniqueness/head-width, the recorded campaign alphabets, the latin default,
+     * the defensive copy, gap accounting, the script/language agreement, router reachability
+     * and the frame budget. None reads a file, and all nine were being skipped with the four
+     * that do (`goldenFixture` / `layoutXml` / `langpack-*`). Those four now guard themselves.
      */
-    @Before
-    fun skipWhenLanguagePacksAreAbsent() {
+    private fun requireShippedFixtures() {
         UpstreamArtefacts.require(UpstreamArtefacts.LANGPACK_DIR)
     }
 
@@ -120,6 +125,7 @@ class CtcScriptSupportTest {
 
     @Test
     fun `a routed script names its model and its fixture, and both ship`() {
+        requireShippedFixtures()
         for ((language, wiring) in CtcScriptSupport.SCRIPTS) {
             if (wiring.status != CtcScriptSupport.Status.ROUTED) continue
             val model = wiring.modelAsset
@@ -204,6 +210,7 @@ class CtcScriptSupportTest {
 
     @Test
     fun `every script names a layout that actually ships`() {
+        requireShippedFixtures()
         // `srcs/layouts/` is NOT shipped — `copyLayoutDefinitions` ships `src/main/layouts/`,
         // and the Greek script-attribute fix once landed in the wrong tree and looked done for
         // months (guide §7.8).
@@ -217,6 +224,7 @@ class CtcScriptSupportTest {
 
     @Test
     fun `each shipped fixture's letters are exactly the app's alphabet for that script`() {
+        requireShippedFixtures()
         var checked = 0
         for ((language, wiring) in CtcScriptSupport.SCRIPTS) {
             val fixture = wiring.goldenFixture ?: continue
@@ -239,6 +247,7 @@ class CtcScriptSupportTest {
 
     @Test
     fun `each shipped fixture decodes at the preset its language will actually ship at`() {
+        requireShippedFixtures()
         for ((language, wiring) in CtcScriptSupport.SCRIPTS) {
             val fixture = wiring.goldenFixture ?: continue
             val preset = JSONObject(File(FIXTURE_DIR, fixture).readText()).getJSONArray("preset")

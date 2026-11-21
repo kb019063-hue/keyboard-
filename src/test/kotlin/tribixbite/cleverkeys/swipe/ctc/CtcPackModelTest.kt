@@ -7,7 +7,6 @@ import java.security.MessageDigest
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
-import org.junit.Before
 import tribixbite.cleverkeys.UpstreamArtefacts
 
 /**
@@ -33,12 +32,20 @@ import tribixbite.cleverkeys.UpstreamArtefacts
 class CtcPackModelTest {
 
     /**
-     * 2026-10-31: the checks in this class decode against the SHIPPED language packs
+     * 2026-10-31: SEVEN of the tests in this class read the SHIPPED language packs
      * (`scripts/dictionaries/langpack-*.zip`), which this fork does not vendor. Skipped, not
      * failed — and not silently green: see [UpstreamArtefacts].
+     *
+     * 2026-11-15: this guard is NO LONGER class-wide, and no longer a `@Before`. A `@Before`
+     * that fails an `Assume` skips EVERY test in the class, so eleven tests that touch no
+     * langpack were being skipped with them — including the whole hash gate this class exists
+     * for (`verifiedBytesRefusesAMismatchedModel`, `verifiedBytesRefusesAModelOverTheSizeCap`),
+     * the pin-well-formedness check, the fingerprint check and the APK-diet check. Those are the
+     * load-side defence against handing ORT user-supplied bytes, and none of them reads a file
+     * from `scripts/dictionaries`. Each of the seven that DO need a pack now calls
+     * [requireLanguagePacks] itself.
      */
-    @Before
-    fun skipWhenLanguagePacksAreAbsent() {
+    private fun requireLanguagePacks() {
         UpstreamArtefacts.require(UpstreamArtefacts.LANGPACK_DIR)
     }
 
@@ -188,6 +195,7 @@ class CtcPackModelTest {
      */
     @Test
     fun theRealScriptModelResolvesOnlyForItsOwnLanguage() {
+        requireLanguagePacks()
         val ru = shippedScriptModelBytes("ru")
         val filesDir = temp.newFolder("files")
         writePackModel(filesDir, "ru", ru)
@@ -203,6 +211,7 @@ class CtcPackModelTest {
 
     @Test
     fun aLatinLanguageNeverResolvesAPackModel() {
+        requireLanguagePacks()
         val filesDir = temp.newFolder("files")
         // A hostile pack can name itself `en` and carry any model.onnx it likes.
         writePackModel(filesDir, "en", shippedScriptModelBytes("ru"))
@@ -214,6 +223,7 @@ class CtcPackModelTest {
 
     @Test
     fun anAbsentOrTamperedPackModelResolvesToNull() {
+        requireLanguagePacks()
         val filesDir = temp.newFolder("files")
         assertWithMessage("no pack installed at all")
             .that(CtcPackModel.verifiedPackModel(filesDir, "ru")).isNull()
@@ -229,6 +239,7 @@ class CtcPackModelTest {
 
     @Test
     fun theResolvedPathIsTheOneTheImporterWritesTo() {
+        requireLanguagePacks()
         val filesDir = temp.newFolder("files")
         assertThat(CtcPackModel.packModelFile(filesDir, "ru_RU")?.path)
             .isEqualTo(File(filesDir, "langpacks/ru/model.onnx").path)
@@ -249,6 +260,7 @@ class CtcPackModelTest {
      */
     @Test
     fun everyRoutedScriptPackCarriesItsPinnedModel() {
+        requireLanguagePacks()
         for ((language, wiring) in CtcScriptSupport.SCRIPTS) {
             if (wiring.status != CtcScriptSupport.Status.ROUTED) continue
             val zip = File("scripts/dictionaries/langpack-$language.zip")
@@ -315,6 +327,7 @@ class CtcPackModelTest {
      */
     @Test
     fun aLatinPackDeclaresNoModel() {
+        requireLanguagePacks()
         for (code in listOf("en", "fr", "de", "es", "it", "pt", "sv", "nl", "tr")) {
             val zip = File("scripts/dictionaries/langpack-$code.zip")
             if (!zip.isFile) continue
@@ -334,6 +347,7 @@ class CtcPackModelTest {
      */
     @Test
     fun theSixScriptPacksAgreeOnTheirManifestVersion() {
+        requireLanguagePacks()
         for (language in CtcScriptSupport.SCRIPTS.keys) {
             val zip = File("scripts/dictionaries/langpack-$language.zip")
             if (!zip.isFile) continue

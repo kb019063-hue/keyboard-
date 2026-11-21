@@ -32,6 +32,15 @@ import tribixbite.cleverkeys.swipe.ctc.CtcFeaturizer
 class OnnxCtcEmissionModel(
     private val env: OrtEnvironment,
     private val session: OrtSession,
+    /**
+     * The [OrtSession.SessionOptions] [session] was created from, or null when the caller has
+     * no such handle (tests building a session directly).
+     *
+     * Held rather than closed by the loader because ORT requires the options to outlive every
+     * session built from them; [close] therefore releases the session FIRST and the options
+     * second. See `ModelLoader.closeSession`.
+     */
+    private val sessionOptions: OrtSession.SessionOptions? = null,
 ) : CtcEmissionModel {
 
     companion object {
@@ -102,6 +111,14 @@ class OnnxCtcEmissionModel(
             session.close()
         } catch (e: Exception) {
             // Session close failures are non-actionable at teardown.
+        }
+        // AFTER the session, never before: ORT forbids closing SessionOptions while a session
+        // built from it is still open. Deliberately outside the catch above so a session that
+        // fails to close does not strand the options handle too.
+        try {
+            sessionOptions?.close()
+        } catch (e: Exception) {
+            // Options close failures are non-actionable at teardown.
         }
     }
 }

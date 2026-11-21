@@ -60,7 +60,7 @@ object SuggestionSpanPolicy {
         val suggestions = LinkedHashSet<String>()
         for (candidate in candidates) {
             val parsed = Suggestion.parse(candidate) as? Suggestion.Word ?: continue
-            val alternative = parsed.text.removePrefix("raw:").trim()
+            val alternative = parsed.text.removePrefix(SuggestionHandler.RAW_PREFIX).trim()
             if (alternative.isEmpty() || alternative.length > MAX_WORD_LENGTH) continue
             if (alternative.any { it.isWhitespace() } || alternative == word) continue
             suggestions += alternative
