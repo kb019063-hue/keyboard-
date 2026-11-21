@@ -36,11 +36,19 @@ import tribixbite.cleverkeys.KeyboardData
  */
 class AccessibilitySubkeyReachTest {
 
-    /** `Key` slots are centre, then nw, ne, sw, se, w, e, n, s. Only slot 0 becomes a node. */
+    /**
+     * `Key` slots are centre, then nw, ne, sw, se, w, e, n, s. Only slot 0 becomes a node.
+     *
+     * `shift = 0f`, NOT `Key.EMPTY`'s 1f. `shift` is a leading offset in key-width units, and
+     * `rowSpans` advances `xLeft = x + shift * keyWidth` before every key, so a shift of 1f starts
+     * each key one full width to the right: with keyWidth 100 a two-key row spans 100..400 inside a
+     * 200-wide host, both cells clamp to the same box, and only one rect survives the
+     * `right > left` test. A real layout key has shift 0 unless it is deliberately indented.
+     */
     private fun key(vararg values: KeyValue?): KeyboardData.Key {
         val slots = MutableList<KeyValue?>(9) { null }
         values.forEachIndexed { i, kv -> slots[i] = kv }
-        return KeyboardData.Key(slots.toList(), null, 0, 1f, 1f, null)
+        return KeyboardData.Key(slots.toList(), null, 0, 1f, 0f, null)
     }
 
     private val params = KeyboardGeometry.Params(
