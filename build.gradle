@@ -1322,6 +1322,10 @@ tasks.register('runPureTests', JavaExec) {
     // 2026-11-09 UI/UX: a query matching nothing used to render nothing at all.
     'tribixbite.cleverkeys.ui.settings.SettingsSearchEmptyStateTest',
     'tribixbite.cleverkeys.VerboseLogRatchetTest',
+    // 2026-11-15: the skip ratchet. A guard in @Before/@BeforeClass skips the WHOLE class; that
+    // silently hid 70 tests here (docs/BUG-HUNT-2026-11-15-PART-4.md). Pins the lifecycle-guard
+    // count, the UpstreamArtefacts.require count and the direct Assume count.
+    'tribixbite.cleverkeys.SkipRatchetTest',
     // KeyFillAlpha is a pure ARGB bit operation (2026-11-01: it no longer calls
     // android.graphics.Color, which the stub answers with 0 in a JVM test).
     'tribixbite.cleverkeys.KeyFillAlphaTest',
