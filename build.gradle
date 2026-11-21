@@ -770,6 +770,7 @@ tasks.register('runPureTests', JavaExec) {
     // local-media commitContent first, case-preserved URL text second, never a dead link.
     'tribixbite.cleverkeys.gif.GifInsertPolicyTest',
     'tribixbite.cleverkeys.gif.GifCategoryTest',
+    'tribixbite.cleverkeys.gif.GifGridGeometryTest',
     // Audit W2 (2026-09-07): E-6 — GIF category bar commits on UP-within-slop (pure detector);
     // E-1 — repo-wide ban on SQLite upsert syntax (parse error on API 24-28);
     // E-10 — Toast is banned from IME-context files (suggestion bar is the surface, #156).

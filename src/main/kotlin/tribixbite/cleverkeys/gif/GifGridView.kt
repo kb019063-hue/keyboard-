@@ -118,6 +118,10 @@ class GifGridManager(
             currentCategory = GifCategory.ALL
             loadCategory(GifCategory.ALL)
         }
+        // Announce the landING category, not the one that was asked for. loadDefaultView is also
+        // what a cleared search restores, so the category bar has no other reliably-timed signal
+        // that the grid moved to ALL on a fresh install. (2026-11-21, `gif`/look pass.)
+        notifyPagination()
     }
 
     /**
@@ -171,6 +175,16 @@ class GifGridManager(
 
     /** Current result count on this page. */
     fun getResultCount(): Int = gifList.size
+
+    /**
+     * The category actually on screen.
+     *
+     * Not the same thing as the last one requested: [loadDefaultView] opens on RECENTLY_USED and
+     * silently moves to ALL when there is no usage history, so on a fresh install the grid is
+     * showing ALL while the caller asked for RECENTLY_USED. The category bar keys its selected
+     * state off this, not off what it tapped.
+     */
+    fun shownCategory(): GifCategory = currentCategory
 
     /** Navigate to next page. */
     fun nextPage() {
@@ -286,11 +300,13 @@ class GifGridManager(
             val imageView = ImageView(parent.context).apply {
                 layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
-                    dpToPx(80)
+                    squareCellPx(parent)
                 )
                 scaleType = ImageView.ScaleType.CENTER_CROP
-                adjustViewBounds = true
-                val pad = dpToPx(2)
+                // CENTER_CROP with a fixed width means the height must follow the width, or the
+                // cell crops unevenly. Do not set adjustViewBounds: it makes the ImageView
+                // re-derive its own bounds from the drawable and fights the fixed cell.
+                val pad = parent.context.dpToPx(2)
                 setPadding(pad, pad, pad, pad)
             }
             return GifViewHolder(imageView)
@@ -309,18 +325,63 @@ class GifGridManager(
         }
     }
 
+    /**
+     * Side of one grid cell, in pixels: the pane's width divided into [columns] equal cells.
+     *
+     * 2026-11-21 (`gif`/look pass): the cell height was the literal `dpToPx(80)` while only the
+     * COLUMN COUNT is configurable (`gif_thumbnail_columns`, 2..5 — `Defaults.GIF_THUMBNAIL_COLUMNS`
+     * is 3). On a 392dp-wide pane that made one cell 194x80dp at two columns and 78x80dp at five:
+     * a 2.4x swing in aspect ratio, so the same thumbnail was cropped hard through its sides at two
+     * columns and nearly square at five. A square cell whose side comes from the width keeps every
+     * cell the same shape at every column count, which is what the colour-coded emotion packs and
+     * the Coil `Scale.FILL` request both assume.
+     *
+     * The width is read from the RecyclerView rather than the screen: the pane is the keyboard's
+     * width, which is not the same thing on a split or floating layout.
+     */
+    private fun squareCellPx(parent: ViewGroup): Int {
+        val usable = (parent.width - parent.paddingLeft - parent.paddingRight)
+            .takeIf { it > 0 }
+            // Before the first layout pass the width is 0. Fall back to a third of the screen,
+            // which is the default column count and corrects itself on the first rebind.
+            ?: (parent.context.resources.displayMetrics.widthPixels / columns)
+        return GifGridGeometry.cellSizePx(usable, 0, columns, parent.context.resources.displayMetrics.density)
+    }
+
     companion object {
         /** Items per page — matches clipboard pagination (100 items). */
         const val ITEMS_PER_PAGE = 100
 
-        /** Keystroke coalescing window for search-as-you-type (issue #152). */
-        private const val SEARCH_DEBOUNCE_MS = 150L
+        /**
+         * Keystroke coalescing window for search-as-you-type (issue #152).
+         *
+         * Raised from 150 ms on 2026-11-21 (`gif`/tool pass). 150 ms is shorter than the gap
+         * between keystrokes for anyone typing at a normal pace, so it coalesced nothing: at
+         * 250 ms per character every single keystroke started its own FTS5 MATCH over the pack
+         * index plus a 100-row read, on the IME's one SQLite connection, while the user was
+         * typing into the keyboard. `searchJob.cancel()` only drops the coroutine; it does not
+         * interrupt a query already inside SQLite, so the discarded passes still cost a full
+         * traversal each. 300 ms is the value `DictionaryManagerActivity` already uses for the
+         * same job, and it lets a whole short word settle into one pass.
+         */
+        private const val SEARCH_DEBOUNCE_MS = 300L
 
         /** Thumbnail decode target size (px). Keeps Coil memory low. */
         private const val THUMB_SIZE_PX = 200
 
-        private fun dpToPx(dp: Int): Int {
-            return (dp * android.content.res.Resources.getSystem().displayMetrics.density).toInt()
-        }
+        /**
+         * Converts dp to pixels against the VIEW's density.
+         *
+         * 2026-11-21 (`gif`/look pass): this read `Resources.getSystem().displayMetrics.density`,
+         * the density of the primary display as the framework sees it, not the density of the
+         * context this pane was inflated with. The two disagree whenever the host supplies an
+         * overridden configuration (split-screen, a floating window, a density-forced app) and
+         * the disagreement is silent: the padding and the cell floor simply come out at the wrong
+         * size. [GifGroupButtonsBar], which sits directly above this grid in the same pane, has
+         * always used `context.resources` — so the two scaled differently under exactly those
+         * configurations. Now both use the same source.
+         */
+        private fun Context.dpToPx(dp: Int): Int =
+            (dp * resources.displayMetrics.density).toInt()
     }
 }
