@@ -1316,6 +1316,10 @@ tasks.register('runPureTests', JavaExec) {
     'tribixbite.cleverkeys.ThemeDefaultMigrationTest',
     'tribixbite.cleverkeys.voice.VoiceTypingConfigTest',
     'tribixbite.cleverkeys.voice.DictationPolicyTest',
+    // 2026-11-21: a second mic tap during the first press's async language query was ignored
+    // (`recognizer?.stopListening()` on a null recogniser), leaving sessionActive true so the
+    // deferred start opened the microphone and committed the transcript the user cancelled.
+    'tribixbite.cleverkeys.voice.DictationStopDuringStartTest',
     'tribixbite.cleverkeys.voice.VoiceLanguagePolicyTest',
     // 2026-11-09: dictation asked for the DEVICE locale, not the keyboard's active language.
     'tribixbite.cleverkeys.voice.DictationLanguageSourceTest',

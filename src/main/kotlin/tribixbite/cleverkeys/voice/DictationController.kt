@@ -290,6 +290,18 @@ internal class DictationController(
      *   it has a model for.
      */
     private fun startListeningWithNegotiatedLanguage(forceDefault: Boolean = false) {
+        // 2026-11-21: the session can be over before we get here. The FIRST press of a process
+        // defers this method until the language query's broadcast is answered (see
+        // queryLanguagesOnce), and `press()` has already set `sessionActive = true` for it. A
+        // second tap inside that window therefore books a STOP, and `stopListening()` cannot act
+        // on it: `recognizer` is still null, so `recognizer?.stopListening()` is a silent no-op
+        // and the session flag stays true. This method then ran anyway -- opening the microphone
+        // for a press the user cancelled, and, because onTranscript only checks `sessionActive`,
+        // committing the resulting transcript into the field. Honour the cancellation instead.
+        if (!sessionActive) {
+            abandonAudioFocus()
+            return
+        }
         val active = obtainRecognizer()
         if (active == null) {
             // Recogniser vanished between the availability check and here.
@@ -350,6 +362,14 @@ internal class DictationController(
     }
 
     private fun stopListening() {
+        // 2026-11-21: a STOP that arrives before the recogniser exists (the first press defers
+        // the start behind an async language query) used to fall through `?.` and leave
+        // `sessionActive` true, which is what let the deferred start open the microphone. Ending
+        // the session here is enough: startListeningWithNegotiatedLanguage refuses to revive one.
+        if (recognizer == null) {
+            endSession()
+            return
+        }
         try {
             recognizer?.stopListening()
         } catch (t: Throwable) {
@@ -379,11 +399,12 @@ internal class DictationController(
             }
             val receiver = object : android.content.BroadcastReceiver() {
                 override fun onReceive(ctx: Context?, broadcast: Intent?) {
-                    try {
-                        context.unregisterReceiver(this)
-                    } catch (t: Throwable) {
-                        Log.w(TAG, "unregister language receiver threw: $t")
-                    }
+                    // 2026-11-21: this used to call `context.unregisterReceiver(this)`, guarded by a
+                    // catch that logged the failure. That call is always wrong here and always
+                    // threw: this receiver is a `sendOrderedBroadcast` RESULT receiver, not one
+                    // registered with `registerReceiver`, and `Context.unregisterReceiver` throws
+                    // IllegalArgumentException when "the receiver was not previously registered".
+                    // The result receiver is owned by the broadcast and needs no release.
                     val list = broadcast?.getStringArrayListExtra(
                         RecognizerIntent.EXTRA_SUPPORTED_LANGUAGES
                     )
@@ -550,9 +571,14 @@ internal class DictationController(
         ) {
             retriedWithDefault = true
             // No extra log line: the startListening line that follows carries language="service
-            // default" and retriedWithDefault=true, and this file sits exactly on the repo's
-            // unguarded-log ceiling (VerboseLogRatchetTest, 246).
-            abandonAudioFocus()
+            // default" and retriedWithDefault=true, and this file sits close to the repo's
+            // unguarded-log ceiling (VerboseLogRatchetTest).
+            //
+            // 2026-11-21: this used to call abandonAudioFocus() first, and
+            // startListeningWithNegotiatedLanguage then immediately called requestAudioFocus()
+            // again -- a release/acquire flap in the middle of a session the user still sees as
+            // "Listening…". The focus is already held (requestAudioFocus returns early on
+            // focusHeld), so keeping it across the retry is both cheaper and what the bar claims.
             main.post { startListeningWithNegotiatedLanguage(forceDefault = true) }
             return
         }
