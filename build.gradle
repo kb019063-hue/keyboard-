@@ -1008,6 +1008,10 @@ tasks.register('runPureTests', JavaExec) {
     'tribixbite.cleverkeys.ContractionBinaryPairingsTest',
     'tribixbite.cleverkeys.swipe.geometric.GeoPurityDriftTest',
     'tribixbite.cleverkeys.swipe.geometric.CkdtReaderTest',
+    // 2026-11-15: the CKDT canonical section validated its record COUNT statistically but each
+    // record only via ByteBuffer.get, so a corrupt uint16 length threw a non-IOException
+    // (BufferUnderflowException) out of the parser that reads a user-installable language pack.
+    'tribixbite.cleverkeys.swipe.geometric.CkdtDictionaryReaderTest',
     'tribixbite.cleverkeys.swipe.geometric.GeoProjectionTest',
     'tribixbite.cleverkeys.swipe.geometric.TemplateGeneratorTest',
     'tribixbite.cleverkeys.swipe.geometric.CandidatePrunerTest',

@@ -64,6 +64,9 @@ object CkdtDictionaryReader {
     private const val EXPECTED_VERSION_V2 = 2
     private const val HEADER_SIZE_V2 = 48
 
+    /** Smallest possible record: uint16 length (0) + uint8 rank. */
+    private const val MIN_RECORD_BYTES = 3
+
     /**
      * Read a CKDT dictionary from an [InputStream] (fully consumed) into a retained
      * [GeometricDictionary].
@@ -130,16 +133,35 @@ object CkdtDictionaryReader {
 
         // Read the canonical section: (word, rank) pairs preserving file order.
         require(canonicalOffset in HEADER_SIZE_V2..bytes.size) { "Invalid canonical offset $canonicalOffset" }
-        require(wordCount <= (bytes.size - canonicalOffset) / 3) { "Truncated canonical records" }
+        require(wordCount <= (bytes.size - canonicalOffset) / MIN_RECORD_BYTES) { "Truncated canonical records" }
         buffer.position(canonicalOffset)
         val words = arrayOfNulls<String>(wordCount)
         val ranks = IntArray(wordCount)
         for (i in 0 until wordCount) {
             checkInterrupted()
+            // Bounds are checked per record, not just once for the section. The up-front
+            // `wordCount <= sectionLength / 3` guard above is a needed reject (it is what turns
+            // an absurd count into an error instead of an OOM on the arrays), but it cannot
+            // bound an individual record: a 3-byte-per-record average is equally consistent
+            // with one 65535-byte word and a tail of empty ones. A single corrupt length near
+            // the end of a 16 MiB section therefore used to reach ByteBuffer.get and throw
+            // BufferUnderflowException — which is not an IOException, so every
+            // `catch (Exception)` around a pack read logged it as an unknown failure rather
+            // than as a malformed dictionary. Malformed input now fails as the documented
+            // "unreadable dictionary" instead, and the trap is explicit.
             val len = buffer.short.toInt() and 0xFFFF
+            if (len > buffer.remaining()) {
+                throw IOException(
+                    "Truncated CKDT record $i of $wordCount: word length $len exceeds the " +
+                        "${buffer.remaining()} bytes left in the canonical section"
+                )
+            }
             val wb = ByteArray(len)
             buffer.get(wb)
             words[i] = String(wb, Charsets.UTF_8)
+            if (buffer.remaining() < 1) {
+                throw IOException("Truncated CKDT record $i of $wordCount: missing rank byte")
+            }
             ranks[i] = buffer.get().toInt() and 0xFF
         }
 
