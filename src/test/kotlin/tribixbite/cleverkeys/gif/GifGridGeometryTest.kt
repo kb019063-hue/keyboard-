@@ -36,7 +36,10 @@ class GifGridGeometryTest {
     fun `more columns means smaller cells and the row still fits`() {
         val widths = (2..5).map { GifGridGeometry.cellSizePx(panePx, gridPadPx, it, density) }
         // Strictly decreasing: each extra column divides the same usable width further.
-        assertThat(widths).isInOrder()
+        // Written as an explicit comparison rather than Truth's isInOrder(), which asserts
+        // ASCENDING order and silently reads as "in order" whichever way the list runs - that
+        // mismatch is what failed the first CI run of this class.
+        assertThat(widths.zipWithNext().all { (wider, narrower) -> wider > narrower }).isTrue()
         assertThat(widths.toSet()).hasSize(widths.size)
         // Two columns on this pane: half of 1070px usable is 535px.
         assertThat(widths.first()).isEqualTo((panePx - gridPadPx) / 2)
