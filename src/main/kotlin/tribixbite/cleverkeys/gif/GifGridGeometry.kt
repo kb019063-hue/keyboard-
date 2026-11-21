@@ -40,4 +40,17 @@ internal object GifGridGeometry {
         if (usable <= 0) return floorPx
         return (usable / safeColumns).coerceAtLeast(floorPx)
     }
+
+    /**
+     * Converts dp to pixels against a caller-supplied density.
+     *
+     * 2026-11-21 (`gif`/look pass): the grid used to convert with
+     * `Resources.getSystem().displayMetrics.density` - the primary display as the framework sees
+     * it, not the configuration the pane was inflated with - while [GifGroupButtonsBar], six
+     * pixels above it in the same pane, used `context.resources`. The two disagree under any
+     * display override (a `ContextThemeWrapper` with a changed density, a window resized in
+     * split-screen), and the disagreement is silent. Taking the density as a parameter means a
+     * call site cannot accidentally reach for the system one.
+     */
+    fun dpToPx(dp: Int, density: Float): Int = (dp * density).toInt()
 }

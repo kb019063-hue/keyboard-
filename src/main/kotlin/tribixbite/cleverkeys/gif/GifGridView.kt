@@ -306,7 +306,7 @@ class GifGridManager(
                 // CENTER_CROP with a fixed width means the height must follow the width, or the
                 // cell crops unevenly. Do not set adjustViewBounds: it makes the ImageView
                 // re-derive its own bounds from the drawable and fights the fixed cell.
-                val pad = parent.context.dpToPx(2)
+                val pad = GifGridGeometry.dpToPx(2, parent.context.resources.displayMetrics.density)
                 setPadding(pad, pad, pad, pad)
             }
             return GifViewHolder(imageView)
@@ -369,19 +369,5 @@ class GifGridManager(
         /** Thumbnail decode target size (px). Keeps Coil memory low. */
         private const val THUMB_SIZE_PX = 200
 
-        /**
-         * Converts dp to pixels against the VIEW's density.
-         *
-         * 2026-11-21 (`gif`/look pass): this read `Resources.getSystem().displayMetrics.density`,
-         * the density of the primary display as the framework sees it, not the density of the
-         * context this pane was inflated with. The two disagree whenever the host supplies an
-         * overridden configuration (split-screen, a floating window, a density-forced app) and
-         * the disagreement is silent: the padding and the cell floor simply come out at the wrong
-         * size. [GifGroupButtonsBar], which sits directly above this grid in the same pane, has
-         * always used `context.resources` — so the two scaled differently under exactly those
-         * configurations. Now both use the same source.
-         */
-        private fun Context.dpToPx(dp: Int): Int =
-            (dp * resources.displayMetrics.density).toInt()
     }
 }

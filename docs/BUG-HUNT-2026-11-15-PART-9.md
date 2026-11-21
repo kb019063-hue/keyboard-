@@ -29,7 +29,7 @@ with the reason.
 | G10 | No test of any kind covered the grid geometry, so G1 and G2 could regress unnoticed | medium (process) | **fixed** |
 
 Production files changed: 8. New files: `gif/GifGridGeometry.kt` (43 lines),
-`gif/GifGridGeometryTest.kt` (93 lines, 6 tests).
+`gif/GifGridGeometryTest.kt` (105 lines, 7 tests).
 
 ---
 
@@ -105,9 +105,14 @@ Under such an override, with the context at density 2.0 and the system reporting
 So two controls in one pane scaled differently under the same configuration, silently — no
 exception, nothing in a screenshot at the default configuration.
 
-**Fix:** `dpToPx` is now a `Context` extension inside the companion, and every call site passes the
-view's own context (`parent.context.dpToPx(2)`), which is the same source `GifGroupButtonsBar`
-already used. The pure conversion moved into `GifGridGeometry` so it can be asserted.
+**Fix:** the conversion moved into `GifGridGeometry.dpToPx(dp, density)` and every call site passes
+the view's own density (`parent.context.resources.displayMetrics.density`), which is the same
+source `GifGroupButtonsBar` already used. The density is now a *parameter*, so a call site cannot
+reach for the system metric by accident, and the conversion is assertable without Android.
+
+(First attempt was a `Context.dpToPx` member extension inside the `companion object`. That only
+resolves where the companion is an implicit receiver — not inside `GifRecyclerAdapter`, the class
+that actually calls it — so it was replaced with the explicit parameter before this was pushed.)
 
 ## G3 — the search debounce was shorter than a keystroke
 
@@ -274,7 +279,7 @@ would move every category button by a pixel for no visible gain.
 
 ## Consequence for the test count
 
-`GifGridGeometryTest` is 6 tests, registered in `pureTestClasses` with no square brackets anywhere
+`GifGridGeometryTest` is 7 tests, registered in `pureTestClasses` with no square brackets anywhere
 in the surrounding comment (see part 8's V8 — a `]` inside those arrays silently unregisters every
 class below it). Registration was re-checked with the drift test's own parser before pushing:
 440 registered, 440 on disk, 0 unregistered.

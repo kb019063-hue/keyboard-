@@ -90,4 +90,18 @@ class GifGridGeometryTest {
         assertThat(GifGridGeometry.cellSizePx(panePx, gridPadPx, 0, density))
             .isEqualTo(panePx - gridPadPx)
     }
+
+    @Test
+    fun `dp to px uses the density it is given, never the system one`() {
+        // The defect: the grid converted with Resources.getSystem().displayMetrics.density while
+        // the category bar beside it used context.resources. A function that must be handed a
+        // density has no way to reach the system metric.
+        assertThat(GifGridGeometry.dpToPx(2, 2.75f)).isEqualTo(5)
+        assertThat(GifGridGeometry.dpToPx(2, 2.0f)).isEqualTo(4)
+        assertThat(GifGridGeometry.dpToPx(56, 2.0f)).isEqualTo(112)
+        assertThat(GifGridGeometry.dpToPx(0, 2.75f)).isEqualTo(0)
+        // Two densities must give two answers, or the parameter is being ignored.
+        assertThat(GifGridGeometry.dpToPx(10, 1.0f))
+            .isNotEqualTo(GifGridGeometry.dpToPx(10, 3.0f))
+    }
 }
