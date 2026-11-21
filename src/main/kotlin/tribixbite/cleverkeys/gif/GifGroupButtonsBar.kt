@@ -23,6 +23,9 @@ class GifGroupButtonsBar(context: Context, attrs: AttributeSet) : HorizontalScro
 
     private val buttonContainer: LinearLayout
 
+    /** Every category button, so the bar can show which one is showing. Insertion order. */
+    private val buttons = mutableListOf<GifGroupButton>()
+
     /** Fired when a category button is tapped — parent should call gifGrid.setCategory(). */
     var onCategoryChanged: ((GifCategory) -> Unit)? = null
 
@@ -41,8 +44,9 @@ class GifGroupButtonsBar(context: Context, attrs: AttributeSet) : HorizontalScro
         }
 
         // Add "recently used" clock button first
+        buttons += GifGroupButton(context, GifCategory.RECENTLY_USED)
         buttonContainer.addView(
-            GifGroupButton(context, GifCategory.RECENTLY_USED),
+            buttons.last(),
             LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -52,8 +56,9 @@ class GifGroupButtonsBar(context: Context, attrs: AttributeSet) : HorizontalScro
         )
 
         // Add "all" globe button
+        buttons += GifGroupButton(context, GifCategory.ALL)
         buttonContainer.addView(
-            GifGroupButton(context, GifCategory.ALL),
+            buttons.last(),
             LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -64,8 +69,9 @@ class GifGroupButtonsBar(context: Context, attrs: AttributeSet) : HorizontalScro
 
         // Add a button for each browsable emotion category
         for (category in GifCategory.browsableCategories()) {
+            buttons += GifGroupButton(context, category)
             buttonContainer.addView(
-                GifGroupButton(context, category),
+                buttons.last(),
                 LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
@@ -76,6 +82,27 @@ class GifGroupButtonsBar(context: Context, attrs: AttributeSet) : HorizontalScro
         }
 
         addView(buttonContainer)
+    }
+
+    /**
+     * Mark [category] as the one on screen, dimming the others.
+     *
+     * 2026-11-21 (`gif`/look pass): the bar had no selected state at all. Eighteen emotion emoji
+     * sat in a scrollable row and, after a tap, nothing on it changed — the grid swapped but the
+     * bar looked identical, so there was no way to tell which category you were looking at or
+     * that the tap had registered. (The grid's own fallback made this worse: opening the pane on
+     * a fresh install lands on ALL while the visually-first button is RECENTLY_USED, so the one
+     * button that looked "current" was never the one loaded.)
+     *
+     * Alpha is the repository's existing idiom for exactly this - the clipboard pane's tabs use
+     * 1.0 for the active tab and 0.5 for the rest (`ClipboardManager.updateTabHighlighting`), and
+     * the pane pagers use 1.0 / 0.3. Alpha also survives every runtime theme, which a background
+     * tint would not: the panes are repainted from `ThemeProvider` at open time.
+     */
+    fun setSelectedCategory(category: GifCategory) {
+        for (button in buttons) {
+            button.alpha = if (button.category == category) ACTIVE_ALPHA else INACTIVE_ALPHA
+        }
     }
 
     /**
@@ -90,12 +117,19 @@ class GifGroupButtonsBar(context: Context, attrs: AttributeSet) : HorizontalScro
         return (dp * context.resources.displayMetrics.density).toInt()
     }
 
+    private companion object {
+        /** The category on screen. Matches ClipboardManager.updateTabHighlighting. */
+        const val ACTIVE_ALPHA = 1.0f
+        /** The others. Dim, not invisible: they must stay readable and tappable. */
+        const val INACTIVE_ALPHA = 0.45f
+    }
+
     /**
      * Individual category button showing the emoji icon for each GIF emotion.
      */
     inner class GifGroupButton(
         context: Context,
-        private val category: GifCategory
+        internal val category: GifCategory
     ) : AppCompatButton(ContextThemeWrapper(context, R.style.emojiTypeButton), null, 0),
         View.OnTouchListener {
 
@@ -116,6 +150,7 @@ class GifGroupButtonsBar(context: Context, attrs: AttributeSet) : HorizontalScro
 
         override fun onTouch(view: View, event: MotionEvent): Boolean {
             if (tapDetector.feed(event.action, event.x, event.y)) {
+                setSelectedCategory(category)
                 // Notify search clear callback
                 onCategorySelected?.invoke()
                 // Notify category change callback
