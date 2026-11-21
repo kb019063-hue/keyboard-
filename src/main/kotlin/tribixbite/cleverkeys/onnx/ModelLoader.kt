@@ -120,12 +120,48 @@ class ModelLoader(
      * @param session Loaded ONNX session ready for inference
      * @param executionProvider Name of execution provider being used
      * @param modelSizeBytes Size of loaded model in bytes
+     * @param sessionOptions the [OrtSession.SessionOptions] [session] was built from, owned by
+     *   the caller for exactly as long as [session] lives. See [closeSession].
      */
-    data class LoadResult(
+    class LoadResult(
         val session: OrtSession,
         val executionProvider: String,
-        val modelSizeBytes: Long
+        val modelSizeBytes: Long,
+        val sessionOptions: OrtSession.SessionOptions? = null
     )
+
+    /**
+     * Release a session from [loadModel] **and then** the options it was built from.
+     *
+     * ORT's contract is one-directional: `SessionOptions` "must not be closed until all sessions
+     * which use it are closed, as otherwise it could release resources that are in use". So the
+     * close order here is not cosmetic — closing the options first would be a native
+     * use-after-free in [OrtSession.close]'s own teardown path.
+     *
+     * This exists because the options were previously never closed at all. `SessionOptions()`
+     * allocates a native handle in its constructor (`createOptions`) and only `close()`
+     * (`closeOptions`) reclaims it; the old code built one per load, handed it to
+     * `createSession`, and dropped the reference. The leak is per model load, so a device that
+     * loads the Latin encoder plus two script encoders leaked three handles per adapter
+     * lifecycle, and an adapter is rebuilt on IME teardown — not just at process death.
+     *
+     * Closing the options only *after* the session is what makes deferring it to the owner
+     * correct rather than merely tidy.
+     */
+    fun closeSession(result: LoadResult) {
+        try {
+            result.session.close()
+        } catch (e: Exception) {
+            Log.w(TAG, "Session close failed (non-actionable at teardown)", e)
+        }
+        // Deliberately outside the session-catch: a session that fails to close must not strand
+        // the options handle as well.
+        try {
+            result.sessionOptions?.close()
+        } catch (e: Exception) {
+            Log.w(TAG, "SessionOptions close failed (non-actionable at teardown)", e)
+        }
+    }
 
     /**
      * Load ONNX model and create optimized session.
@@ -176,10 +212,11 @@ class ModelLoader(
         enableHardwareAcceleration: Boolean = true,
         xnnpackThreads: Int = 2
     ): LoadResult {
+        // Created OUTSIDE the try so the catch can release it: everything between here and the
+        // successful createSession (execution-provider attachment above all) can throw, and a
+        // throw used to abandon the native options handle with no owner left to close it.
+        val sessionOptions = createOptimizedSessionOptions()
         try {
-            // Create optimized session options
-            val sessionOptions = createOptimizedSessionOptions()
-
             // Try hardware acceleration if enabled
             val executionProvider = if (enableHardwareAcceleration) {
                 tryEnableHardwareAcceleration(sessionOptions, sessionName, xnnpackThreads)
@@ -195,11 +232,19 @@ class ModelLoader(
             return LoadResult(
                 session = session,
                 executionProvider = executionProvider,
-                modelSizeBytes = modelData.size.toLong()
+                modelSizeBytes = modelData.size.toLong(),
+                // Ownership of the options moves to the caller, who must pair this with
+                // closeSession(result). Only on the throw path below is it ours to release.
+                sessionOptions = sessionOptions
             )
 
         } catch (e: Exception) {
             Log.e(TAG, "Failed to create $sessionName session from ${modelData.size} bytes", e)
+            try {
+                sessionOptions.close()
+            } catch (closeFailure: Exception) {
+                Log.w(TAG, "SessionOptions close failed after a load failure", closeFailure)
+            }
             throw RuntimeException("Model loading failed: ${e.message}", e)
         }
     }

@@ -1195,6 +1195,10 @@ tasks.register('runPureTests', JavaExec) {
     // load, read back by nothing) is gone; the loader now purges what old builds left in
     // cacheDir. Source-scan pin + purge behaviour.
     'tribixbite.cleverkeys.onnx.ModelLoaderOrtCacheTest',
+    // 2026-11-15: OrtSession.SessionOptions is native memory (createOptions/closeOptions) and
+    // must outlive the sessions built from it. Pins that the handle is carried out of
+    // loadModel, closed on the failure path, and released only AFTER the session.
+    'tribixbite.cleverkeys.onnx.ModelSessionOptionsLifetimeTest',
     'tribixbite.cleverkeys.LauncherSetupFlowTest',
     // MinSdkApiUsageDriftTest DELETED (ARC-113, 2026-09-03): it guarded the
     // API-24 Map/Set idioms that crash on Android 5.0–6.0 and self-asserted

@@ -405,7 +405,17 @@ class CtcEngineAdapter(
                     "${loaded.modelSizeBytes} B, " +
                     "${if (packModel != null) "langpack" else "apk asset"})")
             }
-            OnnxCtcEmissionModel(ortEnvironment, loaded.session).also { emissionModels[asset] = it }
+            try {
+                OnnxCtcEmissionModel(ortEnvironment, loaded.session, loaded.sessionOptions)
+                    .also { emissionModels[asset] = it }
+            } catch (e: Throwable) {
+                // Adopting the session failed (OOM building the model wrapper, or the map's
+                // eviction callback throwing). Nothing owns the native handles now, and the
+                // outer catch would otherwise latch a failure while leaking them — so release
+                // both here, in the order ORT requires, and let the failure be reported as usual.
+                loader.closeSession(loaded)
+                throw e
+            }
         } catch (e: Exception) {
             val failed = attempts + 1
             modelLoadAttempts[asset] = failed
