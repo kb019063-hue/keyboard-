@@ -369,9 +369,9 @@ class UserVocabulary internal constructor(
      * repo's logging rules forbid: `UserVocabulary`'s singleton logger is ungated `Log.d` (the
      * `ENABLE_VERBOSE_LOGGING` rule does not even reach it, so the installed debug build always
      * printed it), and `VerboseLogRatchetTest` cannot see it because the call site spells
-     * `log(...)`, not `Log.d(...)`. `Logs`/`PrivacyManager` strip words from their own lines for
-     * this reason; this path did not. The count is enough to diagnose eviction, so only counts
-     * are logged now.
+     * `log(...)` through an injected lambda, not a `Log.d` call site. `Logs`/`PrivacyManager`
+     * strip words from their own lines for this reason; this path did not. The count is enough to
+     * diagnose eviction, so only counts are logged now.
      */
     private fun removeLowestValueWords(count: Int, currentTime: Long) {
         if (count <= 0) return
