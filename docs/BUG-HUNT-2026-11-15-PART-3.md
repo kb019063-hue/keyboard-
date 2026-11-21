@@ -198,7 +198,7 @@ All three workflows on `973b0f7`:
 | Workflow | Run | Result |
 |---|---|---|
 | `Build APK` (push) | `44862890200` | **green** |
-| `Full unit-test suite` (PR #33) | `44862895782` | **green** — **4847 tests, 0 failed, 194 skipped in 430 classes** |
+| `Full unit-test suite` (PR #33) | `44862895782` on `973b0f7`, and `44864138502` on this report's tip `86c0c9e` | **green** on both — **4847 tests, 0 failed, 194 skipped in 430 classes** |
 | `Emulator smoke test` (push) | `44862890085` | **green** — `rotate verdict=ok`, `new-crash=none` |
 
 The offline front-end check (`scripts/ci/offline/typecheck.sh --tests 0916911`) added 22
