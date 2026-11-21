@@ -277,6 +277,24 @@ would move every category button by a pixel for no visible gain.
   and runs the tests, and the layout changes are checked structurally (XML parses; tag balance;
   ids unchanged).
 
+## CI
+
+| run | head | suite | APK | smoke |
+|-----|------|-------|-----|-------|
+| 1 | `9d52c2d` | **failed** — 1 of 7 | pass | — |
+| 2 | `39dce7a` | **`44941627842` green** — 4870 run, 0 failed, 134 skipped, 435 classes | `44941622810` pass | `44941622836` pass |
+
+Wave 11 ended at 4863 run / 434 classes; this pass adds **7 tests and 1 class** (4870 / 435).
+Skipped stays at 134, so the skip ratchet is untouched. No production file outside `gif/`,
+`emoji/`, `KeyboardReceiver.kt` and the two pane layouts was changed.
+
+Run 1's single failure is worth recording, because the numbers in it were all correct:
+`assertThat(widths).isInOrder()` asserts **ascending** order, and the list is strictly decreasing
+by construction. Truth has no "descending" matcher, and `isInOrder()` reads as neutral when you
+are skimming. Replaced with `zipWithNext().all { wider > narrower }`, which carries its own
+direction. This is the second time in two waves that a *matcher's* semantics — not the value under
+test — was the thing that was wrong; see part 8 on the `shift = 1f` fixture.
+
 ## Consequence for the test count
 
 `GifGridGeometryTest` is 7 tests, registered in `pureTestClasses` with no square brackets anywhere
