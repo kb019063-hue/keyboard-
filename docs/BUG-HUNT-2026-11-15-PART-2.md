@@ -10,12 +10,12 @@ one that *didn't* become a fix: several things that look like bugs in `contextaw
 deliberate, and the code says so in the one place a reader would look. Those are written up under
 "Checked and found sound" because the reasoning is the valuable part.
 
-Status: **UNVERIFIED**. Nothing here has been through CI yet. The front-end check and what it does
-and does not prove are at the end.
+**Verified by CI.** The fix is in `b3fc743` and all three workflows ran green on it — the numbers
+are at the end. The front-end check and what it does and does not prove are there too.
 
 | # | Finding | State |
 |---|---|---|
-| M1 | `loadModel` created an `OrtSession.SessionOptions` per load and closed it nowhere — a native handle leaked on every model load | fixed, pinned |
+| M1 | `loadModel` created an `OrtSession.SessionOptions` per load and closed it nowhere — a native handle leaked on every model load | fixed, pinned, CI-green |
 | M2 | If adopting a freshly created session failed, both native handles were abandoned (the load-failure catch only counted an attempt) | fixed |
 | M3 | `readModelBytes` enforces a *minimum* model size but no maximum, and `readBytes()` is a full copy into the IME heap | reported, low — not reachable from untrusted bytes today |
 | M4 | `ModelLoader.validateSession` is dead code | reported, low |
@@ -184,11 +184,36 @@ no change proposed.
   `copy()`-and-rebuild that precedes it. Correct, unlike the identity match in `enforce` — see M5
   for why both are right for their position.
 
+## Verified by CI
+
+Three workflows on `b3fc743`:
+
+| Workflow | Run | Result |
+|---|---|---|
+| `Build APK` (push) | `44860703016` | **green** — `assembleDebug` passed; advisory subset 1039 tests, 0 failed |
+| `Full unit-test suite` (PR #33) | `44860706530` | **green** — **4840 tests, 0 failed, 204 skipped in 429 classes** |
+| `Emulator smoke test` (push) | `44860702976` | **green** — installed, booted, IME exercised |
+
+The class count is the check that matters for this change: 429 classes and 4840 tests against the
+previous tip's 428 and 4834, so `ModelSessionOptionsLifetimeTest` is registered, ran, and its six
+cases passed — the stale-source case (line numbers or declarations moved) would have failed the
+build rather than passing silently.
+
+The offline front-end check, run with `--tests` against base `0916911`, reported 45 diagnostics new
+*to the file* and 41 repeats of ones the same file already had. Every new one is in one of two
+benign groups: the new test file importing JUnit and Truth, which that check cannot see (no Maven
+Central), and three `unresolved reference 'close'` in `ModelLoader.kt` at the three new `close()`
+calls on `OrtSession`/`SessionOptions` values. ORT is not on that check's classpath — android.jar,
+the stdlib and coroutines only — and the base tree already reports the identical diagnostic at
+`OnnxCtcEmissionModel.kt:102` and `CtcReplayEngine.kt:235,236`, which are the `.close()` calls that
+shipped long ago. The `close()` methods do exist: they are verified against ORT's published
+`OrtSession.java` source, quoted above, rather than assumed. Nothing else in the four changed
+production files gained a diagnostic. Treat the whole check as "did not obviously break the build":
+its own README says an expression whose receiver is unresolved is not checked at all, nothing is
+linked, and its front end is newer than the project's. The green APK build is the verdict.
+
 ## What this pass did not do
 
-- **No CI run.** Everything above is a reading of the source. Per `AGENTS.md` the sandbox cannot
-  build (no Android SDK, no Gradle distribution, no Maven Central), so GitHub Actions is the
-  compiler and a green run is the only verdict. M1 and M2 are **unverified** until then.
 - **The leak size is unmeasured.** I confirmed the handle exists and is never freed; I did not
   measure bytes per `SessionOptions` on-device, and could not resolve the AAR to read the native
   side. The claim is "a handle leaks per load", not "N KB leak per load".
@@ -196,17 +221,6 @@ no change proposed.
   parts the above touches (`enforce` call sites, `recordTrigram`'s insert-then-bound order). Their
   remaining several hundred lines, and `BigramModel` (the non-learned shipped LM), were not
   audited.
-- **The offline front-end check** was run with `--tests` against base `0916911`. It reports 45
-  diagnostics new *to the file*, and every one is in one of two benign groups: the new test file
-  importing JUnit and Truth, which that check cannot see (no Maven Central), and three
-  `unresolved reference 'close'` in `ModelLoader.kt` at the three new `close()` calls on
-  `OrtSession`/`SessionOptions` values. ORT is not on that check's classpath — android.jar, the
-  stdlib and coroutines only — and the base tree already reports the identical diagnostic at
-  `OnnxCtcEmissionModel.kt:102` and `CtcReplayEngine.kt:235,236`, which are the `.close()` calls
-  that shipped long ago. The `close()` methods exist: they are verified against ORT's published
-  `OrtSession.java` source, quoted above, rather than assumed. Nothing else in the four changed
-  production files gained a diagnostic.
-
 The pinning test is `ModelSessionOptionsLifetimeTest` (six cases, registered in `build.gradle`).
 It is a source scan, not a behavioural test, for the same reason as the existing
 `ModelLoaderOrtCacheTest`: `onnxruntime-android`'s native library cannot load in a JVM unit test,
