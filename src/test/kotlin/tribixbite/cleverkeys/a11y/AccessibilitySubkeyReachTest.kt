@@ -66,12 +66,18 @@ class AccessibilitySubkeyReachTest {
 
     @Test
     fun `a corner symbol produces no virtual view of its own`() {
-        val rows = listOf(KeyboardData.Row(listOf(dWithAccents, key(KeyValue.makeCharKey('f'))), 1f, 0f))
-        val rects = KeyboardGeometry.computeAccessibilityKeyRects(rows, params, hostWidth = 200f)
+        val rows = listOf(KeyboardData.Row(listOf(dWithAccents), 1f, 0f))
+        val rects = KeyboardGeometry.computeAccessibilityKeyRects(rows, params, hostWidth = 100f)
 
-        // One node per KEY, not per symbol: the corners are not in the tree.
-        assertThat(rects).hasSize(2)
-        assertThat(rects.map { it.kv.getString() }).containsExactly("d", "f").inOrder()
+        // ONE node per key, not one per symbol: the two corner symbols add no node, so a key
+        // carrying d/è/é yields exactly one rect -- which is the finding.
+        assertThat(rects).hasSize(1)
+        assertThat(rects.map { it.kv.getString() }).containsExactly("d")
+
+        // Two keys side by side still give exactly two nodes, whatever their corners hold.
+        val pair = listOf(KeyboardData.Row(listOf(dWithAccents, dWithAccents), 1f, 0f))
+        assertThat(KeyboardGeometry.computeAccessibilityKeyRects(pair, params, hostWidth = 200f))
+            .hasSize(2)
     }
 
     @Test

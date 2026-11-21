@@ -57,7 +57,19 @@ class TestRunnerListDriftTest {
         val block = Regex("""def\s+$name\s*=\s*\[(.*?)]""", RegexOption.DOT_MATCHES_ALL)
             .find(text)
         check(block != null) { "Runner array `def $name = [` not found in build.gradle." }
-        return classLiteral.findAll(block.groupValues[1])
+        val body = block.groupValues[1]
+        // 2026-11-21: this array is parsed non-greedily up to the FIRST ']'. A ']' anywhere inside
+        // the array -- including inside a COMMENT, e.g. prose mentioning `keys[0]` -- ends the
+        // capture early, and every class literal below that point silently disappears from this
+        // test's view. That is the failure mode this test exists to prevent, so it must not have
+        // it: a comment in build.gradle did exactly this and unregistered ~30 classes without a
+        // word. Refuse to guess rather than under-report.
+        check(']' !in body) {
+            "The `$name` array in build.gradle contains a ']' inside its body (usually a comment), " +
+                "which truncates this parser: every entry below it would go unregistered. " +
+                "Rephrase that comment, or teach this parser to strip comments first."
+        }
+        return classLiteral.findAll(body)
             .map { it.groupValues[1] }
             .toSortedSet()
     }

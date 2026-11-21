@@ -947,9 +947,12 @@ tasks.register('runPureTests', JavaExec) {
     // TalkBack accessibility (a11y) — pure geometry + labeller
     'tribixbite.cleverkeys.a11y.KeyboardGeometryTest',
     'tribixbite.cleverkeys.a11y.KeyLabelsTest',
-    // 2026-11-21: the a11y tree builds one node per KEY (keys[0]); a key's eight corner symbols
-    // get no node, so e.g. the accented letters a Spanish layout carries only in corners cannot
-    // be typed through TalkBack. Pins the current reach rather than asserting a fix.
+    // 2026-11-21: the a11y tree builds one node per KEY, from slot zero of the key's symbol list;
+    // a key's eight corner symbols get no node, so the accented letters a Spanish layout carries
+    // only in corners cannot be typed through TalkBack. Pins the current reach, not a fix.
+    // (No square brackets in this comment: TestRunnerListDriftTest parses this array with a
+    // non-greedy `\[(.*?)]`, so one `]` here would end its capture early and silently unregister
+    // every entry below -- which is exactly what the first version of this comment did.)
     'tribixbite.cleverkeys.a11y.AccessibilitySubkeyReachTest',
     // SuggestionBar rework (WP6-R3) — de-stringified suggestion protocol
     'tribixbite.cleverkeys.SuggestionModelTest',
