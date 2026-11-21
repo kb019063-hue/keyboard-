@@ -227,11 +227,16 @@ which that offline classpath does not have.
 |---|---|---|
 | `Build APK` | `44912140325` | **green** |
 | `Full unit-test suite` | `44912157357` | **red** — 4855 run, 1 failed, 134 skipped in 432 classes; the one failure was P7, not a leak |
+| `Full unit-test suite` (after the P7 fix) | `44913049768` | **green** — **4855 tests, 0 failed, 134 skipped in 432 classes** |
 | `Emulator smoke test` | `44912140379` | **green** |
 
 The failing test was **not** one of mine: all four `UserVocabularyLoggingTest` cases passed, as did
 the other 4850. The single failure was `VerboseLogRatchetTest#unguardedDebugLogCalls_doNotGrow`, on
 the KDoc quoted in P7, and it is fixed in a follow-up commit on this branch.
+
+`4855 / 432` is +4 tests and +1 class over part 5's tip, which is exactly `UserVocabularyLoggingTest`'s
+four cases. `skipped` stayed at **134** — the new class skips nothing, and the 21 class-wide guards
+part 5 counted are unchanged.
 
 ## Checked and found sound
 
