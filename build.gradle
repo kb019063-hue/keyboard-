@@ -950,9 +950,10 @@ tasks.register('runPureTests', JavaExec) {
     // 2026-11-21: the a11y tree builds one node per KEY, from slot zero of the key's symbol list;
     // a key's eight corner symbols get no node, so the accented letters a Spanish layout carries
     // only in corners cannot be typed through TalkBack. Pins the current reach, not a fix.
-    // (No square brackets in this comment: TestRunnerListDriftTest parses this array with a
-    // non-greedy `\[(.*?)]`, so one `]` here would end its capture early and silently unregister
-    // every entry below -- which is exactly what the first version of this comment did.)
+    // Do NOT put square brackets in a comment in this array. TestRunnerListDriftTest captures the
+    // array body non-greedily up to the first closing bracket, so one bracket in prose ends its
+    // capture early and silently unregisters every entry below that point. This comment did
+    // exactly that twice; the drift test now fails loudly if it ever happens again.
     'tribixbite.cleverkeys.a11y.AccessibilitySubkeyReachTest',
     // SuggestionBar rework (WP6-R3) — de-stringified suggestion protocol
     'tribixbite.cleverkeys.SuggestionModelTest',

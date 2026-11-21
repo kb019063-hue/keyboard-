@@ -74,8 +74,13 @@ class AccessibilitySubkeyReachTest {
         assertThat(rects).hasSize(1)
         assertThat(rects.map { it.kv.getString() }).containsExactly("d")
 
-        // Two keys side by side still give exactly two nodes, whatever their corners hold.
-        val pair = listOf(KeyboardData.Row(listOf(dWithAccents, dWithAccents), 1f, 0f))
+        // Two DISTINCT keys side by side still give exactly two nodes. (The two keys must differ:
+        // KeyboardData.Key is a data class, so the same fixture twice is one value, and the walk
+        // produces a single rect for it. My first version of this line used dWithAccents twice
+        // and failed exactly that way -- see V8 in the report for the run that caught it.)
+        val other = key(KeyValue.makeCharKey('f'), KeyValue.makeCharKey('è'), null,
+            KeyValue.makeCharKey('é'), null, null, null, null, null)
+        val pair = listOf(KeyboardData.Row(listOf(dWithAccents, other), 1f, 0f))
         assertThat(KeyboardGeometry.computeAccessibilityKeyRects(pair, params, hostWidth = 200f))
             .hasSize(2)
     }
