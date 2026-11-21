@@ -1109,6 +1109,11 @@ tasks.register('runPureTests', JavaExec) {
     'tribixbite.cleverkeys.personalization.UserVocabularyPersistenceTest',
     // User-configurable learned-vocabulary cap (personalization_max_words, 2026-08-08)
     'tribixbite.cleverkeys.personalization.UserVocabularyCapTest',
+    // 2026-11-21: the vocabulary store logged the evicted WORD (user typing history) on an
+    // ungated Log.d that the source-level log ratchet could not see, because the call site
+    // spells `log(...)` through an injected lambda. Drives the real eviction paths and asserts
+    // no logged line contains a vocabulary word.
+    'tribixbite.cleverkeys.personalization.UserVocabularyLoggingTest',
     // Opt-in next-word prediction (audit 2026-08-06 §4) — pure gating + generation
     'tribixbite.cleverkeys.NextWordPredictorTest',
     // Task A (2026-08-06): MASTER on-device-learning privacy gate — pure gate logic
