@@ -254,8 +254,9 @@ The adapter's internals were the entry point for this pass and needed no change.
 | run | head | suite | APK | smoke |
 |-----|------|-------|-----|-------|
 | 1 | `7d26a6a` | **failed — compile error**: `Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'java.io.File?'` at `GeometricEngineAdapter.kt:725` | failed | failed |
-| 2 | `5be75d7` | **failed** — same class of failure, unrelated surface (job log unreachable from this sandbox; annotations only) | — | failed |
-| 3 | `296c0fa` | **`45060754592` green** — 4884 run, 0 failed, 134 skipped, 438 classes | pass | pass |
+| 2 | `5be75d7` | **failed** — the same `File?` error at the same line, in the commit that also carried A3/A4; a job-log fetch failure is what made it look undiagnosed for a while | — | failed |
+| 3 | `296c0fa` | green — `45060754592`, 4884 run / 0 failed / 134 skipped / 438 classes (an intermediate history: both fixes in one commit) | pass | pass |
+| 4 | `e5146bb` (**final**) | **`45062079295` green** — 4884 run, 0 failed, 134 skipped, 438 classes | `45062073313` pass | `45062073314` pass |
 
 Part 11 ended at 4879 run / 437 classes; this pass adds **5 tests and 1 class** (4884 / 438).
 Skipped stays at **134**, so the skip ratchet is untouched.
@@ -268,11 +269,15 @@ smell, not a typo: while trying to delegate to `langpackRelativePath` I introduc
 `File?` and then left one `.isFile` usage behind. Reverting that delegation (see A2) removed the
 optional entirely, which is the outcome that is both simpler and free of the timing dependency.
 
-Run 2's failure is recorded honestly as **not diagnosed**: `gh api .../jobs/<id>/logs` returns a
-blob-store EOF in this sandbox and the annotations do not name the cause. It was superseded by a
-squash-equivalent replacement commit before the diagnosis was possible, and the same change is green
-in run 3.
+Run 2 was the same error, not a second one — worth recording as a near-miss in diagnosis. The job
+log was unreachable (`gh api .../jobs/<id>/logs` returns a blob-store EOF in this sandbox), so it
+looked like an undiagnosed second failure until `gh run view <id>`'s annotation text turned out to
+carry the compiler line. **`gh run view <id>` shows `e:` annotations; the log API is what fails.**
+That is the difference between "undiagnosed" and "one grep away".
 
-The two commits here were rewritten once (`--force-with-lease`, local-only, branch predates any
-review) because the first split carried the compile error in the middle commit. Order now: A1/A2
-first (`220bdfd`), then A3/A4 (`1c5c8d9`), each independently green-shaped.
+The two fix commits were rewritten once (`--force-with-lease`, local-only) because the first split
+carried the compile error in the middle commit. Final order: A1/A2 (`220bdfd`), then A3/A4
+(`1c5c8d9`), then this document (`e5146bb`). The rewrite was verified twice against the remote —
+the first attempt pushed a stale object rather than `HEAD`, which is noted here because
+`--force-with-lease` reports success for whatever you hand it, not for what you meant to hand it.
+The tree was confirmed identical to the remote afterwards, not just the log.
