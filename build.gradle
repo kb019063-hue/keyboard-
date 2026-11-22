@@ -1025,6 +1025,10 @@ tasks.register('runPureTests', JavaExec) {
     'tribixbite.cleverkeys.swipe.geometric.TemplateGeneratorTest',
     'tribixbite.cleverkeys.swipe.geometric.CandidatePrunerTest',
     'tribixbite.cleverkeys.swipe.geometric.GeoDecoderCoreTest',
+    // 2026-11-21: turn angles (corners, reversals, template corners) must be measured in the
+    // physical frame, not raw normalized u/v. Polyline-level, so it needs no language packs
+    // and never skips.
+    'tribixbite.cleverkeys.swipe.geometric.GeoPhysicalFrameTurnTest',
     // Step-0 SLOPPY prune-recall decomposition (geoFull-gated measurement)
     'tribixbite.cleverkeys.swipe.geometric.GeoSloppyPruneRecallTest',
     // Wave-G OQ-9/10/11 sweep instrument (geoSweep-gated measurement, ARC-027/028/029)

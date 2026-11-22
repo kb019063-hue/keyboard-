@@ -428,7 +428,7 @@ class PathScorer(private val config: GeometricEngineConfig) {
         // entirely for it.
         val gestureCorners = gesture.cornerIndices
         if (gestureCorners.isEmpty()) return 0f
-        val templateCorners = templateCornerIndices(t)
+        val templateCorners = templateCornerIndices(t, layout)
         if (templateCorners.isEmpty()) return 0f
         var matched = 0
         for (tc in templateCorners) {
@@ -447,15 +447,19 @@ class PathScorer(private val config: GeometricEngineConfig) {
      * corner matching is index-proximity-based, so asymmetric edits would silently
      * break the bonus). `internal` for that pin test.
      */
-    internal fun templateCornerIndices(t: FloatArray): IntArray {
+    internal fun templateCornerIndices(t: FloatArray, layout: LayoutGeometry): IntArray {
         if (n < 3) return IntArray(0)
         val thresholdRad = Math.toRadians(config.cornerAngleThresholdDeg.toDouble())
+        val aspect = layout.aspect
         val out = ArrayList<Int>()
         for (i in 1 until n - 1) {
+            // Physical frame (Δv / aspect), matching GesturePreprocessor.detectCorners and
+            // LayoutGeometry.dKw. Normalized u/v is only a physical frame when the key area is
+            // square; see the 2026-11-21 note on detectCorners.
             val ax = t[2 * i] - t[2 * (i - 1)]
-            val ay = t[2 * i + 1] - t[2 * (i - 1) + 1]
+            val ay = (t[2 * i + 1] - t[2 * (i - 1) + 1]) / aspect
             val bx = t[2 * (i + 1)] - t[2 * i]
-            val by = t[2 * (i + 1) + 1] - t[2 * i + 1]
+            val by = (t[2 * (i + 1) + 1] - t[2 * i + 1]) / aspect
             val na = sqrt(ax * ax + ay * ay)
             val nb = sqrt(bx * bx + by * by)
             if (na <= 0f || nb <= 0f) continue

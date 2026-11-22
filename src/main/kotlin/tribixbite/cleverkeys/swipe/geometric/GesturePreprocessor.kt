@@ -75,7 +75,7 @@ class GesturePreprocessor(private val config: GeometricEngineConfig) {
         val resampled = resampleArcLength(norm, n)
 
         // 3) Corners (soft feature).
-        val corners = detectCorners(resampled)
+        val corners = detectCorners(resampled, layout)
 
         // 4) Path length (kw), bbox.
         val pathLenKw = polylineLengthKw(resampled, layout)
@@ -119,7 +119,7 @@ class GesturePreprocessor(private val config: GeometricEngineConfig) {
             endNearest = endNearest,
             startNearestInset = startNearestInset,
             endNearestInset = endNearestInset,
-            reversalCount = countReversals(resampled),
+            reversalCount = countReversals(resampled, layout),
             nonCornerWobbleDeg = nonCornerWobbleDeg(resampled, layout),
         )
     }
@@ -170,17 +170,30 @@ class GesturePreprocessor(private val config: GeometricEngineConfig) {
      * per-decode quality signal for the ranker's confidence temperature; NEVER a
      * filter and never an input to scoring or pruning. Zero-length segments
      * (coincident points) contribute no reversal.
+     *
+     * 2026-11-21 (`geometric/` audit): the angle is now measured in the PHYSICAL
+     * frame (Δv divided by the layout aspect, exactly as [LayoutGeometry.dKw] and
+     * [nonCornerWobbleDeg] already do) instead of in raw normalized (u,v). Raw u/v
+     * is not a physical frame unless the key area is square, so the same physical
+     * hairpin measured differently on every device: at aspect 1.0 a 150° physical
+     * reversal read 150°, but at aspect 2.5 it read 113° and did not count at all.
+     * A 90° physical corner read 90° on a square key area and 57° on a 2.5:1 one.
+     * Because the config default is `reversalAngleThresholdDeg = 150`, the effect
+     * was that real reversals were silently under-counted on ordinary (wide)
+     * keyboards — the signal is a confidence input, so decodes that deserved a
+     * lower temperature kept a high one.
      */
-    internal fun countReversals(poly: FloatArray): Int {
+    internal fun countReversals(poly: FloatArray, layout: LayoutGeometry): Int {
         val count = poly.size / 2
         if (count < 3) return 0
         val thresholdRad = Math.toRadians(config.reversalAngleThresholdDeg.toDouble())
+        val aspect = layout.aspect
         var reversals = 0
         for (i in 1 until count - 1) {
             val ax = poly[2 * i] - poly[2 * (i - 1)]
-            val ay = poly[2 * i + 1] - poly[2 * (i - 1) + 1]
+            val ay = (poly[2 * i + 1] - poly[2 * (i - 1) + 1]) / aspect
             val bx = poly[2 * (i + 1)] - poly[2 * i]
-            val by = poly[2 * (i + 1) + 1] - poly[2 * i + 1]
+            val by = (poly[2 * (i + 1) + 1] - poly[2 * i + 1]) / aspect
             val na = sqrt(ax * ax + ay * ay)
             val nb = sqrt(bx * bx + by * by)
             if (na <= 0f || nb <= 0f) continue // coincident neighbor → no turn
@@ -314,17 +327,27 @@ class GesturePreprocessor(private val config: GeometricEngineConfig) {
      * `(pᵢ − pᵢ₋₁)` and `(pᵢ₊₁ − pᵢ)`; a straight line has 0°, a sharp reversal ~180°.
      * Zero-length segments (coincident points) contribute no corner. This is a SOFT
      * feature (bounded corner-anchor bonus in [PathScorer]) — never a filter.
+     *
+     * 2026-11-21 (`geometric/` audit): measured in the PHYSICAL frame (Δv divided by
+     * the layout aspect), the same convention [LayoutGeometry.dKw] and
+     * [nonCornerWobbleDeg] use, and now the same one [countReversals] uses. The two
+     * detectors sit at 55° and 150° on what the class KDoc calls "the same turn-angle
+     * rule"; measuring that rule in two different frames meant the claim was false.
+     * In raw u/v a physical 55° corner read 42° at aspect 2.5 — below the threshold,
+     * so corners on wide keyboards were under-detected before the corner-anchor bonus
+     * ever saw them.
      */
-    internal fun detectCorners(poly: FloatArray): IntArray {
+    internal fun detectCorners(poly: FloatArray, layout: LayoutGeometry): IntArray {
         val count = poly.size / 2
         if (count < 3) return IntArray(0)
         val thresholdRad = Math.toRadians(config.cornerAngleThresholdDeg.toDouble())
+        val aspect = layout.aspect
         val out = ArrayList<Int>()
         for (i in 1 until count - 1) {
             val ax = poly[2 * i] - poly[2 * (i - 1)]
-            val ay = poly[2 * i + 1] - poly[2 * (i - 1) + 1]
+            val ay = (poly[2 * i + 1] - poly[2 * (i - 1) + 1]) / aspect
             val bx = poly[2 * (i + 1)] - poly[2 * i]
-            val by = poly[2 * (i + 1) + 1] - poly[2 * i + 1]
+            val by = (poly[2 * (i + 1) + 1] - poly[2 * i + 1]) / aspect
             val na = sqrt(ax * ax + ay * ay)
             val nb = sqrt(bx * bx + by * by)
             if (na <= 0f || nb <= 0f) continue // coincident neighbor → no turn

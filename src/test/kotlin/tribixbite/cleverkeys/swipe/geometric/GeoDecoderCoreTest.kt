@@ -485,8 +485,8 @@ class GeoDecoderCoreTest {
         // SAME polyline (corner matching is index-proximity-based — asymmetric edits
         // would silently kill the bonus).
         assertWithMessage("template/gesture corner detectors must agree on the same polyline")
-            .that(scorer.templateCornerIndices(buf).toList())
-            .isEqualTo(preprocessor.detectCorners(buf).toList())
+            .that(scorer.templateCornerIndices(buf, layout).toList())
+            .isEqualTo(preprocessor.detectCorners(buf, layout).toList())
         val bonus = scorer.cornerBonus(gesture, buf, layout)
         assertWithMessage("cornered word's ideal trace must earn a positive corner bonus")
             .that(bonus).isGreaterThan(0f)
@@ -742,16 +742,21 @@ class GeoDecoderCoreTest {
         // 90° L-turn at index 1: a legitimate letter-to-letter corner, NOT a reversal.
         val ell = floatArrayOf(0.1f, 0.2f, 0.5f, 0.2f, 0.5f, 0.6f)
         val straight = floatArrayOf(0.1f, 0.1f, 0.3f, 0.2f, 0.5f, 0.3f, 0.7f, 0.4f)
+        // These three polylines are deliberately frame-INVARIANT: the back-track is purely
+        // horizontal and the L is axis-aligned, so dividing Δv by the aspect cannot move
+        // either angle. That is exactly why they passed while countReversals measured turns in
+        // raw (u,v); the aspect-sensitive case is covered by GeoPhysicalFrameTurnTest.
+        val frameLayout = GeoLayoutFixtures.loadShipped("latn_qwerty_us")
         assertWithMessage("a 180-degree back-track must count exactly one reversal")
-            .that(preprocessor.countReversals(backtrack)).isEqualTo(1)
+            .that(preprocessor.countReversals(backtrack, frameLayout)).isEqualTo(1)
         assertWithMessage("a 90-degree corner is NOT a reversal (150-degree threshold)")
-            .that(preprocessor.countReversals(ell)).isEqualTo(0)
+            .that(preprocessor.countReversals(ell, frameLayout)).isEqualTo(0)
         assertWithMessage("a straight polyline has no reversals")
-            .that(preprocessor.countReversals(straight)).isEqualTo(0)
+            .that(preprocessor.countReversals(straight, frameLayout)).isEqualTo(0)
         // But the same 90° corner IS a corner (55° threshold) — the two detectors
         // deliberately sit at different thresholds on the same turn-angle rule.
         assertWithMessage("the 90-degree corner must still trip the 55-degree corner rule")
-            .that(preprocessor.detectCorners(ell).size).isAtLeast(1)
+            .that(preprocessor.detectCorners(ell, frameLayout).size).isAtLeast(1)
 
         // End-to-end wiring: process() must populate reversalCount from the RESAMPLED
         // polyline it emits (field == recount on gesture.points).
@@ -761,7 +766,7 @@ class GeoDecoderCoreTest {
         )
         val g = preprocessor.process(trace, keyAreaWidthPx, keyAreaHeightPx, layout)
         assertWithMessage("process() must wire reversalCount from the resampled polyline")
-            .that(g.reversalCount).isEqualTo(preprocessor.countReversals(g.points))
+            .that(g.reversalCount).isEqualTo(preprocessor.countReversals(g.points, layout))
     }
 
     @Test
