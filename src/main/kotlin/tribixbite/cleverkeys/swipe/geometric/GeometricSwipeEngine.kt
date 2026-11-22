@@ -119,6 +119,31 @@ class GeometricSwipeEngine(
      * tied at the current worst-admitted score (so a tie never silently drops a word
      * the ranker would have preferred by ordinal). Capacity is a soft floor: ties at
      * the boundary can transiently exceed it; the ranker re-caps to `maxResults`.
+     *
+     * **Known cost of that guarantee** (wave 16, 2026-11-15 — measured, not fixed). Kept
+     * ties are never dropped, so a candidate that finds no vacancy does nothing and the
+     * working set only grows: a group of N candidates sharing the exact worst admitted
+     * float score leaves `size ≈ min(N, survivors)`, re-sorting that whole set on every
+     * subsequent offer (`kthLargest` copies + sorts). Simulated at the production bounds
+     * (`maxCandidatesScored = 1200`, `maxResults` 3..15): the pathological all-ties case
+     * reaches a 1200-element working set and ~7.6M comparison-ops of bookkeeping, versus
+     * ~52k if the set stayed at K — ~146x, on the order of 100 ms on the decode thread for
+     * a single swipe. Every other case stays at K.
+     *
+     * It is NOT a correctness bug and it is deliberately NOT rewritten here. A K-bounded
+     * collector was simulated against this one over 4000 randomized candidate sets
+     * (distinct / small-tie / all-tie / mixed scores) and their ranker output differed in
+     * 75% of trials, because this collector preserves a tie group while a bounded one
+     * keeps whichever members it happened to see. That makes the rewrite a selection
+     * change, not a fix — and per the hunter's own rule for calibrated score paths, a
+     * selection change needs a full-grid accuracy A/B (`GeoAccuracy*` + `GeoAblationTest`
+     * at `-PgeoFull`) before it can ship. A mechanical fix was also not available: an
+     * earlier attempt at "evict the newest tie" was wrong in the other direction, evicting
+     * the best item, which is what the simulation was for.
+     *
+     * The one realizable part of the trigger — duplicate personal-dictionary words landing
+     * in one bucket — is closed at the source instead: see
+     * [GeometricUserWordMerge.merge]'s case-folded dedupe.
      */
     private class TopKScored(private val capacity: Int) {
         private val items = ArrayList<CandidateRanker.Scored>(capacity + 4)

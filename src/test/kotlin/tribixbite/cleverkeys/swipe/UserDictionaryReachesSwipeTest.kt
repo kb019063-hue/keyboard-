@@ -232,6 +232,27 @@ class UserDictionaryReachesSwipeTest {
     }
 
     @Test
+    fun aCaseVariantOfOneUserWordIsMergedOnce() {
+        // `mergeWithCustom` de-dupes case-insensitively, so the production list is already
+        // clean — but `GeometricUserWordMerge` is a public pure API and its own match rule is
+        // case-folded, which made "two entries that are one word here" representable. Both
+        // copies got the SAME template (LayoutProjection maps them to the same key-id
+        // sequence), so the second was a pure duplicate inside one extremity bucket: scored
+        // twice, never ranked better, and able to disagree with the first about its
+        // swipe-priority bonus, because `bonusByWord` is keyed by the word as listed.
+        val base = ArrayBackedDictionary("en", 1L, arrayOf("the", "keyboard"))
+        val userWords = listOf("zeta" to 500, "Zeta" to 900)
+
+        val merged = GeometricUserWordMerge.merge(base, userWords, emptySet(), "en", 1L)
+        val words = (0 until merged.size).map { merged.word(it) }
+
+        assertWithMessage("one word, one ordinal — the higher-frequency spelling is kept")
+            .that(words).containsExactly("Zeta", "the", "keyboard").inOrder()
+        assertWithMessage("and it keeps the BEST frequency's rank, i.e. first position")
+            .that(words.first()).isEqualTo("Zeta")
+    }
+
+    @Test
     fun aProviderChangeChangesTheLexiconMemoVersion() {
         val before = UserDictionarySnapshot.of(listOf("kubernetes" to 40))
         val added = UserDictionarySnapshot.of(listOf("kubernetes" to 40, "istio" to 40))
