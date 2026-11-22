@@ -1490,6 +1490,7 @@ tasks.register('runMockTests', JavaExec) {
     // Swipe-correction resolution, Feature B: the collector reports the stored row's trace id
     // and SwipeMLDataStore.relabelRow rewrites that row (mocked SQLite).
     'tribixbite.cleverkeys.ml.SwipeMLRelabelStoreTest',
+    'tribixbite.cleverkeys.ml.SwipeMLExportStatisticsTest',
     // Swipe-correction resolution, Feature A+B end to end through the real SuggestionHandler:
     // bar-replace / undo+retype recording, changed-mind + cursor-moved filtering, the three
     // gates, the offer at 2 corrections, accept -> personal dictionary, decline remembered,
