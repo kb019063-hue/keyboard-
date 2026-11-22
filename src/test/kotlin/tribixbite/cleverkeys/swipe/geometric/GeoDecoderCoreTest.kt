@@ -485,8 +485,8 @@ class GeoDecoderCoreTest {
         // SAME polyline (corner matching is index-proximity-based — asymmetric edits
         // would silently kill the bonus).
         assertWithMessage("template/gesture corner detectors must agree on the same polyline")
-            .that(scorer.templateCornerIndices(buf, layout).toList())
-            .isEqualTo(preprocessor.detectCorners(buf, layout).toList())
+            .that(scorer.templateCornerIndices(buf).toList())
+            .isEqualTo(preprocessor.detectCorners(buf).toList())
         val bonus = scorer.cornerBonus(gesture, buf, layout)
         assertWithMessage("cornered word's ideal trace must earn a positive corner bonus")
             .that(bonus).isGreaterThan(0f)
@@ -756,7 +756,7 @@ class GeoDecoderCoreTest {
         // But the same 90° corner IS a corner (55° threshold) — the two detectors
         // deliberately sit at different thresholds on the same turn-angle rule.
         assertWithMessage("the 90-degree corner must still trip the 55-degree corner rule")
-            .that(preprocessor.detectCorners(ell, frameLayout).size).isAtLeast(1)
+            .that(preprocessor.detectCorners(ell).size).isAtLeast(1)
 
         // End-to-end wiring: process() must populate reversalCount from the RESAMPLED
         // polyline it emits (field == recount on gesture.points).

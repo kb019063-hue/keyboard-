@@ -428,7 +428,7 @@ class PathScorer(private val config: GeometricEngineConfig) {
         // entirely for it.
         val gestureCorners = gesture.cornerIndices
         if (gestureCorners.isEmpty()) return 0f
-        val templateCorners = templateCornerIndices(t, layout)
+        val templateCorners = templateCornerIndices(t)
         if (templateCorners.isEmpty()) return 0f
         var matched = 0
         for (tc in templateCorners) {
@@ -447,19 +447,24 @@ class PathScorer(private val config: GeometricEngineConfig) {
      * corner matching is index-proximity-based, so asymmetric edits would silently
      * break the bonus). `internal` for that pin test.
      */
-    internal fun templateCornerIndices(t: FloatArray, layout: LayoutGeometry): IntArray {
-        if (n < 3) return IntArray(0)
+    internal fun templateCornerIndices(t: FloatArray): IntArray {
+        // Bounded by the BUFFER, not by config.resamplePoints. They are equal on the production
+        // path, where t is a template this scorer resampled itself, but keying the loop off `n`
+        // made the function throw AIOOBE for any shorter caller — which is how the
+        // template/gesture pin test caught the 2026-11-21 frame fix.
+        val count = t.size / 2
+        if (count < 3) return IntArray(0)
         val thresholdRad = Math.toRadians(config.cornerAngleThresholdDeg.toDouble())
-        val aspect = layout.aspect
         val out = ArrayList<Int>()
-        for (i in 1 until n - 1) {
-            // Physical frame (Δv / aspect), matching GesturePreprocessor.detectCorners and
-            // LayoutGeometry.dKw. Normalized u/v is only a physical frame when the key area is
-            // square; see the 2026-11-21 note on detectCorners.
+        for (i in 1 until count - 1) {
+            // Raw normalized frame, kept in lockstep with GesturePreprocessor.detectCorners —
+            // which also stays in raw u/v for now, because moving it moves live ranking. See the
+            // 2026-11-21 note there; the two are pinned to each other in INDEX space by
+            // GeoDecoderCoreTest, so neither may drift on its own.
             val ax = t[2 * i] - t[2 * (i - 1)]
-            val ay = (t[2 * i + 1] - t[2 * (i - 1) + 1]) / aspect
+            val ay = t[2 * i + 1] - t[2 * (i - 1) + 1]
             val bx = t[2 * (i + 1)] - t[2 * i]
-            val by = (t[2 * (i + 1) + 1] - t[2 * i + 1]) / aspect
+            val by = t[2 * (i + 1) + 1] - t[2 * i + 1]
             val na = sqrt(ax * ax + ay * ay)
             val nb = sqrt(bx * bx + by * by)
             if (na <= 0f || nb <= 0f) continue

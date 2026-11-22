@@ -75,7 +75,7 @@ class GesturePreprocessor(private val config: GeometricEngineConfig) {
         val resampled = resampleArcLength(norm, n)
 
         // 3) Corners (soft feature).
-        val corners = detectCorners(resampled, layout)
+        val corners = detectCorners(resampled)
 
         // 4) Path length (kw), bbox.
         val pathLenKw = polylineLengthKw(resampled, layout)
@@ -328,26 +328,31 @@ class GesturePreprocessor(private val config: GeometricEngineConfig) {
      * Zero-length segments (coincident points) contribute no corner. This is a SOFT
      * feature (bounded corner-anchor bonus in [PathScorer]) — never a filter.
      *
-     * 2026-11-21 (`geometric/` audit): measured in the PHYSICAL frame (Δv divided by
-     * the layout aspect), the same convention [LayoutGeometry.dKw] and
-     * [nonCornerWobbleDeg] use, and now the same one [countReversals] uses. The two
-     * detectors sit at 55° and 150° on what the class KDoc calls "the same turn-angle
-     * rule"; measuring that rule in two different frames meant the claim was false.
-     * In raw u/v a physical 55° corner read 42° at aspect 2.5 — below the threshold,
-     * so corners on wide keyboards were under-detected before the corner-anchor bonus
-     * ever saw them.
+     * 2026-11-21 (`geometric/` audit) — REPORTED, DELIBERATELY NOT CHANGED. Unlike
+     * [countReversals], which now measures this same rule in the physical frame, this
+     * function still works in raw normalized (u,v), and that is not a physical frame unless
+     * the key area is square: a physical 55° corner reads 42° at aspect 2.5, so corners on
+     * ordinary wide keyboards are under-detected. Fixing it here was attempted and REVERTED:
+     * unlike the reversal count — which feeds nothing at the default
+     * `reversalConfidenceTempSlope = 0` — this feeds [PathScorer.cornerBonus] and therefore
+     * live ranking, and moving it measurably moved TYPICAL top-1 on the synthetic grid, enough
+     * to break `GeoAblationTest.cornerAnchorBonus_keeping_doesNotRegress`. Changing a scoring
+     * channel needs a measured A/B against the accuracy floors, not a plausible argument.
+     *
+     * The frame difference against [countReversals] is therefore real and deliberate until
+     * that A/B is run; the class KDoc's "same turn-angle rule" claim holds for the RULE (an
+     * acos over consecutive segment vectors) and not, for now, for the frame.
      */
-    internal fun detectCorners(poly: FloatArray, layout: LayoutGeometry): IntArray {
+    internal fun detectCorners(poly: FloatArray): IntArray {
         val count = poly.size / 2
         if (count < 3) return IntArray(0)
         val thresholdRad = Math.toRadians(config.cornerAngleThresholdDeg.toDouble())
-        val aspect = layout.aspect
         val out = ArrayList<Int>()
         for (i in 1 until count - 1) {
             val ax = poly[2 * i] - poly[2 * (i - 1)]
-            val ay = (poly[2 * i + 1] - poly[2 * (i - 1) + 1]) / aspect
+            val ay = poly[2 * i + 1] - poly[2 * (i - 1) + 1]
             val bx = poly[2 * (i + 1)] - poly[2 * i]
-            val by = (poly[2 * (i + 1) + 1] - poly[2 * i + 1]) / aspect
+            val by = poly[2 * (i + 1) + 1] - poly[2 * i + 1]
             val na = sqrt(ax * ax + ay * ay)
             val nb = sqrt(bx * bx + by * by)
             if (na <= 0f || nb <= 0f) continue // coincident neighbor → no turn
