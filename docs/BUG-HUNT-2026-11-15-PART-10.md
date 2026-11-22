@@ -243,4 +243,19 @@ should not assume this method does something.
 
 ## CI
 
-Filled in below after the run.
+| run | head | suite | APK | smoke |
+|-----|------|-------|-----|-------|
+| 1 | `83ebff9` | **`45040796764` green** — 4874 run, 0 failed, 134 skipped, 436 classes | `45040792821` pass | `45040792828` pass |
+
+Green on the first push, which is the first time in four waves. Wave 12 ended at 4870 run / 435
+classes; this pass adds **4 tests and 1 class** (4874 / 436). Skipped stays at 134, so the skip
+ratchet is untouched.
+
+The `statisticsJson` assertions were modelled in `python3` against the exact builder output before
+being written, including the full document parse — part 9 and part 8 both lost a build to an
+assertion whose *numbers* were right and whose *matcher or fixture* was not.
+
+`VerboseLogRatchetTest`'s ceiling is unchanged at 242 and the tree still counts exactly 242
+unguarded `Log.d/i/v` calls: the one `Log.d` added in `deleteEntry` sits inside
+`if (BuildConfig.ENABLE_VERBOSE_LOGGING)`, and the `Log.e` calls in the same method are not counted
+(the ratchet regex is `Log\.[div]\(`).
