@@ -3,6 +3,8 @@ package tribixbite.cleverkeys.ui.settings.io
 import android.net.Uri
 import android.widget.Toast
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import tribixbite.cleverkeys.R
 import tribixbite.cleverkeys.SwipePerformanceStats
@@ -38,20 +40,30 @@ internal fun SettingsActivity.loadCollectedDataPage() {
         try {
             val dataStore = tribixbite.cleverkeys.ml.SwipeMLDataStore.getInstance(_self)
             val offset = collectedDataCurrentPage * collectedDataPageSize
+            val query = collectedDataSearchQuery
+            val needStats = collectedDataStats == null
 
-            // Get total count for pagination
-            collectedDataTotalCount = dataStore.countSearchResults(collectedDataSearchQuery)
-
-            // Load page data
-            collectedDataList = if (collectedDataSearchQuery.isEmpty()) {
-                dataStore.loadPaginatedData(collectedDataPageSize, offset)
-            } else {
-                dataStore.searchByWord(collectedDataSearchQuery, collectedDataPageSize, offset)
+            // 2026-11-21 (ml/ audit): the reads below ran on the main thread - lifecycleScope
+            // dispatches on Dispatchers.Main.immediate - and none of them is small.
+            // getStatistics() alone makes three separate passes over the whole table
+            // (COUNT(*), GROUP BY source, COUNT(DISTINCT target_word)), and a page is 20 rows of
+            // JSON parsed into SwipeMLData objects with their full trace-point lists. Wrapped so
+            // the handler only touches the collectedData* fields back on the main thread.
+            val loaded = withContext(Dispatchers.IO) {
+                Triple(
+                    dataStore.countSearchResults(query),
+                    if (query.isEmpty()) {
+                        dataStore.loadPaginatedData(collectedDataPageSize, offset)
+                    } else {
+                        dataStore.searchByWord(query, collectedDataPageSize, offset)
+                    },
+                    if (needStats) dataStore.getStatistics() else null,
+                )
             }
-
-            // Update stats (only on first load)
-            if (collectedDataStats == null) {
-                collectedDataStats = dataStore.getStatistics()
+            collectedDataTotalCount = loaded.first
+            collectedDataList = loaded.second
+            if (needStats) {
+                collectedDataStats = loaded.third
             }
         } catch (e: Exception) {
             android.util.Log.w(SettingsActivity.TAG, "Loading collected swipe data failed", e)
@@ -112,7 +124,8 @@ internal fun SettingsActivity.deleteCollectedData(onDeleted: () -> Unit = {}) {
             lifecycleScope.launch {
                 try {
                     val dataStore = tribixbite.cleverkeys.ml.SwipeMLDataStore.getInstance(_self)
-                    dataStore.clearAllData()
+                    // 2026-11-21 (ml/ audit): DELETE over the whole table, off the main thread.
+                    withContext(Dispatchers.IO) { dataStore.clearAllData() }
                     Toast.makeText(
                         _self, R.string.privacy_delete_data_done, Toast.LENGTH_SHORT
                     ).show()
