@@ -618,17 +618,24 @@ class GeometricEngineAdapter(
     // ═══════════════════════════ Dictionary conversion ═══════════════════════════
 
     private fun dictionaryFor(language: String): DictMemo? {
-        // TODO: this is the THIRD language-normalization in the swipe package and the only
-        // one that does not strip a region subtag — `CtcLanguageSupport.normalize` and
-        // `SwipeContractionPolicy.baseSubtag` (which delegates to it) both cut at `-`/`_`.
-        // A region-bearing tag would therefore key this path's custom/disabled words to
-        // `custom_words_fr-ca` while the CTC path uses `custom_words_fr`, silently splitting
-        // one user's personal dictionary across two engines. Latent today, NOT a live bug:
-        // every producer feeds a bare code (`Locale.getDefault().language`, and the
-        // `pref_primary_language*` settings lists), and `DictionaryManager.setLanguage`
-        // stores what it is given without normalizing. Fix by normalizing here too if a
-        // region-bearing tag ever becomes reachable — do not add a fourth copy.
-        val lang = language.lowercase(Locale.ROOT)
+        // Region subtags are stripped, matching `CtcLanguageSupport.normalize` — the function
+        // `SwipeContractionPolicy.baseSubtag` also delegates to — so the two engines resolve one
+        // personal dictionary to one set of preference keys.
+        //
+        // This used to be `language.lowercase(Locale.ROOT)` under a TODO that called a
+        // region-bearing tag "latent today, NOT a live bug: every producer feeds a bare code".
+        // That premise was wrong: `LayoutLanguageBinding.VALID_CODE` deliberately accepts region
+        // segments (`^[a-z]{2,3}(?:[_-][a-z0-9]{1,16}){0,4}$`, "so every installable language can
+        // be bound"), a layout's `language` attribute is normalized through it, and
+        // `LayoutLanguageBinding.resolve` hands a bound layout's code straight through as
+        // `primary_language` — which `InputCoordinator` passes here verbatim. So binding a layout
+        // to `fr-CA` gave this adapter `custom_words_fr-ca` while CTC used `custom_words_fr`:
+        // a word added on one engine was invisible on the other, for the same finger and the same
+        // keyboard, depending only on which engine the router picked.
+        //
+        // This governs the preference keys ONLY; the lexicon lookup below goes through CTC's own
+        // resolution and keeps whatever tag that resolution is keyed on.
+        val lang = CtcLanguageSupport.normalize(language)
         val prefs = DirectBootAwarePreferences.get_shared_preferences(context)
         val customJson = prefs.getString(LanguagePreferenceKeys.customWordsKey(lang), "{}") ?: "{}"
         val disabled = prefs.getStringSet(LanguagePreferenceKeys.disabledWordsKey(lang), emptySet())
@@ -641,6 +648,18 @@ class GeometricEngineAdapter(
         // builds) and folded into the version below.
         val userDictionary = userDictionarySource(lang)
 
+        // The pack directory uses the SAME base subtag as the preference keys above, which is
+        // also the code `CtcLanguageSupport.langpackRelativePath` resolves for CTC — one tag, one
+        // answer, both engines. Deliberately composed here rather than asked of that function:
+        // the function's answer is gated on CTC's pack-measurement resolver, so on the first swipe
+        // after a pack import it can still report "no pack" and would silently drop this engine to
+        // the bundled asset. A `stat` has no such timing dependency, which matches how this path
+        // behaved before.
+        //
+        // A pack installed under a region code (`langpacks/fr-ca/`, which the importer permits)
+        // is therefore not read by either engine — see the wave-15 report, which records it as an
+        // improvement rather than fixing it here: making it reachable needs the eligibility
+        // resolver, the verdict cache and the λ preset lookup to agree on a region key first.
         val langpackFile = File(context.filesDir, "langpacks/$lang/dictionary.bin")
         val sourceId = if (langpackFile.isFile) {
             "langpack:${langpackFile.path}:${langpackFile.length()}:${langpackFile.lastModified()}"
@@ -663,6 +682,9 @@ class GeometricEngineAdapter(
             if (langpackFile.isFile) {
                 langpackFile.inputStream().use { CkdtDictionaryReader.read(it, lang, version) }
             } else {
+                // Bundled dictionaries are named by bare script only — no asset carries a region
+                // subtag — so a region binding falls back to its base subtag's lexicon instead of
+                // failing the decode outright.
                 context.assets.open("dictionaries/${lang}_enhanced.bin")
                     .use { CkdtDictionaryReader.read(it, lang, version) }
             }

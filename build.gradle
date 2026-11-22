@@ -1083,6 +1083,12 @@ tasks.register('runPureTests', JavaExec) {
     // F6: contraction ranking through the REAL beam on the REAL fr assets — proves a
     // floor-injected alias key can actually SURFACE, and that it never displaces a real word.
     'tribixbite.cleverkeys.swipe.ctc.CtcContractionRankingTest',
+    // Wave 15 (2026-11-15): a region-bearing language tag has three destinations and they are
+    // answered by three name spaces — pref keys (base subtag, shared with CTC), the pack
+    // directory (full tag, `langpacks/fr-ca/`), and the bundled asset (base subtag). The bug was
+    // the geometric adapter keying prefs on the raw tag while CTC normalized, so one user's
+    // personal dictionary split across two engines for the same finger and keyboard.
+    'tribixbite.cleverkeys.swipe.LanguageTagResolutionTest',
     // Per-language CTC enablement (fr/de/es, 2026-08-16): the λ-by-lexicon-scale preset
     // table (docs/eval/2026-08-15-ctc-per-language-lambda.md) + the CKDT→a-z projection
     // and accent-display map, verified against the REAL bundled dictionaries.
