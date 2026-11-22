@@ -559,6 +559,10 @@ class LanguagePackManager(
     /**
      * Get contractions file path for a language code.
      * Returns null if not available.
+     *
+     * Pass `ContractionManager.packCode(language)`, not a raw language tag: contraction data is
+     * per-SCRIPT, so a `fr-CA` binding must read `fr`'s pack. Callers normalize before calling
+     * here because [getDictionaryPath] deliberately does NOT — a dictionary may be per-region.
      */
     fun getContractionsPath(code: String): File? {
         val contractionsFile = File(packsRoot(), "$code/$CONTRACTIONS_FILE")

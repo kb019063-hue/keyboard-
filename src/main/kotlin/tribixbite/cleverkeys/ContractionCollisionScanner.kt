@@ -159,12 +159,12 @@ object ContractionCollisionScanner {
         // Mirrors ContractionManager.loadLanguageContractions: a pack that supplies its own
         // contractions file wins OUTRIGHT and the bundled file for that language is skipped.
         // Scanning both would report collisions for mappings the runtime never loads.
-        packs.getContractionsPath(lang)?.let { file ->
+        packs.getContractionsPath(ContractionManager.packCode(lang))?.let { file ->
             runCatching { return parseMappings(file.readText()) }
                 .onFailure { Log.w(TAG, "unreadable pack contractions for $lang: ${it.message}") }
         }
         val bundled = runCatching {
-            parseMappings(context.assets.open("dictionaries/contractions_$lang.json")
+            parseMappings(context.assets.open(ContractionManager.bundledContractionsAsset(lang))
                 .bufferedReader().use { it.readText() })
         }.getOrElse { emptyMap() }
         if (lang != SwipeContractionPolicy.ENGLISH) return bundled
