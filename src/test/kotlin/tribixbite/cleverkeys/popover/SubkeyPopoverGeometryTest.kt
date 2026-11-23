@@ -87,11 +87,13 @@ class SubkeyPopoverGeometryTest {
     /**
      * A finger inside a cell's drawn square, but off its centre, can select a NEIGHBOUR.
      *
-     * Measured on a 100 × 150 px cell at the shipped 60 % neutral default: 20.7 px inside the
-     * drawn N cell (41 % of the way to its centre) the selection is NE, not N. That is inherent
-     * to the design — the slot is a 45° SECTOR from the grid centre while the cell is a SQUARE
-     * on screen, and a wedge cannot contain a square. Worst penetration per cell is 41 % for the
-     * four cardinals (their square's corners stick out furthest) and 17 % for the diagonals.
+     * Measured on a 100 × 150 px cell at the shipped 60 % neutral default: the sector's boundary
+     * sits 30 px left of the drawn N cell's centre, so a finger 35-45 px left of centre — well
+     * inside the drawn cell, which spans ±50 px — selects NW, not N. That is inherent to the
+     * design: the slot is a 45° SECTOR from the grid centre while the cell is a SQUARE on screen,
+     * and a wedge cannot contain a square. How far in the error reaches, per cell: 0.383 cells
+     * from the grid centre for the four cardinals (46 % of the way in from the square's corner)
+     * and 0.541 cells (23 %) for the diagonals.
      *
      * Pinned, not fixed: closing it means changing the rule from "sector" to "nearest drawn
      * cell", which changes the selection of every swipe in the corners. The module's own doc
@@ -101,10 +103,10 @@ class SubkeyPopoverGeometryTest {
      */
     @Test
     fun aFingerInsideTheDrawnNCellsLeftSide_selectsItsNeighbour() {
-        // Inside the drawn N cell (|dx| < 50, |dy + 150| < 75) but 20 px left of its centre.
+        // Inside the drawn N cell (|dx| < 50, |dy + 150| < 75) but 45-55 px left of its centre.
         assertEquals(SwipeDirection.NW, slot(-55f, -150f))
         assertEquals(SwipeDirection.NW, slot(-45f, -150f))
-        // Comfortably off-centre but still N: the boundary sits at 30 px for this cell shape.
+        // Comfortably off-centre but still N: the sector boundary sits at 30 px for this shape.
         assertEquals(SwipeDirection.N, slot(-35f, -150f))
         assertEquals(SwipeDirection.N, slot(0f, -150f))
     }
