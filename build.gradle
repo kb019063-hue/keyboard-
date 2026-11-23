@@ -1057,6 +1057,12 @@ tasks.register('runPureTests', JavaExec) {
     'tribixbite.cleverkeys.swipe.geometric.GeoDoubleLetterTest',
     'tribixbite.cleverkeys.swipe.geometric.GeoShortWordTest',
     'tribixbite.cleverkeys.swipe.geometric.GeoAblationTest',
+    // Wave 17 (2026-11-15): the NFR-2 memory accounting in arithmetic form. TemplateCache's
+    // KDoc claimed "~2.3 MB/index" while the formula it derives from answers ~1.2 MiB at the
+    // shipped 98,140 words. Neither existing memory assertion could catch that: one is in a
+    // class this fork skips wholesale, the other only checks a total is UNDER the bar. Its own
+    // first version also caught a wrong per-word figure in the prose, which is the point.
+    'tribixbite.cleverkeys.swipe.geometric.GeoMemoryAccountingTest',
     'tribixbite.cleverkeys.swipe.geometric.GeoBenchmarkTest',
     // FUTO-style CTC swipe module (wired as the `ctc` engine mode, G5) — pure JVM
     // golden-trace parity vs the Python port (scripts/futo_decoder_{eval,ceiling}.py)
