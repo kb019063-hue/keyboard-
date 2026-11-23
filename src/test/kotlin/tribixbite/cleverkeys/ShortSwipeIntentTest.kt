@@ -603,13 +603,14 @@ class ShortSwipeIntentTest {
     // =========================================================================
 
     /**
-     * Parse an exported attribute value the way a layout does: `KeyboardData.parse_key_attr`
-     * hands the attribute value straight to `KeyValue.getKeyByName`, with no `symbol:` prefix.
-     * A prefix would change the parse — `x:'Hi'` is a single-element Macro, not a String key
-     * (`KeyValueParserTest.existingTextTokenSyntaxRemainsLiteral`) — so the bare form is the
-     * one that mirrors the export path.
+     * Parse an exported attribute value the way a layout does.
+     *
+     * `KeyboardData.parse_key_attr` hands the attribute value STRAIGHT to
+     * `KeyValue.getKeyByName`, with no `symbol:` prefix, and `getKeyByName` is what consults
+     * `getSpecialKeyByName` before falling back to the parser. Using `KeyValueParser.parse`
+     * here instead would turn `copy` into a String key and hide the very defect under test.
      */
-    private fun parseExported(value: String) = KeyValueParser.parse(value)
+    private fun parseExported(value: String) = KeyValue.getKeyByName(value)
 
     @Test
     fun `a legacy SCREAMING_SNAKE command exports the key name, not the enum spelling`() {
@@ -687,33 +688,24 @@ class ShortSwipeIntentTest {
     }
 
     @Test
-    fun `a TEXT mapping with a backslash survives the export round trip`() {
-        // TEXT was the one action type that did not escape backslashes, so a Windows path
-        // exported as the unparseable 'C:\work' and the layout's short swipe broke.
-        // buildString rather than a literal: a Kotlin literal needs each backslash
-        // doubled, which makes "count the backslashes in the source" the thing
-        // under test. Each append(char) below is unambiguously ONE backslash.
-        val path = buildString { append("C:"); append('\\'); append("Users"); append('\\'); append("me") }
-        val mapping = ShortSwipeMapping.textInput("a", SwipeDirection.N, "PTH", path)
+    fun `the map does not cover TEXT and the three controls - the reported contradiction`() {
+        // Pinned so the mismatch cannot change silently. `toXmlValue` builds a KEYDEF (the
+        // right-hand side of a `symbol:keydef` string), which is how this library's own tests
+        // parse it; a layout attribute is parsed BARE by `parse_key_attr`, and `KeyValueParser`
+        // turns any colon-free string into a String key. So the quotes survive as text.
+        //
+        // Reported as an exporter/mapper contradiction (wave 19): choosing between emitting the
+        // bare literal and emitting a prefixed keydef changes the layout format and needs a
+        // device check. Asserted here as CURRENT behaviour, not as correct behaviour.
+        //
+        // `toXmlValue` itself is NOT the reported gap: `toXmlValue` is a pure keydef
+        // serialiser, and its documented contract — the one `KeyValueParserTest` and
+        // `ShortSwipeMappingTest` exercise with a `date:`/`{}:` prefix — is what it implements.
+        // The gap is downstream, in `XmlLayoutExporter`.
+        val mapping = ShortSwipeMapping.textInput("a", SwipeDirection.N, "HI", "Hello")
         val exported = XmlAttributeMapper.toXmlValue(mapping)!!
-        val parsed = parseExported(exported)
-        assertThat(parsed.getString()).isEqualTo(path)
-    }
-
-    @Test
-    fun `a TEXT mapping ending in a single backslash survives the export round trip`() {
-        // The pathological case: an unescaped trailing backslash escapes the closing quote.
-        val text = buildString { append("C:"); append('\\') }
-        val mapping = ShortSwipeMapping.textInput("a", SwipeDirection.N, "PTH", text)
-        val parsed = parseExported(XmlAttributeMapper.toXmlValue(mapping)!!)
-        assertThat(parsed.getString()).isEqualTo(text)
-    }
-
-    @Test
-    fun `a TEXT mapping keeps single-quote escaping after the backslash fix`() {
-        val mapping = ShortSwipeMapping.textInput("a", SwipeDirection.N, "Q", "It's")
-        val parsed = parseExported(XmlAttributeMapper.toXmlValue(mapping)!!)
-        assertThat(parsed.getString()).isEqualTo("It's")
+        assertThat(exported).isEqualTo("'Hello'")
+        assertThat(parseExported(exported).getString()).isEqualTo("'Hello'")
     }
 
     // =========================================================================

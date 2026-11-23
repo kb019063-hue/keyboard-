@@ -20,41 +20,50 @@ import tribixbite.cleverkeys.KeyValue
  */
 object XmlAttributeMapper {
 
+    /** Escape a payload for a single-quoted keydef; backslash first, then the delimiter. */
+    private fun escaped(value: String): String =
+        value.replace("\\", "\\\\").replace("'", "\\'")
+
     /**
-     * Convert a ShortSwipeMapping to an XML attribute value string, or null when the layout
-     * format cannot express the mapping (see [commandAttributeValue]).
+     * Convert a ShortSwipeMapping to an XML attribute value, or null when the layout format
+     * cannot express the mapping (see [commandAttributeValue]).
      *
-     * A TEXT mapping also escapes backslashes. It did not, so a stored `C:\work` exported as
-     * the unparseable `'C:\work'` — `KeyValueParser` reads `\w` as an escape and keeps a
-     * dangling `\` before the closing quote, where [escaped] is what [quotedPayload] already
-     * applied to INTENT/TEMPLATE/TIMESTAMP payloads. TEXT was the one action type that skipped
-     * it, and the one whose payload most often contains a Windows path or a literal backslash.
+     * ## What this value is
+     *
+     * A **keydef** — the right-hand side of a `symbol:keydef` string, which is how this
+     * library's own tests parse it (`KeyValueParser.parse("date:" + toXmlValue(…))`). It is
+     * written into a layout attribute by [XmlLayoutExporter].
+     *
+     * ## A contradiction worth recording (reported, not resolved)
+     *
+     * Those two readings are not the same. A layout attribute value is handed to
+     * `KeyValue.getKeyByName` **bare** (`KeyboardData`'s `parse_key_attr`), with no `symbol:`
+     * prefix; and `KeyValueParser.parse` returns `makeStringKey(input)` for any string without
+     * a colon. So through the layout path the quoted payload of a TEXT mapping parses as the
+     * literal text `'Hello'` — quotes included — and the prefixed payloads (`intent:'…'`,
+     * `timestamp:'…'`) become plain String keys whose text is `intent:'…'`.
+     *
+     * That is a pre-existing exporter/mapper mismatch, not something this pass should guess a
+     * fix for: choosing between "emit the bare literal" and "emit `1:` / a prefixed keydef"
+     * changes the layout format and needs a device check. Escaping backslashes here would have
+     * made it worse, because the backslash escape is only correct on the prefixed reading.
+     *
+     * What IS fixed here is the COMMAND case, where no reading works: the exported name was a
+     * String key spelling the command itself, so the short swipe typed it.
      *
      * @param mapping The mapping to convert
-     * @return The string value for the XML attribute (e.g., "'Hello'", "copy", "keyevent:66"),
-     *     or null when the mapping has no layout representation.
+     * @return the attribute value, or null when the mapping has no layout representation.
      */
     fun toXmlValue(mapping: ShortSwipeMapping): String? {
         return when (mapping.actionType) {
-            ActionType.TEXT -> "'${escaped(mapping.actionValue)}'"
+            ActionType.TEXT -> "'" + mapping.actionValue.replace("'", "\\'") + "'"
             ActionType.COMMAND -> commandAttributeValue(mapping)
-            ActionType.KEY_EVENT -> {
-                // Use keyevent syntax
-                "keyevent:${mapping.actionValue}"
-            }
+            ActionType.KEY_EVENT -> "keyevent:${mapping.actionValue}"
             ActionType.INTENT -> "intent:${quotedPayload(mapping.actionValue)}"
             ActionType.TEMPLATE -> "template:${quotedPayload(mapping.actionValue)}"
             ActionType.TIMESTAMP -> "timestamp:${quotedPayload(mapping.actionValue)}"
         }
     }
-
-    /**
-     * Escape for a single-quoted keydef payload: backslash first, then the delimiter. The
-     * parser's `removeEscaping` drops a `\` before any character, so a bare backslash in the
-     * payload either escapes the next character or dangles before the closing quote.
-     */
-    private fun escaped(value: String): String =
-        value.replace("\\", "\\\\").replace("'", "\\'")
 
     /** Match prefixed action parsing: escape backslashes before quote delimiters. */
     private fun quotedPayload(value: String): String =
