@@ -51,8 +51,12 @@ object XmlLayoutExporter {
                 // Apply mappings
                 for (mapping in keyMappings) {
                     val attrName = dirToAttribute(mapping.direction)
-                    val attrValue = XmlAttributeMapper.toXmlValue(mapping)
-                    
+                    // A mapping the layout format cannot express is skipped: writing a value
+                    // that parses to a String key would make the short swipe TYPE the command's
+                    // name (see XmlAttributeMapper.commandAttributeValue), and an existing
+                    // attribute on the key is left as the layout had it.
+                    val attrValue = XmlAttributeMapper.toXmlValue(mapping) ?: continue
+
                     // Set the attribute (overwriting existing if present)
                     keyElement.setAttribute(attrName, attrValue)
                     

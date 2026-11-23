@@ -282,7 +282,7 @@ class ShortSwipeMappingTest {
             displayText = "TS",
             pattern = "yyyy-MM-dd"
         )
-        val xml = XmlAttributeMapper.toXmlValue(mapping)
+        val xml = XmlAttributeMapper.toXmlValue(mapping)!!
         assertThat(xml).isEqualTo("timestamp:'yyyy-MM-dd'")
     }
 
@@ -296,7 +296,7 @@ class ShortSwipeMappingTest {
             displayText = "TS",
             pattern = "yyyy''"
         )
-        val xml = XmlAttributeMapper.toXmlValue(mapping)
+        val xml = XmlAttributeMapper.toXmlValue(mapping)!!
         assertThat(xml).startsWith("timestamp:'")
         assertThat(xml).endsWith("'")
         // The two literal apostrophes in the SDF pattern are escaped to backslash-apostrophe
