@@ -1062,6 +1062,11 @@ tasks.register('runPureTests', JavaExec) {
     // shipped 98,140 words. Neither existing memory assertion could catch that: one is in a
     // class this fork skips wholesale, the other only checks a total is UNDER the bar. Its own
     // first version also caught a wrong per-word figure in the prose, which is the point.
+    // Wave 18 (2026-11-15): shapeDistance derives its scale from the bbox longest side in RAW
+    // normalized (u,v), so a vertical stroke's scale is overstated by the aspect — a physical
+    // deviation on a vertical word is charged aspect^2 less than the same deviation on a
+    // horizontal one. Pinned as-is: changing it moves a calibrated score channel.
+    'tribixbite.cleverkeys.swipe.geometric.GeoShapeFrameTest',
     'tribixbite.cleverkeys.swipe.geometric.GeoMemoryAccountingTest',
     'tribixbite.cleverkeys.swipe.geometric.GeoBenchmarkTest',
     // FUTO-style CTC swipe module (wired as the `ctc` engine mode, G5) — pure JVM
