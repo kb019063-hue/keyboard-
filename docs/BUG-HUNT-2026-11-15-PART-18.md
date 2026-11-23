@@ -317,6 +317,11 @@ height to agree on.
   1 failed / 134 skipped / 441 classes, the failure being
   `MoreToolsPanelA11yDriftTest#the close label comes from a string resource` — the `Regex.matches`
   anchoring described above. Corrected to `containsMatchIn` and re-pushed forward (never forced).
+- CI on the corrected run: **4913 run / 0 failed / 134 skipped / 441 classes**; Build APK success;
+  Emulator smoke success (`fails=0-toolbar=unverifiable-tbui=picker-2-oh=toggled-nf=ok-keyboard=bound-anr=0`).
+- Delta from part 17's `6d94ecb` (4910 / 134 / 440): **+3 tests, +1 class** — the three assertions in
+  the new drift test, and the class itself. Production behaviour is unchanged apart from the one
+  `contentDescription` assignment.
 - Test-runner registration verified exactly: **446** test classes on disk, **310** in
   `pureTestClasses` + **136** in `mockTestClasses`, intersection **0**, unregistered **0**,
   registered-but-absent **0**. The new class is in the pure list beside the clipboard a11y drift
