@@ -1,4 +1,4 @@
-# Bug hunt, part 18 — the tools: a panel taller than the keyboard it opens on, and a dismiss button TalkBack cannot name
+# Bug hunt, part 18 — the tools: a panel taller than the keyboard it opens on, a dismiss button TalkBack cannot name, and a smoke test that never saw either
 
 Date: 2026-11-15
 Branch: `arena/cbf26556-keyboard`
@@ -9,18 +9,33 @@ renderer), `ToolbarCompactPolicy.kt` (31), `ToolbarConfig.kt` (116), `KeyboardTo
 together with the code that hosts them: `KeyboardReceiver.showToolsPanel` / `onToolTap` /
 `panelState`, `CleverKeysService.setToolsPanelSwitch` and the five setters behind it,
 `KeyboardComponentGraph.initialize` (where the toolbar is built), and the
-`SWITCH_TOOLS` / `MoreToolsPanel.Key` branch of `Keyboard2View.onCustomShortSwipe`.
+`SWITCH_TOOLS` / `MoreToolsPanel.Key` branch of `Keyboard2View.onCustomShortSwipe` — plus, in the
+second pass, `scripts/ci/emulator-smoke.sh`, which is the only witness any of these surfaces has on
+a device.
 
 This is the last surface part 17 left untouched. Part 16 scoped `customization/` and part 17 the
 popover; both appear here only where they route a toolbar tap or panel tap, and neither is
 re-opened.
 
-One defect is fixed (P1, plus a drift test that would have caught it). Three are reported with
-measured numbers, because each changes behaviour or layout and wants a decision rather than a
-patch. Two measurements deliberately came out the **other** way from my expectation — the
-247-command routing sweep, which I expected to find dead buttons in and did not, and the panel's
-key-hiding, which I had drafted as a finding before measuring that only the *clipboard* hides the
-keys — and both are in "Checked and found sound" rather than dropped.
+Two defects are fixed (P1 and P5). Three are reported with measured numbers, because each changes
+behaviour or layout and wants a decision rather than a patch. Two measurements deliberately came out
+the **other** way from my expectation — the 247-command routing sweep, which I expected to find dead
+buttons in and did not, and the panel's key-hiding, which I had drafted as a finding before
+measuring that only the *clipboard* hides the keys — and both are in "Checked and found sound"
+rather than dropped.
+
+A second pass turned to the question the first pass had no evidence for: does any of this work on a
+device? For the tools panel, it did not — and the reason was in the harness, not the product: the
+smoke test has been aiming 16 px above the toolbar since floating mode shipped, so the one check the
+panel has ever had has reported `silent` on every run it was measured in (P5).
+
+## A note on two passes
+
+The first pass here (commit `c97fd30`) fixed P1 and reported P2–P4. Reviewing it raised the
+harness question above, which is a different surface (the CI script) reached through the same
+subsystem, so it is recorded as P5 in this same document rather than a new one. Nothing in P1–P4
+changed except P2, which gained a floating-mode measurement that was not available from source
+alone.
 
 ---
 
@@ -32,6 +47,7 @@ keys — and both are in "Checked and found sound" rather than dropped.
 | P2 | The panel needs **308 dp** (44 header + 3 × 88 rows) but is given 30 % of the **screen**, not of the keyboard — on every non-tablet device measured the third row is mostly cut off (Pixel 8: 20 of 88 dp visible, 23 %), and SETTINGS is the cell that lands there | **medium** (a tool is unreachable without discovering the panel scrolls) | **reported** |
 | P3 | `ToolbarConfig.MAX_TOOLBAR_KEYS = 12` is enforced **only** by the settings Add button's `enabled` state; `parse` — the read path every consumer uses — accepts any number, so a restored/imported/hand-edited preference yields >12 buttons and the rows scroll | low (needs a path outside the settings UI) | **reported** |
 | P4 | The tile is a fixed 88 dp inside a non-scrolling vertical section, so at `fontScale ≥ 1.7` the two-line caption is clipped (2 lines = 44.9 dp in a 40 dp box at 1.7, 52.8 dp at 2.0) | low (large-text accessibility setting) | **reported** |
+| P5 | The smoke test's `kb_toolbar_center()` measures the toolbar from the top of the input-method frame, ignoring `FloatingRoot`'s 26 dp grip — and section 7d deliberately leaves floating **on**, so 7e/7g have been tapping 16 px *above* the toolbar. 7g has therefore only ever reported `verdict=silent`, meaning CI has never once confirmed the tools panel opens | **high for the harness** (two checks silently unverifiable; the emitted warning blamed the product's toolbar layout) | **fixed** |
 
 ---
 
@@ -117,6 +133,20 @@ holds exactly one cell: **SETTINGS**. So the one launcher a user is most likely 
 one below the fold, with no scroll indicator (`setVerticalScrollBarEnabled(false)`) and no partial
 row to imply more content on the 720×1280 case.
 
+The panel is bigger than the pane in **floating** mode too, but by a different ratio — which is the
+clearest evidence that the percentage is measuring the wrong thing. Using the floating window CI
+actually produced (`[108,1302][972,2274]`, density 2.625):
+
+| mode | height available to a pane | pane @30 % of the *screen* | ratio |
+|---|---|---|---|
+| docked, Pixel 8 | 167 dp (keys band) | 274 dp | **164 %** |
+| floating, Pixel 8 | 344 dp (window minus the 26 dp grip) | 274 dp | **80 %** |
+
+So the same 30 % is a 164 % overrun docked and a comfortable 80 % floating — the pane's share of the
+keyboard **halves** (1.64 / 0.80 = 2.05×) purely because the keyboard changed shape, while
+`clipboard_pane_height_percent` never moved. Docked it still falls 34 dp short of the 308 dp the grid
+needs.
+
 Two things make this worse than a cosmetic shortage, and both are worth stating before anyone
 "fixes" it by raising the percentage:
 
@@ -197,6 +227,105 @@ a loss of function. The fix is to let the tile height follow content (`WRAP_CONT
 `minHeight` of 88 dp) rather than pinning it. Reported because it changes the grid's ragged-tail
 alignment guarantee that `gridRows`' null padding exists to provide: equal-height cells need a
 height to agree on.
+
+---
+
+## P5 — the fix: the smoke test has never once confirmed the tools panel opens
+
+Part 18's first pass fixed the panel's own accessibility and reported its geometry. This pass went
+looking for the opposite: what evidence exists that any of it works on a device. The answer, for
+the tools panel specifically, is **none** — and the reason is a harness bug, not a product one.
+
+### The check, and what it actually reported
+
+`scripts/ci/emulator-smoke.sh` §7g taps the toolbar's first button and reads logcat, because this
+emulator's `uiautomator` dumps never carry IME-window nodes (documented since run 40). The verdict
+vocabulary is deliberately unambiguous:
+
+| logcat contains | verdict | meaning |
+|---|---|---|
+| `shown rows=` | `shown` | the panel opened — the check passes |
+| `press` but no `shown` | `press` | dispatched and nothing appeared — **a real defect** |
+| neither | `silent` | the tap hit nothing — harness's miss, warning only |
+
+Two consecutive runs on this branch — `45261915906` and `45263705962` — both report
+`MTSHEET-DIAG verdict=silent tap=169 1354 shown=mInputShown=true log='none'`. The assertion that
+matters has never fired, and the warning text — *"toolbar may not carry the more key at position 1"*
+— points at the product. It is the harness.
+
+### The measurement
+
+Run `45263705962` prints the frame in its `NFFRAME-DIAG` annotation:
+
+```
+frame=[108,1302][972,2274]   screen=1080x2400   density=420 (2.625)
+```
+
+`kb_toolbar_center(0)` computes `x = l + (r-l)(2·0+1)/(2·7) = 169` and `y = t + th/2`, where
+`th = 40dp = 105px`, giving **169 1354** — exactly the tap observed. The arithmetic is right and the
+tap is in the wrong place, which means the *model* is wrong.
+
+`FloatingRoot` (26 dp grip) is a vertical `LinearLayout`: the grip first, then the `contentHolder`
+that hosts the keyboard. So the IME window's frame starts at the **grip's** top:
+
+```
+real toolbar top    = 1302 + 26dp(68px) = 1370
+real toolbar spans  = 1370 .. 1475      (centre 1422)
+the smoke tapped    = 1354              ← 16 px ABOVE the toolbar, inside the grip
+```
+
+The tap lands on a drag handle, which correctly consumes it as a drag (that is what a grip is for)
+and dispatches nothing — hence `press` never appears in logcat, hence `silent`.
+
+### Why it has always been this way
+
+Section 7d's own header says it: *"Floating and incognito are deliberately left ENABLED afterwards:
+the rest of the run then exercises the keyboard in that state."* Floating was enabled before 7e and
+7g and never turned off, so **both** of the checks that locate a toolbar button by computed
+geometry have been measuring from the wrong top edge since phase 3 shipped:
+
+- **7e** — the dictation self-test falls back to `kb_toolbar_center 6` (the mic, 7th of 7) when the
+  dump carries no node, which is what `DUMPDIAG descVoice=0` says happens. Both runs emit
+  `VOICE-DIAG verdict=key mic='910 1354' route=coord` — the *same* y as 7g's failed tap, and the
+  same 16 px miss; only x differs (910 vs 169), because the mic is the 7th button. Its warning
+  blames "the toolbar may not carry the mic at its default position".
+- **7g** — as above, and it is the only check the tools panel has ever had.
+
+### The fix
+
+`kb_toolbar_center()` now adds the grip's height to the frame's top **when, and only when, floating
+is actually on**:
+
+```bash
+if [ "${FL_VERDICT:-off}" = "on" ]; then
+  t=$(( t + 26 * dpi / 160 ))     # FloatingRoot.GRIP_HEIGHT_DP
+fi
+```
+
+`FL_VERDICT` is a new tracker set to `on` at the single point 7d confirms the floating switch took
+effect, and defaults to `off`. That default is what keeps the fix honest: if 7d bailed early (no
+text field to focus, switch never composed, a future refactor), no grip is on screen and no offset
+is applied — rather than assuming a layout state the script did not verify. Verified by evaluating
+the patched helper under `bash` for all three shapes:
+
+| state | frame | tap |
+|---|---|---|
+| floating on (the shipped path) | `108 1302 972`, d=420 | **169 1422** — toolbar centre |
+| floating off | `108 1302 972`, d=420 | `169 1354` — unchanged |
+| full-width window, floating on | `0 1302 1080`, d=420 | `77 1422` |
+
+`bash -n` parses clean. The `26` is hardcoded beside the `40` that was already there, with both
+tied to their Kotlin constants in the comment (`FloatingRoot.GRIP_HEIGHT_DP`,
+`KeyboardToolbar.HEIGHT_DP`); a magic number that mirrors a constant is acceptable only if the
+comment names the constant, which is the rule the `TB_N=7` note above it already follows.
+
+### What this pass did *not* do about it
+
+The grip is a **product** decision as much as a harness one: a 26 dp drag handle above the keyboard
+means the toolbar is not at the top of the IME window whenever floating is on, and any user aim
+near that band hits the grip. Whether that is right is a design question (Gboard's floating
+keyboard uses a grip of its own). What is not defensible is the harness blaming the product for it,
+and that is what changed. Recorded here rather than silently patched in the script only.
 
 ---
 
@@ -304,6 +433,12 @@ height to agree on.
   of the panel's height budget would have to pin a policy that has not been decided yet.
 - **Did not audit `Pointers`' gesture arbitration or the clipboard/emoji/GIF panes.** Out of scope;
   waves 4–20 stay closed.
+- **Did not change the 26 dp floating grip itself.** P5 moved the harness off it; whether a drag
+  handle belongs directly above the toolbar is a design question, and it is Gboard's pattern too.
+  It is noted in P5, not "fixed".
+- **Did not re-run the smoke test to watch 7g turn `shown`.** That is the whole point of the P5 fix
+  and it needs the next CI run; the geometry is verified by evaluating the patched helper under
+  `bash` against the frame this run actually printed, which is as far as this sandbox can go.
 - **Did not re-open part 16's routing seam.** `CommandRouting` appears here only as the thing a
   toolbar tap passes through, and the sweep above exercises all 247 names through it.
 
@@ -327,10 +462,14 @@ height to agree on.
   registered-but-absent **0**. The new class is in the pure list beside the clipboard a11y drift
   test it is modelled on, and the arrays contain no `]` in a comment (the trap
   `TestRunnerListDriftTest` refuses to parse past).
+- P5 fix: `scripts/ci/emulator-smoke.sh` only (+12 lines code, +18 comment), no product change.
+  `bash -n` clean; the patched helper evaluated under `bash` for floating-on / floating-off /
+  full-width-window and each matched the hand calculation.
 - Every figure above was recomputed in one final script before being written: the 308 dp budget and
   the five device rows, the 40 dp caption box and its five font-scale rows, the 42 views per tap
   rebuild, the 58.7 / 34.2 / 45.7 dp per-button widths, the 234 / 30 / 204 / 13 / 0 routing split, and
-  the 21-locale `common_close` and 23-of-26 `colorKey` checks.
+  the 21-locale `common_close` and 23-of-26 `colorKey` checks, the floating grip offset (68 px at
+  density 2.625) and the 164 % / 80 % pane ratios.
 - Two expectations came out the other way, and both are recorded instead of dropped: the
   247-command sweep found **no** unrouted command (it is in "Checked and found sound"), and the
   panel does **not** hide the keys, so its switches are visible in action — the "switches apply

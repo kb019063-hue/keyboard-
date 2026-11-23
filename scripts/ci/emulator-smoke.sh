@@ -58,6 +58,9 @@ KB_VERDICT=notrun
 ANR_SEEN=0
 VOICE_VERDICT=notrun
 ROT_VERDICT=notrun
+# "on" once 7d has confirmed floating is enabled and left it that way. FloatingRoot's grip is a real
+# 26dp band above the keyboard, so every later toolbar geometry must account for it.
+FL_VERDICT=off
 # The voice field is spelled `-v=` and appended LAST on purpose: the workflow truncates the summary
 # to 90 characters before it becomes the artifact name, and the run-36 summary is already 80. A
 # longer spelling would push `anr=` past the cut and silently lose the ANR witness.
@@ -1315,6 +1318,10 @@ if nf_reach nfflt floating 'Floating Keyboard' 'Appearance'; then
   # the tap. Tapping a Compose row and hoping is how a harness turns into a liar: if the tap missed,
   # the window is legitimately full width and the failure would blame the product.
   if [ "${SWST%% *}" = "true" ] || [ "${POST:-0}" -gt "${PRE:-0}" ]; then
+    # Floating is now ON and STAYS ON for the rest of the run (see this section's header), which
+    # means FloatingRoot's 26dp grip sits above every later toolbar measurement. Recorded here, at
+    # the one place the state is confirmed, so kb_toolbar_center() can skip that band.
+    FL_VERDICT=on
     nf_frame_probe
   else
     ann warning "NFFRAME skipped, floating never confirmed on: state='$SWST' checked-nodes=${PRE:-0}->${POST:-0} tap='${C:-none}' focus='$(focus)'"
@@ -1381,6 +1388,24 @@ kb_toolbar_center() {  # $1 = zero-based toolbar button index; echoes "x y" of i
   set -- $rect
   l=$1; t=$2; r=$3
   th=$(( 40 * dpi / 160 ))
+  # FLOATING MODE PUTS A GRIP ABOVE THE TOOLBAR (2026-11-15, wave 21 part 2).
+  # FloatingRoot is a VERTICAL LinearLayout: a 26dp `grip` View first, then the contentHolder that
+  # hosts the keyboard. setState() makes the grip VISIBLE while floating is on and GONE otherwise,
+  # so the input-method window's frame starts at the GRIP's top — not the toolbar's — exactly when
+  # floating is enabled.
+  # This is not theoretical. Section 7d deliberately leaves floating ENABLED, and 7g (which runs
+  # later) taps "the toolbar" via this helper, so it has been tapping ABOVE the toolbar ever since
+  # phase 3 shipped. Observed in run 45263705962: frame=[108,1302][972,2274] at density 2.625 puts
+  # the tap at y=1354, while the real toolbar spans 1370..1475 — the tap landed in the grip, hit no
+  # button, and 7g reported `silent` ("toolbar may not carry the more key"). Consequence: CI has
+  # never once confirmed that the tools panel opens, and the message blamed the product's toolbar
+  # layout for the harness's arithmetic.
+  # FL_VERDICT is set to `on` at the single place 7d confirms floating took effect, and defaults to
+  # `off`, so a run where 7d bailed early (no field to focus, switch never composed) keeps the
+  # un-offset geometry that is correct in that state.
+  if [ "${FL_VERDICT:-off}" = "on" ]; then
+    t=$(( t + 26 * dpi / 160 ))
+  fi
   # Space-separated, the same contract nodecenter/nodecenter_desc return: every caller does
   # `adb shell input tap $POINT` and relies on word splitting for the two coordinates.
   echo "$(( l + (r - l) * (2 * idx + 1) / (2 * TB_N) )) $(( t + th / 2 ))"
