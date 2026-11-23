@@ -860,6 +860,10 @@ tasks.register('runPureTests', JavaExec) {
     // Audit W4 (2026-09-07): H-9 — every clipboardEntryButton in the entry row carries a
     // contentDescription resolving to a string present in all 22 locale files.
     'tribixbite.cleverkeys.clipboard.ClipboardEntryButtonA11yDriftTest',
+    // Wave 21 (2026-11-15): the tools panel is built in code, so the XML-side a11y drift
+    // tests could not see it, and its only dismiss control shipped as an unlabelled
+    // clickable+focusable node. Pins the label and its presence in every shipped locale.
+    'tribixbite.cleverkeys.MoreToolsPanelA11yDriftTest',
     'tribixbite.cleverkeys.HapticsBehaviorDriftTest',
     // #139 option A (2026-10-20): "Enter always inserts a new line" — the pure Enter/action
     // swap decision (multi-line fields only; single-line and blind fields keep their action).

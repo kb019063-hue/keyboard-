@@ -156,6 +156,12 @@ class MoreToolsPanelView(context: Context, private val theme: Theme?) : LinearLa
             isFocusable = true
             minimumWidth = dp(TOUCH_MIN_DP)
             minimumHeight = dp(TOUCH_MIN_DP)
+            // Named, for the same reason every tile is: this wrapper is the clickable+focusable
+            // node, so TalkBack lands on it and reads its contentDescription. It had none until
+            // 2026-11-15, which made the panel's only dismiss control an unlabelled empty node —
+            // the clipboard, emoji and GIF panes all label theirs. The glyph is deliberately
+            // excluded from accessibility (below), so this is the sole label for the control.
+            contentDescription = context.getString(R.string.common_close)
             rippleBackground()
             addView(glyph, FrameLayout.LayoutParams(dp(ICON_DP), dp(ICON_DP), Gravity.CENTER))
             setOnClickListener { onClose?.invoke() }
