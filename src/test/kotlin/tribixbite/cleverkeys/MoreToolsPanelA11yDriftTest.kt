@@ -45,7 +45,7 @@ class MoreToolsPanelA11yDriftTest {
     fun `the close label comes from a string resource, not an English literal`() {
         val wrapper = wrapperBlock()
         assertWithMessage("the close label must be a localized resource")
-            .that(LOCALIZED_LABEL.matches(wrapper)).isTrue()
+            .that(LOCALIZED_LABEL.containsMatchIn(wrapper)).isTrue()
     }
 
     @Test
@@ -95,6 +95,11 @@ class MoreToolsPanelA11yDriftTest {
          * `contentDescription = context.getString(R.string.<lower_snake>)` — the only shape this
          * project accepts for a code-built control's label. Kept as a compiled [Regex] rather than
          * a Truth `containsPattern` so the assertion uses APIs this project already exercises.
+         *
+         * `containsMatchIn`, NOT `matches`: Kotlin's `Regex.matches` anchors the WHOLE input, so it
+         * would demand that the entire wrapper block be nothing but that one assignment. CI run
+         * 45261928680 caught exactly that — the first version of this test failed on the fixed
+         * source for this reason and no other.
          */
         val LOCALIZED_LABEL = Regex(
             """contentDescription\s*=\s*context\.getString\(R\.string\.[a-z0-9_]+\)"""

@@ -80,6 +80,14 @@ default file **and** every shipped locale. Verified against the fixed source and
 against the *unfixed* one first, where assertions 1 and 2 both fail, so the test has teeth rather
 than being written to match what happens to be there.
 
+**The first version of this test was itself buggy, and CI is how it was caught.** I asserted
+`LOCALIZED_LABEL.matches(wrapper)`; Kotlin's `Regex.matches` anchors the *whole* input, so it
+demanded that the entire 927-character wrapper block be nothing but that one assignment. CI run
+`45261928680` failed with exactly one test — this one — against correct production code. The
+assertion is now `containsMatchIn` (match anywhere), and the failure is left in the history rather
+than force-pushed away. Worth recording because the mistake is invisible to inspection: the regex
+is right, the block is right, and only the semantics of *which* `Regex` method was meant is wrong.
+
 ---
 
 ## P2 — reported: the panel is taller than the space it is given, on every phone I measured
@@ -305,6 +313,10 @@ height to agree on.
 
 - P1 fix: `MoreToolsPanelView` +6 lines (387 → 393), `build.gradle` (+4, test registration),
   `MoreToolsPanelA11yDriftTest` (new, 3 tests).
+- CI on the first attempt (`45261928680`) was **red on my own test**, not on the fix: 4913 run /
+  1 failed / 134 skipped / 441 classes, the failure being
+  `MoreToolsPanelA11yDriftTest#the close label comes from a string resource` — the `Regex.matches`
+  anchoring described above. Corrected to `containsMatchIn` and re-pushed forward (never forced).
 - Test-runner registration verified exactly: **446** test classes on disk, **310** in
   `pureTestClasses` + **136** in `mockTestClasses`, intersection **0**, unregistered **0**,
   registered-but-absent **0**. The new class is in the pure list beside the clipboard a11y drift
