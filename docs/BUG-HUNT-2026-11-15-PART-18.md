@@ -47,7 +47,7 @@ alone.
 | P2 | The panel needs **308 dp** (44 header + 3 × 88 rows) but is given 30 % of the **screen**, not of the keyboard — on every non-tablet device measured the third row is mostly cut off (Pixel 8: 20 of 88 dp visible, 23 %), and SETTINGS is the cell that lands there | **medium** (a tool is unreachable without discovering the panel scrolls) | **reported** |
 | P3 | `ToolbarConfig.MAX_TOOLBAR_KEYS = 12` is enforced **only** by the settings Add button's `enabled` state; `parse` — the read path every consumer uses — accepts any number, so a restored/imported/hand-edited preference yields >12 buttons and the rows scroll | low (needs a path outside the settings UI) | **reported** |
 | P4 | The tile is a fixed 88 dp inside a non-scrolling vertical section, so at `fontScale ≥ 1.7` the two-line caption is clipped (2 lines = 44.9 dp in a 40 dp box at 1.7, 52.8 dp at 2.0) | low (large-text accessibility setting) | **reported** |
-| P5 | The smoke test's `kb_toolbar_center()` measures the toolbar from the top of the input-method frame, ignoring `FloatingRoot`'s 26 dp grip — and section 7d deliberately leaves floating **on**, so 7e/7g have been tapping 16 px *above* the toolbar. 7g has therefore only ever reported `verdict=silent`, meaning CI has never once confirmed the tools panel opens | **high for the harness** (two checks silently unverifiable; the emitted warning blamed the product's toolbar layout) | **fixed** |
+| P5 | The smoke test's `kb_toolbar_center()` measures the toolbar from the top of the input-method frame, ignoring `FloatingRoot`'s 26 dp grip — and section 7d deliberately leaves floating **on**, so 7e/7g have been tapping 16 px *above* the toolbar. 7g has therefore only ever reported `verdict=silent`, meaning CI has never once confirmed the tools panel opens | **high for the harness** (two checks silently unverifiable; the emitted warning blamed the product's toolbar layout) | **fixed** — verified: 7g `shown`, 7e `ok` |
 
 ---
 
@@ -319,6 +319,30 @@ tied to their Kotlin constants in the comment (`FloatingRoot.GRIP_HEIGHT_DP`,
 `KeyboardToolbar.HEIGHT_DP`); a magic number that mirrors a constant is acceptable only if the
 comment names the constant, which is the rule the `TB_N=7` note above it already follows.
 
+### Verified on device, same run
+
+Commit `3010376`'s smoke run (`45278048972`) is the first in which either check has ever returned a
+positive verdict. The two annotations, verbatim:
+
+```
+MTSHEET-DIAG verdict=shown tap=169 1422 shown=mInputShown=true
+  log='I/MoreToolsPanel: press | I/MoreToolsPanel: shown rows=3 incognito=on floating=on
+        split=on one_handed=on sound=off emoji=off clipboard=off theme=off settings=off'
+
+VOICE-DIAG verdict=ok mic='910 1422' route=coord grant='granted' shown=mInputShown=true
+  log='I/DictationController: press mode=DICTATION selfTest=true ... decision=COMMIT_SELF_TEST
+        | self-test commit length=25 | committed 25 characters'
+```
+
+So the tap now lands on the toolbar (y **1422**, the centre computed above), the panel logs `press`
+then `shown rows=3`, and the dictation self-test's coordinate fallback — which had never worked
+either — committed its transcript. Two checks that had been reporting "unverifiable" or a
+misattributed warning went green **without touching the product**, which is the proof that the
+defect was the measurement.
+
+It also means the panel has now been observed opening and drawing its three rows on a device, which
+is the first device-side corroboration of the model's row arithmetic in P2.
+
 ### What this pass did *not* do about it
 
 The grip is a **product** decision as much as a harness one: a 26 dp drag handle above the keyboard
@@ -436,9 +460,9 @@ and that is what changed. Recorded here rather than silently patched in the scri
 - **Did not change the 26 dp floating grip itself.** P5 moved the harness off it; whether a drag
   handle belongs directly above the toolbar is a design question, and it is Gboard's pattern too.
   It is noted in P5, not "fixed".
-- **Did not re-run the smoke test to watch 7g turn `shown`.** That is the whole point of the P5 fix
-  and it needs the next CI run; the geometry is verified by evaluating the patched helper under
-  `bash` against the frame this run actually printed, which is as far as this sandbox can go.
+- **Did not change anything else in the smoke test.** The grip offset was the one broken measurement
+  found; 7f's clip check compares *bottom* edges and is unaffected by a band at the top, so it was
+  left alone after checking that, rather than "fixed" alongside.
 - **Did not re-open part 16's routing seam.** `CommandRouting` appears here only as the thing a
   toolbar tap passes through, and the sweep above exercises all 247 names through it.
 
@@ -465,6 +489,10 @@ and that is what changed. Recorded here rather than silently patched in the scri
 - P5 fix: `scripts/ci/emulator-smoke.sh` only (+12 lines code, +18 comment), no product change.
   `bash -n` clean; the patched helper evaluated under `bash` for floating-on / floating-off /
   full-width-window and each matched the hand calculation.
+- CI at `3010376` (the commit carrying the P5 fix): Full unit-test suite **success**, Build APK
+  **success**, Emulator smoke **success** — and the smoke's own annotations report
+  `MTSHEET-DIAG verdict=shown` and `VOICE-DIAG verdict=ok`, the first positive readings either
+  check has produced.
 - Every figure above was recomputed in one final script before being written: the 308 dp budget and
   the five device rows, the 40 dp caption box and its five font-scale rows, the 42 views per tap
   rebuild, the 58.7 / 34.2 / 45.7 dp per-button widths, the 234 / 30 / 204 / 13 / 0 routing split, and
