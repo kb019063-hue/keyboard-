@@ -602,8 +602,14 @@ class ShortSwipeIntentTest {
     // E2. Export-path safety: never emit a value that parses to the command's own name
     // =========================================================================
 
-    /** Parse an exported attribute value the way a layout does. */
-    private fun parseExported(value: String) = KeyValueParser.parse("x:" + value)
+    /**
+     * Parse an exported attribute value the way a layout does: `KeyboardData.parse_key_attr`
+     * hands the attribute value straight to `KeyValue.getKeyByName`, with no `symbol:` prefix.
+     * A prefix would change the parse — `x:'Hi'` is a single-element Macro, not a String key
+     * (`KeyValueParserTest.existingTextTokenSyntaxRemainsLiteral`) — so the bare form is the
+     * one that mirrors the export path.
+     */
+    private fun parseExported(value: String) = KeyValueParser.parse(value)
 
     @Test
     fun `a legacy SCREAMING_SNAKE command exports the key name, not the enum spelling`() {
@@ -690,7 +696,7 @@ class ShortSwipeIntentTest {
         val path = buildString { append("C:"); append('\\'); append("Users"); append('\\'); append("me") }
         val mapping = ShortSwipeMapping.textInput("a", SwipeDirection.N, "PTH", path)
         val exported = XmlAttributeMapper.toXmlValue(mapping)!!
-        val parsed = KeyValueParser.parse("x:" + exported)
+        val parsed = parseExported(exported)
         assertThat(parsed.getString()).isEqualTo(path)
     }
 
@@ -699,14 +705,14 @@ class ShortSwipeIntentTest {
         // The pathological case: an unescaped trailing backslash escapes the closing quote.
         val text = buildString { append("C:"); append('\\') }
         val mapping = ShortSwipeMapping.textInput("a", SwipeDirection.N, "PTH", text)
-        val parsed = KeyValueParser.parse("x:" + XmlAttributeMapper.toXmlValue(mapping)!!)
+        val parsed = parseExported(XmlAttributeMapper.toXmlValue(mapping)!!)
         assertThat(parsed.getString()).isEqualTo(text)
     }
 
     @Test
     fun `a TEXT mapping keeps single-quote escaping after the backslash fix`() {
         val mapping = ShortSwipeMapping.textInput("a", SwipeDirection.N, "Q", "It's")
-        val parsed = KeyValueParser.parse("x:" + XmlAttributeMapper.toXmlValue(mapping)!!)
+        val parsed = parseExported(XmlAttributeMapper.toXmlValue(mapping)!!)
         assertThat(parsed.getString()).isEqualTo("It's")
     }
 
