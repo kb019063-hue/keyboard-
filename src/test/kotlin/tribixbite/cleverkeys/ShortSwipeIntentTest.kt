@@ -734,4 +734,104 @@ class ShortSwipeIntentTest {
             assertThat(command.description).isNotEmpty()
         }
     }
+
+    // =========================================================================
+    // G. Load-path tolerance + timestamp truncation (wave 19, 2026-11-15)
+    // =========================================================================
+
+    /** Build a stored entry directly, bypassing the factories' truncation. */
+    private fun stored(
+        displayText: String = "ab",
+        actionType: String = "TEXT",
+        actionValue: String = "hi",
+    ) = DirectionMapping(displayText, actionType, actionValue)
+
+    @Test
+    fun `one malformed stored entry does not discard the rest of the file`() {
+        // `mappings` comes from gson.fromJson of the user's file or an imported backup, so
+        // ShortSwipeMapping's init invariants are being applied to untrusted input. Before
+        // this, the first violation threw out of toMappingList and loadMappings caught it as
+        // "Failed to load custom mappings" — leaving the user with NONE of their mappings
+        // instead of all-but-one.
+        val stored = ShortSwipeCustomizations(
+            mappings = mapOf(
+                "a" to mapOf("N" to stored()),
+                // 5 characters: the primary constructor requires <= 4. Not reachable from the
+                // editor, which takes(4) — but trivially reachable in a hand-edited file.
+                "b" to mapOf("S" to stored(displayText = "FIVES")),
+                "c" to mapOf("E" to stored(actionValue = "ok")),
+                // An unparseable TIMESTAMP pattern.
+                "d" to mapOf("W" to stored(actionType = "TIMESTAMP", actionValue = "yyyy-'abc")),
+            )
+        )
+
+        val result = stored.convert()
+
+        assertThat(result.mappings.map { it.keyCode }).containsExactly("a", "c")
+        assertThat(result.skipped).isEqualTo(2)
+        // `toMappingList` stays the compatible shape for every existing caller.
+        assertThat(stored.toMappingList()).hasSize(2)
+    }
+
+    @Test
+    fun `an unknown action type is tolerated rather than throwing`() {
+        // ActionType.fromString maps unrecognised strings to a default, so this entry is kept —
+        // asserted so a future strictness change is a visible decision, not a silent drop.
+        val converted = ShortSwipeCustomizations(
+            mappings = mapOf("a" to mapOf("N" to stored(actionType = "NOT_A_TYPE")))
+        ).convert()
+        assertThat(converted.skipped).isEqualTo(0)
+        assertThat(converted.mappings).hasSize(1)
+    }
+
+    @Test
+    fun `an unknown direction name is skipped without counting as malformed`() {
+        val converted = ShortSwipeCustomizations(
+            mappings = mapOf("a" to mapOf("NORTHISH" to stored()))
+        ).convert()
+        assertThat(converted.mappings).isEmpty()
+        assertThat(converted.skipped).isEqualTo(0)
+    }
+
+    @Test
+    fun `a timestamp pattern longer than the cap is truncated to a still-valid pattern`() {
+        // A cut can turn a valid pattern into an invalid one exactly once: if it lands inside a
+        // quoted literal, the remainder has an unterminated quote. The cap exists to bound
+        // storage, not to express intent, so the unfinished tail is dropped back to the last
+        // complete quote rather than throwing.
+        val quoted = "yyyy-" + "'" + "x".repeat(5000) + "'"
+        assertThat(ShortSwipeMapping.isValidTimestampPattern(quoted)).isTrue()
+
+        val mapping = ShortSwipeMapping.timestamp(
+            keyCode = "t",
+            direction = SwipeDirection.N,
+            displayText = "TS",
+            pattern = quoted,
+        )
+        val storedPattern = mapping.getTimestampPattern()!!
+        assertThat(storedPattern.length).isAtMost(ShortSwipeMapping.MAX_ACTION_LENGTH)
+        assertThat(ShortSwipeMapping.isValidTimestampPattern(storedPattern)).isTrue()
+    }
+
+    @Test
+    fun `a short timestamp pattern is stored unchanged`() {
+        // The truncation helper must be a no-op below the cap, or every existing mapping moves.
+        val pattern = "yyyy-MM-dd'T'HH:mm:ss"
+        assertThat(ShortSwipeMapping.untruncatedTimestampPattern(pattern)).isEqualTo(pattern)
+        assertThat(
+            ShortSwipeMapping.timestamp("t", SwipeDirection.N, "TS", pattern).getTimestampPattern()
+        ).isEqualTo(pattern)
+    }
+
+    @Test
+    fun `truncation that would leave only a quoted fragment is rejected rather than stored`() {
+        // A pathological pattern that is one enormous literal: cutting it inside the quote leaves
+        // only the opening quote, which the helper trims to the empty string, which init rejects.
+        // Asserted so the failure mode is a loud IllegalArgumentException at construction rather
+        // than an invalid pattern reaching SimpleDateFormat at execution time.
+        val allLiteral = "'" + "x".repeat(ShortSwipeMapping.MAX_ACTION_LENGTH + 100) + "'"
+        val expected = ShortSwipeMapping.untruncatedTimestampPattern(allLiteral)
+        assertThat(expected).isEmpty()
+        assertThat(ShortSwipeMapping.isValidTimestampPattern(expected)).isFalse()
+    }
 }

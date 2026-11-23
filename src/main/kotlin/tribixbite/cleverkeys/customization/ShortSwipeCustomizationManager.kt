@@ -118,14 +118,27 @@ class ShortSwipeCustomizationManager private constructor(private val context: Co
                         }
 
                         customizations?.let {
-                            val mappingList = it.toMappingList()
+                            val loaded = it.convert()
+                            val mappingList = loaded.mappings
                             mappingCache.clear()
                             mappingList.forEach { mapping ->
                                 mappingCache[mapping.toStorageKey()] = mapping
                             }
                             rebuildByKeyIndex()
                             _mappingsFlow.value = mappingList
-                            Log.i(TAG, "Loaded ${mappingList.size} custom short swipe mappings")
+                            if (loaded.skipped > 0) {
+                                // The entry is still in the file; it was simply not usable. Say
+                                // which, so "my mapping stopped working" is diagnosable.
+                                Log.w(
+                                    TAG,
+                                    "Loaded ${mappingList.size} custom short swipe mappings, " +
+                                        "skipped ${loaded.skipped} malformed entr" +
+                                        (if (loaded.skipped == 1) "y" else "ies") +
+                                        " (left in the file)"
+                                )
+                            } else {
+                                Log.i(TAG, "Loaded ${mappingList.size} custom short swipe mappings")
+                            }
                         }
                     } else {
                         Log.i(TAG, "No custom short swipe mappings file found, using defaults")
@@ -296,7 +309,16 @@ class ShortSwipeCustomizationManager private constructor(private val context: Co
             // Parse outside the lock; mutate + persist inside it so the import can't
             // interleave with loadMappings' clear+repopulate or other mutators.
             val customizations = gson.fromJson(json, ShortSwipeCustomizations::class.java)
-            val mappingList = customizations?.toMappingList().orEmpty()
+            val converted = customizations?.convert()
+            val mappingList = converted?.mappings.orEmpty()
+            if ((converted?.skipped ?: 0) > 0) {
+                Log.w(
+                    TAG,
+                    "Import: skipped ${converted?.skipped} malformed entr" +
+                        (if (converted?.skipped == 1) "y" else "ies") +
+                        " from the payload"
+                )
+            }
 
             // G-2 (comprehensive audit 2026-09-06): an import that parses to ZERO mappings
             // must not touch the existing set. REPLACE used to clear FIRST and only then
