@@ -49,11 +49,25 @@ object FloatingConfig {
     /**
      * The largest top-edge fraction that still leaves the WHOLE window on screen.
      *
-     * [MAX_Y_FRACTION] alone is a fraction of the screen, not of the space the keyboard leaves
-     * over, so on its own it lets a 38 %-tall keyboard sit with its bottom row (space, period,
-     * enter) below the display: `y = 0.9 * 2400` puts the bottom edge at 3070 px on a 2400 px
-     * screen. This caps by the window's own measured height instead, which is what the promise
-     * "the whole window stays on screen" actually means.
+     * [MAX_Y_FRACTION] alone caps by a flat fraction of the height and so knows nothing about how
+     * tall the window is, which on its own lets a tall keyboard sit with its bottom row (space,
+     * period, enter) below the display. This caps by the window's own measured height instead,
+     * which is what the promise "the whole window stays on screen" actually means.
+     *
+     * ## What `screenHeight` really is (corrected 2026-11-15, part 19)
+     *
+     * The caller passes `resources.displayMetrics.heightPixels`, and the window is positioned with
+     * `Gravity.TOP` in the input method's own area — so on a device with a navigation bar this is
+     * the IME's AVAILABLE height, not the physical screen. Measured in CI run 45307511686 on a
+     * 1080x2400 device at density 2.625: an 80%-wide window is 972px tall, the layout resolves to
+     * `(2274 - 972) / 2274 = 0.5726`, and `0.5726 * 2274 = 1302` matches the frame top `dumpsys`
+     * reported to the pixel. The 126px difference from 2400 is a 48dp navigation bar.
+     *
+     * The previous version of this comment worked its example in physical-screen pixels
+     * (`y = 0.9 * 2400` puts the bottom edge at 3070px on a 2400px screen). The arithmetic was
+     * fine and the units were not: 0.9 is unreachable in either space, because the cap for any
+     * window taller than 38% of this height is below 0.62 — the shipped default. See PART-19's
+     * P8-P10; the practical consequence is that the window cannot be dragged *down* at all.
      *
      * A [windowHeightPx] of 0 (before the first layout pass) keeps the old cap, so a caller that
      * has not measured yet can never park the window somewhere layout would have to undo.

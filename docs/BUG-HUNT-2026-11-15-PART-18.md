@@ -450,6 +450,14 @@ write, so the open keyboard would follow through `applyFloatingToOpenKeyboard` w
 Recommended as its own pass: it is a new gesture with a haptic contract, not a layout tweak, and
 this pass has already changed three files that a dock gesture would also touch.
 
+> **Prerequisite, found in part 19: the window cannot be dragged down.** It opens pinned at
+> `maxYFraction` — bottom-flush at the bottom of the IME's area — and the drag handler clamps to the
+> same cap, so downward travel is 0 px on every device measured at every legal width. A "drag the
+> grip down to dock" gesture therefore could not fire as specified. Part 19's P8 records the
+> measurements and the two position policies; one of them has to be chosen before the gesture has
+> anything to detect. Part 19's P11 records the second prerequisite: a dock needs a haptic, because
+> toasts are forbidden in this IME and the suggestion strip is under the thumb doing the dragging.
+
 ---
 
 ## Checked and found sound
