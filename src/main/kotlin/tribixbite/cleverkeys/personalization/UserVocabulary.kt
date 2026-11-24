@@ -10,7 +10,6 @@ import tribixbite.cleverkeys.persist.LearnedDataStorage
 import tribixbite.cleverkeys.persist.SharedPrefsLearnedStorage
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ScheduledExecutorService
-import kotlin.concurrent.thread
 
 /**
  * User vocabulary tracker for personalized word prediction.
@@ -43,7 +42,7 @@ class UserVocabulary internal constructor(
     private val storage: LearnedDataStorage,
     debounceMs: Long = DebouncedPersister.DEFAULT_DEBOUNCE_MS,
     maxDelayMs: Long = DebouncedPersister.DEFAULT_MAX_DELAY_MS,
-    scheduler: ScheduledExecutorService = DebouncedPersister.sharedScheduler(),
+    private val scheduler: ScheduledExecutorService = DebouncedPersister.sharedScheduler(),
     private val log: (String, Throwable?) -> Unit = { _, _ -> },
     private val maxWords: () -> Int = { Defaults.PERSONALIZATION_MAX_WORDS }
 ) {
@@ -363,6 +362,16 @@ class UserVocabulary internal constructor(
     /**
      * Evict the [count] words with the lowest personalization boost.
      * Caller must hold the instance lock.
+     *
+     * PRIVACY (2026-11-21): this used to log the evicted word itself —
+     * `log("Removed low-value word: ${usage.word}")` — which put user text in logcat. The
+     * vocabulary IS the user's typing history, so a word here is exactly the class of data the
+     * repo's logging rules forbid: `UserVocabulary`'s singleton logger is ungated `Log.d` (the
+     * `ENABLE_VERBOSE_LOGGING` rule does not even reach it, so the installed debug build always
+     * printed it), and `VerboseLogRatchetTest` cannot see it because the call site spells
+     * `log(...)` through an injected lambda, not a `Log.d` call site. `Logs`/`PrivacyManager`
+     * strip words from their own lines for this reason; this path did not. The count is enough to
+     * diagnose eviction, so only counts are logged now.
      */
     private fun removeLowestValueWords(count: Int, currentTime: Long) {
         if (count <= 0) return
@@ -371,8 +380,8 @@ class UserVocabulary internal constructor(
             .take(count)
             .forEach { usage ->
                 vocabulary.remove(usage.word)
-                log("Removed low-value word: ${usage.word}", null)
             }
+        log("Removed $count low-value word(s)", null)
     }
 
     /**
@@ -490,10 +499,30 @@ class UserVocabulary internal constructor(
 
     /**
      * Perform cleanup asynchronously.
+     *
+     * Runs on the store's injected persistence [scheduler], NOT a bare `thread {}` (2026-11-21).
+     * This is called from inside `recordWordUsage`'s `synchronized` block, i.e. on the typing
+     * thread, once every [CLEANUP_INTERVAL_MS]; a raw non-daemon thread per invocation is the
+     * same anti-pattern the class KDoc says the debounced persister replaced, and it outlives the
+     * IME. The scheduler is already owned and shut down with the store (tests inject their own
+     * and shut it down in `@After`).
+     *
+     * The task is guarded so an exception cannot kill the scheduled executor's worker silently,
+     * and a rejected submit (scheduler already shut down during teardown) is a no-op rather than
+     * a crash on the typing path.
      */
     private fun performCleanupAsync() {
-        thread {
-            cleanupStaleWords()
+        try {
+            scheduler.submit {
+                try {
+                    cleanupStaleWords()
+                } catch (e: Exception) {
+                    log("Stale-word cleanup failed", e)
+                }
+            }
+        } catch (e: java.util.concurrent.RejectedExecutionException) {
+            // Store is tearing down; the next process start runs cleanup on load anyway.
+            log("Stale-word cleanup skipped (scheduler shut down)", null)
         }
     }
 

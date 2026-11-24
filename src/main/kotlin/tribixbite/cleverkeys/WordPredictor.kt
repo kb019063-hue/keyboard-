@@ -1942,13 +1942,13 @@ class WordPredictor : Predictor {
         var count = 0
         try {
             val packManager = LanguagePackManager.getInstance(context)
-            val packFile = packManager.getContractionsPath(language)
+            val packFile = packManager.getContractionsPath(ContractionManager.packCode(language))
 
             val inputStream = if (packFile != null) {
                 packFile.inputStream()
             } else {
                 try {
-                    context.assets.open("dictionaries/contractions_$language.json")
+                    context.assets.open(ContractionManager.bundledContractionsAsset(language))
                 } catch (e: java.util.concurrent.CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -2012,14 +2012,14 @@ class WordPredictor : Predictor {
         try {
             // Try language pack first
             val packManager = LanguagePackManager.getInstance(context)
-            val packFile = packManager.getContractionsPath(language)
+            val packFile = packManager.getContractionsPath(ContractionManager.packCode(language))
 
             val inputStream = if (packFile != null) {
                 packFile.inputStream()
             } else {
                 // Try bundled assets
                 try {
-                    context.assets.open("dictionaries/contractions_$language.json")
+                    context.assets.open(ContractionManager.bundledContractionsAsset(language))
                 } catch (e: Exception) {
                     // No contractions file for this language - that's OK
                     if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "No contractions file for primary language '$language'")
@@ -2102,14 +2102,14 @@ class WordPredictor : Predictor {
         try {
             // Try language pack first
             val packManager = LanguagePackManager.getInstance(context)
-            val packFile = packManager.getContractionsPath(language)
+            val packFile = packManager.getContractionsPath(ContractionManager.packCode(language))
 
             val inputStream = if (packFile != null) {
                 packFile.inputStream()
             } else {
                 // Try bundled assets
                 try {
-                    context.assets.open("dictionaries/contractions_$language.json")
+                    context.assets.open(ContractionManager.bundledContractionsAsset(language))
                 } catch (e: java.util.concurrent.CancellationException) {
                     throw e
                 } catch (e: Exception) {

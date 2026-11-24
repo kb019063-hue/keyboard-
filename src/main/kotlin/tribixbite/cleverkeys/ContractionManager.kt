@@ -352,9 +352,19 @@ class ContractionManager(private val context: Context) {
      * @param langCode Language code (e.g., "fr", "it", "de", "es", "pt", "nl")
      */
     fun loadLanguageContractions(langCode: String) {
+        // Both lookups below use the BASE SUBTAG, because that is the name the data uses: a
+        // bundled file is `contractions_<bare>.json`, and a pack installs under its own
+        // `manifest.code`, which the CTC eligibility path only ever reaches through the
+        // normalized code (see `CtcLanguageSupport.langpackRelativePath`).
+        // So `fr-CA`, which layout-language binding legitimately produces, used to look for
+        // `contractions_fr-ca.json` and `langpacks/fr-ca/`, find neither, and give a French user
+        // contractions in NO language at all — worse than the wrong language, because the bar
+        // silently stops showing `l'a` / `d'accord` with nothing on screen to explain it.
+        // The log messages keep the caller's own tag so a device log still names the binding.
+        val base = packCode(langCode)
         // First try loading from installed language pack
         val langPackManager = LanguagePackManager.getInstance(context)
-        val packContractionsFile = langPackManager.getContractionsPath(langCode)
+        val packContractionsFile = langPackManager.getContractionsPath(base)
 
         if (packContractionsFile != null) {
             try {
@@ -367,7 +377,7 @@ class ContractionManager(private val context: Context) {
         }
 
         // Fall back to bundled assets
-        val filename = "dictionaries/contractions_$langCode.json"
+        val filename = bundledContractionsAsset(langCode)
         try {
             val inputStream = assetManager.open(filename)
             val count = loadContractionsFromStream(inputStream)
@@ -396,7 +406,7 @@ class ContractionManager(private val context: Context) {
      * @return the number of variants added.
      */
     private fun loadLanguagePairedContractions(langCode: String): Int {
-        val filename = "dictionaries/contraction_pairs_$langCode.json"
+        val filename = bundledPairedContractionsAsset(langCode)
         return try {
             val jsonObj = JSONObject(readStream(assetManager.open(filename)))
             val keys = jsonObj.keys()
@@ -807,6 +817,30 @@ class ContractionManager(private val context: Context) {
 
     companion object {
         private const val TAG = "ContractionManager"
+
+        /**
+         * The pack code whose contraction data a [language] binding reads — the BASE SUBTAG.
+         *
+         * Contraction data is per-SCRIPT, never per-region: the bundled files are
+         * `contractions_<bare>.json`, and a pack's contractions file sits beside the dictionary
+         * under the code the CTC path resolved. Layout-language binding legitimately produces a
+         * region tag (`fr-CA`), so every lookup for this data MUST normalize; before this existed
+         * the runtime looked for `contractions_fr-ca.json`, found nothing, and served a French
+         * user contractions in NO language — silently, with nothing on screen to explain it.
+         *
+         * Deliberately NOT folded into `LanguagePackManager.getContractionsPath`: that type stays
+         * a dumb path composer, because `getDictionaryPath` must NOT normalize (a dictionary can
+         * be per-region). The distinction is that vocabulary is regional and contractions are not.
+         */
+        fun packCode(language: String?): String = SwipeContractionPolicy.baseSubtag(language)
+
+        /** The bundled asset holding [language]'s REPLACE-mode mappings. */
+        fun bundledContractionsAsset(language: String?): String =
+            "dictionaries/contractions_${packCode(language)}.json"
+
+        /** The bundled asset holding [language]'s PAIRED (append-mode) mappings. */
+        fun bundledPairedContractionsAsset(language: String?): String =
+            "dictionaries/contraction_pairs_${packCode(language)}.json"
 
         /**
          * Parses `contraction_pairings.json` — `{"shed": [{"contraction": "she'd",

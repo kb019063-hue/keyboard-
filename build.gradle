@@ -770,6 +770,7 @@ tasks.register('runPureTests', JavaExec) {
     // local-media commitContent first, case-preserved URL text second, never a dead link.
     'tribixbite.cleverkeys.gif.GifInsertPolicyTest',
     'tribixbite.cleverkeys.gif.GifCategoryTest',
+    'tribixbite.cleverkeys.gif.GifGridGeometryTest',
     // Audit W2 (2026-09-07): E-6 — GIF category bar commits on UP-within-slop (pure detector);
     // E-1 — repo-wide ban on SQLite upsert syntax (parse error on API 24-28);
     // E-10 — Toast is banned from IME-context files (suggestion bar is the surface, #156).
@@ -859,6 +860,10 @@ tasks.register('runPureTests', JavaExec) {
     // Audit W4 (2026-09-07): H-9 — every clipboardEntryButton in the entry row carries a
     // contentDescription resolving to a string present in all 22 locale files.
     'tribixbite.cleverkeys.clipboard.ClipboardEntryButtonA11yDriftTest',
+    // Wave 21 (2026-11-15): the tools panel is built in code, so the XML-side a11y drift
+    // tests could not see it, and its only dismiss control shipped as an unlabelled
+    // clickable+focusable node. Pins the label and its presence in every shipped locale.
+    'tribixbite.cleverkeys.MoreToolsPanelA11yDriftTest',
     'tribixbite.cleverkeys.HapticsBehaviorDriftTest',
     // #139 option A (2026-10-20): "Enter always inserts a new line" — the pure Enter/action
     // swap decision (multi-line fields only; single-line and blind fields keep their action).
@@ -947,6 +952,14 @@ tasks.register('runPureTests', JavaExec) {
     // TalkBack accessibility (a11y) — pure geometry + labeller
     'tribixbite.cleverkeys.a11y.KeyboardGeometryTest',
     'tribixbite.cleverkeys.a11y.KeyLabelsTest',
+    // 2026-11-21: the a11y tree builds one node per KEY, from slot zero of the key's symbol list;
+    // a key's eight corner symbols get no node, so the accented letters a Spanish layout carries
+    // only in corners cannot be typed through TalkBack. Pins the current reach, not a fix.
+    // Do NOT put square brackets in a comment in this array. TestRunnerListDriftTest captures the
+    // array body non-greedily up to the first closing bracket, so one bracket in prose ends its
+    // capture early and silently unregisters every entry below that point. This comment did
+    // exactly that twice; the drift test now fails loudly if it ever happens again.
+    'tribixbite.cleverkeys.a11y.AccessibilitySubkeyReachTest',
     // SuggestionBar rework (WP6-R3) — de-stringified suggestion protocol
     'tribixbite.cleverkeys.SuggestionModelTest',
     // WP9 pipeline-unification characterization oracle (R-1 step 2) — pure JVM twin
@@ -1016,6 +1029,10 @@ tasks.register('runPureTests', JavaExec) {
     'tribixbite.cleverkeys.swipe.geometric.TemplateGeneratorTest',
     'tribixbite.cleverkeys.swipe.geometric.CandidatePrunerTest',
     'tribixbite.cleverkeys.swipe.geometric.GeoDecoderCoreTest',
+    // 2026-11-21: turn angles (corners, reversals, template corners) must be measured in the
+    // physical frame, not raw normalized u/v. Polyline-level, so it needs no language packs
+    // and never skips.
+    'tribixbite.cleverkeys.swipe.geometric.GeoPhysicalFrameTurnTest',
     // Step-0 SLOPPY prune-recall decomposition (geoFull-gated measurement)
     'tribixbite.cleverkeys.swipe.geometric.GeoSloppyPruneRecallTest',
     // Wave-G OQ-9/10/11 sweep instrument (geoSweep-gated measurement, ARC-027/028/029)
@@ -1044,6 +1061,17 @@ tasks.register('runPureTests', JavaExec) {
     'tribixbite.cleverkeys.swipe.geometric.GeoDoubleLetterTest',
     'tribixbite.cleverkeys.swipe.geometric.GeoShortWordTest',
     'tribixbite.cleverkeys.swipe.geometric.GeoAblationTest',
+    // Wave 17 (2026-11-15): the NFR-2 memory accounting in arithmetic form. TemplateCache's
+    // KDoc claimed "~2.3 MB/index" while the formula it derives from answers ~1.2 MiB at the
+    // shipped 98,140 words. Neither existing memory assertion could catch that: one is in a
+    // class this fork skips wholesale, the other only checks a total is UNDER the bar. Its own
+    // first version also caught a wrong per-word figure in the prose, which is the point.
+    // Wave 18 (2026-11-15): shapeDistance derives its scale from the bbox longest side in RAW
+    // normalized (u,v), so a vertical stroke's scale is overstated by the aspect — a physical
+    // deviation on a vertical word is charged aspect^2 less than the same deviation on a
+    // horizontal one. Pinned as-is: changing it moves a calibrated score channel.
+    'tribixbite.cleverkeys.swipe.geometric.GeoShapeFrameTest',
+    'tribixbite.cleverkeys.swipe.geometric.GeoMemoryAccountingTest',
     'tribixbite.cleverkeys.swipe.geometric.GeoBenchmarkTest',
     // FUTO-style CTC swipe module (wired as the `ctc` engine mode, G5) — pure JVM
     // golden-trace parity vs the Python port (scripts/futo_decoder_{eval,ceiling}.py)
@@ -1070,6 +1098,12 @@ tasks.register('runPureTests', JavaExec) {
     // F6: contraction ranking through the REAL beam on the REAL fr assets — proves a
     // floor-injected alias key can actually SURFACE, and that it never displaces a real word.
     'tribixbite.cleverkeys.swipe.ctc.CtcContractionRankingTest',
+    // Wave 15 (2026-11-15): a region-bearing language tag has three destinations and they are
+    // answered by three name spaces — pref keys (base subtag, shared with CTC), the pack
+    // directory (full tag, `langpacks/fr-ca/`), and the bundled asset (base subtag). The bug was
+    // the geometric adapter keying prefs on the raw tag while CTC normalized, so one user's
+    // personal dictionary split across two engines for the same finger and keyboard.
+    'tribixbite.cleverkeys.swipe.LanguageTagResolutionTest',
     // Per-language CTC enablement (fr/de/es, 2026-08-16): the λ-by-lexicon-scale preset
     // table (docs/eval/2026-08-15-ctc-per-language-lambda.md) + the CKDT→a-z projection
     // and accent-display map, verified against the REAL bundled dictionaries.
@@ -1109,6 +1143,11 @@ tasks.register('runPureTests', JavaExec) {
     'tribixbite.cleverkeys.personalization.UserVocabularyPersistenceTest',
     // User-configurable learned-vocabulary cap (personalization_max_words, 2026-08-08)
     'tribixbite.cleverkeys.personalization.UserVocabularyCapTest',
+    // 2026-11-21: the vocabulary store logged the evicted WORD (user typing history) on an
+    // ungated Log.d that the source-level log ratchet could not see, because the call site
+    // spells `log(...)` through an injected lambda. Drives the real eviction paths and asserts
+    // no logged line contains a vocabulary word.
+    'tribixbite.cleverkeys.personalization.UserVocabularyLoggingTest',
     // Opt-in next-word prediction (audit 2026-08-06 §4) — pure gating + generation
     'tribixbite.cleverkeys.NextWordPredictorTest',
     // Task A (2026-08-06): MASTER on-device-learning privacy gate — pure gate logic
@@ -1308,9 +1347,17 @@ tasks.register('runPureTests', JavaExec) {
     'tribixbite.cleverkeys.SuggestionPillPolicyTest',
     'tribixbite.cleverkeys.ToolbarCompactPolicyTest',
     'tribixbite.cleverkeys.FloatingConfigTest',
+    // Wave 21 (2026-11-15): FloatingRoot is built in code, so no XML-side drift test can see it.
+    // Pins the handle arrangement the smoke test's toolbar geometry depends on (content first,
+    // grip below) and the grip's clearance for the knob.
+    'tribixbite.cleverkeys.FloatingRootHandlePositionDriftTest',
     'tribixbite.cleverkeys.ThemeDefaultMigrationTest',
     'tribixbite.cleverkeys.voice.VoiceTypingConfigTest',
     'tribixbite.cleverkeys.voice.DictationPolicyTest',
+    // 2026-11-21: a second mic tap during the first press's async language query was ignored
+    // (`recognizer?.stopListening()` on a null recogniser), leaving sessionActive true so the
+    // deferred start opened the microphone and committed the transcript the user cancelled.
+    'tribixbite.cleverkeys.voice.DictationStopDuringStartTest',
     'tribixbite.cleverkeys.voice.VoiceLanguagePolicyTest',
     // 2026-11-09: dictation asked for the DEVICE locale, not the keyboard's active language.
     'tribixbite.cleverkeys.voice.DictationLanguageSourceTest',
@@ -1472,6 +1519,7 @@ tasks.register('runMockTests', JavaExec) {
     // Swipe-correction resolution, Feature B: the collector reports the stored row's trace id
     // and SwipeMLDataStore.relabelRow rewrites that row (mocked SQLite).
     'tribixbite.cleverkeys.ml.SwipeMLRelabelStoreTest',
+    'tribixbite.cleverkeys.ml.SwipeMLExportStatisticsTest',
     // Swipe-correction resolution, Feature A+B end to end through the real SuggestionHandler:
     // bar-replace / undo+retype recording, changed-mind + cursor-moved filtering, the three
     // gates, the offer at 2 corrections, accept -> personal dictionary, decline remembered,

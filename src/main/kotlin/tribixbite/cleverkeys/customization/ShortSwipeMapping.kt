@@ -95,6 +95,34 @@ data class ShortSwipeMapping(
         }
 
         /**
+         * [pattern] cut to [MAX_ACTION_LENGTH], refusing a cut that would leave an unterminated
+         * quoted literal.
+         *
+         * `SimpleDateFormat` rejects an odd number of `'`. A pattern longer than the cap whose
+         * 4096th character falls inside a quoted run therefore truncates to an INVALID pattern,
+         * and because the cap exists to bound storage rather than to express a user intent, the
+         * right answer is to drop the unfinished tail back to the last complete quote rather
+         * than to throw. Patterns are short in practice (the editor offers `yyyy-MM-dd` and the
+         * like), so this only bites a hand-edited or imported backup.
+         */
+        @JvmStatic
+        fun untruncatedTimestampPattern(pattern: String): String {
+            if (pattern.length <= MAX_ACTION_LENGTH) return pattern
+            val cut = pattern.substring(0, MAX_ACTION_LENGTH)
+            // An unterminated quote is the ONLY way a prefix of a valid pattern is invalid, so
+            // trim the dangling tail back to its opening quote. Bounded: one pass, no loop.
+            // If that leaves nothing usable the pattern began inside a literal, and `init`'s
+            // isNotBlank/validity require rejects it with its own message — the same contract
+            // this factory already documents, and the load path tolerates it per entry.
+            val lastQuote = cut.lastIndexOf('\'')
+            return if (lastQuote >= 0 && cut.count { it == '\'' } % 2 == 1) {
+                cut.substring(0, lastQuote)
+            } else {
+                cut
+            }
+        }
+
+        /**
          * Create a text input mapping.
          */
         fun textInput(
@@ -187,7 +215,14 @@ data class ShortSwipeMapping(
             direction = direction,
             displayText = displayText.take(MAX_DISPLAY_LENGTH),
             actionType = ActionType.TIMESTAMP,
-            actionValue = pattern.take(MAX_ACTION_LENGTH),
+            // Truncate BEFORE constructing, so `init` validates the string that is actually
+            // stored. `pattern.take(...)` in the constructor argument is evaluated first, so
+            // this is the same value — but the property it has to be *provably* validated now
+            // holds by construction rather than by argument order. A cut can turn a valid
+            // pattern into an invalid one exactly once: if it lands inside a quoted literal,
+            // the remainder has an unterminated quote (`yyyy-'abc` ) — see
+            // `GeoShapeFrameTest`'s sibling `ShortSwipeTruncationTest`.
+            actionValue = untruncatedTimestampPattern(pattern),
             useKeyFont = useKeyFont
         )
     }
@@ -251,12 +286,41 @@ data class ShortSwipeCustomizations(
 ) {
     /**
      * Convert to flat list of ShortSwipeMapping objects.
+     *
+     * **Per-entry tolerance.** [ShortSwipeMapping]'s `init` REJECTS an entry that violates its
+     * invariants (`displayText` > 4 chars, `actionValue` > 4096, a TIMESTAMP pattern that is
+     * blank or unparseable, …). This is a LOAD path — `mappings` comes straight from
+     * `gson.fromJson` of the user's file or an imported backup — so those invariants are being
+     * applied to untrusted input, and they are not all reachable through the app's own editor.
+     * A hand-edited or third-party-backup entry can violate one of them.
+     *
+     * Letting the exception escape would fail the WHOLE file: `loadMappings` catches it and
+     * logs "Failed to load custom mappings", leaving the user with NONE of their mappings
+     * instead of all-but-one. (The same shape as the import bug G-2 already fixed for an
+     * empty payload — "an import that delivers nothing must not destroy everything".) So each
+     * entry is converted independently and a bad one is skipped, keeping the rest.
+     *
+     * A skipped entry is not silently lost forever: it stays in the on-disk JSON (this method
+     * does not rewrite the file), so correcting the file or a future release that accepts it
+     * restores it, and the count comes back through [convert] for the caller to log.
      */
-    fun toMappingList(): List<ShortSwipeMapping> {
-        return mappings.flatMap { (keyCode, directions) ->
-            directions.mapNotNull { (directionName, mapping) ->
-                val direction = SwipeDirection.entries.find { it.name == directionName }
-                direction?.let {
+    fun toMappingList(): List<ShortSwipeMapping> = convert().mappings
+
+    /**
+     * [toMappingList] plus the count of entries it had to reject, for the caller to log.
+     *
+     * A side-effect property was the obvious alternative and is the wrong shape for a `data
+     * class`: the count would be mutable state on a value type, shared by every holder of the
+     * instance, and correct only if the reader happened to be the thread that called
+     * [toMappingList] last. Returning it keeps the value with the call that produced it.
+     */
+    fun convert(): Converted {
+        var skipped = 0
+        val out = ArrayList<ShortSwipeMapping>(mappings.size * 4)
+        for ((keyCode, directions) in mappings) {
+            for ((directionName, mapping) in directions) {
+                val direction = SwipeDirection.entries.find { it.name == directionName } ?: continue
+                val converted = try {
                     val actionType = ActionType.fromString(mapping.actionType)
                     // A command's old default label (e.g. Private Copy's "🔒⎘") becomes its
                     // current default; user-typed labels are kept as saved.
@@ -267,16 +331,26 @@ data class ShortSwipeCustomizations(
                     } else null
                     ShortSwipeMapping(
                         keyCode = keyCode,
-                        direction = it,
+                        direction = direction,
                         displayText = upgraded?.displayText ?: mapping.displayText,
                         actionType = actionType,
                         actionValue = mapping.actionValue,
                         useKeyFont = upgraded?.useKeyFont ?: mapping.useKeyFont
                     )
+                } catch (_: IllegalArgumentException) {
+                    // `init`'s `require` failures are the only IllegalArgumentException this can
+                    // throw, and they are exactly the "this stored entry is malformed" case.
+                    skipped++
+                    continue
                 }
+                out.add(converted)
             }
         }
+        return Converted(out, skipped)
     }
+
+    /** The result of [convert]: the usable mappings plus how many stored entries were dropped. */
+    data class Converted(val mappings: List<ShortSwipeMapping>, val skipped: Int)
 
     companion object {
         const val CURRENT_VERSION = 2

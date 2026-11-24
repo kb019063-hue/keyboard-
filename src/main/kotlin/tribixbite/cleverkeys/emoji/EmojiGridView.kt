@@ -95,6 +95,16 @@ class EmojiGridView(context: Context, attrs: AttributeSet?) :
     private var shownQuery: String? = null
 
     /**
+     * The group actually on screen.
+     *
+     * Not the same as the last one requested: the pane opens on [GROUP_LAST_USE] only when there
+     * is history, otherwise it opens on group 0. The category bar keys its selected state off
+     * this, so the highlighted button is the group being shown rather than the one that was asked
+     * for. (2026-11-21, `gif`/look pass.)
+     */
+    fun currentGroup(): Int = shownGroup
+
+    /**
      * #181: EmojiCompat (androidx.emoji2, initialised by androidx.startup when a font provider
      * exists) loads its font asynchronously. Until it settles, renderability answers are not
      * cached; when it finishes, the current grid is filtered again so emoji it can draw appear.

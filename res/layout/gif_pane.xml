@@ -6,16 +6,33 @@
     android:layout_height="match_parent"
     android:hardwareAccelerated="false">
 
-  <!-- Search bar with close button -->
+  <!-- Search bar with back button -->
   <LinearLayout
       android:id="@+id/gif_search_bar"
       android:layout_width="match_parent"
       android:layout_height="40dp"
       android:orientation="horizontal"
       android:gravity="center_vertical"
-      android:paddingStart="8dp"
+      android:paddingStart="4dp"
       android:paddingEnd="4dp"
       android:background="?attr/colorKey">
+
+    <!-- Back to typing (2026-11-21). The GIF pane is as tall as the keyboard and the keys are
+         not drawn under it, so this is the way back to them — the same argument, and now the same
+         control, as the clipboard pane's clipboard_close_button (2026-11-13). This pane used to
+         have its dismiss control at the far END of the header as a small down-arrow, which is
+         neither where anyone looks for "back" nor the same place as the pane it sits beside. -->
+    <ImageButton
+        android:id="@+id/gif_close_button"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:src="@drawable/ic_clipboard_back"
+        android:tint="?attr/colorLabel"
+        tools:ignore="UseAppTint"
+        android:background="?android:attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/clipboard_back"
+        android:scaleType="centerInside"
+        android:padding="8dp"/>
 
     <EditText
         android:id="@+id/gif_search_input"
@@ -45,19 +62,6 @@
         android:background="?android:attr/selectableItemBackgroundBorderless"
         android:contentDescription="@string/clipboard_clear_search"
         android:visibility="gone"
-        android:scaleType="centerInside"
-        android:padding="6dp" />
-
-    <!-- Close/dismiss GIF pane button -->
-    <ImageButton
-        android:id="@+id/gif_close_button"
-        android:layout_width="36dp"
-        android:layout_height="36dp"
-        android:src="@android:drawable/arrow_down_float"
-        android:tint="?attr/colorLabel"
-        tools:ignore="UseAppTint"
-        android:background="?android:attr/selectableItemBackgroundBorderless"
-        android:contentDescription="@string/gif_close"
         android:scaleType="centerInside"
         android:padding="6dp" />
 
@@ -109,7 +113,8 @@
   <LinearLayout
       android:id="@+id/gif_pagination_bar"
       android:layout_width="match_parent"
-      android:layout_height="28dp"
+      android:layout_height="wrap_content"
+      android:minHeight="40dp"
       android:orientation="horizontal"
       android:gravity="center"
       android:background="?attr/colorKey"

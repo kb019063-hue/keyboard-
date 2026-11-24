@@ -119,7 +119,7 @@ class GesturePreprocessor(private val config: GeometricEngineConfig) {
             endNearest = endNearest,
             startNearestInset = startNearestInset,
             endNearestInset = endNearestInset,
-            reversalCount = countReversals(resampled),
+            reversalCount = countReversals(resampled, layout),
             nonCornerWobbleDeg = nonCornerWobbleDeg(resampled, layout),
         )
     }
@@ -170,17 +170,30 @@ class GesturePreprocessor(private val config: GeometricEngineConfig) {
      * per-decode quality signal for the ranker's confidence temperature; NEVER a
      * filter and never an input to scoring or pruning. Zero-length segments
      * (coincident points) contribute no reversal.
+     *
+     * 2026-11-21 (`geometric/` audit): the angle is now measured in the PHYSICAL
+     * frame (Δv divided by the layout aspect, exactly as [LayoutGeometry.dKw] and
+     * [nonCornerWobbleDeg] already do) instead of in raw normalized (u,v). Raw u/v
+     * is not a physical frame unless the key area is square, so the same physical
+     * hairpin measured differently on every device: at aspect 1.0 a 150° physical
+     * reversal read 150°, but at aspect 2.5 it read 113° and did not count at all.
+     * A 90° physical corner read 90° on a square key area and 57° on a 2.5:1 one.
+     * Because the config default is `reversalAngleThresholdDeg = 150`, the effect
+     * was that real reversals were silently under-counted on ordinary (wide)
+     * keyboards — the signal is a confidence input, so decodes that deserved a
+     * lower temperature kept a high one.
      */
-    internal fun countReversals(poly: FloatArray): Int {
+    internal fun countReversals(poly: FloatArray, layout: LayoutGeometry): Int {
         val count = poly.size / 2
         if (count < 3) return 0
         val thresholdRad = Math.toRadians(config.reversalAngleThresholdDeg.toDouble())
+        val aspect = layout.aspect
         var reversals = 0
         for (i in 1 until count - 1) {
             val ax = poly[2 * i] - poly[2 * (i - 1)]
-            val ay = poly[2 * i + 1] - poly[2 * (i - 1) + 1]
+            val ay = (poly[2 * i + 1] - poly[2 * (i - 1) + 1]) / aspect
             val bx = poly[2 * (i + 1)] - poly[2 * i]
-            val by = poly[2 * (i + 1) + 1] - poly[2 * i + 1]
+            val by = (poly[2 * (i + 1) + 1] - poly[2 * i + 1]) / aspect
             val na = sqrt(ax * ax + ay * ay)
             val nb = sqrt(bx * bx + by * by)
             if (na <= 0f || nb <= 0f) continue // coincident neighbor → no turn
@@ -314,6 +327,21 @@ class GesturePreprocessor(private val config: GeometricEngineConfig) {
      * `(pᵢ − pᵢ₋₁)` and `(pᵢ₊₁ − pᵢ)`; a straight line has 0°, a sharp reversal ~180°.
      * Zero-length segments (coincident points) contribute no corner. This is a SOFT
      * feature (bounded corner-anchor bonus in [PathScorer]) — never a filter.
+     *
+     * 2026-11-21 (`geometric/` audit) — REPORTED, DELIBERATELY NOT CHANGED. Unlike
+     * [countReversals], which now measures this same rule in the physical frame, this
+     * function still works in raw normalized (u,v), and that is not a physical frame unless
+     * the key area is square: a physical 55° corner reads 42° at aspect 2.5, so corners on
+     * ordinary wide keyboards are under-detected. Fixing it here was attempted and REVERTED:
+     * unlike the reversal count — which feeds nothing at the default
+     * `reversalConfidenceTempSlope = 0` — this feeds [PathScorer.cornerBonus] and therefore
+     * live ranking, and moving it measurably moved TYPICAL top-1 on the synthetic grid, enough
+     * to break `GeoAblationTest.cornerAnchorBonus_keeping_doesNotRegress`. Changing a scoring
+     * channel needs a measured A/B against the accuracy floors, not a plausible argument.
+     *
+     * The frame difference against [countReversals] is therefore real and deliberate until
+     * that A/B is run; the class KDoc's "same turn-angle rule" claim holds for the RULE (an
+     * acos over consecutive segment vectors) and not, for now, for the frame.
      */
     internal fun detectCorners(poly: FloatArray): IntArray {
         val count = poly.size / 2

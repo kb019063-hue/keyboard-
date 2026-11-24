@@ -51,7 +51,28 @@ object GeometricUserWordMerge {
         if (user.isEmpty() && disabled.isEmpty()) return base
 
         user.sortWith(compareByDescending<Pair<String, Int>> { it.second }.thenBy { it.first })
-        val userLower = user.mapTo(HashSet()) { it.first.lowercase(Locale.ROOT) }
+        // Dedupe by case-folded word, KEEPING THE FIRST — i.e. the highest-frequency entry,
+        // since the sort above is frequency-desc then word-asc. Two sources feed [userWords]
+        // (`UserDictionarySnapshot.mergeWithCustom`), and the CASE-FOLDED match below means
+        // `Zeta` and `zeta` are the same word to this merge, so an unsorted list could carry
+        // both. Emitting both was wrong in three ways:
+        //  - the duplicate got the SAME template word: `LayoutProjection` maps it to the same
+        //    key-id sequence, so both ordinals landed in the same extremity bucket and were
+        //    scored twice for no extra information;
+        //  - the second copy sits at a WORSE ordinal rank, so it scores no better and is
+        //    discarded by the ranker's dedupe — it can only cost work;
+        //  - `bonusByWord` is keyed by the word exactly as listed, so the two copies could
+        //    disagree about whether the word carries a swipe-priority bonus.
+        // Collapsing here also makes the two ordinals that could have reached `TopKScored`
+        // one, which is what keeps a duplicated personal dictionary from amplifying the
+        // equal-score tie group that collector has to re-sort (see GeometricSwipeEngine).
+        val deduped = ArrayList<Pair<String, Int>>(user.size)
+        val userLower = HashSet<String>(user.size)
+        for (entry in user) {
+            if (userLower.add(entry.first.lowercase(Locale.ROOT))) deduped.add(entry)
+        }
+        user.clear()
+        user.addAll(deduped)
         val disabledLower = disabled.mapTo(HashSet()) { it.lowercase(Locale.ROOT) }
 
         val words = ArrayList<String>(base.size + user.size)

@@ -24,10 +24,11 @@ import android.widget.TextView
 import androidx.core.view.ViewCompat
 import tribixbite.cleverkeys.gif.Gif
 import tribixbite.cleverkeys.gif.GifAssetManager
-import tribixbite.cleverkeys.gif.GifInsertPolicy
-import tribixbite.cleverkeys.minimize.MinimizedStyle
+import tribixbite.cleverkeys.gif.GifCategory
 import tribixbite.cleverkeys.gif.GifGridManager
 import tribixbite.cleverkeys.gif.GifGroupButtonsBar
+import tribixbite.cleverkeys.gif.GifInsertPolicy
+import tribixbite.cleverkeys.minimize.MinimizedStyle
 import tribixbite.cleverkeys.voice.DictationController
 import tribixbite.cleverkeys.voice.DictationPolicy
 import tribixbite.cleverkeys.voice.VoiceTypingConfig
@@ -619,6 +620,15 @@ class KeyboardReceiver(
                     pane.findViewById<EmojiGroupButtonsBar>(R.id.emoji_group_buttons)
                         ?.setSearchManager(emojiSearchManager!!)
 
+                    // 2026-11-21: the emoji bar had no selected state either, so tapping a group
+                    // swapped the grid and left the bar looking unchanged. Mark the group the grid
+                    // actually opened on - it falls back to group 0 when there is no history -
+                    // and follow later changes from the same place category taps already land.
+                    pane.findViewById<EmojiGridView>(R.id.emoji_grid)?.let { grid ->
+                        pane.findViewById<EmojiGroupButtonsBar>(R.id.emoji_group_buttons)
+                            ?.setSelectedGroup(grid.currentGroup())
+                    }
+
                     // #41 v8: Wire up search manager to emoji grid for selection bypass
                     pane.findViewById<EmojiGridView>(R.id.emoji_grid)?.let { grid ->
                         grid.setSearchManager(emojiSearchManager!!)
@@ -834,6 +844,25 @@ class KeyboardReceiver(
                 }
                 groupButtons?.onCategoryChanged = { category ->
                     gifGrid?.setCategory(category)
+                }
+
+                // 2026-11-21: the bar had no selected state, so nothing showed which category was
+                // on screen. The initial mark cannot just be RECENTLY_USED: on a fresh install the
+                // grid keeps loading until a page is non-empty (loadDefaultView, called out of the
+                // view's own scope), so the only reliable moment to read the LANDED category is
+                // after pagination is announced. setCategory/nextPage/previousPage all announce
+                // it; only a load that no tap triggered does not, and the loop below covers that.
+                groupButtons?.setSelectedCategory(gifGrid?.shownCategory() ?: GifCategory.RECENTLY_USED)
+                val paginationSignal = gifGrid?.onPaginationChanged
+                // Bound to a local so the lambda body sees a non-null grid: `gifGrid` is nullable
+                // (there is no RecyclerView in some pane configurations) and a safe call on the
+                // setter does not extend into the lambda.
+                val gridForBar = gifGrid
+                if (gridForBar != null) {
+                    gridForBar.onPaginationChanged = { needsPagination, page, total ->
+                        paginationSignal?.invoke(needsPagination, page, total)
+                        groupButtons?.setSelectedCategory(gridForBar.shownCategory())
+                    }
                 }
             }
 

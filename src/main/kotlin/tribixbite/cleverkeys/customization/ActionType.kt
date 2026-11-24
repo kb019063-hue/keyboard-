@@ -158,6 +158,20 @@ enum class AvailableCommand(
         }
 
         /**
+         * The legacy enum constant spelled EXACTLY [name], or null.
+         *
+         * [fromString] is deliberately case-insensitive: it matches the enum's own names, which
+         * users type in any case. That makes it the wrong tool for deciding whether a *stored
+         * command name* is a legacy spelling, because the catalogue also has lowercase names
+         * (`copy`, `switch_forward`, `showTextMenu` …) and 14 of this enum's 27 constants
+         * lowercase onto one of them. Matching exactly keeps the two namespaces apart — see
+         * `CommandRouting.editingKeyName` for the five mappings that differ in meaning.
+         */
+        fun fromLegacyName(name: String): AvailableCommand? {
+            return entries.find { it.name == name }
+        }
+
+        /**
          * Get commands grouped by category for UI display.
          */
         fun groupedByCategory(): Map<String, List<AvailableCommand>> = mapOf(

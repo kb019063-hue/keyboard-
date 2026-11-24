@@ -513,7 +513,7 @@ class ShortSwipeIntentTest {
             text = "Hello"
         )
 
-        val xmlValue = XmlAttributeMapper.toXmlValue(mapping)
+        val xmlValue = XmlAttributeMapper.toXmlValue(mapping)!!
 
         assertThat(xmlValue).isEqualTo("'Hello'")
     }
@@ -527,7 +527,7 @@ class ShortSwipeIntentTest {
             text = "It's great"
         )
 
-        val xmlValue = XmlAttributeMapper.toXmlValue(mapping)
+        val xmlValue = XmlAttributeMapper.toXmlValue(mapping)!!
 
         assertThat(xmlValue).isEqualTo("'It\\'s great'")
         assertThat(xmlValue).contains("\\'")
@@ -542,10 +542,12 @@ class ShortSwipeIntentTest {
             command = AvailableCommand.COPY
         )
 
-        val xmlValue = XmlAttributeMapper.toXmlValue(mapping)
+        val xmlValue = XmlAttributeMapper.toXmlValue(mapping)!!
 
-        // KeyValue.getKeyByName("COPY") finds it, so the raw command name is used
-        assertThat(xmlValue).isEqualTo("COPY")
+        // "COPY" is not a key name: KeyValue.getKeyByName returns its own-name fallback, and the
+        // legacy table names the editing key behind it. Exporting "COPY" itself would make the
+        // short swipe TYPE "COPY" — getKeyByName is total, so the old `!= null` check passed.
+        assertThat(xmlValue).isEqualTo("copy")
     }
 
     @Test
@@ -557,7 +559,7 @@ class ShortSwipeIntentTest {
             keyEventCode = 66
         )
 
-        val xmlValue = XmlAttributeMapper.toXmlValue(mapping)
+        val xmlValue = XmlAttributeMapper.toXmlValue(mapping)!!
 
         assertThat(xmlValue).isEqualTo("keyevent:66")
     }
@@ -572,7 +574,7 @@ class ShortSwipeIntentTest {
             intentJson = json
         )
 
-        val xmlValue = XmlAttributeMapper.toXmlValue(mapping)
+        val xmlValue = XmlAttributeMapper.toXmlValue(mapping)!!
 
         assertThat(xmlValue).startsWith("intent:'")
         assertThat(xmlValue).endsWith("'")
@@ -589,11 +591,121 @@ class ShortSwipeIntentTest {
             intentJson = json
         )
 
-        val xmlValue = XmlAttributeMapper.toXmlValue(mapping)
+        val xmlValue = XmlAttributeMapper.toXmlValue(mapping)!!
 
         assertThat(xmlValue).contains("\\'")
         // Should escape the single quote in "It's"
         assertThat(xmlValue).matches(".*It\\\\'s.*")
+    }
+
+    // =========================================================================
+    // E2. Export-path safety: never emit a value that parses to the command's own name
+    // =========================================================================
+
+    /**
+     * Parse an exported attribute value the way a layout does.
+     *
+     * `KeyboardData.parse_key_attr` hands the attribute value STRAIGHT to
+     * `KeyValue.getKeyByName`, with no `symbol:` prefix, and `getKeyByName` is what consults
+     * `getSpecialKeyByName` before falling back to the parser. Using `KeyValueParser.parse`
+     * here instead would turn `copy` into a String key and hide the very defect under test.
+     */
+    private fun parseExported(value: String) = KeyValue.getKeyByName(value)
+
+    @Test
+    fun `a legacy SCREAMING_SNAKE command exports the key name, not the enum spelling`() {
+        // AvailableCommand.COPY.name is "COPY", and KeyValue.getKeyByName("COPY") is a String
+        // key spelling "COPY" — NOT null. The old `getKeyByName(x) != null` guard was therefore
+        // always true, its legacy remap never ran, and the exported layout typed "COPY".
+        val mapping = ShortSwipeMapping(
+            keyCode = "a", direction = SwipeDirection.N, displayText = "CPY",
+            actionType = ActionType.COMMAND, actionValue = "COPY",
+        )
+        assertThat(XmlAttributeMapper.toXmlValue(mapping)).isEqualTo("copy")
+        val parsed = parseExported(XmlAttributeMapper.toXmlValue(mapping)!!)
+        assertThat(parsed.getKind()).isEqualTo(KeyValue.Kind.Editing)
+    }
+
+    @Test
+    fun `word movement commands export their own key, not a one-character cursor move`() {
+        // They mapped to cursor_left/cursor_right until 2026-10-17, when word_left/word_right
+        // became real editing keys. Exporting cursor_left silently changed what the swipe does.
+        val left = ShortSwipeMapping(
+            keyCode = "a", direction = SwipeDirection.W, displayText = "W<",
+            actionType = ActionType.COMMAND, actionValue = "WORD_LEFT",
+        )
+        assertThat(XmlAttributeMapper.toXmlValue(left)).isEqualTo("word_left")
+        val parsed = parseExported("word_left")
+        assertThat(parsed.getKind()).isEqualTo(KeyValue.Kind.Editing)
+        assertThat(parsed.getEditing()).isEqualTo(KeyValue.Editing.WORD_LEFT)
+    }
+
+    @Test
+    fun `a command with no layout spelling exports null rather than its own name`() {
+        // These have no KeyValue at all, so the only available "value" is the name itself, and
+        // a String key in a subkey slot TYPES its text. Omitting the attribute is the only
+        // export that does not corrupt the user's document.
+        for (name in listOf(
+            "paste_pinned_1", "paste_pinned_2", "paste_pinned_3", "paste_pinned_4",
+            "paste_pinned_5", "showTextMenu", "primaryLangToggle", "secondaryLangToggle",
+            "one_handed_toggle", "one_handed_side", "split_toggle", "incognito_toggle",
+            "floating_toggle",
+        )) {
+            val mapping = ShortSwipeMapping(
+                keyCode = "a", direction = SwipeDirection.N, displayText = "X",
+                actionType = ActionType.COMMAND, actionValue = name,
+            )
+            assertThat(XmlAttributeMapper.toXmlValue(mapping)).isNull()
+        }
+    }
+
+    @Test
+    fun `the removed placeholder exports as the placeholder key, not as text`() {
+        // `removed` is a real KeyValue (Kind.Placeholder, empty payload), so it survives the
+        // own-name test and exports as itself. Checked because it is the one COMMAND mapping
+        // whose whole purpose is to be blank: if it ever exported as a String key, a "hide the
+        // default subkey" mapping would start typing "removed".
+        val mapping = ShortSwipeMapping.removal("a", SwipeDirection.N)
+        assertThat(XmlAttributeMapper.toXmlValue(mapping)).isEqualTo("removed")
+        val parsed = parseExported("removed")
+        assertThat(parsed.getKind()).isEqualTo(KeyValue.Kind.Placeholder)
+        assertThat(parsed.getString()).isEmpty()
+    }
+
+    @Test
+    fun `every registry command either exports a real key or nothing`() {
+        // The property, over the whole catalogue rather than a sample: an exported value must
+        // never come back as a String key spelling the command's own name.
+        for (command in CommandRegistry.ALL_COMMANDS) {
+            val mapping = ShortSwipeMapping(
+                keyCode = "a", direction = SwipeDirection.N, displayText = "X",
+                actionType = ActionType.COMMAND, actionValue = command.name,
+            )
+            val exported = XmlAttributeMapper.toXmlValue(mapping) ?: continue
+            val parsed = parseExported(exported)
+            assertThat(CommandRouting.isOwnNameFallback(exported, parsed)).isFalse()
+        }
+    }
+
+    @Test
+    fun `the map does not cover TEXT and the three controls - the reported contradiction`() {
+        // Pinned so the mismatch cannot change silently. `toXmlValue` builds a KEYDEF (the
+        // right-hand side of a `symbol:keydef` string), which is how this library's own tests
+        // parse it; a layout attribute is parsed BARE by `parse_key_attr`, and `KeyValueParser`
+        // turns any colon-free string into a String key. So the quotes survive as text.
+        //
+        // Reported as an exporter/mapper contradiction (wave 19): choosing between emitting the
+        // bare literal and emitting a prefixed keydef changes the layout format and needs a
+        // device check. Asserted here as CURRENT behaviour, not as correct behaviour.
+        //
+        // `toXmlValue` itself is NOT the reported gap: `toXmlValue` is a pure keydef
+        // serialiser, and its documented contract — the one `KeyValueParserTest` and
+        // `ShortSwipeMappingTest` exercise with a `date:`/`{}:` prefix — is what it implements.
+        // The gap is downstream, in `XmlLayoutExporter`.
+        val mapping = ShortSwipeMapping.textInput("a", SwipeDirection.N, "HI", "Hello")
+        val exported = XmlAttributeMapper.toXmlValue(mapping)!!
+        assertThat(exported).isEqualTo("'Hello'")
+        assertThat(parseExported(exported).getString()).isEqualTo("'Hello'")
     }
 
     // =========================================================================
@@ -733,5 +845,105 @@ class ShortSwipeIntentTest {
         for (command in AvailableCommand.values()) {
             assertThat(command.description).isNotEmpty()
         }
+    }
+
+    // =========================================================================
+    // G. Load-path tolerance + timestamp truncation (wave 19, 2026-11-15)
+    // =========================================================================
+
+    /** Build a stored entry directly, bypassing the factories' truncation. */
+    private fun stored(
+        displayText: String = "ab",
+        actionType: String = "TEXT",
+        actionValue: String = "hi",
+    ) = DirectionMapping(displayText, actionType, actionValue)
+
+    @Test
+    fun `one malformed stored entry does not discard the rest of the file`() {
+        // `mappings` comes from gson.fromJson of the user's file or an imported backup, so
+        // ShortSwipeMapping's init invariants are being applied to untrusted input. Before
+        // this, the first violation threw out of toMappingList and loadMappings caught it as
+        // "Failed to load custom mappings" — leaving the user with NONE of their mappings
+        // instead of all-but-one.
+        val stored = ShortSwipeCustomizations(
+            mappings = mapOf(
+                "a" to mapOf("N" to stored()),
+                // 5 characters: the primary constructor requires <= 4. Not reachable from the
+                // editor, which takes(4) — but trivially reachable in a hand-edited file.
+                "b" to mapOf("S" to stored(displayText = "FIVES")),
+                "c" to mapOf("E" to stored(actionValue = "ok")),
+                // An unparseable TIMESTAMP pattern.
+                "d" to mapOf("W" to stored(actionType = "TIMESTAMP", actionValue = "yyyy-'abc")),
+            )
+        )
+
+        val result = stored.convert()
+
+        assertThat(result.mappings.map { it.keyCode }).containsExactly("a", "c")
+        assertThat(result.skipped).isEqualTo(2)
+        // `toMappingList` stays the compatible shape for every existing caller.
+        assertThat(stored.toMappingList()).hasSize(2)
+    }
+
+    @Test
+    fun `an unknown action type is tolerated rather than throwing`() {
+        // ActionType.fromString maps unrecognised strings to a default, so this entry is kept —
+        // asserted so a future strictness change is a visible decision, not a silent drop.
+        val converted = ShortSwipeCustomizations(
+            mappings = mapOf("a" to mapOf("N" to stored(actionType = "NOT_A_TYPE")))
+        ).convert()
+        assertThat(converted.skipped).isEqualTo(0)
+        assertThat(converted.mappings).hasSize(1)
+    }
+
+    @Test
+    fun `an unknown direction name is skipped without counting as malformed`() {
+        val converted = ShortSwipeCustomizations(
+            mappings = mapOf("a" to mapOf("NORTHISH" to stored()))
+        ).convert()
+        assertThat(converted.mappings).isEmpty()
+        assertThat(converted.skipped).isEqualTo(0)
+    }
+
+    @Test
+    fun `a timestamp pattern longer than the cap is truncated to a still-valid pattern`() {
+        // A cut can turn a valid pattern into an invalid one exactly once: if it lands inside a
+        // quoted literal, the remainder has an unterminated quote. The cap exists to bound
+        // storage, not to express intent, so the unfinished tail is dropped back to the last
+        // complete quote rather than throwing.
+        val quoted = "yyyy-" + "'" + "x".repeat(5000) + "'"
+        assertThat(ShortSwipeMapping.isValidTimestampPattern(quoted)).isTrue()
+
+        val mapping = ShortSwipeMapping.timestamp(
+            keyCode = "t",
+            direction = SwipeDirection.N,
+            displayText = "TS",
+            pattern = quoted,
+        )
+        val storedPattern = mapping.getTimestampPattern()!!
+        assertThat(storedPattern.length).isAtMost(ShortSwipeMapping.MAX_ACTION_LENGTH)
+        assertThat(ShortSwipeMapping.isValidTimestampPattern(storedPattern)).isTrue()
+    }
+
+    @Test
+    fun `a short timestamp pattern is stored unchanged`() {
+        // The truncation helper must be a no-op below the cap, or every existing mapping moves.
+        val pattern = "yyyy-MM-dd'T'HH:mm:ss"
+        assertThat(ShortSwipeMapping.untruncatedTimestampPattern(pattern)).isEqualTo(pattern)
+        assertThat(
+            ShortSwipeMapping.timestamp("t", SwipeDirection.N, "TS", pattern).getTimestampPattern()
+        ).isEqualTo(pattern)
+    }
+
+    @Test
+    fun `truncation that would leave only a quoted fragment is rejected rather than stored`() {
+        // A pathological pattern that is one enormous literal: cutting it inside the quote leaves
+        // only the opening quote, which the helper trims to the empty string, which init rejects.
+        // Asserted so the failure mode is a loud IllegalArgumentException at construction rather
+        // than an invalid pattern reaching SimpleDateFormat at execution time.
+        val allLiteral = "'" + "x".repeat(ShortSwipeMapping.MAX_ACTION_LENGTH + 100) + "'"
+        val expected = ShortSwipeMapping.untruncatedTimestampPattern(allLiteral)
+        assertThat(expected).isEmpty()
+        assertThat(ShortSwipeMapping.isValidTimestampPattern(expected)).isFalse()
     }
 }

@@ -448,10 +448,19 @@ class PathScorer(private val config: GeometricEngineConfig) {
      * break the bonus). `internal` for that pin test.
      */
     internal fun templateCornerIndices(t: FloatArray): IntArray {
-        if (n < 3) return IntArray(0)
+        // Bounded by the BUFFER, not by config.resamplePoints. They are equal on the production
+        // path, where t is a template this scorer resampled itself, but keying the loop off `n`
+        // made the function throw AIOOBE for any shorter caller — which is how the
+        // template/gesture pin test caught the 2026-11-21 frame fix.
+        val count = t.size / 2
+        if (count < 3) return IntArray(0)
         val thresholdRad = Math.toRadians(config.cornerAngleThresholdDeg.toDouble())
         val out = ArrayList<Int>()
-        for (i in 1 until n - 1) {
+        for (i in 1 until count - 1) {
+            // Raw normalized frame, kept in lockstep with GesturePreprocessor.detectCorners —
+            // which also stays in raw u/v for now, because moving it moves live ranking. See the
+            // 2026-11-21 note there; the two are pinned to each other in INDEX space by
+            // GeoDecoderCoreTest, so neither may drift on its own.
             val ax = t[2 * i] - t[2 * (i - 1)]
             val ay = t[2 * i + 1] - t[2 * (i - 1) + 1]
             val bx = t[2 * (i + 1)] - t[2 * i]

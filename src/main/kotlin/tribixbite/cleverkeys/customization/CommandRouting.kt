@@ -71,11 +71,41 @@ object CommandRouting {
         else editingValue(mapping.actionValue)
 
     /** The Editing-kind key the command named [commandName] denotes, or null. */
-    fun editingValue(commandName: String): KeyValue? {
-        // Legacy names match case-insensitively, exactly as the executor's AvailableCommand.fromString.
-        val name = AvailableCommand.fromString(commandName)?.let { LEGACY_EDITING_NAMES[it] } ?: commandName
-        return KeyValue.getKeyByName(name).takeIf { it.getKind() == KeyValue.Kind.Editing }
-    }
+    fun editingValue(commandName: String): KeyValue? =
+        editingKeyName(commandName)?.let { KeyValue.getKeyByName(it) }
+            ?.takeIf { it.getKind() == KeyValue.Kind.Editing }
+
+    /**
+     * The key name [editingValue] resolves [commandName] to, or null — the lookup on its own, so
+     * the name resolution is unit-testable without constructing a [KeyValue] of the right kind.
+     *
+     * ## Why the legacy lookup is EXACT here and case-insensitive below (audit 2026-11-15, P3)
+     *
+     * `AvailableCommand.fromString` is case-insensitive, which is right for `AvailableCommand`'s
+     * own 27 names (`COPY`, `copy`, `Copy`). Applying it to EVERY stored command name is not:
+     * `"copy".uppercase()` matched the enum, so a catalogue mapping stored as `copy` was looked
+     * up as `AvailableCommand.COPY`, remapped to `copy`, and echoed back — harmless for the 9
+     * names that remap to themselves, wrong for the 5 whose legacy name means something
+     * different from the catalogue command with the same lowercase spelling:
+     *
+     * | stored | legacy meaning (executor `when`)      | catalogue command of that name |
+     * |--------|---------------------------------------|--------------------------------|
+     * | `SWITCH_FORWARD`  | defer to the keyboard service | an `Event` key that switches layouts |
+     * | `SWITCH_BACKWARD` | defer to the keyboard service | an `Event` key |
+     * | `SHOW_TEXT_MENU`  | defer the text menu           | no Editing key (null) |
+     * | `PRIMARY_LANG_TOGGLE`   | defer the language toggle | no Editing key (null) |
+     * | `SECONDARY_LANG_TOGGLE` | defer the language toggle | no Editing key (null) |
+     *
+     * Matching `AvailableCommand` by its EXACT name (`fromLegacyName`) means a lowercase
+     * catalogue name is never mistaken for the SCREAMING_SNAKE enum constant it happens to
+     * spell, while the legacy spellings the catalogue predates keep resolving. Those five then
+     * fall through to the executor/view exactly as they did before CommandRouting existed.
+     *
+     * (`KeyValue.getKeyByName` is total, so the final `takeIf` — not a null check on the lookup —
+     * is what decides whether the name denoted an editing key at all.)
+     */
+    fun editingKeyName(commandName: String): String? =
+        AvailableCommand.fromLegacyName(commandName)?.let { LEGACY_EDITING_NAMES[it] } ?: commandName
 
     /**
      * Legacy AvailableCommands that are editing keys, with the key's catalogue name. The other

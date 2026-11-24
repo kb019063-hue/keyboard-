@@ -12,8 +12,18 @@ package tribixbite.cleverkeys.swipe.geometric
  *
  * **Tier B** — per-index lazy full-template memo ([WordTemplate]): only pruning
  * survivors are ever materialized, memoized in an LRU of `config.templateMemoCapacity`
- * entries. Eager full materialization (98k × 128 B + overhead ≈ 25 MB) is explicitly
- * rejected; the memo keeps the per-index footprint at ≈ 2.3 MB (NFR-2).
+ * entries. Eager full materialization is explicitly rejected: 98,140 words × 128 B of
+ * variant-0 payload ≈ 12 MiB, and ≈ 24 MiB if every word carried a doubled-letter second
+ * variant (at the default `resamplePoints = 32`; see [GeoMemoryAccountingTest]).
+ *
+ * The steady-state per-index footprint is **≈ 2.5 MiB: ~1.2 MiB Tier-A + ~1.3 MiB for a
+ * full 4096-entry memo**. Tier-A's half is per-word packed arrays
+ * (`TemplateIndex.estimatedBytes`, 9 B/word + 4 B/typeable word + the CSR tables); the memo
+ * half is `2·N` shorts per variant plus [MEMO_ENTRY_OVERHEAD_BYTES] of documented
+ * object/map overhead per entry. This used to read "≈ 2.3 MB", which no run of
+ * `estimatedBytes` ever produced — the formula's own answer for Tier-A is ~1.2 MiB at the
+ * shipped size, and nothing checked the prose against it. The enforced budget
+ * (`NFR-2`, ≤ 2.5 MiB/index) is asserted in `GeoBenchmarkTest`.
  *
  * **Thread-safety**: cache mutation (put/evict/get-or-build) is synchronized on
  * [lock]; each [CachedIndex]'s Tier-B memo is an independently synchronized LRU. A
@@ -209,7 +219,13 @@ class TemplateCache(private val config: GeometricEngineConfig) {
      * Byte cost of one index's Tier-B memo: the live payload (2 B/short) plus the
      * per-entry overhead the spec pins — array header 16 B + `WordTemplate` object
      * ~32 B + `pathLengthsKw` FloatArray (header 16 B + ≤ 2 floats) + LRU map entry
-     * ~48 B ≈ 112 B/entry of fixed overhead on top of the ~128 B/variant payload.
+     * ~48 B ≈ 112 B/entry of fixed overhead.
+     *
+     * The payload is `2·N` shorts **per variant** = 128 B at the default
+     * `resamplePoints = 32`, so a doubled-letter word (two variants) costs 256 B of
+     * payload, not 128 — the "~128 B/variant" this line used to say was right about the
+     * unit and easy to misread as a per-word figure. `memoPayloadBytes` sums the real
+     * array sizes, so the estimate is correct either way; only the prose could mislead.
      */
     private fun memoBytes(cached: CachedIndex): Long {
         val entries = cached.memoSize().toLong()

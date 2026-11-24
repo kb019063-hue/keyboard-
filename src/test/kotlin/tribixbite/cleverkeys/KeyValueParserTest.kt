@@ -56,7 +56,7 @@ class KeyValueParserTest {
     }
     @Test fun templateXmlRoundTripEscapesQuotesAndBackslashes() {
         val mapping = tribixbite.cleverkeys.customization.ShortSwipeMapping("a", tribixbite.cleverkeys.customization.SwipeDirection.N, "{}", tribixbite.cleverkeys.customization.ActionType.TEMPLATE, "C:\\work\\'[{selection}]\\")
-        val exported = tribixbite.cleverkeys.customization.XmlAttributeMapper.toXmlValue(mapping)
+        val exported = tribixbite.cleverkeys.customization.XmlAttributeMapper.toXmlValue(mapping)!!
         val key = KeyValueParser.parse("{}:" + exported)
         assertThat(key.getKind()).isEqualTo(KeyValue.Kind.Template)
         assertThat(key.getTemplateFormat().template).isEqualTo(mapping.actionValue)
@@ -93,7 +93,7 @@ class KeyValueParserTest {
         val mapping = tribixbite.cleverkeys.customization.ShortSwipeMapping("a",
             tribixbite.cleverkeys.customization.SwipeDirection.N, "date",
             tribixbite.cleverkeys.customization.ActionType.TIMESTAMP, "yyyy-MM-dd 'stamp'")
-        val key = KeyValueParser.parse("date:" + tribixbite.cleverkeys.customization.XmlAttributeMapper.toXmlValue(mapping))
+        val key = KeyValueParser.parse("date:" + tribixbite.cleverkeys.customization.XmlAttributeMapper.toXmlValue(mapping)!!)
         assertThat(key.getKind()).isEqualTo(KeyValue.Kind.Timestamp)
         assertThat(key.getTimestampFormat().pattern).isEqualTo(mapping.actionValue)
     }
@@ -102,7 +102,7 @@ class KeyValueParserTest {
         val mapping = tribixbite.cleverkeys.customization.ShortSwipeMapping("a",
             tribixbite.cleverkeys.customization.SwipeDirection.N, "open",
             tribixbite.cleverkeys.customization.ActionType.INTENT, json)
-        val key = KeyValueParser.parse("open:" + tribixbite.cleverkeys.customization.XmlAttributeMapper.toXmlValue(mapping))
+        val key = KeyValueParser.parse("open:" + tribixbite.cleverkeys.customization.XmlAttributeMapper.toXmlValue(mapping)!!)
         assertThat(key.getKind()).isEqualTo(KeyValue.Kind.Macro)
         assertThat(key.getMacro()[0].getString()).isEqualTo(tribixbite.cleverkeys.customization.IntentDefinition.INTENT_PREFIX + json)
     }

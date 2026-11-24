@@ -330,29 +330,45 @@ class SwipeMLDataStore private constructor(context: Context) :
     }
 
     /**
-     * Delete a specific swipe entry from the database
+     * Delete the one row stored for [data]'s trace.
+     *
+     * 2026-11-21 (ml/ audit) fixed two things here:
+     *
+     * 1. It matched on `target_word` plus a one-second timestamp window, not on `trace_id` — which
+     *    is UNIQUE NOT NULL and is what every other method in this class keys on ([relabelSwipe]
+     *    included). Deleting a swipe that shared a word and fell inside a second of another one
+     *    removed BOTH rows, and a row whose timestamp had drifted by more than a second matched
+     *    nothing at all. The trace id is the identity of a swipe; nothing else in the schema is.
+     * 2. It ran on the caller's thread. Every other write in this class goes through `_executor`,
+     *    which exists so the store's writers are serialized; a synchronous delete on the UI thread
+     *    both blocks it and can interleave with a queued insert.
+     *
+     * Separately reported and NOT fixed: the `is_exported` column is written in three places and
+     * read in none. [markAllAsExported] sets it to 1 after every export including the NDJSON one,
+     * which never resets it; [relabelRow] clears it so "the next export carries the corrected
+     * label", but no query filters on it, so it changes nothing. Dropping it would need a schema
+     * version bump; out of scope for this pass.
+     *
+     * Has no production caller today (only androidTest), so this is a latent-defect fix rather
+     * than a user-visible one.
      */
     fun deleteEntry(data: SwipeMLData?) {
         if (data == null) return
 
-        val db = writableDatabase
+        val traceId = data.traceId
 
-        // Delete by matching the word and approximate timestamp
-        val word = data.targetWord
-        val timestamp = data.timestampUtc
-
-        // Allow 1 second tolerance for timestamp matching
-        val minTime = timestamp - 1000
-        val maxTime = timestamp + 1000
-
-        val deleted = db.delete(
-            TABLE_SWIPES,
-            "$COL_TARGET_WORD=? AND $COL_TIMESTAMP BETWEEN ? AND ?",
-            arrayOf(word, minTime.toString(), maxTime.toString())
-        )
-
-        if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
-            Log.d(TAG, "Deleted $deleted entries for word: $word")
+        _executor.execute {
+            try {
+                val deleted = writableDatabase.delete(
+                    TABLE_SWIPES, "$COL_TRACE_ID=?", arrayOf(traceId)
+                )
+                if (BuildConfig.ENABLE_VERBOSE_LOGGING) {
+                    // No word in the line: an ungated line must not carry what the user typed.
+                    Log.d(TAG, "Deleted $deleted row(s) for a trace id")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error deleting swipe data", e)
+            }
         }
     }
 
@@ -423,11 +439,14 @@ class SwipeMLDataStore private constructor(context: Context) :
             writer.write("  \"total_samples\": $count,\n")
 
             val prefs = _context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-            writer.write("  \"statistics\": {\n")
-            writer.write("    \"total_swipes\": ${prefs.getInt(PREF_TOTAL_COUNT, 0)},\n")
-            writer.write("    \"calibration_swipes\": ${prefs.getInt(PREF_CALIBRATION_COUNT, 0)},\n")
-            writer.write("    \"user_swipes\": ${prefs.getInt(PREF_USER_COUNT, 0)}\n")
-            writer.write("  }\n")
+            writer.write(
+                statisticsJson(
+                    count = count,
+                    lifetimeInserts = prefs.getInt(PREF_TOTAL_COUNT, 0),
+                    lifetimeCalibrationInserts = prefs.getInt(PREF_CALIBRATION_COUNT, 0),
+                    lifetimeUserSelectionInserts = prefs.getInt(PREF_USER_COUNT, 0),
+                )
+            )
             writer.write("}\n")
         }
 
@@ -666,7 +685,7 @@ class SwipeMLDataStore private constructor(context: Context) :
          * Relabel one row in [db] (the body of [relabelSwipe]; a separate function so the SQL is
          * testable against a mocked database).
          *
-         * Updates BOTH the `target_word` column (search, per-word counts, deleteEntry's match)
+         * Updates BOTH the `target_word` column (search and per-word counts)
          * and the JSON blob via [SwipeMLData.relabelJson], which records the original label under
          * `metadata.corrected_from`. The row's `is_exported` flag is cleared so the next export
          * carries the corrected label. `collection_source` is unchanged — the trace was still
@@ -695,6 +714,39 @@ class SwipeMLDataStore private constructor(context: Context) :
                 put(COL_IS_EXPORTED, 0)
             }
             return db.update(TABLE_SWIPES, values, "$COL_TRACE_ID=?", arrayOf(traceId)) > 0
+        }
+
+        /**
+         * The `statistics` object of a JSON export, as text (including the trailing newline).
+         *
+         * 2026-11-21 (ml/ audit): the three counters here used to be written under names that read
+         * as row counts - `total_swipes`, `calibration_swipes`, `user_swipes` - and were nothing
+         * of the kind. They are lifetime INSERT counters: [updateStatistics] is only called from
+         * [storeSwipeData], so they miss every batch insert, and nothing ever decrements them -
+         * [clearAllData] wipes the preferences, and retention cleanup, [deleteBySource] and
+         * [relabelRow] all remove rows without touching them. A user who collected 5000 swipes and
+         * let the 90-day retention remove all of them exported an empty `data` array under
+         * `"total_swipes": 5000`.
+         *
+         * [count] is the number of rows actually written, so `total_swipes` now answers the
+         * question its name asks. The counters are kept under names that say what they are,
+         * because the per-source split cannot be recovered from the file without a second scan.
+         *
+         * A separate function so this is assertable without a database: same seam idea as
+         * [relabelRow]'s `newValues` factory.
+         */
+        internal fun statisticsJson(
+            count: Int,
+            lifetimeInserts: Int,
+            lifetimeCalibrationInserts: Int,
+            lifetimeUserSelectionInserts: Int,
+        ): String = buildString {
+            append("  \"statistics\": {\n")
+            append("    \"total_swipes\": $count,\n")
+            append("    \"lifetime_inserts\": $lifetimeInserts,\n")
+            append("    \"lifetime_calibration_inserts\": $lifetimeCalibrationInserts,\n")
+            append("    \"lifetime_user_selection_inserts\": $lifetimeUserSelectionInserts\n")
+            append("  }\n")
         }
 
         private const val DATABASE_NAME = "swipe_ml_data.db"

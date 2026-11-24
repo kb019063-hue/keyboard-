@@ -58,6 +58,9 @@ KB_VERDICT=notrun
 ANR_SEEN=0
 VOICE_VERDICT=notrun
 ROT_VERDICT=notrun
+# "on" once 7d has confirmed floating is enabled and left it that way. FloatingRoot's grip is a real
+# 26dp band above the keyboard, so every later toolbar geometry must account for it.
+FL_VERDICT=off
 # The voice field is spelled `-v=` and appended LAST on purpose: the workflow truncates the summary
 # to 90 characters before it becomes the artifact name, and the run-36 summary is already 80. A
 # longer spelling would push `anr=` past the cut and silently lose the ANR witness.
@@ -1315,6 +1318,10 @@ if nf_reach nfflt floating 'Floating Keyboard' 'Appearance'; then
   # the tap. Tapping a Compose row and hoping is how a harness turns into a liar: if the tap missed,
   # the window is legitimately full width and the failure would blame the product.
   if [ "${SWST%% *}" = "true" ] || [ "${POST:-0}" -gt "${PRE:-0}" ]; then
+    # Floating is now ON and STAYS ON for the rest of the run (see this section's header), which
+    # means FloatingRoot's 26dp grip sits above every later toolbar measurement. Recorded here, at
+    # the one place the state is confirmed, so kb_toolbar_center() can skip that band.
+    FL_VERDICT=on
     nf_frame_probe
   else
     ann warning "NFFRAME skipped, floating never confirmed on: state='$SWST' checked-nodes=${PRE:-0}->${POST:-0} tap='${C:-none}' focus='$(focus)'"
@@ -1381,6 +1388,32 @@ kb_toolbar_center() {  # $1 = zero-based toolbar button index; echoes "x y" of i
   set -- $rect
   l=$1; t=$2; r=$3
   th=$(( 40 * dpi / 160 ))
+  # THE TOOLBAR IS AT THE TOP OF THE FRAME, FLOATING OR NOT (2026-11-15, wave 21 part 2).
+  # FloatingRoot used to put a 26dp `grip` View ABOVE the contentHolder, so while floating was on
+  # the frame started at the grip's top and every computed tap here landed 16px short of the
+  # toolbar — in the grip — which is why 7g reported `silent` for months and blamed the product's
+  # toolbar layout. The grip now sits BELOW the content, following Gboard (see FloatingRoot's KDoc
+  # and PART-18 P5), so the content starts at the frame's top and no offset is needed.
+  # The offset was briefly added here as a workaround; it is deliberately REMOVED rather than kept
+  # conditionally, because the product fixed the cause. A workaround left behind after the fix is
+  # how the next reader learns the wrong thing.
+  #
+  # Nothing may quietly reintroduce a band above the content: if it does, every computed tap
+  # silently misses again and gets reported as the product's fault. The guard below turns that into
+  # a named warning instead. The script runs from the repository root (it is invoked as
+  # scripts/ci/emulator-smoke.sh from the workflow), and a missing file is treated as UNKNOWN and
+  # stays silent rather than crying wolf.
+  local fro="src/main/kotlin/tribixbite/cleverkeys/FloatingRoot.kt"
+  if [ -f "$fro" ]; then
+    local first
+    # The first addView inside `column` is the one that ends up on top of the window.
+    first=$(awk '/private val column/,/^    }/' "$fro" | grep -o 'addView([A-Za-z]*)' | head -1)
+    case "$first" in
+      'addView(contentHolder)') : ;;  # expected: content first, grip below it
+      '') : ;;                        # layout reshaped beyond recognition; say nothing
+      *) ann warning "TBGEOM FloatingRoot's column now starts with $first, so the toolbar may not sit at the input-method frame's top — computed taps in 7e/7g assume it does" ;;
+    esac
+  fi
   # Space-separated, the same contract nodecenter/nodecenter_desc return: every caller does
   # `adb shell input tap $POINT` and relies on word splitting for the two coordinates.
   echo "$(( l + (r - l) * (2 * idx + 1) / (2 * TB_N) )) $(( t + th / 2 ))"

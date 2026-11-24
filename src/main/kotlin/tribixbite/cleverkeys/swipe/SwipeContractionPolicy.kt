@@ -54,7 +54,9 @@ object SwipeContractionPolicy {
      * TODO: the canonical definition currently lives under `swipe.ctc` because that is the
      * consumer whose result also picks preference keys, so `swipe` depends on `swipe.ctc`
      * here. If a third consumer appears, lift it to a neutral pure helper instead of adding
-     * a copy — `GeometricEngineAdapter.dictionaryFor` is already a near-miss (see its TODO).
+     * a copy. `GeometricEngineAdapter.dictionaryFor` used to be the second copy (it lowercased
+     * without stripping the region) and now calls [CtcLanguageSupport.normalize] directly, so
+     * there are two consumers of one definition, not three of two.
      */
     fun baseSubtag(language: String?): String = CtcLanguageSupport.normalize(language)
 

@@ -214,4 +214,68 @@ class CommandRoutingTest {
         assertThat(CommandRouting.editingValue("CURSOR_LEFT")).isNull()
         assertThat(CommandRouting.editingValue("switch_forward")).isNull()
     }
+
+    // ---------------------------------------------------------------------
+    // Legacy vs catalogue names (audit 2026-11-15, P3)
+    // ---------------------------------------------------------------------
+
+    @Test
+    fun aLegacyEditingSpelling_stillReachesItsEditingKey() {
+        // The names the catalogue predates keep resolving, whatever their case in the enum.
+        for ((stored, expected) in listOf(
+            "COPY" to "copy",
+            "PASTE" to "paste",
+            "CUT" to "cut",
+            "SELECT_ALL" to "selectAll",
+            "UNDO" to "undo",
+            "REDO" to "redo",
+            "PRIVATE_COPY" to "copy_private",
+            "TEXT_ASSIST" to "textAssist",
+            "REPLACE_TEXT" to "replaceText",
+            "DELETE_WORD" to "delete_word",
+            "CURSOR_DOC_START" to "doc_home",
+            "CURSOR_DOC_END" to "doc_end",
+            "WORD_LEFT" to "word_left",
+            "WORD_RIGHT" to "word_right",
+        )) {
+            assertWithMessage(stored).that(CommandRouting.editingKeyName(stored)).isEqualTo(expected)
+            assertWithMessage(stored).that(CommandRouting.editingValue(stored)).isNotNull()
+        }
+    }
+
+    @Test
+    fun aCatalogueNameIsNeverMistakenForTheLegacyEnumSpellingItLooksLike() {
+        // AvailableCommand.fromString is case-insensitive, so "copy" used to match COPY. That was
+        // harmless for the names that remap to themselves, and wrong for the five below: their
+        // LEGACY meaning is "defer to the keyboard service", while the catalogue command with the
+        // same lowercase spelling is an Event key (or nothing). Routing them as editing keys
+        // returned null, so the executor ran the lowercase catalogue name instead of the legacy
+        // command — e.g. SWITCH_FORWARD went from "defer to the service" to "Event key".
+        for (catalogueName in listOf(
+            "switch_forward", "switch_backward", "showTextMenu",
+            "primaryLangToggle", "secondaryLangToggle",
+        )) {
+            assertWithMessage(catalogueName)
+                .that(CommandRouting.editingKeyName(catalogueName))
+                .isEqualTo(catalogueName)
+            assertWithMessage(catalogueName)
+                .that(CommandRouting.editingValue(catalogueName))
+                .isNull()
+        }
+        // And a catalogue editing command still resolves to its own key.
+        assertThat(CommandRouting.editingKeyName("copy")).isEqualTo("copy")
+        assertThat(CommandRouting.editingValue("copy")).isNotNull()
+    }
+
+    @Test
+    fun theExactLegacyLookup_agreesWithFromStringOnTheRemappedNames() {
+        // fromLegacyName is the narrow form of fromString: same answer for every SCREAMING_SNAKE
+        // constant, no answer for anything the case-insensitive form would over-match.
+        assertThat(AvailableCommand.fromLegacyName("COPY")).isEqualTo(AvailableCommand.COPY)
+        assertThat(AvailableCommand.fromString("copy")).isEqualTo(AvailableCommand.COPY)
+        assertThat(AvailableCommand.fromLegacyName("copy")).isNull()
+        for (c in AvailableCommand.values()) {
+            assertThat(AvailableCommand.fromLegacyName(c.name)).isEqualTo(c)
+        }
+    }
 }

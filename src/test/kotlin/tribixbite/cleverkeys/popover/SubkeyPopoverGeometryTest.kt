@@ -80,6 +80,84 @@ class SubkeyPopoverGeometryTest {
         assertTrue(SubkeyPopoverGeometry.isArmed(0f, 0f, 12f, 12f, 100f, 150f))   // 17.0 px
     }
 
+    // ---------------------------------------------------------------------
+    // Selection vs. the cell DRAWN under the finger (audit 2026-11-15, P1/P2).
+    // ---------------------------------------------------------------------
+
+    /**
+     * A finger inside a cell's drawn square, but off its centre, can select a NEIGHBOUR.
+     *
+     * Measured on a 100 × 150 px cell at the shipped 60 % neutral default: the sector's boundary
+     * sits 30 px left of the drawn N cell's centre, so a finger 35-45 px left of centre — well
+     * inside the drawn cell, which spans ±50 px — selects NW, not N. That is inherent to the
+     * design: the slot is a 45° SECTOR from the grid centre while the cell is a SQUARE on screen,
+     * and a wedge cannot contain a square. How far in the error reaches, per cell: 0.383 cells
+     * from the grid centre for the four cardinals (46 % of the way in from the square's corner)
+     * and 0.541 cells (23 %) for the diagonals.
+     *
+     * Pinned, not fixed: closing it means changing the rule from "sector" to "nearest drawn
+     * cell", which changes the selection of every swipe in the corners. The module's own doc
+     * claims "what the user sees under the finger is what gets selected", so this test is the
+     * counter-example that has to be resolved before that sentence can stand — see
+     * docs/BUG-HUNT-2026-11-15-PART-17.md (P1).
+     */
+    @Test
+    fun aFingerInsideTheDrawnNCellsLeftSide_selectsItsNeighbour() {
+        // Inside the drawn N cell (|dx| < 50, |dy + 150| < 75) but 45-55 px left of its centre.
+        assertEquals(SwipeDirection.NW, slot(-55f, -150f))
+        assertEquals(SwipeDirection.NW, slot(-45f, -150f))
+        // Comfortably off-centre but still N: the sector boundary sits at 30 px for this shape.
+        assertEquals(SwipeDirection.N, slot(-35f, -150f))
+        assertEquals(SwipeDirection.N, slot(0f, -150f))
+    }
+
+    @Test
+    fun everyCellsCentreStillSelectsItself() {
+        // The property the sector rule DOES guarantee, and the reason P1 is a corner-case
+        // finding rather than a broken control: each cell's centre and a generous core around
+        // it are unambiguous. Guards against a future "fix" that moves the boundaries inward.
+        for (dir in SwipeDirection.entries) {
+            val dx = SubkeyPopoverGeometry.cellColumn(dir) * 100f
+            val dy = SubkeyPopoverGeometry.cellRow(dir) * 150f
+            assertEquals("centre of $dir", dir, slot(dx, dy))
+            // 1/4 of a cell off-centre, on both axes, is still the same cell.
+            assertEquals("$dir, quarter-cell off-centre", dir, slot(dx * 0.75f, dy * 0.75f))
+        }
+    }
+
+    @Test
+    fun theNeutralZoneIsTheSameFractionOfEachAxis_regardlessOfCellAspect() {
+        // The neutral zone is a RECTANGLE in px but a SQUARE in cell units (both halves come
+        // from the cell size), so the cancel region has the same shape relative to the cells on
+        // a wide key as on a tall one. Pinned because making the two axes independent is the
+        // obvious-looking "fix" that would make a release inside a drawn cell cancel.
+        val tall = SubkeyPopoverGeometry.slotAt(0f, -100f, 100f, 150f, 0.6f, 0.6f)
+        val wide = SubkeyPopoverGeometry.slotAt(0f, -100f, 150f, 100f, 0.6f, 0.6f)
+        // 100 px up is 0.67 cells on the tall key (outside ±0.30) and 1.0 cells on the wide one.
+        assertEquals(SwipeDirection.N, tall)
+        assertEquals(SwipeDirection.N, wide)
+        // The cancel half-extent in cells is 0.30 either way.
+        assertNull(SubkeyPopoverGeometry.slotAt(0f, -45f, 100f, 150f, 0.6f, 0.6f))   // 0.30 cells
+        assertNull(SubkeyPopoverGeometry.slotAt(0f, -30f, 150f, 100f, 0.6f, 0.6f))   // 0.30 cells
+    }
+
+    @Test
+    fun aNeutralWidthLargerThanTheCell_swallowsTheHorizontalSlots_reportedNotFixed() {
+        // Both sliders accept 20 %…150 % (Config.SUBKEY_POPOVER_NEUTRAL_MAX). At the top of that
+        // range the cancel region is 0.75 cells wide, which reaches past the inner edge of the
+        // drawn W/E cells: 50 px right of centre is inside the drawn E cell and cancels.
+        //
+        // This is a live interaction between two independent settings, not a boundary artefact,
+        // and it is REPORTED rather than fixed (P2): clamping the neutral zone to what the grid
+        // can spare would silently move a slider the user set. Pinned so the range and the
+        // consequence stay tied together.
+        assertNull(SubkeyPopoverGeometry.slotAt(50f, 0f, 100f, 150f, 1.5f, 0.6f))
+        assertEquals(SwipeDirection.E, SubkeyPopoverGeometry.slotAt(50f, 0f, 100f, 150f, 0.6f, 0.6f))
+        // Hitting exactly one maximum is enough; the smaller axis does not rescue the larger.
+        assertNull(SubkeyPopoverGeometry.slotAt(0f, 110f, 100f, 150f, 0.6f, 1.5f))
+        assertEquals(SwipeDirection.S, SubkeyPopoverGeometry.slotAt(0f, 110f, 100f, 150f, 0.6f, 0.6f))
+    }
+
     @Test
     fun degenerateCells_selectNothing() {
         assertNull(SubkeyPopoverGeometry.slotAt(50f, 50f, 0f, 150f, 0.6f, 0.6f))
