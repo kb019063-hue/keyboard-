@@ -415,6 +415,26 @@ and no XML-side drift test can see it. Three assertions: the `column` adds `cont
 `grip`; the grip reserves `KNOB_SIZE_DP` on the right; both constants keep their names (the smoke
 test's comment cites them). Verified against the pre-change source first, where the first two fail.
 
+### Verified on device, after the move
+
+Run `45307511686` (commit `ec0321d`) is the proof, and it is the cleaner kind: the frame is
+**identical** to the one P5 was measured against — `[108,1302][972,2274]`, density 2.625 — but the
+helper now emits `1354` with **no offset at all**, and `1354` is once again the toolbar's true
+centre (1302 + 105/2). The same tap that used to land 68 px inside the grip now lands in the
+toolbar because there is no longer a band above it:
+
+| | tap | toolbar actually at | verdicts |
+|---|---|---|---|
+| before P5 (grip on top, no offset) | `1354` | 1370–1475 | `silent` / `key` — in the grip |
+| P5 workaround (grip on top, +68 px) | `1422` | 1370–1475 | `shown` / `ok` |
+| **this commit (grip below, no offset)** | **`1354`** | **1302–1407** | **`shown` / `ok`** |
+
+So both checks stay verified *and* the harness stops carrying a correction for a defect that no
+longer exists. The guard did not fire, i.e. `column` still starts with `contentHolder`, as the
+layout intends. `fails=0-toolbar=unverifiable-tbui=picker-2-oh=toggled-nf=ok-keyboard=bound-anr=0-v=ok-r=ok`
+— the same verdict string as before, with `toolbar=unverifiable` being 7f's pre-existing status and
+not a regression.
+
 ### What this still does not do: drag-to-dock
 
 Gboard's handle does a second job that this one does not. Dragging it down to the bottom edge
@@ -558,6 +578,11 @@ this pass has already changed three files that a dock gesture would also touch.
 
 - P1 fix: `MoreToolsPanelView` +6 lines (387 → 393), `build.gradle` (+4, test registration),
   `MoreToolsPanelA11yDriftTest` (new, 3 tests).
+- P6 on CI (commit `ec0321d`): unit **4916 run / 0 failed / 134 skipped / 442 classes** — exactly
+  the predicted +3 tests / +1 class; Build APK success; Emulator smoke success, with
+  `MTSHEET-DIAG verdict=shown tap=169 1354` and `VOICE-DIAG verdict=ok mic='910 1354'` at the
+  *un-offset* geometry. Delta from part 17's `6d94ecb` (4910 / 134 / 440): **+6 tests, +2 classes**
+  across parts 18's two waves.
 - P6 fix: **four executable lines** in `FloatingRoot` (swap the two `addView` calls, add the
   `rightMargin`), plus comments; `FloatingConfig` changes are prose only (the clamp maths is
   untouched, so every one of `FloatingConfigTest`'s 14 tests holds unchanged). `build.gradle` +4
