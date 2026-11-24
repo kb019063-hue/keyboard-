@@ -1347,6 +1347,10 @@ tasks.register('runPureTests', JavaExec) {
     'tribixbite.cleverkeys.SuggestionPillPolicyTest',
     'tribixbite.cleverkeys.ToolbarCompactPolicyTest',
     'tribixbite.cleverkeys.FloatingConfigTest',
+    // Wave 21 (2026-11-15): FloatingRoot is built in code, so no XML-side drift test can see it.
+    // Pins the handle arrangement the smoke test's toolbar geometry depends on (content first,
+    // grip below) and the grip's clearance for the knob.
+    'tribixbite.cleverkeys.FloatingRootHandlePositionDriftTest',
     'tribixbite.cleverkeys.ThemeDefaultMigrationTest',
     'tribixbite.cleverkeys.voice.VoiceTypingConfigTest',
     'tribixbite.cleverkeys.voice.DictationPolicyTest',

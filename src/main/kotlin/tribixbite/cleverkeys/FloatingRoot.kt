@@ -8,8 +8,21 @@ import android.widget.LinearLayout
 
 /**
  * The floating-keyboard wrapper: the keyboard content plus the two handles that make a small
- * window usable -- a grip across the top to drag it, a knob at the bottom-right corner to change
+ * window usable -- a grip along the BOTTOM to drag it, a knob at the bottom-right corner to change
  * its width.
+ *
+ * ## Why the grip is at the bottom (2026-11-15)
+ *
+ * It used to be across the top. Gboard's is at the bottom, and that is the arrangement to copy, for
+ * a reason beyond taste: dragging the handle *down* is how you dock, and with the handle already at
+ * the bottom edge that is one gesture rather than a hunt. Five independent sources across 2018-2024
+ * describe it that way ("drag the keyboard around by the bump on the bottom"; "drag the handle at
+ * the bottom"; "drag it to the bottom edge and it will magnetize") -- see PART-18's P5.
+ *
+ * There is a mechanical payoff too. A band above the content sits INSIDE the input-method window,
+ * so it pushed the toolbar 26dp down along with every y coordinate in the window. That is what put
+ * the smoke test's computed toolbar tap into the grip and left the tools panel unverified. Below
+ * the content the grip costs the toolbar nothing.
  *
  * Sits OUTSIDE [OneHandedRoot] in the setInputView chain (the service hosts the one-handed root
  * inside this one) so the grip and knob are never scaled with the keys, and while floating is on
@@ -30,9 +43,15 @@ class FloatingRoot(context: Context) : FrameLayout(context) {
 
     private val grip = View(context).apply {
         setBackgroundColor(HANDLE_COLOUR)
+        // Right margin = the knob. With the grip at the BOTTOM the knob's frame
+        // (bottom|end, same HANDLE_COLOUR) sits exactly on top of the grip's last 26dp, so it
+        // would paint an identical grey square over an identical grey band and the resize
+        // affordance would vanish. Stopping the grip short keeps both handles at full size and
+        // leaves the two touch zones disjoint: the band drags, the corner resizes — which is
+        // Gboard's own split (a "bump on the bottom" to drag, corner handles to resize).
         layoutParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, dp(GRIP_HEIGHT_DP)
-        )
+        ).apply { rightMargin = dp(KNOB_SIZE_DP) }
     }
     private val contentHolder = FrameLayout(context).apply {
         layoutParams = LinearLayout.LayoutParams(
@@ -41,8 +60,18 @@ class FloatingRoot(context: Context) : FrameLayout(context) {
     }
     private val column = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
-        addView(grip)
+        // Content FIRST, grip BELOW it (2026-11-15). Gboard puts its drag handle at the bottom —
+        // "drag the keyboard around by the bump on the bottom", and dragging that handle down is
+        // how you dock, one gesture because the handle is already at the edge you dock to. Five
+        // independent sources across 2018–2024 agree; see PART-18's P5 for the receipts.
+        //
+        // The position is not cosmetic. A grip above the content is a band INSIDE the input-method
+        // window, so it pushes the toolbar 26dp down and every y coordinate inside the window with
+        // it — which is precisely how the smoke test's computed toolbar tap ended up in the grip
+        // and why the tools panel went unverified for months. Below the content the grip costs the
+        // toolbar nothing.
         addView(contentHolder)
+        addView(grip)
         layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
     }
     private val knob = View(context).apply {

@@ -37,14 +37,18 @@ small, and shrinking the window around it would shrink the one thing left to tap
 portrait session would strand the window off a landscape screen. The x fraction is a fraction of the
 window's available horizontal *travel* (screen width minus window width), so 0 is flush left, 1
 flush right and 0.5 centred at any width, and narrowing the window can never push it past an edge.
-The y fraction places the window's top edge, capped at 0.9 of screen height so the keyboard can
-never be dragged until only its grip shows. Width maths is integer, like phase 2's gap width,
-because float truncation surprised us there.
+The y fraction places the window's top edge, capped by the window's own measured height so the
+whole window stays on screen. (This paragraph originally said "capped at 0.9 of screen height so the
+keyboard can never be dragged until only its grip shows" — the 0.9 cap was itself the bug, and the
+phrase assumed a grip above the content. Both were corrected: see `FloatingConfig.maxYFraction` and
+PART-18 P5.) Width maths is integer, like phase 2's gap width, because float truncation surprised us
+there.
 
 ## The wrapper: grip and knob outside the scaling
 
-`FloatingRoot` wraps the one-handed root from the *outside*, so the grip (a 26dp bar across the top)
-and the resize knob (a 26dp square at the bottom-right corner) are never scaled with the keys — and
+`FloatingRoot` wraps the one-handed root from the *outside*, so the grip (a 26dp bar along the
+bottom, under the keys) and the resize knob (a 26dp square at the bottom-right corner) are never
+scaled with the keys — and
 while floating is on, the service suppresses one-handed scaling altogether, because two independent
 shrinks stacking would leave the keyboard smaller than either setting says. The handles report
 movement, not geometry: pixel deltas go to the service, which owns the fractions and the relayout,

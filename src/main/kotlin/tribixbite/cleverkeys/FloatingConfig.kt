@@ -12,8 +12,13 @@ package tribixbite.cleverkeys
  * change must never push the window past an edge. The x fraction is a fraction of the window's
  * available horizontal TRAVEL (screen width minus window width), so 0 is flush left, 1 flush
  * right and 0.5 centred at any width; the y fraction places the window's top edge, capped by
- * [maxYFraction] at the lowest value that still leaves the whole window on screen, so the keyboard
- * can never be dragged until only its grip shows.
+ * [maxYFraction] at the lowest value that still leaves the whole window on screen.
+ *
+ * (That cap used to be described as "the keyboard can never be dragged until only its grip shows",
+ * which was written when the grip was across the top and the degenerate case was the content
+ * sliding off above it. The grip moved to the bottom on 2026-11-15 — see [FloatingRoot] — so the
+ * analogous case is the grip sliding off below. The cap was always about the whole window staying
+ * on screen, so it forbids both without changing: only this sentence was ever grip-specific.)
  */
 object FloatingConfig {
     const val PREF_ENABLED = "floating_enabled"
@@ -47,11 +52,15 @@ object FloatingConfig {
      * [MAX_Y_FRACTION] alone is a fraction of the screen, not of the space the keyboard leaves
      * over, so on its own it lets a 38 %-tall keyboard sit with its bottom row (space, period,
      * enter) below the display: `y = 0.9 * 2400` puts the bottom edge at 3070 px on a 2400 px
-     * screen. This caps by the window's own measured height instead, which is what the grip's
-     * documented promise ("can never be dragged until only its grip shows") actually means.
+     * screen. This caps by the window's own measured height instead, which is what the promise
+     * "the whole window stays on screen" actually means.
      *
      * A [windowHeightPx] of 0 (before the first layout pass) keeps the old cap, so a caller that
      * has not measured yet can never park the window somewhere layout would have to undo.
+     *
+     * [windowHeightPx] must be the WHOLE window, grip included — it is measured from the wrapper
+     * root, so it already is. That matters more since the grip moved below the content: the grip
+     * is now the part that would be last to leave the screen.
      */
     fun maxYFraction(screenHeight: Int, windowHeightPx: Int): Float {
         if (screenHeight <= 0 || windowHeightPx <= 0) return MAX_Y_FRACTION

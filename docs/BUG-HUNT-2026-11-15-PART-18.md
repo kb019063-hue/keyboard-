@@ -47,7 +47,8 @@ alone.
 | P2 | The panel needs **308 dp** (44 header + 3 × 88 rows) but is given 30 % of the **screen**, not of the keyboard — on every non-tablet device measured the third row is mostly cut off (Pixel 8: 20 of 88 dp visible, 23 %), and SETTINGS is the cell that lands there | **medium** (a tool is unreachable without discovering the panel scrolls) | **reported** |
 | P3 | `ToolbarConfig.MAX_TOOLBAR_KEYS = 12` is enforced **only** by the settings Add button's `enabled` state; `parse` — the read path every consumer uses — accepts any number, so a restored/imported/hand-edited preference yields >12 buttons and the rows scroll | low (needs a path outside the settings UI) | **reported** |
 | P4 | The tile is a fixed 88 dp inside a non-scrolling vertical section, so at `fontScale ≥ 1.7` the two-line caption is clipped (2 lines = 44.9 dp in a 40 dp box at 1.7, 52.8 dp at 2.0) | low (large-text accessibility setting) | **reported** |
-| P5 | The smoke test's `kb_toolbar_center()` measures the toolbar from the top of the input-method frame, ignoring `FloatingRoot`'s 26 dp grip — and section 7d deliberately leaves floating **on**, so 7e/7g have been tapping 16 px *above* the toolbar. 7g has therefore only ever reported `verdict=silent`, meaning CI has never once confirmed the tools panel opens | **high for the harness** (two checks silently unverifiable; the emitted warning blamed the product's toolbar layout) | **fixed** — verified: 7g `shown`, 7e `ok` |
+| P5 | The smoke test's `kb_toolbar_center()` measured the toolbar from the top of the input-method frame while `FloatingRoot` put a 26 dp grip **above** the content — and section 7d deliberately leaves floating **on**, so 7e/7g had been tapping 16 px *above* the toolbar. 7g had therefore only ever reported `verdict=silent`: CI never once confirmed the tools panel opens | **high for the harness** (two checks silently unverifiable, and the emitted warning blamed the product's toolbar layout) | **fixed** — verified on device: 7g `shown`, 7e `ok` |
+| P6 | The root cause of P5 was in the product, not the harness: the floating keyboard's drag grip sits across the **top** of the window, where Gboard's is along the **bottom** (five sources, 2018–2024). A top band is inside the input-method window, pushing the toolbar 26 dp down — and it rules out the "drag down to dock" gesture that is the reason the handle lives at the bottom at all | medium (ergonomics, plus the P5 root cause) | **fixed** + drift test; drag-to-dock itself still absent |
 
 ---
 
@@ -343,13 +344,91 @@ defect was the measurement.
 It also means the panel has now been observed opening and drawing its three rows on a device, which
 is the first device-side corroboration of the model's row arithmetic in P2.
 
-### What this pass did *not* do about it
+### The grip is on the wrong edge, and Gboard is the evidence
 
 The grip is a **product** decision as much as a harness one: a 26 dp drag handle above the keyboard
-means the toolbar is not at the top of the IME window whenever floating is on, and any user aim
-near that band hits the grip. Whether that is right is a design question (Gboard's floating
-keyboard uses a grip of its own). What is not defensible is the harness blaming the product for it,
-and that is what changed. Recorded here rather than silently patched in the script only.
+means the toolbar is not at the top of the IME window whenever floating is on, and any user aim near
+that band hits the grip. This pass initially left it alone, on the claim that *"Gboard's floating
+keyboard uses a grip of its own"* in that position. **That claim was mine, and it was wrong.** It
+is corrected here, because a report that rationalises a defect with a false appeal to the
+reference implementation is worse than one that leaves the defect open.
+
+What the sources actually say, from Gboard's floating mode across its whole life:
+
+| year | source | where Gboard's handle is |
+|---|---|---|
+| 2018 | PhoneArena, on the beta that shipped it | "Drag the keyboard around by the **'bump' on the bottom**"; "dock … drag it to the bottom of the screen" |
+| 2018 | Forbes | "grab the keyboard by a small handle"; "grab the handle and **drag the keyboard down** to the bottom of the display to dock it" |
+| 2020 | GoAndroid how-to | "move the keyboard anywhere … by tapping and dragging the icon **at the bottom**" |
+| 2023 | Android Police (the auto-floating landscape layout) | "move the keyboard into any position using the **drag handle at the bottom**"; "drag it to the bottom edge … it will magnetize" |
+| 2024 | UMA Technology how-to | "**dragging the handle at the bottom** of the keyboard" |
+
+Five independent sources over six years, one answer: the handle is at the **bottom**, and dragging
+it to the bottom edge is how you *dock* — which is the same gesture because the handle is already
+there. One 2021 redesign report (XDA, via Sammy Fans) says the handle became "no longer focused on
+the bottom" and is now attached to the window's frame, but that is a single second-hand line about
+a Material You restyle and it contradicts every other source; it is not enough to justify the
+opposite arrangement.
+
+So the right edge is the bottom, and this codebase has it at the top. That matters beyond
+aesthetics, and one consequence is already a recorded defect: **P2's panel-height arithmetic.** A
+bottom grip sits under the keyboard and costs the content nothing; a top grip costs the content
+26 dp and shifts every y coordinate inside the window — which is exactly what made 7g's computed
+tap land in the grip instead of on the toolbar.
+
+### The change
+
+`FloatingRoot.column` now adds `contentHolder` first and `grip` second, so the grip is a band under
+the keyboard and the content starts at the input-method frame's top. Two things had to move with it:
+
+- **The grip stops 26 dp short of the right edge** (`rightMargin = dp(KNOB_SIZE_DP)`). The knob is
+  `bottom|end` in the same `HANDLE_COLOUR` (`0x33808080`, 20 % alpha), so with the grip under it the
+  knob would have been painted on top of an identical grey band — still hittable (it is drawn last)
+  but **invisible**, losing the resize affordance. The margin keeps both handles at full size and
+  makes the two touch zones disjoint: the band drags, the corner resizes.
+- **The smoke test's workaround is removed, not kept conditionally.** With the grip below the
+  content the toolbar is back at the frame's top, so the correct tap is the original `t + th/2`;
+  the +68 px offset this pass added would now be wrong by exactly 68 px. Leaving a dead workaround
+  behind is how the next reader learns the wrong thing, so it is deleted and replaced by a guard
+  that warns if `column` ever starts with anything other than `contentHolder`:
+
+  ```
+  first=$(awk '/private val column/,/^    }/' "$fro" | grep -o 'addView([A-Za-z]*)' | head -1)
+  case "$first" in
+    'addView(contentHolder)') : ;;   # expected
+    '') : ;;                         # layout reshaped beyond recognition; say nothing
+    *) ann warning "TBGEOM FloatingRoot's column now starts with $first, …" ;;
+  esac
+  ```
+
+  Verified in all three states: passes on the real source, warns on a simulated revert to
+  grip-first, and stays silent when the file is absent (no false alarm from a moved script).
+
+The clamp maths needed **no change** — `maxYFraction` was always about the whole window staying on
+screen, which forbids both a content-sliding-off-above derangement and a grip-sliding-off-below one.
+Only the prose that described it as "the grip" was grip-specific, and that is corrected in
+`FloatingConfig` and in `PHASE3-PART3-FLOATING-DESIGN.md`. The user-facing string is already
+edge-agnostic ("a smaller keyboard window you can drag and resize"), so no translation work.
+
+`FloatingRootHandlePositionDriftTest` pins the arrangement, because `FloatingRoot` is built in code
+and no XML-side drift test can see it. Three assertions: the `column` adds `contentHolder` then
+`grip`; the grip reserves `KNOB_SIZE_DP` on the right; both constants keep their names (the smoke
+test's comment cites them). Verified against the pre-change source first, where the first two fail.
+
+### What this still does not do: drag-to-dock
+
+Gboard's handle does a second job that this one does not. Dragging it down to the bottom edge
+**magnetises the window and docks it**, with a confirmatory buzz — that is *why* the handle lives at
+the bottom, and it is one gesture rather than the two this app needs (drag the window where you want
+it, then toggle floating off). `FloatingRoot`/`FloatingConfig`/`CleverKeysService` contain no dock
+path at all: no proximity test, no haptic, no edge snap.
+
+Implementing it means a pure-Kotlin proximity decision in `FloatingConfig` (testable offline, the
+way every other clamp here is), a buzz at the threshold, and a write of `floating_enabled = false`
+on release inside it — which is the same preference the settings switch and `floating_toggle`
+write, so the open keyboard would follow through `applyFloatingToOpenKeyboard` with no new path.
+Recommended as its own pass: it is a new gesture with a haptic contract, not a layout tweak, and
+this pass has already changed three files that a dock gesture would also touch.
 
 ---
 
@@ -457,12 +536,19 @@ and that is what changed. Recorded here rather than silently patched in the scri
   of the panel's height budget would have to pin a policy that has not been decided yet.
 - **Did not audit `Pointers`' gesture arbitration or the clipboard/emoji/GIF panes.** Out of scope;
   waves 4–20 stay closed.
-- **Did not change the 26 dp floating grip itself.** P5 moved the harness off it; whether a drag
-  handle belongs directly above the toolbar is a design question, and it is Gboard's pattern too.
-  It is noted in P5, not "fixed".
+- **Did not implement drag-to-dock (P6's other half).** The grip now sits where Gboard puts it, but
+  dragging it to the bottom edge does not dock the window: there is no proximity test, no haptic and
+  no edge snap anywhere in `FloatingRoot`, `FloatingConfig` or the service. It is a new gesture with
+  a haptic contract and its own product questions ("how close is close enough?", "should the buzz
+  fire on approach or on release?"), so it belongs in its own pass rather than bolted onto a layout
+  change. P6 records the shape the implementation should take.
+- **Did not verify P6 on a device.** The layout change is four lines and compile-checkable, and the
+  drift test pins its two invariants, but nothing in the sandbox can say how the 26 dp band *looks*
+  under the keys or whether the right margin is wide enough to hit comfortably. That wants the next
+  emulator smoke run at minimum, and ideally a real thumb.
 - **Did not change anything else in the smoke test.** The grip offset was the one broken measurement
-  found; 7f's clip check compares *bottom* edges and is unaffected by a band at the top, so it was
-  left alone after checking that, rather than "fixed" alongside.
+  found, and it has since been *removed* rather than retuned now that the grip no longer sits above
+  the content. 7f's clip check compares *bottom* edges and was untouched throughout.
 - **Did not re-open part 16's routing seam.** `CommandRouting` appears here only as the thing a
   toolbar tap passes through, and the sweep above exercises all 247 names through it.
 
@@ -472,6 +558,16 @@ and that is what changed. Recorded here rather than silently patched in the scri
 
 - P1 fix: `MoreToolsPanelView` +6 lines (387 → 393), `build.gradle` (+4, test registration),
   `MoreToolsPanelA11yDriftTest` (new, 3 tests).
+- P6 fix: **four executable lines** in `FloatingRoot` (swap the two `addView` calls, add the
+  `rightMargin`), plus comments; `FloatingConfig` changes are prose only (the clamp maths is
+  untouched, so every one of `FloatingConfigTest`'s 14 tests holds unchanged). `build.gradle` +4
+  (registers `FloatingRootHandlePositionDriftTest`), which adds 3 tests and 1 class.
+- P6 was **not** shipped on the strength of the diff: the drift test was first run against
+  `git show HEAD:` of the old `FloatingRoot.kt`, where its two layout assertions **fail**, and the
+  smoke test's new guard was run in three states (real source → pass, simulated grip-first revert →
+  warn, absent file → silent). `bash -n scripts/ci/emulator-smoke.sh` → clean.
+- Test registration re-derived by script, not by eye: **447** test classes on disk, **311** pure +
+  **136** mock registered, **0** unregistered, **0** stale, **0** overlap.
 - CI on the first attempt (`45261928680`) was **red on my own test**, not on the fix: 4913 run /
   1 failed / 134 skipped / 441 classes, the failure being
   `MoreToolsPanelA11yDriftTest#the close label comes from a string resource` — the `Regex.matches`
