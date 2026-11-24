@@ -210,5 +210,13 @@ and redesign mid-implementation.
 - The dead-axis conclusion was checked against the drag path it depends on (`clampYFraction` inside
   `moveFloating`), not only against the layout path.
 - The reachability table was computed for five window heights, and the claim that *all* legal widths
-  land in the same row was checked by noting the knob changes width, not height
-  (`floating_width_percent` appears in no height calculation).
+  land in the same row was checked structurally: `floatingWindowHeightPx` reads the root's measured
+  height and never references the width, so no width can lengthen or shorten the window (a narrow
+  window could only make the strip wrap and grow *taller*).
+- **Reproduced on a second run** (commit `e753531`, smoke `45316713947`): frame again
+  `[108,1302][972,2274]` on 1080x2400, i.e. the same clamp-pinned position, one run apart and after
+  a reinstall. `MTSHEET-DIAG verdict=shown tap=169 1354` and `VOICE-DIAG verdict=ok mic='910 1354'`
+  both still positive, so part 18's grip move remains sound and this part's comment edits changed
+  nothing observable. CI: **4916 run / 0 failed / 134 skipped / 442 classes** — identical to part
+  18, which is the expected result for a comments-only change and confirms none of the constants
+  were disturbed.
