@@ -374,6 +374,57 @@ class ClipboardTabsAndPaneCloseTest {
             .contains("findViewById<ImageButton>(R.id.clipboard_close_button)?.setOnClickListener { onCloseCallback?.invoke() }")
     }
 
+    // --------------------------------------------- the Gboard look pass (2026-11-25)
+
+    /**
+     * The owner's verdict on this pass was "it doesn't even look like Gboard, not even close".
+     * The 2026-11-13 pass had fixed the pane's height, back arrow and tap-to-paste, but a scan
+     * of it still passed on a pane with no title, no section and one-line rows. These checks
+     * pin the chrome he asked for; only a device can judge the radius and spacing.
+     */
+    @Test
+    fun paneHasTheGboardHeaderSectionLabelAndCollapsibleSearch() {
+        val xml = File("res/layout/clipboard_pane.xml").readText()
+        for (id in listOf("clipboard_title", "clipboard_search_toggle", "clipboard_section_label",
+                "clipboard_tab_recent_chip", "clipboard_tab_pinned_chip", "clipboard_tab_todos_chip")) {
+            assertWithMessage("clipboard_pane.xml lost @+id/$id").that(xml).contains("@+id/$id")
+        }
+        assertWithMessage("the header must say what surface this is")
+            .that(xml).contains("@string/clipboard_title")
+
+        val search = xml.substringAfter("android:id=\"@+id/clipboard_search\"").substringBefore("/>")
+        assertWithMessage("search starts collapsed, the way Gboard's clipboard does")
+            .that(search).contains("android:visibility=\"gone\"")
+
+        val manager = File("src/main/kotlin/tribixbite/cleverkeys/clipboard/ClipboardManager.kt").readText()
+        assertWithMessage("the header's search action must be wired")
+            .that(manager).contains("R.id.clipboard_search_toggle")
+        assertWithMessage("expanding search must be reversible")
+            .that(manager).contains("private fun setSearchExpanded(")
+    }
+
+    @Test
+    fun clipsRenderAsRoundedCardsWithMoreThanOneLine() {
+        val row = File("res/layout/clipboard_history_entry.xml").readText()
+        assertWithMessage("a clip must have the Gboard-style card background")
+            .that(row).contains("android:background=\"@drawable/clipboard_card_bg\"")
+        assertWithMessage("cards need gutters")
+            .that(row).contains("android:layout_marginStart=\"8dp\"")
+        assertWithMessage("clip text must not be squeezed back to one line")
+            .that(row).contains("android:maxLines=\"3\"")
+        assertWithMessage("the card follows the active theme")
+            .that(File("res/drawable/clipboard_card_bg.xml").readText()).contains("?attr/colorKey")
+    }
+
+    @Test
+    fun sectionLabelFollowsTheSelectedTab() {
+        val manager = File("src/main/kotlin/tribixbite/cleverkeys/clipboard/ClipboardManager.kt").readText()
+        for (label in listOf("clipboard_section_recent", "clipboard_section_pinned",
+                "clipboard_section_todos")) {
+            assertWithMessage("no code path sets $label").that(manager).contains("R.string.$label")
+        }
+    }
+
     // ------------------------------------------------------------------ fixtures
 
     /** An emoji pane whose findViewById answers with mocks, close button included. */

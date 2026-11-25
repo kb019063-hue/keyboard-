@@ -13,13 +13,13 @@
     <item name="android:layout_weight">1</item>
     <item name="android:layout_width">fill_parent</item>
     <item name="android:layout_height">wrap_content</item>
-    <!-- marginStart/End + marginTop/Bottom instead of layout_marginHorizontal/Vertical
-         (those require API 26; the split attrs are API 17-safe with identical rendering). -->
-    <item name="android:layout_marginStart">14dp</item>
-    <item name="android:layout_marginEnd">14dp</item>
-    <item name="android:layout_marginTop">14dp</item>
-    <item name="android:layout_marginBottom">14dp</item>
-    <item name="android:textSize">16sp</item>
+    <!-- The card supplies the outer spacing; the text only needs a little breathing room
+         inside it. Split attrs keep the API 17-safe rendering the old style used. -->
+    <item name="android:layout_marginStart">8dp</item>
+    <item name="android:layout_marginEnd">8dp</item>
+    <item name="android:layout_marginTop">4dp</item>
+    <item name="android:layout_marginBottom">4dp</item>
+    <item name="android:textSize">15sp</item>
     <item name="android:textColor">?attr/colorLabel</item>
   </style>
   <style name="clipboardEntryButton">

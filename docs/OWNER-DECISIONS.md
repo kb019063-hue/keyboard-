@@ -177,5 +177,6 @@ notice (`anr first-dialog`).
 ## Where the design notes live
 
 - Layout and Gboard alignment: [`PHASE4-POLISH-DESIGN.md`](PHASE4-POLISH-DESIGN.md) parts 5, 7, 8, 9.
+- Clipboard look (2026-11-25): [`CLIPBOARD-GBOARD-LOOK-2026-11-25.md`](CLIPBOARD-GBOARD-LOOK-2026-11-25.md).
 - Agent conventions, including the layout and theme rules: [`../AGENTS.md`](../AGENTS.md).
 - CI storage limits: [`CI-STORAGE.md`](CI-STORAGE.md).

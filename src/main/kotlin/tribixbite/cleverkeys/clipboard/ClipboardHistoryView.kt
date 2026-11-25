@@ -1752,6 +1752,12 @@ class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListVi
      */
     private fun applyRuntimeRowColors(row: View, textView: TextView, provenanceView: TextView) {
         val rc = runtimeColors ?: return
+        // The rounded card is `?attr/colorKey` in XML, which resolves to the base style for
+        // runtime (custom/decorative) themes. Retint the row's own drawable — never a shared
+        // constant — so custom themes get the same card colour the pane chrome uses.
+        if (rc.key != 0) {
+            row.background?.mutate()?.setTint(rc.key)
+        }
         if (rc.label != 0) {
             textView.setTextColor(rc.label)
             val tint = android.content.res.ColorStateList.valueOf(rc.label)
@@ -1793,11 +1799,14 @@ class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListVi
         // OS clipboard by accident, so it toggles like a tap.
         textView.setOnLongClickListener { toggleSelection(entry); true }
         textView.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        textView.maxLines = if (entry.isMedia) 2 else 1
+        textView.maxLines = if (entry.isMedia) 2 else 3
         textView.ellipsize = android.text.TextUtils.TruncateAt.END
         // Selected rows are tinted as well as checked, so the state is not colour-only
-        // or checkbox-only.
-        row.setBackgroundColor(if (checked) selectedRowColor() else android.graphics.Color.TRANSPARENT)
+        // or checkbox-only. A foreground tint keeps the rounded card (and its runtime-theme
+        // colour) intact; setBackgroundColor would replace the card drawable with a rectangle.
+        row.foreground = if (checked) {
+            android.graphics.drawable.ColorDrawable(selectedRowColor())
+        } else null
     }
 
     /** Return a (possibly recycled) row to its non-selection state. */
@@ -1805,7 +1814,7 @@ class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListVi
         selectBox.visibility = GONE
         selectBox.setOnClickListener(null)
         textView.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
-        row.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        row.foreground = null
     }
 
     /** Translucent label colour (runtime theme aware) behind selected rows. */

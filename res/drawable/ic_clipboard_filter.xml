@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+  <!-- Material's filter-list glyph, drawn for the unified filters (date, tags, size, private). -->
+  <path
+      android:fillColor="#FFFFFFFF"
+      android:pathData="M10,18h4v-2h-4v2zM3,6v2l6,5v3h2v-3l6,-5V6H3z"/>
+</vector>
