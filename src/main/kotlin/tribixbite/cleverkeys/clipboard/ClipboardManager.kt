@@ -1800,15 +1800,21 @@ class ClipboardManager(
      * Tab icons honour the config toggles; in selection mode only the current tab's icon
      * stays (the selection is scoped to that tab), freeing width for the selection actions.
      */
+    @Suppress("UNNECESSARY_SAFE_CALL")
     private fun updateTabIcons() {
         val selecting = isInSelectionMode()
         // An open search field owns the tab row; the chips come back when it collapses.
         val searchOpen = clipboardSearchBox?.visibility == View.VISIBLE
         fun visible(tab: ClipboardTab, enabled: Boolean) =
             if (enabled && !searchOpen && (!selecting || currentTab == tab)) View.VISIBLE else View.GONE
+        // Collapsing search also runs from resetSearchOnHide(), which the JVM tests invoke on
+        // an Objenesis-built manager with no constructor config. Both tabs default to ON there;
+        // production always has a Config and reads the real toggles.
+        val pinnedEnabled = config?.clipboard_pinned_enabled ?: true
+        val todosEnabled = config?.clipboard_todo_enabled ?: true
         val historyVisibility = visible(ClipboardTab.HISTORY, true)
-        val pinnedVisibility = visible(ClipboardTab.PINNED, config.clipboard_pinned_enabled)
-        val todosVisibility = visible(ClipboardTab.TODOS, config.clipboard_todo_enabled)
+        val pinnedVisibility = visible(ClipboardTab.PINNED, pinnedEnabled)
+        val todosVisibility = visible(ClipboardTab.TODOS, todosEnabled)
         tabHistory?.visibility = historyVisibility
         tabPinned?.visibility = pinnedVisibility
         tabTodos?.visibility = todosVisibility
