@@ -41,6 +41,27 @@ Every id the manager, the layout tests and the instrumented tests look up is sti
 three tab `ImageView`s keep their icons, click listeners and 1.0/0.5 alpha contract — they now sit
 inside labelled chips.
 
+## Final pass and the current Gboard baseline
+
+A check against up-to-date write-ups on 2026-11-25 confirms the pattern we copied is still the
+one Gboard ships: Pinned and Recent sections, a pencil in the header for bulk pin/delete, and a
+long-press menu with Paste / Pin or Unpin / Edit / Delete
+([How-To Geek, March 2026](https://www.howtogeek.com/overlooked-gboard-feature-makes-copy-pasting-so-much-easier-on-android/),
+[Android Police, May 2026](https://www.androidpolice.com/never-copying-pasting-old-way-again-thanks-to-android-trick/)).
+Search is a newer addition to Gboard's clipboard surface, which is why ours is a header action
+that takes over the tab row rather than a permanent field.
+
+Gboard's November 2026 beta adds a plain-text paste shortcut and a 1–24 hour retention setting
+([Android Authority, 20 Nov 2026](https://www.androidauthority.com/gboard-beta-clipboard-history-24-hours-3737622/)).
+Neither is copied here: this fork's indefinite retention is an explicit owner decision from the
+first paragraph of the README, and its paste/long-press action set already passes the owner's
+"actions are fine" verdict. Following a beta change would make the pane *less* like the owner's
+installed Gboard, not more.
+
+The final pass also fixed two landscape geometry faults found by reading the layout maths: the
+290dp header now leaves the 20sp title untruncated, the 132dp chip row fits three icon-only
+chips, and an open search field is clamped so search + selection cannot overflow a 720dp pane.
+
 ## What this deliberately does not do
 
 - Pinned clips remain on their own **Pinned** tab. Gboard shows Pinned and Recent as two sections

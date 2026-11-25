@@ -61,13 +61,22 @@ class ClipboardPaneLayout @JvmOverloads constructor(
         }
         val selecting = findViewById<View?>(R.id.clipboard_selection_bar)?.visibility == VISIBLE
         val searching = findViewById<View?>(R.id.clipboard_search)?.visibility == VISIBLE
+        // Search and selection can both be open (select-all-matching is a real workflow), so
+        // the search width is clamped to what is left beside the header, the five selection
+        // actions and a usable result strip. Without this, a 720dp pane overflowed by ~50dp.
+        val searchWidth = if (wide && searching) {
+            val available = if (MeasureSpec.getMode(widthMeasureSpec) != MeasureSpec.UNSPECIFIED)
+                MeasureSpec.getSize(widthMeasureSpec) else Int.MAX_VALUE
+            val left = available - pixels(HEADER_WIDE_DP) -
+                (if (selecting) pixels(SELECTION_WIDE_DP) else 0) - pixels(MIN_RESULT_WIDE_DP)
+            minOf(pixels(SEARCH_WIDE_DP), maxOf(pixels(MIN_SEARCH_WIDE_DP), left))
+        } else pixels(TABS_WIDE_DP)
 
         updateParams(R.id.clipboard_toolbar,
             width = if (wide) pixels(HEADER_WIDE_DP) else LayoutParams.MATCH_PARENT,
             height = pixels(if (wide) 48 else 56), weight = 0f)
         updateParams(R.id.clipboard_search_bar,
-            width = if (wide) pixels(if (searching) SEARCH_WIDE_DP else TABS_WIDE_DP)
-                    else LayoutParams.MATCH_PARENT,
+            width = if (wide) searchWidth else LayoutParams.MATCH_PARENT,
             height = pixels(if (wide) 48 else 44), weight = 0f)
         updateParams(R.id.clipboard_result_controls,
             width = if (wide) 0 else LayoutParams.MATCH_PARENT,
@@ -103,12 +112,16 @@ class ClipboardPaneLayout @JvmOverloads constructor(
     private companion object {
         /** Panes at least this wide put the control groups side by side. */
         const val WIDE_MIN_DP = 720
-        /** Back + title + search + filter + edit, with just enough title width to read. */
-        const val HEADER_WIDE_DP = 248
-        /** Three icon-only chips in landscape; their labels come back in portrait. */
-        const val TABS_WIDE_DP = 112
+        /** Back + title + search + filter + edit. 290dp leaves the 20sp title untruncated. */
+        const val HEADER_WIDE_DP = 290
+        /** Three icon-only chips (20dp icon + 18dp padding + 4dp margin each) in landscape. */
+        const val TABS_WIDE_DP = 132
         /** An open search field replaces the chips in landscape. */
         const val SEARCH_WIDE_DP = 240
+        /** Never squeeze search below this even with selection open. */
+        const val MIN_SEARCH_WIDE_DP = 72
+        /** Leave the result strip at least this wide when clamping search. */
+        const val MIN_RESULT_WIDE_DP = 120
         /** Five 48dp selection actions. */
         const val SELECTION_WIDE_DP = 240
         val TAB_LABEL_IDS = intArrayOf(
