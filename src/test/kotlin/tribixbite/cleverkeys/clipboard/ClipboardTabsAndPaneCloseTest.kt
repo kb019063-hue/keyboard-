@@ -404,6 +404,22 @@ class ClipboardTabsAndPaneCloseTest {
     }
 
     @Test
+    fun clipsAreLaidOutTwoPerRowLikeGboard() {
+        val xml = File("res/layout/clipboard_pane.xml").readText()
+        assertWithMessage("Gboard puts two text clips on a row")
+            .that(xml).contains("android:numColumns=\"2\"")
+        assertWithMessage("columns must stretch to equal card widths")
+            .that(xml).contains("android:stretchMode=\"columnWidth\"")
+        val view = File("src/main/kotlin/tribixbite/cleverkeys/clipboard/ClipboardHistoryView.kt").readText()
+        assertWithMessage("the clip surface must be the non-scrolling grid")
+            .that(view).contains(": NonScrollGridView(ctx, attrs)")
+        assertWithMessage("tests that build the view with no AttributeSet must still get two columns")
+            .that(view).contains("numColumns = 2")
+        assertWithMessage("inflating with a null root would drop the card gutters")
+            .that(view).contains(".inflate(R.layout.clipboard_history_entry, parent, false)")
+    }
+
+    @Test
     fun clipsRenderAsRoundedCardsWithMoreThanOneLine() {
         val row = File("res/layout/clipboard_history_entry.xml").readText()
         assertWithMessage("a clip must have the Gboard-style card background")

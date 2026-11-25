@@ -54,7 +54,12 @@ enum class ClipboardTab {
     TODOS     // To-do items
 }
 
-class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListView(ctx, attrs),
+/**
+ * The clipboard's clip surface. Since 2026-11-25 it is a two-column [NonScrollGridView]:
+ * that is the Gboard arrangement the owner called out ("2 texts on a row"), and it keeps one
+ * adapter position per clip so edit/swipe/selection/pagination still use the same indices.
+ */
+class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollGridView(ctx, attrs),
     ClipboardHistoryService.OnClipboardHistoryChange {
 
     private var history: List<ClipboardEntry> = emptyList()
@@ -521,6 +526,10 @@ class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListVi
     }
 
     init {
+        // Two equal cards per row, including when a test constructs this view with no
+        // AttributeSet. XML can still override these on the real pane.
+        numColumns = 2
+        stretchMode = STRETCH_COLUMN_WIDTH
         service = ClipboardHistoryService.get_service(ctx)
         clipboardAdapter = ClipboardEntriesAdapter()
         // Start with empty data — actual load deferred to onAttachedToWindow (async, off UI thread)
@@ -1838,7 +1847,11 @@ class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListVi
         override fun getItemId(pos: Int): Long = paginatedHistory[pos].hashCode().toLong()
 
         override fun getView(pos: Int, v: View?, parent: ViewGroup): View {
-            val view = v ?: View.inflate(context, R.layout.clipboard_history_entry, null)
+            // Inflate with the adapter's parent so the card's XML layout params (its 8dp
+            // gutters) survive. Inflating with a null root silently dropped them and left
+            // GridView to generate bare MATCH_PARENT params — cards touched edge to edge.
+            val view = v ?: android.view.LayoutInflater.from(context)
+                .inflate(R.layout.clipboard_history_entry, parent, false)
             // A recycled row may carry a swipe offset or a running spring-back: rebind upright,
             // except the row the finger is dragging right now (its next move re-applies it).
             if (view !== swipeRow || !swipeClaimed) {

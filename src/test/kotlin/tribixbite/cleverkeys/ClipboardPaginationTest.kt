@@ -15,7 +15,7 @@ import org.junit.Test
 class ClipboardPaginationTest {
 
     // Mirror the constant from ClipboardHistoryView — can't reference directly
-    // because ClipboardHistoryView extends NonScrollListView (Android View).
+    // because ClipboardHistoryView is an Android View (now a two-column NonScrollGridView).
     private val itemsPerPage = 100
 
     /** Replicate the exact formula from ClipboardHistoryView.getTotalPages(). */

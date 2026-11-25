@@ -424,11 +424,16 @@
           android:maxLines="1"
           android:ellipsize="end"/>
 
+      <!-- Gboard's arrangement: two clip cards per row. The adapter keeps one position per
+           clip; GridView does the row-major placement. -->
       <tribixbite.cleverkeys.ClipboardHistoryView
           android:id="@+id/clipboard_history_view"
-          android:orientation="vertical"
           android:layout_width="match_parent"
           android:layout_height="wrap_content"
+          android:numColumns="2"
+          android:stretchMode="columnWidth"
+          android:horizontalSpacing="0dp"
+          android:verticalSpacing="0dp"
           android:divider="@null"
           android:dividerHeight="0dp"/>
     </LinearLayout>

@@ -19,8 +19,8 @@ not Google's artwork:
 
 - header: a back arrow, a visible **"Clipboard"** title, and an edit pencil on the right;
 - a short section label — **Recent** / **Pinned** — above the clips;
-- **rounded white cards** on the keyboard-coloured field, with real gutters, several lines of
-  text per card and link/image decorations where relevant;
+- **rounded white cards on the keyboard-coloured field, two text clips per row**, with real
+  gutters, several lines of text per card and link/image decorations where relevant;
 - no permanent search field, no result counter and no tab icon strip in the resting state.
 
 Our retention, search, regex, filters, tags, to-dos and bulk actions stay. Those are the fork's
@@ -32,6 +32,7 @@ features; the owner asked for a Gboard *look*, not for Gboard's five-item expiry
 |---|---|
 | `res/layout/clipboard_pane.xml` | Gboard header (back, title, search, filter, pencil), labelled Recent/Pinned/To-dos chips, collapsible search field, a section label over the list, no permanent result counter. |
 | `res/layout/clipboard_history_entry.xml` | Each clip is a rounded card with a gutter, a taller touch target and up to three lines of text instead of one clipped line. |
+| `NonScrollGridView.kt`, `ClipboardHistoryView.kt` | The clips are laid out **two per row**, the arrangement the owner clarified on 2026-11-25. One adapter position still means one clip, so edit, swipe, selection and pagination indices are unchanged. Adapter inflation now uses the real parent, so the XML card gutters survive. |
 | `res/drawable/clipboard_card_bg.xml`, `clipboard_tab_chip_bg.xml`, `ic_clipboard_search.xml`, `ic_clipboard_filter.xml` | Card/chip geometry and our own Material-style icons. No Google asset or typeface. |
 | `ClipboardManager.kt` | Search is a header action that reveals a full-width field and hides the chips while open; tab chips and section label follow `switchToTab`; the result counter is only shown when it carries information (search, filter, selection, undo). Runtime-theme colours reach every new view. |
 | `ClipboardPaneLayout.kt` (same file) | Phone stacks the header, chips and status row; a wide/landscape pane puts them side by side so a full card still fits. A selection drops the chips and keeps the five 48 dp actions inside the pane. |
