@@ -52,25 +52,44 @@ class ClipboardPaneLayout @JvmOverloads constructor(
         fun pixels(dp: Int) = (dp * density).roundToInt()
         val wide = MeasureSpec.getMode(widthMeasureSpec) != MeasureSpec.UNSPECIFIED &&
             MeasureSpec.getSize(widthMeasureSpec) >= pixels(WIDE_MIN_DP)
-        // Reserve room for the visible tabs, search and its action icons. Selection mode hides
-        // the non-current tabs, which returns their width to counts, paging and selection
-        // actions instead of starving the results beside a fixed-width search bar.
-        val visibleTabs = TAB_IDS.count { findViewById<View?>(it)?.visibility == VISIBLE }
+        // Wide panes are short: the three control groups sit side by side so a whole card
+        // still fits above the app. Narrow panes stack them, with the status row collapsing
+        // to zero height until filters, pagination or a selection asks for it.
         findViewById<LinearLayout>(R.id.clipboard_controls).apply {
             val orientation = if (wide) HORIZONTAL else VERTICAL
             if (this.orientation != orientation) this.orientation = orientation
         }
+        val selecting = findViewById<View?>(R.id.clipboard_selection_bar)?.visibility == VISIBLE
+        val searching = findViewById<View?>(R.id.clipboard_search)?.visibility == VISIBLE
+        // Search and selection can both be open (select-all-matching is a real workflow), so
+        // the search width is clamped to what is left beside the header, the five selection
+        // actions and a usable result strip. Without this, a 720dp pane overflowed by ~50dp.
+        val searchWidth = if (wide && searching) {
+            val available = if (MeasureSpec.getMode(widthMeasureSpec) != MeasureSpec.UNSPECIFIED)
+                MeasureSpec.getSize(widthMeasureSpec) else Int.MAX_VALUE
+            val left = available - pixels(HEADER_WIDE_DP) -
+                (if (selecting) pixels(SELECTION_WIDE_DP) else 0) - pixels(MIN_RESULT_WIDE_DP)
+            minOf(pixels(SEARCH_WIDE_DP), maxOf(pixels(MIN_SEARCH_WIDE_DP), left))
+        } else pixels(TABS_WIDE_DP)
+
+        updateParams(R.id.clipboard_toolbar,
+            width = if (wide) pixels(HEADER_WIDE_DP) else LayoutParams.MATCH_PARENT,
+            height = pixels(if (wide) 48 else 56), weight = 0f)
         updateParams(R.id.clipboard_search_bar,
-            width = if (wide) pixels(SEARCH_BASE_DP + TAB_DP * visibleTabs) else LayoutParams.MATCH_PARENT,
-            height = pixels(if (wide) 48 else 40), weight = 0f)
+            width = if (wide) searchWidth else LayoutParams.MATCH_PARENT,
+            height = pixels(if (wide) 48 else 44), weight = 0f)
         updateParams(R.id.clipboard_result_controls,
             width = if (wide) 0 else LayoutParams.MATCH_PARENT,
             height = LayoutParams.WRAP_CONTENT, weight = if (wide) 1f else 0f)
-        // Narrow panes are tall: the selection actions take their own row. Wide panes are
-        // short (landscape): they sit beside the results so a full entry row stays visible.
         updateParams(R.id.clipboard_selection_bar,
-            width = if (wide) LayoutParams.WRAP_CONTENT else LayoutParams.MATCH_PARENT,
+            width = if (wide) pixels(SELECTION_WIDE_DP) else LayoutParams.MATCH_PARENT,
             height = pixels(48), weight = 0f)
+
+        // A selection needs every pixel beside the results; the chips go away and the search
+        // field (when open) keeps its full row. Wide panes have no vertical room for labels.
+        setVisibility(R.id.clipboard_search_bar,
+            if (wide && selecting && !searching) GONE else VISIBLE)
+        for (id in TAB_LABEL_IDS) setVisibility(id, if (wide) GONE else VISIBLE)
         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
     }
 
@@ -85,14 +104,31 @@ class ClipboardPaneLayout @JvmOverloads constructor(
         view.layoutParams = params
     }
 
+    private fun setVisibility(id: Int, visibility: Int) {
+        val view = findViewById<View?>(id) ?: return
+        if (view.visibility != visibility) view.visibility = visibility
+    }
+
     private companion object {
-        /** Panes at least this wide put search and results side by side. */
+        /** Panes at least this wide put the control groups side by side. */
         const val WIDE_MIN_DP = 720
-        /** Wide search bar without tab icons: search text plus its clear/regex/filter/close icons. */
-        const val SEARCH_BASE_DP = 212
-        /** Width of one tab icon (36dp ImageView). */
-        const val TAB_DP = 36
-        val TAB_IDS = intArrayOf(R.id.tab_history, R.id.tab_pinned, R.id.tab_todos)
+        /** Back + title + search + filter + edit. 290dp leaves the 20sp title untruncated. */
+        const val HEADER_WIDE_DP = 290
+        /** Three icon-only chips (20dp icon + 18dp padding + 4dp margin each) in landscape. */
+        const val TABS_WIDE_DP = 132
+        /** An open search field replaces the chips in landscape. */
+        const val SEARCH_WIDE_DP = 240
+        /** Never squeeze search below this even with selection open. */
+        const val MIN_SEARCH_WIDE_DP = 72
+        /** Leave the result strip at least this wide when clamping search. */
+        const val MIN_RESULT_WIDE_DP = 120
+        /** Five 48dp selection actions. */
+        const val SELECTION_WIDE_DP = 240
+        val TAB_LABEL_IDS = intArrayOf(
+            R.id.clipboard_tab_recent_label,
+            R.id.clipboard_tab_pinned_label,
+            R.id.clipboard_tab_todos_label
+        )
     }
 }
 
@@ -204,6 +240,12 @@ class ClipboardManager(
     private var tabHistory: ImageView? = null
     private var tabPinned: ImageView? = null
     private var tabTodos: ImageView? = null
+    // The chip containers carry the Gboard-style label and the activated state; the icons
+    // above stay the click targets and the alpha the tab tests pin.
+    private var tabRecentChip: View? = null
+    private var tabPinnedChip: View? = null
+    private var tabTodosChip: View? = null
+    private var sectionLabel: TextView? = null
 
     // Pagination views
     private var paginationBar: View? = null
@@ -278,6 +320,20 @@ class ClipboardManager(
                 clipboardSearchBox?.requestFocus()
             }
 
+            // Search is now a header action: the resting pane has no search field. Tapping the
+            // magnifier reveals it and hides the tabs; tapping it again clears and closes it.
+            clipboardPane?.findViewById<View>(R.id.clipboard_search_toggle)?.setOnClickListener {
+                if (isInEditMode()) return@setOnClickListener
+                val expanding = clipboardSearchBox?.visibility != View.VISIBLE
+                setSearchExpanded(expanding)
+                if (expanding) {
+                    searchMode = true
+                    clipboardSearchBox?.hint =
+                        context.getString(R.string.clipboard_search_hint_typing)
+                    clipboardSearchBox?.requestFocus()
+                }
+            }
+
             // Set up search clear button (X)
             clipboardSearchClear = clipboardPane?.findViewById(R.id.clipboard_search_clear)
             clipboardSearchClear?.setOnClickListener {
@@ -312,6 +368,10 @@ class ClipboardManager(
             tabHistory = clipboardPane?.findViewById<ImageView>(R.id.tab_history)
             tabPinned = clipboardPane?.findViewById<ImageView>(R.id.tab_pinned)
             tabTodos = clipboardPane?.findViewById<ImageView>(R.id.tab_todos)
+            tabRecentChip = clipboardPane?.findViewById(R.id.clipboard_tab_recent_chip)
+            tabPinnedChip = clipboardPane?.findViewById(R.id.clipboard_tab_pinned_chip)
+            tabTodosChip = clipboardPane?.findViewById(R.id.clipboard_tab_todos_chip)
+            sectionLabel = clipboardPane?.findViewById(R.id.clipboard_section_label)
 
             // Selection mode hides the other tabs (a selection is scoped to one tab's rows);
             // the guard covers a tap that lands while the visibility change is pending.
@@ -452,8 +512,9 @@ class ClipboardManager(
     }
 
     /**
-     * Updates tab button highlighting based on current tab.
-     * Active tab has full alpha (1.0), inactive tabs are dimmed (0.5).
+     * Updates tab button highlighting based on current tab. Icons keep their 1.0/0.5 alpha
+     * (the tab contract); the chips and the list's section label carry the same state in the
+     * Gboard-style chrome so which list is open is visible without reading the icons.
      */
     private fun updateTabHighlighting() {
         val activeAlpha = 1.0f
@@ -462,6 +523,14 @@ class ClipboardManager(
         tabHistory?.alpha = if (currentTab == ClipboardTab.HISTORY) activeAlpha else inactiveAlpha
         tabPinned?.alpha = if (currentTab == ClipboardTab.PINNED) activeAlpha else inactiveAlpha
         tabTodos?.alpha = if (currentTab == ClipboardTab.TODOS) activeAlpha else inactiveAlpha
+        tabRecentChip?.isActivated = currentTab == ClipboardTab.HISTORY
+        tabPinnedChip?.isActivated = currentTab == ClipboardTab.PINNED
+        tabTodosChip?.isActivated = currentTab == ClipboardTab.TODOS
+        sectionLabel?.setText(when (currentTab) {
+            ClipboardTab.HISTORY -> R.string.clipboard_section_recent
+            ClipboardTab.PINNED -> R.string.clipboard_section_pinned
+            ClipboardTab.TODOS -> R.string.clipboard_section_todos
+        })
     }
 
     /**
@@ -539,6 +608,7 @@ class ClipboardManager(
     private fun setSearchText(newText: String): Boolean {
         val searchBox = clipboardSearchBox ?: return false
         val historyView = clipboardHistoryView ?: return false
+        setSearchExpanded(true)
         searchBox.text = newText
         // Update history view filter
         historyView.setSearchFilter(newText)
@@ -550,6 +620,15 @@ class ClipboardManager(
     }
 
     /**
+     * Reveals or collapses the search field. An expanded search takes the whole tab row,
+     * so the chips (which are navigation, not filters) get out of its way.
+     */
+    private fun setSearchExpanded(expanded: Boolean) {
+        clipboardSearchBox?.visibility = if (expanded) View.VISIBLE else View.GONE
+        updateTabIcons()
+    }
+
+    /**
      * Clears clipboard search and exits search mode.
      */
     fun clearSearch() {
@@ -558,6 +637,7 @@ class ClipboardManager(
             text = ""
             hint = context.getString(R.string.clipboard_search_hint_tap)
         }
+        setSearchExpanded(false)
         clipboardHistoryView?.setSearchFilter("")
         clipboardHistoryView?.setRegexMode(false)
         updateRegexToggleVisual(false)
@@ -585,6 +665,7 @@ class ClipboardManager(
             text = ""
             hint = context.getString(R.string.clipboard_search_hint_tap)
         }
+        setSearchExpanded(false)
         clipboardHistoryView?.setSearchFilter("")
         clipboardHistoryView?.setRegexMode(false)
         updateRegexToggleVisual(false)
@@ -621,6 +702,7 @@ class ClipboardManager(
             text = ""
             hint = context.getString(R.string.clipboard_search_hint_tap)
         }
+        setSearchExpanded(false)
         updateSearchClearVisibility("")
         // Also exit edit mode and tag panel when hiding clipboard pane
         exitEditMode()
@@ -1219,6 +1301,10 @@ class ClipboardManager(
             context.getString(R.string.clipboard_results_summary, count, Formatter.formatShortFileSize(context, bytes))
         else context.getString(R.string.clipboard_results_loading)
         val selecting = view.isSelecting()
+        // Gboard shows clips, not a permanent counter. Keep the live region for the cases where
+        // the number matters: an active filter/search, a selection, or a bulk action.
+        resultSummary?.visibility = if (selecting || searchMode || view.hasActiveFilters())
+            View.VISIBLE else View.GONE
         selectButton?.apply {
             visibility = if (selecting) View.GONE else View.VISIBLE
             isEnabled = ready && !tagMode && !isInEditMode()
@@ -1567,15 +1653,26 @@ class ClipboardManager(
             intArrayOf(
                 R.id.tab_history, R.id.tab_pinned, R.id.tab_todos,
                 R.id.clipboard_search_clear, R.id.clipboard_date_filter,
-                R.id.clipboard_close_button, R.id.clipboard_select_matching,
-                R.id.clipboard_selection_clear, R.id.clipboard_delete_selected,
-                R.id.clipboard_selection_actions, R.id.clipboard_selection_exit
+                R.id.clipboard_search_toggle, R.id.clipboard_close_button,
+                R.id.clipboard_select_matching, R.id.clipboard_selection_clear,
+                R.id.clipboard_delete_selected, R.id.clipboard_selection_actions,
+                R.id.clipboard_selection_exit
             ).forEach { id ->
                 (pane.findViewById<View?>(id) as? ImageView)
                     ?.setColorFilter(label, PorterDuff.Mode.SRC_IN)
             }
+            // The edit button is a Button (its key-coloured background is pinned by a test),
+            // so its pencil is a compound drawable rather than an ImageView.
+            (pane.findViewById<Button?>(R.id.clipboard_select))?.let { button ->
+                button.setTextColor(label)
+                button.compoundDrawables.forEach { drawable -> drawable?.setTint(label) }
+            }
             (pane.findViewById<TextView?>(R.id.clipboard_search))?.setTextColor(label)
-            (pane.findViewById<TextView?>(R.id.clipboard_select))?.setTextColor(label)
+            for (id in intArrayOf(R.id.clipboard_tab_recent_label,
+                    R.id.clipboard_tab_pinned_label, R.id.clipboard_tab_todos_label)) {
+                (pane.findViewById<TextView?>(id))?.setTextColor(label)
+            }
+            (pane.findViewById<TextView?>(R.id.clipboard_title))?.setTextColor(label)
             (pane.findViewById<TextView?>(R.id.clipboard_swipe_undo))?.setTextColor(label)
             (pane.findViewById<TextView?>(R.id.clipboard_selection_count))?.setTextColor(label)
             (pane.findViewById<TextView?>(R.id.clipboard_result_summary))?.setTextColor(theme.subLabelColor)
@@ -1587,6 +1684,7 @@ class ClipboardManager(
         if (sub != 0) {
             (pane.findViewById<TextView?>(R.id.clipboard_search))?.setHintTextColor(sub)
             (pane.findViewById<TextView?>(R.id.clipboard_page_info))?.setTextColor(sub)
+            (pane.findViewById<TextView?>(R.id.clipboard_section_label))?.setTextColor(sub)
         }
     }
 
@@ -1679,6 +1777,10 @@ class ClipboardManager(
         tabHistory = null
         tabPinned = null
         tabTodos = null
+        tabRecentChip = null
+        tabPinnedChip = null
+        tabTodosChip = null
+        sectionLabel = null
         paginationBar = null
         pagePrev = null
         pageInfo = null
@@ -1711,13 +1813,27 @@ class ClipboardManager(
      * Tab icons honour the config toggles; in selection mode only the current tab's icon
      * stays (the selection is scoped to that tab), freeing width for the selection actions.
      */
+    @Suppress("UNNECESSARY_SAFE_CALL")
     private fun updateTabIcons() {
         val selecting = isInSelectionMode()
+        // An open search field owns the tab row; the chips come back when it collapses.
+        val searchOpen = clipboardSearchBox?.visibility == View.VISIBLE
         fun visible(tab: ClipboardTab, enabled: Boolean) =
-            if (enabled && (!selecting || currentTab == tab)) View.VISIBLE else View.GONE
-        tabHistory?.visibility = visible(ClipboardTab.HISTORY, true)
-        tabPinned?.visibility = visible(ClipboardTab.PINNED, config.clipboard_pinned_enabled)
-        tabTodos?.visibility = visible(ClipboardTab.TODOS, config.clipboard_todo_enabled)
+            if (enabled && !searchOpen && (!selecting || currentTab == tab)) View.VISIBLE else View.GONE
+        // Collapsing search also runs from resetSearchOnHide(), which the JVM tests invoke on
+        // an Objenesis-built manager with no constructor config. Both tabs default to ON there;
+        // production always has a Config and reads the real toggles.
+        val pinnedEnabled = config?.clipboard_pinned_enabled ?: true
+        val todosEnabled = config?.clipboard_todo_enabled ?: true
+        val historyVisibility = visible(ClipboardTab.HISTORY, true)
+        val pinnedVisibility = visible(ClipboardTab.PINNED, pinnedEnabled)
+        val todosVisibility = visible(ClipboardTab.TODOS, todosEnabled)
+        tabHistory?.visibility = historyVisibility
+        tabPinned?.visibility = pinnedVisibility
+        tabTodos?.visibility = todosVisibility
+        tabRecentChip?.visibility = historyVisibility
+        tabPinnedChip?.visibility = pinnedVisibility
+        tabTodosChip?.visibility = todosVisibility
     }
 
     /**
@@ -1753,6 +1869,10 @@ class ClipboardManager(
         tabHistory = null
         tabPinned = null
         tabTodos = null
+        tabRecentChip = null
+        tabPinnedChip = null
+        tabTodosChip = null
+        sectionLabel = null
         paginationBar = null
         pagePrev = null
         pageInfo = null

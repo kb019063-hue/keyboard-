@@ -379,6 +379,19 @@
     <string name="clipboard_date_filter">Date filter</string>
     <string name="clipboard_close">Close clipboard</string>
 
+    <!-- Gboard-style clipboard surface (2026-11-25): a real title, labelled tabs and a section
+         header. The short tab labels are visible chrome; the longer *_tab_* strings above stay
+         the TalkBack names. -->
+    <string name="clipboard_title">Clipboard</string>
+    <string name="clipboard_tab_recent_label">Recent</string>
+    <string name="clipboard_tab_pinned_label">Pinned</string>
+    <string name="clipboard_tab_todos_label">To-dos</string>
+    <string name="clipboard_section_recent">Recent</string>
+    <string name="clipboard_section_pinned">Pinned</string>
+    <string name="clipboard_section_todos">To-dos</string>
+    <string name="clipboard_search_open">Search clips</string>
+    <string name="clipboard_edit_mode">Edit clips</string>
+
     <!-- Clipboard entry accessibility labels (clipboard_history_entry) -->
     <string name="clipboard_media_thumbnail">Media thumbnail</string>
     <string name="clipboard_animated">Animated</string>

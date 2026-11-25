@@ -1,10 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Clipboard entry: horizontal layout with text + stacked button column on right -->
+<!-- Clipboard entry: a Gboard-style rounded card on the keyboard field. The card is the
+     whole row so swipe-to-delete and the long-press menu still act on the same view; only its
+     paint and spacing changed. Selection mode tints the root behind the card. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:orientation="horizontal"
     android:layout_width="fill_parent"
-    android:layout_height="wrap_content">
+    android:layout_height="wrap_content"
+    android:minHeight="68dp"
+    android:background="@drawable/clipboard_card_bg"
+    android:paddingStart="6dp"
+    android:paddingEnd="6dp"
+    android:paddingTop="6dp"
+    android:paddingBottom="6dp"
+    android:layout_marginStart="8dp"
+    android:layout_marginEnd="8dp"
+    android:layout_marginTop="2dp"
+    android:layout_marginBottom="8dp">
 
   <!-- Selection mode (2026-10-07): GONE outside selection mode. 48dp touch target; the
        contentDescription (set per row) names the clipping, so TalkBack announces
@@ -76,7 +88,7 @@
       android:id="@+id/clipboard_entry_text"
       style="@style/clipboardEntry"
       android:layout_weight="0"
-      android:maxLines="1"
+      android:maxLines="3"
       android:ellipsize="end"/>
 
   <!-- #156 provenance line — VISIBLE only when the row is expanded AND the entry carries a

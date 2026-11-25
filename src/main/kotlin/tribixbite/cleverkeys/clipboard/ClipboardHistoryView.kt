@@ -54,7 +54,12 @@ enum class ClipboardTab {
     TODOS     // To-do items
 }
 
-class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListView(ctx, attrs),
+/**
+ * The clipboard's clip surface. Since 2026-11-25 it is a two-column [NonScrollGridView]:
+ * that is the Gboard arrangement the owner called out ("2 texts on a row"), and it keeps one
+ * adapter position per clip so edit/swipe/selection/pagination still use the same indices.
+ */
+class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollGridView(ctx, attrs),
     ClipboardHistoryService.OnClipboardHistoryChange {
 
     private var history: List<ClipboardEntry> = emptyList()
@@ -521,6 +526,10 @@ class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListVi
     }
 
     init {
+        // Two equal cards per row, including when a test constructs this view with no
+        // AttributeSet. XML can still override these on the real pane.
+        numColumns = 2
+        stretchMode = STRETCH_COLUMN_WIDTH
         service = ClipboardHistoryService.get_service(ctx)
         clipboardAdapter = ClipboardEntriesAdapter()
         // Start with empty data — actual load deferred to onAttachedToWindow (async, off UI thread)
@@ -1752,6 +1761,12 @@ class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListVi
      */
     private fun applyRuntimeRowColors(row: View, textView: TextView, provenanceView: TextView) {
         val rc = runtimeColors ?: return
+        // The rounded card is `?attr/colorKey` in XML, which resolves to the base style for
+        // runtime (custom/decorative) themes. Retint the row's own drawable — never a shared
+        // constant — so custom themes get the same card colour the pane chrome uses.
+        if (rc.key != 0) {
+            row.background?.mutate()?.setTint(rc.key)
+        }
         if (rc.label != 0) {
             textView.setTextColor(rc.label)
             val tint = android.content.res.ColorStateList.valueOf(rc.label)
@@ -1793,11 +1808,14 @@ class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListVi
         // OS clipboard by accident, so it toggles like a tap.
         textView.setOnLongClickListener { toggleSelection(entry); true }
         textView.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        textView.maxLines = if (entry.isMedia) 2 else 1
+        textView.maxLines = if (entry.isMedia) 2 else 3
         textView.ellipsize = android.text.TextUtils.TruncateAt.END
         // Selected rows are tinted as well as checked, so the state is not colour-only
-        // or checkbox-only.
-        row.setBackgroundColor(if (checked) selectedRowColor() else android.graphics.Color.TRANSPARENT)
+        // or checkbox-only. A foreground tint keeps the rounded card (and its runtime-theme
+        // colour) intact; setBackgroundColor would replace the card drawable with a rectangle.
+        row.foreground = if (checked) {
+            android.graphics.drawable.ColorDrawable(selectedRowColor())
+        } else null
     }
 
     /** Return a (possibly recycled) row to its non-selection state. */
@@ -1805,7 +1823,7 @@ class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListVi
         selectBox.visibility = GONE
         selectBox.setOnClickListener(null)
         textView.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
-        row.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        row.foreground = null
     }
 
     /** Translucent label colour (runtime theme aware) behind selected rows. */
@@ -1829,7 +1847,11 @@ class ClipboardHistoryView(ctx: Context, attrs: AttributeSet?) : NonScrollListVi
         override fun getItemId(pos: Int): Long = paginatedHistory[pos].hashCode().toLong()
 
         override fun getView(pos: Int, v: View?, parent: ViewGroup): View {
-            val view = v ?: View.inflate(context, R.layout.clipboard_history_entry, null)
+            // Inflate with the adapter's parent so the card's XML layout params (its 8dp
+            // gutters) survive. Inflating with a null root silently dropped them and left
+            // GridView to generate bare MATCH_PARENT params — cards touched edge to edge.
+            val view = v ?: android.view.LayoutInflater.from(context)
+                .inflate(R.layout.clipboard_history_entry, parent, false)
             // A recycled row may carry a swipe offset or a running spring-back: rebind upright,
             // except the row the finger is dragging right now (its next move re-applies it).
             if (view !== swipeRow || !swipeClaimed) {
