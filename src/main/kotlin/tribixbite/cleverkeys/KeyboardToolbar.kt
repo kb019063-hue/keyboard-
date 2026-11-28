@@ -19,7 +19,14 @@ import tribixbite.cleverkeys.customization.ShortSwipeMapping
 import tribixbite.cleverkeys.customization.SwipeDirection
 
 /**
- * A row of one-tap command buttons, sitting above the suggestion strip.
+ * A row of one-tap command buttons, sharing ONE 40 dp band above the keys with the suggestion
+ * strip.
+ *
+ * Since 2026-11-28 (the owner's Gboard comparison) this is not a second row: the toolbar owns the
+ * band when the strip has nothing to show, and steps aside while the strip carries words, a
+ * message or the password toggle — the strip then draws this toolbar's first and last commands at
+ * its own ends ([rowEnds]). Either way the keyboard is exactly one row taller than its keys, which
+ * is also why its total height never changes between the two states.
  *
  * Phase 1 of the HeliBoard gap analysis (`docs/HELIBOARD-GAP-ANALYSIS.md`): HeliBoard has a
  * toolbar and this codebase did not, but every command a toolbar would run already existed in
@@ -36,18 +43,20 @@ import tribixbite.cleverkeys.customization.SwipeDirection
  * reasons, both from reading `SuggestionBarPane`:
  * - `topPane` swaps its only child between the suggestion strip and a content pane, so anything
  *   inside it is removed the moment the clipboard or emoji pane opens.
- * - with word prediction and swipe typing both off, `topPane` is collapsed to height 0, so a
- *   toolbar living there would vanish exactly when the user has no suggestion strip and wants the
- *   buttons most.
+ * - `topPane` is the strip's band, and in the one-row layout exactly one of the two occupies it
+ *   at a time; a toolbar living inside `topPane` would be thrown out by the next pane swap.
  *
  * ## Sizing
  *
  * A [HorizontalScrollView] with `isFillViewport = true` around a weighted row: when the buttons
  * fit they stretch to divide the width evenly, and when they do not the row scrolls instead of
- * shrinking buttons below [BUTTON_MIN_WIDTH_DP]. In compact mode the two end buttons return
- * to their intrinsic widths and [ToolbarCompactPolicy] gives the middle to [compactSpacer],
- * so they sit at the edges rather than as two half-width blocks. No button is ever
- * unreachable or too small to hit.
+ * shrinking buttons below [BUTTON_MIN_WIDTH_DP]. No button is ever unreachable or too small to
+ * hit.
+ *
+ * The older `compact` mode — two end buttons pushed to the edges with the middle hidden, as a
+ * stand-in for Gboard's row — is kept for the `ToolbarCompactPolicy` tests but no longer driven
+ * by the service: the strip itself now draws those ends, and this toolbar is either the whole row
+ * or not on screen.
  *
  * ## Theming
  *
@@ -107,6 +116,15 @@ class KeyboardToolbar(
      */
     private var compact = false
 
+    /** Whether the user's config gives this toolbar anything to show. */
+    private var enabledRow = false
+
+    /**
+     * True while the strip is carrying the row and this toolbar must not take a band of its
+     * own — the one-row layout. See [setHiddenForStrip].
+     */
+    private var hiddenForStrip = false
+
     init {
         // A stable id so PreferenceUIUpdateHandler can re-find this view after a preference
         // change instead of capturing a reference that a theme change would leave detached.
@@ -151,9 +169,18 @@ class KeyboardToolbar(
                 is TextView -> child.setTextColor(textColor())
                 is ImageView -> child.imageTintList = ColorStateList.valueOf(textColor())
                 // Icon buttons are an ImageView inside a FrameLayout wrapper (the wrapper owns
-                // the ripple and the click), so the tint lives one level down.
-                is FrameLayout -> (child.getChildAt(0) as? ImageView)
-                    ?.imageTintList = ColorStateList.valueOf(textColor())
+                // the ripple and the click), so the tint lives one level down. The mic's circle
+                // is the wrapper's own background, and its glyph is the bar's background.
+                is FrameLayout -> {
+                    val glyph = child.getChildAt(0) as? ImageView
+                    if (child.tag == "voice_typing") {
+                        glyph?.imageTintList = ColorStateList.valueOf(micGlyphColor())
+                        (child.background as? android.graphics.drawable.GradientDrawable)
+                            ?.setColor(micFillColor())
+                    } else {
+                        glyph?.imageTintList = ColorStateList.valueOf(textColor())
+                    }
+                }
             }
         }
     }
@@ -164,12 +191,60 @@ class KeyboardToolbar(
      */
     fun applyFromConfig(config: Config) {
         val parsed = ToolbarConfig.parse(config.toolbar_keys)
-        visibility = if (config.toolbar_enabled && parsed.isNotEmpty()) View.VISIBLE else View.GONE
+        enabledRow = config.toolbar_enabled && parsed.isNotEmpty()
         if (parsed != keys) {
             keys = parsed
             rebuild()
         }
+        applyVisibility()
     }
+
+    /** Whether the toolbar has anything to show at all, whatever the strip is doing. */
+    fun canOwnRow(): Boolean = enabledRow && keys.isNotEmpty()
+
+    /**
+     * One-row layout (2026-11-28): the toolbar and the suggestion strip are the same 40 dp
+     * band, never two stacked ones. When the strip is carrying the row — words, a message,
+     * the password toggle — the toolbar steps aside entirely and its two end commands are
+     * drawn inside the strip instead ([rowEnds]). When the strip has nothing, this row is the
+     * band, with the full set of commands the user configured.
+     *
+     * Kept as a separate flag from [compact]: compact was the two-row approximation of
+     * Gboard's row (ends pushed apart with the middle buttons hidden, but still a second
+     * row above the strip). The owner asked for the single row on 2026-11-25.
+     */
+    fun setHiddenForStrip(hidden: Boolean) {
+        if (hiddenForStrip == hidden) return
+        hiddenForStrip = hidden
+        applyVisibility()
+    }
+
+    private fun applyVisibility() {
+        visibility = if (enabledRow && !hiddenForStrip) View.VISIBLE else View.GONE
+    }
+
+    /**
+     * The commands drawn at the strip's two ends while this toolbar is hidden: the first and
+     * last of the configured list, in order (positions, not names, exactly like
+     * [ToolbarCompactPolicy]). Empty when the toolbar is off or has a single command.
+     */
+    fun rowEnds(): List<RowEnd> {
+        // A toolbar the user switched off lends nothing to the strip either: its commands are
+        // meant to be gone from this keyboard.
+        if (!enabledRow || keys.isEmpty()) return emptyList()
+        val names = if (keys.size == 1) listOf(keys.first()) else listOf(keys.first(), keys.last())
+        return names.map { name ->
+            val command = CommandRegistry.getByName(name)
+            RowEnd(
+                name = name,
+                iconRes = toolbarIcon(name),
+                label = command?.nameRes?.let { context.getString(it) } ?: name
+            )
+        }
+    }
+
+    /** One command drawn at an edge of the suggestion row. */
+    data class RowEnd(val name: String, val iconRes: Int, val label: String)
 
     private fun rebuild() {
         row.removeAllViews()
@@ -243,11 +318,12 @@ class KeyboardToolbar(
      * horizontal padding inside a 22 dp box, leaving only 6 dp for the glyph itself.
      */
     private fun createIconButton(name: String, nameRes: Int, iconRes: Int): View {
-        val size = dp(ICON_SIZE_DP)
+        val isMic = name == "voice_typing"
+        val size = dp(if (isMic) MIC_ICON_SIZE_DP else ICON_SIZE_DP)
         val button = ImageView(context).apply {
             setImageResource(iconRes)
             scaleType = ImageView.ScaleType.FIT_CENTER
-            imageTintList = ColorStateList.valueOf(textColor())
+            imageTintList = ColorStateList.valueOf(if (isMic) micGlyphColor() else textColor())
             // The wrapper is the interactive view. A clickable/focusable child would swallow
             // the tap and expose a duplicate, label-less node to TalkBack.
             isClickable = false
@@ -261,7 +337,18 @@ class KeyboardToolbar(
             isClickable = true
             isFocusable = true
             minimumWidth = dp(BUTTON_MIN_WIDTH_DP)
-            rippleBackground()
+            if (isMic) {
+                // Gboard's mic sits in a filled circle (owner's screenshots): secondary
+                // ink as the fill, bar background as the glyph.
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    setColor(micFillColor())
+                }
+                val inset = dp(4)
+                setPadding(inset, inset, inset, inset)
+            } else {
+                rippleBackground()
+            }
             addView(button, FrameLayout.LayoutParams(size, size, Gravity.CENTER))
             setOnClickListener { dispatch(name, CommandRegistry.getDisplayInfo(name)) }
             contentDescription = label
@@ -361,6 +448,15 @@ class KeyboardToolbar(
         )
     }
 
+    /**
+     * Run a command through this toolbar's own dispatcher, exactly as one of its buttons does.
+     * The strip's end buttons call this ([rowEnds]), so a tap on the grid in the strip and a tap
+     * on the grid in the toolbar can never route differently.
+     */
+    fun dispatchCommand(name: String) {
+        dispatch(name, CommandRegistry.getDisplayInfo(name))
+    }
+
     /** Same contract as `SuggestionBar.setOpacity`: clamps, ignores no-op updates. */
     fun setOpacity(percent: Int) {
         val clamped = percent.coerceIn(0, 100)
@@ -377,6 +473,12 @@ class KeyboardToolbar(
     }
 
     private fun textColor(): Int = theme?.suggestionTextColor ?: 0xFF000000.toInt()
+
+    /** Fill of the mic's circle: the strip's secondary ink, as on Gboard. */
+    private fun micFillColor(): Int = theme?.suggestionSecondaryTextColor ?: 0xFF5F6368.toInt()
+
+    /** Glyph inside the mic's circle: the bar background, so it reads as a cut-out. */
+    private fun micGlyphColor(): Int = theme?.suggestionBackgroundColor ?: 0xFFFFFFFF.toInt()
 
     /**
      * Standard touch feedback, resolved from the platform theme so it follows light/dark.
@@ -405,6 +507,12 @@ class KeyboardToolbar(
          * screenshot shows.
          */
         private const val ICON_SIZE_DP = 22
+
+        /**
+         * Glyph size inside the mic's filled circle. The circle is 40 dp; the glyph sits a
+         * little smaller than a bare icon so the fill stays visible around it.
+         */
+        const val MIC_ICON_SIZE_DP = 20
 
         /**
          * Command name to drawable. A command with no entry keeps its font glyph, which is the

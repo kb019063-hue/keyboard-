@@ -166,4 +166,109 @@ class SuggestionBarPaletteTest {
         assertWithMessage("the echoed word / swipe hint must sit in the middle of the row")
             .that(placeholder).contains("gravity = Gravity.CENTER")
     }
+
+    // ---------------------------------------------------------------------------------------
+    // The owner's Gboard comparison, 2026-11-25: *"the suggestion strip and toolbar of mine and
+    // Gboard's … Mine doesn't look right. Can you make it look like Gboard?"* Two answers were
+    // confirmed with the owner, and each is the opposite of what the code did before:
+    //   1. ONE row above the keys: the toolbar and the strip share one 40 dp band and take turns
+    //      owning it — full toolbar while the field is empty, words with the toolbar's first and
+    //      last commands at the ends while typing. It used to be a second row stacked on top.
+    //   2. No pill, thin dividers: every word plain, same weight, same ink, separated by thin
+    //      vertical rules, as in the owner's Gboard screenshots.
+    // These are View classes, so — like the strip-width test above — the checks read the sources.
+    // ---------------------------------------------------------------------------------------
+
+    private fun toolbarSource() = File("src/main/kotlin/tribixbite/cleverkeys/KeyboardToolbar.kt").readText()
+
+    private fun serviceSource() = File("src/main/kotlin/tribixbite/cleverkeys/CleverKeysService.kt").readText()
+
+    @Test
+    fun theStripPaintsNoPillAndSeparatesWordsWithThinRules() {
+        val strip = File("src/main/kotlin/tribixbite/cleverkeys/SuggestionBar.kt").readText()
+        assertWithMessage("the commit chip must not be filled: no pill on this surface")
+            .that(strip).doesNotContain("SuggestionPillPolicy.look(")
+        assertWithMessage("no rounded pill radius left behind")
+            .that(strip).doesNotContain("PILL_RADIUS_DP")
+
+        val highlight = strip.substringAfter("index == currentHighlightIndex ->")
+            .substringBefore("\n            }\n")
+        assertWithMessage("every word, including the commit one, uses the plain strip ink")
+            .that(highlight).contains("theme?.suggestionTextColor")
+        assertWithMessage("the commit word must not be bolded any more")
+            .that(highlight).contains("Typeface.NORMAL")
+
+        assertWithMessage("a divider is drawn between neighbouring words")
+            .that(strip).contains("private fun createDividerView()")
+        assertWithMessage("dividers are interleaved with the words, not appended after them")
+            .that(strip).contains("desired.add(dividerViews[i])")
+        assertWithMessage("one rule between each pair of words")
+            .that(strip).contains("val dividerCount = if (needsDividers) count - 1 else 0")
+        assertWithMessage("a single word has no divider")
+            .that(strip).contains("val needsDividers = count > 1")
+    }
+
+    @Test
+    fun theStripCarriesTheToolbarsEndsInTheSameRow() {
+        val strip = File("src/main/kotlin/tribixbite/cleverkeys/SuggestionBar.kt").readText()
+        assertWithMessage("the strip exposes the toolbar's two end commands")
+            .that(strip).contains("fun setRowEnds(")
+        assertWithMessage("the start end is placed before the first word")
+            .that(strip).contains("if (showEnds) startEndButton?.let { desired.add(it) }")
+        assertWithMessage("the end end is placed after the last word")
+            .that(strip).contains("if (showEnds) endEndButton?.let { desired.add(it) }")
+        assertWithMessage("ends frame words, so an empty strip shows none")
+            .that(strip).contains("val showEnds = count > 0 && !hasCenteredPrompt")
+        assertWithMessage("the mic end is drawn as Gboard's filled circle")
+            .that(strip).contains("shape = GradientDrawable.OVAL")
+
+        assertWithMessage("the toolbar publishes its ends, by position")
+            .that(toolbarSource()).contains("fun rowEnds(): List<RowEnd>")
+        assertWithMessage("a strip end routes through the toolbar's own dispatcher")
+            .that(toolbarSource()).contains("fun dispatchCommand(name: String)")
+        assertWithMessage("the service wires the ends from the toolbar")
+            .that(serviceSource()).contains("wireStripRowEnds()")
+        assertWithMessage("the wiring hands the ends to the strip")
+            .that(serviceSource()).contains("bar.setRowEnds(")
+    }
+
+    @Test
+    fun theBandAboveTheKeysIsOneRowNotTwo() {
+        val toolbar = toolbarSource()
+        val service = serviceSource()
+        assertWithMessage("the toolbar steps aside while the strip owns the band")
+            .that(toolbar).contains("fun setHiddenForStrip(hidden: Boolean)")
+        assertWithMessage("and only one of the two is ever visible")
+            .that(toolbar).contains("visibility = if (enabledRow && !hiddenForStrip) View.VISIBLE else View.GONE")
+
+        val apply = service.substringAfter("private fun applyStripHeight(").substringBefore("\n    }\n")
+        assertWithMessage("the strip's band collapses when the toolbar takes the row")
+            .that(apply).contains("val target = if (stripTakesRow) full else 0")
+        assertWithMessage("which view owns the row follows the strip's own report")
+            .that(apply).contains("val stripTakesRow = occupied || !toolbarCanFill")
+        assertWithMessage("the toolbar is handed the same decision, so 40 dp is the whole band")
+            .that(apply).contains("toolbar?.setHiddenForStrip(stripTakesRow)")
+
+        val strip = File("src/main/kotlin/tribixbite/cleverkeys/SuggestionBar.kt").readText()
+        assertWithMessage("the strip reports the row it needs, including a word being typed")
+            .that(strip).contains("fun ownsRow(): Boolean = isOccupied() || placeholderIsWord")
+        assertWithMessage("the service lays the band out from that, not from bare occupancy")
+            .that(service).contains("applyStripHeight(_suggestionBar?.ownsRow() == true)")
+
+        assertWithMessage("the old compact second-row path is no longer driven")
+            .that(service).doesNotContain("setCompactMode(")
+    }
+
+    @Test
+    fun theToolbarsMicSitsInAFilledCircle() {
+        val toolbar = toolbarSource()
+        assertWithMessage("the mic gets Gboard's circle")
+            .that(toolbar).contains("shape = android.graphics.drawable.GradientDrawable.OVAL")
+        assertWithMessage("the circle's glyph is the bar background, so it reads as a cut-out")
+            .that(toolbar).contains("private fun micGlyphColor()")
+        assertWithMessage("the circle's fill is the strip's secondary ink")
+            .that(toolbar).contains("private fun micFillColor()")
+        assertWithMessage("the glyph is a shade smaller than a bare icon to leave the fill visible")
+            .that(toolbar).contains("const val MIC_ICON_SIZE_DP = 20")
+    }
 }

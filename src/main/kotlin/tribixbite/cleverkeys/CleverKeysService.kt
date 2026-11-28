@@ -870,7 +870,7 @@ class CleverKeysService : InputMethodService(),
         // The row keeps its height all the time now (2026-11-13), so the only thing a field
         // changes about it is WHAT it shows: the word before the caret, or the swipe hint. The
         // text itself is read on the caret reports below, never here on the set-up path.
-        applyStripHeight(_suggestionBar?.isOccupied() == true)
+        applyStripHeight(_suggestionBar?.ownsRow() == true)
         _formAtFinishView = null
         _viewEditor = editorRefOf(info)
         _keyboardView.cancelContinuousSwipe()
@@ -994,25 +994,16 @@ class CleverKeysService : InputMethodService(),
         // Capture the band's full height once, while it still holds the built-in value, and let
         // the bar's occupancy reports drive it from then on.
         if (_stripFullHeightPx <= 0) _stripFullHeightPx = _topPane?.layoutParams?.height ?: 0
-        // 2026-11-04 (owner screenshots): the toolbar used to collapse to its two end buttons --
-        // grid and mic -- as soon as the strip carried words, which read as "part of the keyboard
-        // disappears when I type something". Gboard on this owner's phone keeps every icon in the
-        // row while suggestions are displayed, so compact mode is off: the row always shows the
-        // configured buttons, and a crowded row scrolls instead of hiding anything. Only the
-        // strip's own band height still follows occupancy (below).
-        _suggestionBar?.onOccupancyChanged = { occupied ->
-            applyStripHeight(occupied)
-            // Gboard's row while words are offered: the tools button on the left, the words in
-            // the middle, the microphone on the right — and the commands the user does not need
-            // at that moment out of the way. This is `ToolbarCompactPolicy`, switched off on
-            // 2026-11-04 because it read as "part of the keyboard disappears"; the owner asked
-            // for it by name on 2026-11-13 ("that's why when the suggestions are active the only
-            // tools visible are the more tools sheet on the left and mic on the right"), so it is
-            // wired again — now that the suggestion row beneath it never collapses, which is what
-            // made the 2026-11-04 collapse look like an empty band.
-            _keyboardToolbar?.setCompactMode(occupied && _suggestionBar?.hasSuggestions() == true)
-        }
-        val stripOccupied = _suggestionBar?.isOccupied() == true
+        // 2026-11-25 (owner's Gboard screenshots): ONE row above the keys, not two. The strip
+        // and the toolbar share the same 40 dp band and take turns owning it, so the row shows
+        // the configured commands when the field is empty and the words (with the toolbar's two
+        // ends drawn inside the strip) once there is something to suggest. `compact` mode was
+        // the earlier approximation of this — ends pushed apart with the middle buttons hidden,
+        // but still a second row stacked above the strip — and is no longer used: the toolbar is
+        // either the whole row or not on screen.
+        _suggestionBar?.onOccupancyChanged = { occupied -> applyStripHeight(occupied) }
+        wireStripRowEnds()
+        val stripOccupied = _suggestionBar?.ownsRow() == true
         applyStripHeight(stripOccupied)
         setInputView(predictionSetup.inputView)
         LatencyMeter.showMark("install")
@@ -1703,7 +1694,7 @@ class CleverKeysService : InputMethodService(),
         // is back at the very start (the field was emptied). Uses the position just reported:
         // no call to the app. False on an ordinary keystroke, so nothing is resized then.
         if (_stripBand.onCaret(newSelStart, newSelEnd, _suggestionBar?.hasSuggestions() == true)) {
-            applyStripHeight(_suggestionBar?.isOccupied() == true)
+            applyStripHeight(_suggestionBar?.ownsRow() == true)
         }
         // The row's dimmed placeholder echoes the word before the caret. This is the one place
         // that already knows where the caret is, so the word is read here (a bounded read of a
@@ -1860,7 +1851,13 @@ class CleverKeysService : InputMethodService(),
         // The strip's band is service-side state (topPane lives here), so the toggle applies
         // straight away rather than on the next suggestion update.
         if (key == "suggestion_strip_always_visible") {
-            applyStripHeight(_suggestionBar?.isOccupied() == true)
+            applyStripHeight(_suggestionBar?.ownsRow() == true)
+        }
+        // The toolbar's commands are the strip's ends in the one-row layout, and whether the
+        // toolbar exists at all decides which view owns the band, so both are re-applied here.
+        if (key == ToolbarConfig.PREF_ENABLED || key == ToolbarConfig.PREF_KEYS) {
+            wireStripRowEnds()
+            applyStripHeight(_suggestionBar?.ownsRow() == true)
         }
         if (key == SplitConfig.PREF_ENABLED || key == SplitConfig.PREF_GAP_PERCENT) {
             // Split holds no service-side state: the next draw and the next hit-test both read
@@ -2028,6 +2025,20 @@ class CleverKeysService : InputMethodService(),
     }
 
     /**
+     * Put the single row above the keys back the way the strip wants it, after a pane has
+     * closed and handed the band back.
+     *
+     * The clipboard, emoji and GIF panes own the band while they are open, and the row is left
+     * exactly as it was for as long as they are ([applyStripHeight] never fights the pane). Once
+     * the pane closes, the strip may be empty — an empty field with a fresh editor, say — and the
+     * toolbar has to come back, or the keyboard would sit with a blank 40 dp band where its
+     * commands were.
+     */
+    fun restoreRowAfterPane() {
+        applyStripHeight(_suggestionBar?.ownsRow() == true)
+    }
+
+    /**
      * The height the row above the keys occupies, for [KeyboardReceiver.hideContentPane] when it
      * puts the row back after a pane.
      *
@@ -2058,16 +2069,64 @@ class CleverKeysService : InputMethodService(),
      * its tests describe it), and the preference is a user's stated wish for a keyboard whose
      * height never moves — which is now what every keyboard does.
      */
+    /**
+     * Size the row above the keys, and give it to whichever of the two live in it.
+     *
+     * One row, not two (2026-11-25, the owner's Gboard comparison): the toolbar and the
+     * suggestion strip are the same 40 dp band. Whichever is up, the keyboard is exactly one
+     * row taller than its keys, and the total keyboard height never changes between them —
+     * only the band's content does:
+     *  - strip has content (suggestions, message, password toggle, the echoed word) → the strip
+     *    fills the band and carries the toolbar's two end commands itself, so the full toolbar
+     *    row steps aside ([KeyboardToolbar.setHiddenForStrip]);
+     *  - strip has nothing to say → the band collapses to nothing and the full toolbar takes the
+     *    row, which is Gboard's empty-field state.
+     *
+     * Before 2026-11-28 both rows were always visible, one stacked on the other, which is what
+     * the owner's screenshots showed as "doesn't look right".
+     *
+     * A keyboard with the toolbar switched off keeps the old behaviour: the strip keeps the band
+     * (collapsing it would leave nothing above the keys).
+     */
     private fun applyStripHeight(occupied: Boolean) {
         val top = _topPane ?: return
-        // Pane mode (clipboard, emoji, GIF) owns the band's height; never fight it.
+        // Pane mode (clipboard, emoji, GIF) owns the band's height; never fight it. The toolbar
+        // stays as it was for that mode, which is what the shipped clipboard layout assumes.
         if (top.childCount > 0 && top.getChildAt(0) !== _scrollView) return
         val full = _stripFullHeightPx
         if (full <= 0) return
-        if (top.layoutParams.height != full) {
-            top.layoutParams.height = full
+        val toolbar = _keyboardToolbar
+        val toolbarCanFill = toolbar?.canOwnRow() == true
+        // With no toolbar to hand the row to, the strip always keeps the band.
+        val stripTakesRow = occupied || !toolbarCanFill
+        toolbar?.setHiddenForStrip(stripTakesRow)
+        val target = if (stripTakesRow) full else 0
+        if (top.layoutParams.height != target) {
+            top.layoutParams.height = target
             top.requestLayout()
         }
+    }
+
+    /**
+     * Give the strip the toolbar's two end commands, so the single row can show the same ends
+     * Gboard does (tools on the left, mic on the right) while the strip carries the words.
+     * Called whenever the toolbar's command list can have changed.
+     */
+    private fun wireStripRowEnds() {
+        val toolbar = _keyboardToolbar ?: return
+        val bar = _suggestionBar ?: return
+        val ends = toolbar.rowEnds()
+        // One command (or none) has no "left and right": the strip then keeps its words alone.
+        if (ends.size < 2) {
+            bar.setRowEnds(null, 0, null, null, 0, null) { toolbar.dispatchCommand(it) }
+            return
+        }
+        val start = ends.first()
+        val end = ends.last()
+        bar.setRowEnds(
+            start.name, start.iconRes, start.label,
+            end.name, end.iconRes, end.label
+        ) { name -> toolbar.dispatchCommand(name) }
     }
 
     /**

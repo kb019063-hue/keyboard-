@@ -215,9 +215,20 @@ class KeyboardReceiver(
         keyboard2.setKeysVisible(visible)
     }
 
-    /** The toolbar row's height now, or 0 when the toolbar is off. */
-    private fun toolbarHeightPx(): Int =
-        (topPane?.parent as? ViewGroup)?.findViewById<View?>(R.id.keyboard_toolbar)?.height ?: 0
+    /**
+     * The height of the band above the keys, or 0 when there is none.
+     *
+     * Since the one-row layout (2026-11-28) the toolbar and the suggestion strip share that
+     * band, and the toolbar is GONE while the strip carries it — so its measured height reads
+     * 0 exactly when the band is in use. The band's height is the toolbar's declared row
+     * height either way, so that is what is reserved (falling back to the measured height for
+     * a view whose params were never set).
+     */
+    private fun toolbarHeightPx(): Int {
+        val view = (topPane?.parent as? ViewGroup)?.findViewById<View?>(R.id.keyboard_toolbar)
+            ?: return 0
+        return view.layoutParams?.height?.takeIf { it > 0 } ?: view.height
+    }
 
     /**
      * Show content pane and hide suggestion bar.
@@ -278,6 +289,9 @@ class KeyboardReceiver(
         SuggestionBarPane.switchToSuggestionBarMode(
             top, content, scroll, keyboard2.suggestionStripHeight(suggestionBarHeight)
         )
+        // The band is the strip's again — or the toolbar's, if the strip has nothing to show
+        // (one-row layout, 2026-11-28). The service knows which; the receiver only swapped views.
+        keyboard2.restoreRowAfterPane()
     }
 
     /**
