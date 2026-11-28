@@ -154,10 +154,23 @@ class SuggestionBar : LinearLayout {
 
     private fun notifyOccupancy() {
         rebindPlaceholder()
+        // After the placeholder has decided whether this band is the strip's: a keystroke that
+        // turns the row into "the word being typed" has to bring the strip back with it.
+        applyRowVisibility()
         // ownsRow(), not isOccupied(): the listener lays out the single band above the keys,
         // and that band belongs to the strip while a word is being typed even before any
         // suggestion exists (see [ownsRow]).
         onOccupancyChanged?.invoke(ownsRow())
+    }
+
+    /**
+     * Draw the strip while it owns the band — suggestions, a message, the password toggle or the
+     * word being typed — and hide it only when the toolbar has taken the band instead.
+     *
+     * With the always-visible preference on (the default) the strip is simply always drawn.
+     */
+    private fun applyRowVisibility() {
+        visibility = if (alwaysVisible || ownsRow()) VISIBLE else GONE
     }
 
     /**
@@ -184,6 +197,9 @@ class SuggestionBar : LinearLayout {
      */
     private var placeholderIsWord = false
 
+    /** Whether the placeholder is currently framed by the row's two ends (see [showPlaceholder]). */
+    private var placeholderFramed = false
+
     /** What the row should show when it has no suggestions, message or chip. */
     private fun placeholder(): SuggestionStripBandPolicy.Placeholder =
         SuggestionStripBandPolicy.placeholder(isPasswordMode, textBeforeCaret)
@@ -209,23 +225,22 @@ class SuggestionBar : LinearLayout {
      */
     private fun rebindPlaceholder() {
         val wasWord = placeholderIsWord
-        if (isShowingTemporaryMessage || currentSuggestions.isNotEmpty() || isPasswordMode) {
-            placeholderView?.let {
-                if (it.parent === this) removeView(it)
-            }
-            placeholderView = null
-            placeholderWord = null
-            placeholderIsWord = false
+        if (isShowingTemporaryMessage || isPasswordMode) {
+            clearPlaceholderRow()
+            notifyPlaceholderRowChange(wasWord)
+            return
+        }
+        if (currentSuggestions.isNotEmpty()) {
+            // Words own the row and the ends are already placed around them by
+            // rebindSuggestionViews; only the placeholder goes. Removing the ends here would
+            // take them off the word row that was just built (this list is called from
+            // notifyOccupancy AFTER the words are laid out).
+            detachPlaceholder()
             notifyPlaceholderRowChange(wasWord)
             return
         }
         when (val p = placeholder()) {
-            is SuggestionStripBandPolicy.Placeholder.None -> {
-                placeholderView?.let { if (it.parent === this) removeView(it) }
-                placeholderView = null
-                placeholderWord = null
-                placeholderIsWord = false
-            }
+            is SuggestionStripBandPolicy.Placeholder.None -> clearPlaceholderRow()
             is SuggestionStripBandPolicy.Placeholder.LastWord -> {
                 placeholderIsWord = true
                 showPlaceholder(p.word, clickable = true)
@@ -247,14 +262,39 @@ class SuggestionBar : LinearLayout {
         if (wasWord != placeholderIsWord) notifyOccupancy()
     }
 
+    /**
+     * Take the placeholder down and leave the ends alone. Used when the row is being taken over
+     * by something that carries its own ends (the words) — those are placed by their own layout.
+     */
+    private fun detachPlaceholder() {
+        placeholderView?.let { if (it.parent === this) removeView(it) }
+        placeholderView = null
+        placeholderWord = null
+        placeholderIsWord = false
+        placeholderFramed = false
+    }
+
+    /**
+     * Take the placeholder's whole row down: the placeholder itself AND the ends that framed it,
+     * for when nothing is left to show. Left attached with nothing between them they would be
+     * two orphan icons floating in an otherwise empty band.
+     */
+    private fun clearPlaceholderRow() {
+        detachPlaceholder()
+        startEndButton?.let { if (it.parent === this) removeView(it) }
+        endEndButton?.let { if (it.parent === this) removeView(it) }
+    }
+
     private fun showPlaceholder(text: String, clickable: Boolean) {
-        if (placeholderWord == text && placeholderView?.parent === this) return
+        // A word being typed keeps the tools and the microphone where they are, so it takes
+        // the middle of the row. Letting it fill the whole band (which is what it did at first,
+        // 2026-11-28) hid every command for as long as a word had no suggestion — a row that
+        // went blank-ish mid-word, and the tools unreachable from the row for that keystroke.
+        val framed = clickable && (startEndButton != null || endEndButton != null)
+        if (placeholderWord == text && placeholderView?.parent === this && placeholderFramed == framed) return
         placeholderWord = text
+        placeholderFramed = framed
         val view = placeholderView ?: TextView(context).apply {
-            layoutParams = LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
             // The echoed word / "Swipe to type" hint sits where a suggestion would be.
             gravity = Gravity.CENTER
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
@@ -265,6 +305,14 @@ class SuggestionBar : LinearLayout {
             // the row is never a blank band. TalkBack reads it without announcing an action
             // when it is not tappable.
         }.also { placeholderView = it }
+        view.layoutParams = if (framed) {
+            LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+        } else {
+            LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
         // The secondary (dimmed) ink, so it cannot be mistaken for a suggestion to tap — except
         // that a word IS tappable, to put the caret back at the end of it (see below).
         view.setTextColor(theme?.suggestionSecondaryTextColor?.takeIf { it != 0 } ?: Color.LTGRAY)
@@ -279,7 +327,11 @@ class SuggestionBar : LinearLayout {
                 }
             } else null
         )
-        if (view.parent !== this) addView(view)
+        val desired = ArrayList<View>(3)
+        if (framed) startEndButton?.let { desired.add(it) }
+        desired.add(view)
+        if (framed) endEndButton?.let { desired.add(it) }
+        reconcileChildren(desired)
     }
 
     /**
@@ -445,8 +497,8 @@ class SuggestionBar : LinearLayout {
             dividerViews.add(createDividerView())
         }
 
-        // Build the desired ordered child sequence from the pools: the one-row ends
-        // (toolbar's first/last) at the edges, words and dividers in the middle.
+        // Build the desired ordered child sequence from the pools: the row's two ends
+        // (tools left, microphone right) at the edges, words and dividers in the middle.
         // A single centered prompt has no ends — it owns the row, as before.
         val hasCenteredPrompt = count == 1 &&
             Suggestion.parse(currentSuggestions[0]) is Suggestion.AddToDictionary
@@ -708,7 +760,7 @@ class SuggestionBar : LinearLayout {
             setTextColor(theme?.suggestionTextColor?.takeIf { it != 0 } ?: Color.WHITE)
             val pad = dpToPx(context, 14)
             setPadding(pad, pad, pad, pad)
-            background = android.graphics.drawable.GradientDrawable().apply {
+            background = GradientDrawable().apply {
                 cornerRadius = dpToPx(context, 10).toFloat()
                 val bg = theme?.colorKeyboardSurface?.takeIf { it != 0 } ?: Color.DKGRAY
                 setColor(
@@ -899,13 +951,13 @@ class SuggestionBar : LinearLayout {
         }
         LatencyMeter.stripUpdated(System.nanoTime() - rebindStart)
 
-        // Show or hide the entire bar based on suggestions (unless always visible mode)
-        // NOTE: Visibility is now controlled by the parent HorizontalScrollView
-        visibility = if (alwaysVisible) {
-            VISIBLE // Always keep visible to prevent UI rerendering
-        } else {
-            if (currentSuggestions.isEmpty()) GONE else VISIBLE
-        }
+        // Visibility follows the ROW, not just the words (2026-11-28): "always visible, else
+        // GONE when there are no suggestions" hollowed out the one-row layout for anyone who
+        // switched the preference off — the band still belonged to the strip while a word was
+        // being typed, but the strip itself was GONE, leaving an empty 40 dp band with no tools
+        // on the left, no microphone on the right and nothing between. notifyOccupancy() applies
+        // the rule, once the placeholder has had its say.
+        // NOTE: the parent HorizontalScrollView follows this view's visibility.
         notifyOccupancy()
     }
 
@@ -1148,8 +1200,6 @@ class SuggestionBar : LinearLayout {
         currentScores.clear()
         currentMetas.clear()
 
-        // Show empty suggestions (maintains bar visibility if alwaysVisible)
-        visibility = if (alwaysVisible) VISIBLE else GONE
         notifyOccupancy()
 
         Log.d(TAG, "clearEmojiSearchStatus: exited emoji search mode")
@@ -1240,74 +1290,79 @@ class SuggestionBar : LinearLayout {
     }
 
     /**
-     * Wire the one-row ends: the toolbar's first/last commands, shown at the edges of
-     * the word strip while typing. [dispatcher] receives the command name, exactly as
-     * the toolbar's own dispatcher does, so a tap here and a tap on the toolbar can
-     * never disagree about what a command does.
+     * Wire the one-row ends: the commands Gboard puts at the edges of its suggestion row,
+     * shown in the same 40 dp band as the words. [dispatcher] receives the command name,
+     * exactly as the toolbar's own dispatcher does, so a tap here and a tap on the toolbar
+     * can never disagree about what a command does.
      *
-     * The mic end (when [endName] is `voice_typing`) is drawn in Gboard's filled circle.
-     * A null name or zero icon hides that end.
+     * Either end may be null (the tools panel is not offered while the toolbar is switched
+     * off, and a command the registry does not know is never drawn). The ends are placed
+     * around whatever the row is showing right now — words, or the dimmed word being typed.
      */
-    fun setRowEnds(
-        startName: String?,
-        startIconRes: Int,
-        startLabel: String?,
-        endName: String?,
-        endIconRes: Int,
-        endLabel: String?,
-        dispatcher: (String) -> Unit
-    ) {
+    fun setRowEnds(start: RowEnd?, end: RowEnd?, dispatcher: (String) -> Unit) {
         endButtonDispatcher = dispatcher
-        startEndButton = if (startName != null && startIconRes != 0) {
-            createEndButton(startIconRes, startLabel, isMic = false, name = startName)
-        } else null
-        endEndButton = if (endName != null && endIconRes != 0) {
-            createEndButton(endIconRes, endLabel, isMic = endName == "voice_typing", name = endName)
-        } else null
-        // If words are already on screen, put the ends in place now.
-        if (currentSuggestions.isNotEmpty()) rebindSuggestionViews()
+        startEndButton = start?.let { createEndButton(it) }
+        endEndButton = end?.let { createEndButton(it) }
+        when {
+            currentSuggestions.isNotEmpty() -> rebindSuggestionViews()
+            // The echoed word takes the middle of the row, so it has to be re-placed around
+            // the new ends (and the band re-laid out if it was empty a moment ago).
+            placeholderView != null -> rebindPlaceholder()
+        }
     }
 
-    private fun createEndButton(iconRes: Int, label: String?, isMic: Boolean, name: String): View {
-        val iconSize = dpToPx(context, if (isMic) 20 else 22)
-        val icon = ImageView(context).apply {
-            setImageResource(iconRes)
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            isClickable = false
-            isFocusable = false
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            contentDescription = null
-        }
+    /**
+     * One command drawn at an edge of the row: the toolbar's own drawable for it, or — for a
+     * command that has no drawable — its text symbol, which is what the toolbar draws too.
+     *
+     * There is deliberately no circle drawn around the microphone here: `ic_tool_mic` is
+     * already Gboard's button, the mic knocked out of a filled disc. An earlier pass wrapped
+     * it in a second disc and produced a donut (2026-11-28).
+     */
+    private fun createEndButton(end: RowEnd): View {
+        val ink = theme?.suggestionTextColor?.takeIf { it != 0 } ?: Color.WHITE
         val wrapper = FrameLayout(context).apply {
-            tag = name
+            tag = end.name
             isClickable = true
             isFocusable = true
             minimumWidth = dpToPx(context, 40)
-            contentDescription = label
-            setOnClickListener { endButtonDispatcher?.invoke(name) }
-            if (isMic) {
-                // Gboard's mic sits in a filled circle: secondary ink as the fill,
-                // bar background as the glyph, so it reads on light and dark themes.
-                val fill = theme?.suggestionSecondaryTextColor?.takeIf { it != 0 } ?: Color.GRAY
-                val glyph = theme?.suggestionBackgroundColor?.takeIf { it != 0 } ?: Color.WHITE
-                icon.imageTintList = android.content.res.ColorStateList.valueOf(glyph)
-                background = GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
-                    setColor(fill)
-                }
-                // Inset the circle inside the 40 dp hit target, as Gboard does.
-                val inset = dpToPx(context, 4)
-                setPadding(inset, inset, inset, inset)
-            } else {
-                icon.imageTintList = android.content.res.ColorStateList.valueOf(
-                    theme?.suggestionTextColor?.takeIf { it != 0 } ?: Color.WHITE
-                )
-                val outValue = TypedValue()
-                if (context.theme.resolveAttribute(android.R.attr.selectableItemBackground, outValue, true)) {
-                    setBackgroundResource(outValue.resourceId)
-                }
+            contentDescription = end.label
+            setOnClickListener { endButtonDispatcher?.invoke(end.name) }
+            val outValue = TypedValue()
+            if (context.theme.resolveAttribute(android.R.attr.selectableItemBackground, outValue, true)) {
+                setBackgroundResource(outValue.resourceId)
             }
-            addView(icon, FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER))
+            if (end.iconRes != 0) {
+                val icon = ImageView(context).apply {
+                    setImageResource(end.iconRes)
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    imageTintList = android.content.res.ColorStateList.valueOf(ink)
+                    // The wrapper is the interactive view: a clickable child would swallow the
+                    // tap and expose a second, label-less node to TalkBack.
+                    isClickable = false
+                    isFocusable = false
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                    contentDescription = null
+                }
+                val iconSize = dpToPx(context, END_ICON_DP)
+                addView(icon, FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER))
+            } else {
+                val glyph = TextView(context).apply {
+                    text = end.glyph
+                    gravity = Gravity.CENTER
+                    setTextColor(ink)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                    typeface = if (end.useKeyFont) Theme.getKeyFont(context) else Typeface.DEFAULT
+                    isClickable = false
+                    isFocusable = false
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                }
+                addView(glyph, FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.CENTER
+                ))
+            }
         }
         wrapper.layoutParams = LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -1315,6 +1370,18 @@ class SuggestionBar : LinearLayout {
         )
         return wrapper
     }
+
+    /** One command the row can draw at an edge; see [setRowEnds]. */
+    data class RowEnd(
+        val name: String,
+        /** The toolbar's drawable for this command, or 0 when it has none. */
+        val iconRes: Int,
+        /** The localized command name, for TalkBack. */
+        val label: String,
+        /** Text symbol drawn when [iconRes] is 0, exactly as the toolbar draws it. */
+        val glyph: String,
+        val useKeyFont: Boolean
+    )
 
     /**
      * Get the currently displayed suggestions
@@ -1367,6 +1434,12 @@ class SuggestionBar : LinearLayout {
 
         /** Height of the vertical rule between words, dp. Short and centred, as on Gboard. */
         private const val DIVIDER_HEIGHT_DP = 24
+
+        /**
+         * Glyph size of the row's end buttons, dp. The same 22 dp the toolbar uses, so the
+         * microphone's disc is the same size in both rows.
+         */
+        private const val END_ICON_DP = 22
 
         /** Up to this many words share the strip width equally, as on Gboard. */
         private const val MAX_EVENLY_SPACED_SUGGESTIONS = 3

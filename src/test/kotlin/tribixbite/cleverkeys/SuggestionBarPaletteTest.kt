@@ -219,11 +219,13 @@ class SuggestionBarPaletteTest {
             .that(strip).contains("if (showEnds) endEndButton?.let { desired.add(it) }")
         assertWithMessage("ends frame words, so an empty strip shows none")
             .that(strip).contains("val showEnds = count > 0 && !hasCenteredPrompt")
-        assertWithMessage("the mic end is drawn as Gboard's filled circle")
-            .that(strip).contains("shape = GradientDrawable.OVAL")
+        assertWithMessage("a command with no drawable still gets an end, as a text symbol")
+            .that(strip).contains("if (end.iconRes != 0) {")
+        assertWithMessage("the text-symbol fallback is the command's own glyph")
+            .that(strip).contains("text = end.glyph")
 
-        assertWithMessage("the toolbar publishes its ends, by position")
-            .that(toolbarSource()).contains("fun rowEnds(): List<RowEnd>")
+        assertWithMessage("the toolbar publishes the two ends of the row")
+            .that(toolbarSource()).contains("fun rowEnds(): Pair<SuggestionBar.RowEnd?, SuggestionBar.RowEnd?>")
         assertWithMessage("a strip end routes through the toolbar's own dispatcher")
             .that(toolbarSource()).contains("fun dispatchCommand(name: String)")
         assertWithMessage("the service wires the ends from the toolbar")
@@ -260,15 +262,87 @@ class SuggestionBarPaletteTest {
     }
 
     @Test
-    fun theToolbarsMicSitsInAFilledCircle() {
+    fun theMicIsGboardsDiscFromItsOwnDrawableNotASecondCircle() {
+        // 2026-11-28, the defect this replaces: `ic_tool_mic` is ALREADY Gboard's button — the
+        // mic knocked out of a filled disc (see the drawable's comment) — and a pass added a
+        // circle of its own behind it, so the button became a disc inside a disc, i.e. a donut,
+        // and its glyph was tinted with the bar's background instead of the row's ink.
+        val mic = File("res/drawable/ic_tool_mic.xml").readText()
+        assertWithMessage("the shipped mic drawable carries the disc")
+            .that(mic).contains("knocked out of a filled circle")
+
+        for ((name, text) in listOf("KeyboardToolbar.kt" to toolbarSource(),
+                                    "SuggestionBar.kt" to File("src/main/kotlin/tribixbite/cleverkeys/SuggestionBar.kt").readText())) {
+            assertWithMessage("$name must not draw a circle behind the mic")
+                .that(text).doesNotContain("GradientDrawable.OVAL")
+            assertWithMessage("$name must not tint the mic with the bar's background")
+                .that(text).doesNotContain("micGlyphColor")
+            assertWithMessage("$name must not shrink the mic into a private circle slot")
+                .that(text).doesNotContain("MIC_ICON_SIZE_DP")
+        }
+        assertWithMessage("the strip's end icons are tinted with the row's own ink")
+            .that(File("src/main/kotlin/tribixbite/cleverkeys/SuggestionBar.kt").readText())
+            .contains("imageTintList = android.content.res.ColorStateList.valueOf(ink)")
+    }
+
+    @Test
+    fun theRowsEndsAreGboardsEndsNotTheToolbarsFirstAndLast() {
+        // 2026-11-28, the defect this replaces: the ends were "first and last of the configured
+        // toolbar". On the owner's phone the saved toolbar ends with `close`, so the words were
+        // bracketed by a grid and a ✕ and the row had no microphone at all — the one thing that
+        // makes Gboard's row recognisable.
         val toolbar = toolbarSource()
-        assertWithMessage("the mic gets Gboard's circle")
-            .that(toolbar).contains("shape = android.graphics.drawable.GradientDrawable.OVAL")
-        assertWithMessage("the circle's glyph is the bar background, so it reads as a cut-out")
-            .that(toolbar).contains("private fun micGlyphColor()")
-        assertWithMessage("the circle's fill is the strip's secondary ink")
-            .that(toolbar).contains("private fun micFillColor()")
-        assertWithMessage("the glyph is a shade smaller than a bare icon to leave the fill visible")
-            .that(toolbar).contains("const val MIC_ICON_SIZE_DP = 20")
+        val ends = toolbar.substringAfter("fun rowEnds()").substringBefore("private fun rowEnd")
+        assertWithMessage("the tools affordance is the row's left end, by name")
+            .that(ends).contains("rowEnd(MORE_TOOLS)")
+        assertWithMessage("the microphone is the row's right end, by name")
+            .that(ends).contains("rowEnd(VOICE_TYPING)")
+        assertWithMessage("the ends must not follow the configured list's first entry")
+            .that(ends).doesNotContain("keys.first()")
+        assertWithMessage("the ends must not follow the configured list's last entry")
+            .that(ends).doesNotContain("keys.last()")
+        assertWithMessage("the tools end is offered only while the toolbar itself is enabled")
+            .that(ends).contains("if (enabledRow) rowEnd(MORE_TOOLS) else null")
+        assertWithMessage("the tools command name is declared once, beside the icon that draws it")
+            .that(toolbar).contains("const val MORE_TOOLS = \"more_tools\"")
+        assertWithMessage("so is the microphone's")
+            .that(toolbar).contains("const val VOICE_TYPING = \"voice_typing\"")
+    }
+
+    @Test
+    fun theStripIsDrawnWhileItOwnsTheRow() {
+        // 2026-11-28, the defect this replaces: visibility was "alwaysVisible, else GONE when
+        // there are no suggestions". With that preference switched off, the band still belonged
+        // to the strip while a word was being typed, but the strip was GONE — an empty 40 dp
+        // band above the keys with no tools, no microphone and nothing in between.
+        val strip = File("src/main/kotlin/tribixbite/cleverkeys/SuggestionBar.kt").readText()
+        assertWithMessage("the strip is drawn whenever the band is the strip's")
+            .that(strip).contains("visibility = if (alwaysVisible || ownsRow()) VISIBLE else GONE")
+        assertWithMessage("and that decision is taken after the placeholder has had its say")
+            .that(strip).contains("applyRowVisibility()")
+        assertWithMessage("nothing re-hides the strip behind the service's back")
+            .that(strip).doesNotContain("if (currentSuggestions.isEmpty()) GONE else VISIBLE")
+    }
+
+    @Test
+    fun aWordBeingTypedSitsBetweenTheEndsInsteadOfSwallowingTheRow() {
+        // 2026-11-28, the defect this replaces: the echoed word took the whole band, and because
+        // the toolbar is GONE while the strip owns the row, the tools and the mic disappeared
+        // for as long as a word had no suggestion — a row that went nearly blank mid-word.
+        val strip = File("src/main/kotlin/tribixbite/cleverkeys/SuggestionBar.kt").readText()
+        assertWithMessage("the placeholder is framed by the ends only when it is the echoed word")
+            .that(strip).contains("val framed = clickable && (startEndButton != null || endEndButton != null)")
+        assertWithMessage("a framed placeholder takes the middle at weight 1")
+            .that(strip).contains("LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)")
+        assertWithMessage("and it is placed after the left end")
+            .that(strip).contains("if (framed) startEndButton?.let { desired.add(it) }")
+        assertWithMessage("and before the right end")
+            .that(strip).contains("if (framed) endEndButton?.let { desired.add(it) }")
+        assertWithMessage("the ends never linger as orphan icons when the row empties")
+            .that(strip).contains("private fun clearPlaceholderRow()")
+        assertWithMessage("clearing the row clears the ends with the placeholder")
+            .that(strip).contains("startEndButton?.let { if (it.parent === this) removeView(it) }")
+        assertWithMessage("words take the row without the placeholder dragging the ends off it")
+            .that(strip).contains("detachPlaceholder()")
     }
 }
