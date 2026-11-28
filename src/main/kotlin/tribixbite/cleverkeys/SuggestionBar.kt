@@ -201,7 +201,8 @@ class SuggestionBar : LinearLayout {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
-            gravity = Gravity.CENTER_VERTICAL
+            // The echoed word / "Swipe to type" hint sits where a suggestion would be.
+            gravity = Gravity.CENTER
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
@@ -294,13 +295,7 @@ class SuggestionBar : LinearLayout {
 
     private fun createSuggestionView(context: Context, index: Int): TextView {
         return TextView(context).apply {
-            // Use wrap_content for horizontal scrolling
-            layoutParams = LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            ).apply {
-                setMargins(0, 0, dpToPx(context, 4), 0) // Small right margin
-            }
+            layoutParams = defaultSuggestionLayoutParams()
             gravity = Gravity.CENTER
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
 
@@ -347,19 +342,29 @@ class SuggestionBar : LinearLayout {
     }
 
     /**
-     * Default layout params for a (non-centered) suggestion TextView:
-     * WRAP_CONTENT width so the bar scrolls horizontally, MATCH_PARENT height,
-     * with a small right margin. Recreated per bind so a view that was previously
-     * used as the centered "Add to dictionary?" prompt (which switches to
-     * MATCH_PARENT width) is reset back to the scrollable layout.
+     * Layout for a normal suggestion chip. Gboard spreads its three words across the whole
+     * strip; the old WRAP_CONTENT chips clustered at the left and left most of the band empty.
+     * Up to three words therefore get equal-weight cells. Longer/debug sets keep the old
+     * scrollable WRAP_CONTENT layout so no word is ever squeezed out of reach.
+     *
+     * Recreated on every bind so a view previously used as the centered "Add to dictionary?"
+     * prompt (MATCH_PARENT) returns to the normal layout.
      */
-    private fun defaultSuggestionLayoutParams(): LayoutParams =
-        LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.MATCH_PARENT
-        ).apply {
-            setMargins(0, 0, dpToPx(context, 4), 0)
+    private fun defaultSuggestionLayoutParams(): LayoutParams {
+        val count = currentSuggestions.size
+        return if (count in 1..MAX_EVENLY_SPACED_SUGGESTIONS) {
+            LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f).apply {
+                setMargins(0, 0, dpToPx(context, 2), 0)
+            }
+        } else {
+            LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            ).apply {
+                setMargins(0, 0, dpToPx(context, 4), 0)
+            }
         }
+    }
 
     /**
      * R3: Reconcile the child views to the current [currentSuggestions] by
@@ -1216,6 +1221,9 @@ class SuggestionBar : LinearLayout {
 
         /** Vertical padding inside that pill, dp: Gboard insets the fill from the row edges. */
         private const val PILL_PADDING_V_DP = 4
+
+        /** Up to this many words share the strip width equally, as on Gboard. */
+        private const val MAX_EVENLY_SPACED_SUGGESTIONS = 3
 
         /**
          * Check if the given EditorInfo indicates a password or PIN field.

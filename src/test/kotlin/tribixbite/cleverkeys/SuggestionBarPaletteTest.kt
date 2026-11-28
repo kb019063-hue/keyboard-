@@ -151,4 +151,19 @@ class SuggestionBarPaletteTest {
         assertThat(SuggestionBarPalette.contrastRatio(0xFF000000.toInt(), 0xFFFFFFFF.toInt())).isWithin(1e-9).of(21.0)
         assertThat(SuggestionBarPalette.contrastRatio(0xFF777777.toInt(), 0xFFFFFFFF.toInt())).isWithin(0.01).of(4.48)
     }
+
+    /** 2026-11-25: the owner picked the suggestion strip as the next surface to fix. */
+    @Test
+    fun threeWordsShareTheStripWidthAndTheEmptyRowIsCentred() {
+        val source = File("src/main/kotlin/tribixbite/cleverkeys/SuggestionBar.kt").readText()
+        assertWithMessage("the normal strip must spread up to three words evenly")
+            .that(source).contains("count in 1..MAX_EVENLY_SPACED_SUGGESTIONS")
+        assertWithMessage("longer/debug sets must stay scrollable")
+            .that(source).contains("ViewGroup.LayoutParams.WRAP_CONTENT")
+        assertWithMessage("MAX_EVENLY_SPACED_SUGGESTIONS must be three")
+            .that(source).contains("private const val MAX_EVENLY_SPACED_SUGGESTIONS = 3")
+        val placeholder = source.substringAfter("private fun showPlaceholder(").substringBefore("\n    }")
+        assertWithMessage("the echoed word / swipe hint must sit in the middle of the row")
+            .that(placeholder).contains("gravity = Gravity.CENTER")
+    }
 }
