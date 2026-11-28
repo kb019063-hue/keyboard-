@@ -17,6 +17,12 @@ class Autocapitalisation(
     private var shouldDisableShift = false
     private var shouldUpdateCapsMode = false
 
+    /**
+     * The field declared `TYPE_TEXT_FLAG_CAP_CHARACTERS` ("all caps": codes, serials, some search
+     * boxes). Such a field wants the CAPS LOCK, not sentence capitals, for as long as it has focus.
+     */
+    private var capsLockField = false
+
     private var ic: InputConnection? = null
     private var capsMode = 0
 
@@ -36,18 +42,35 @@ class Autocapitalisation(
         // Check inputType for CAP_MODE flags
         capsMode = info.inputType and SUPPORTED_CAPS_MODES
         val autocapEnabled = Config.globalConfig().autocapEffective
+        // A field that asks for all caps (codes, serials, some search boxes) wants the CAPS LOCK.
+        // The flag was simply not read before, so such a field opened with a lowercase keyboard
+        // and the editor had to re-case every letter after the fact — or, in fields that ignore
+        // case on input, ended up with lowercase text the user had to fix by hand.
+        capsLockField = (info.inputType and InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS) != 0
 
-        vlog { "AUTOCAP started: setting=$autocapEnabled, capsMode=$capsMode, inputType=0x${info.inputType.toString(16)}" }
+        vlog { "AUTOCAP started: setting=$autocapEnabled, capsMode=$capsMode, lock=$capsLockField, inputType=0x${info.inputType.toString(16)}" }
 
-        if (!autocapEnabled || capsMode == 0) {
+        // An all-caps field is honoured even with auto-capitalisation switched off: it is the
+        // FIELD asking, not a guess about the text.
+        if ((!autocapEnabled || capsMode == 0) && !capsLockField) {
             enabled = false
+            shouldEnableShift = false
+            shouldUpdateCapsMode = false
             vlog { "AUTOCAP: Disabled (setting=$autocapEnabled, capsMode=$capsMode)" }
+            // Publish the decision even though there is nothing to capitalise. Returning without
+            // a callback left the PREVIOUS field's shift state standing: end a sentence in a
+            // message, tap a URL/search field and the keyboard came up shifted, so the first
+            // letter of an address or a query was typed in capitals. Every field opens unshifted
+            // unless it — or the text before the caret — asks otherwise.
+            callback_now(true)
             return
         }
 
         enabled = true
-        shouldEnableShift = info.initialCapsMode != 0
-        shouldUpdateCapsMode = started_should_update_state(info.inputType)
+        shouldEnableShift = capsLockField || info.initialCapsMode != 0
+        // A locked field never asks the editor: the lock outranks whatever it would answer.
+        shouldUpdateCapsMode = !capsLockField && autocapEnabled && capsMode != 0 &&
+            started_should_update_state(info.inputType)
         vlog { "AUTOCAP: Enabled, shouldEnableShift=$shouldEnableShift, shouldUpdateCapsMode=$shouldUpdateCapsMode" }
         callback_now(true)
     }
@@ -109,7 +132,12 @@ class Autocapitalisation(
     }
 
     fun interface Callback {
-        fun update_shift_state(should_enable: Boolean, should_disable: Boolean)
+        /**
+         * @param should_enable latched shift on.
+         * @param should_disable latched shift off (a decision, not just "don't touch it").
+         * @param lock CAPS LOCK rather than a one-shot shift — the field asked for all caps.
+         */
+        fun update_shift_state(should_enable: Boolean, should_disable: Boolean, lock: Boolean)
     }
 
     /** Returns [true] if shift might be disabled. */
@@ -117,13 +145,12 @@ class Autocapitalisation(
         if (new_cursor == cursor) { // Just typing
             return
         }
-        if (new_cursor == 0 && ic != null) {
-            // Detect whether the input box has been cleared
-            val t = ic?.getTextAfterCursor(1, 0)
-            if (t != null && t.toString() == "") {
-                shouldUpdateCapsMode = true
-            }
-        }
+        // A caret move — a tap in the field, an arrow key, a suggestion replacing a word — can
+        // land at a sentence start, where the editor asks for a capital again. The question used
+        // to be asked only when the field had JUST been cleared (cursor 0 with nothing after it),
+        // so placing the caret after a full stop left shift off until the next key was typed and
+        // the capital was then lost. Ask on every real caret move; the 50 ms delay coalesces them.
+        shouldUpdateCapsMode = true
         cursor = new_cursor
         shouldEnableShift = false
         callback(true)
@@ -136,8 +163,14 @@ class Autocapitalisation(
             vlog { "AUTOCAP callback: enabled=$enabled, cursorCapsMode=$cursorCapsMode, shouldEnableShift=$shouldEnableShift" }
             shouldUpdateCapsMode = false
         }
-        vlog { "AUTOCAP update_shift_state: enable=$shouldEnableShift, disable=$shouldDisableShift" }
-        callback.update_shift_state(shouldEnableShift, shouldDisableShift)
+        // An all-caps field keeps the lock through everything typed into it: the editor's caps
+        // mode is not consulted for it, and a letter typed into it must not drop the lock.
+        if (enabled && capsLockField) {
+            shouldEnableShift = true
+            shouldUpdateCapsMode = false
+        }
+        vlog { "AUTOCAP update_shift_state: enable=$shouldEnableShift, disable=$shouldDisableShift, lock=$capsLockField" }
+        callback.update_shift_state(shouldEnableShift, shouldDisableShift, enabled && capsLockField)
     }
 
     /**

@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- See [number_row_no_symbols.xml] for the number row with no symbols. -->
-<row height="0.75">
+<!-- Same pitch as a letter row, as on Gboard: a compact (0.75-row) digit strip reads as
+     a different keyboard above the letter keys. -->
+<row>
   <key key0="1" se="!"/>
   <key key0="2" se="@"/>
   <key key0="3" se="#"/>

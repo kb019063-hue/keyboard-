@@ -31,6 +31,14 @@ the tree are stale and have been removed:
 - lowercase QWERTY, with Gboard's single corner hint per letter
 - bottom row `?123`, comma, emoji, space, period, action/enter
 - keys are separate rounded tiles with a visible gap, not one continuous slab
+- one pitch for every row: the digit row and the space-bar row are the same height as a letter
+  row, as on Gboard (2026-11-28)
+- the number-row preference decides both ways, including on the Gboard-style layout, which carries
+  its own digit row (2026-11-28)
+- an all-caps field (`TYPE_TEXT_FLAG_CAP_CHARACTERS`) opens in caps lock; a new field never
+  inherits the previous field's shift (2026-11-28)
+- the space bar prints the language only while a second language is in use, which is when Gboard
+  does (2026-11-28)
 
 The "before" state was the dense PC-style layout (Ctrl/Fn bottom row, symbols on every
 letter); it is not the target.
@@ -183,5 +191,7 @@ notice (`anr first-dialog`).
   comparison): [`SUGGESTION-ROW-2026-11-25.md`](SUGGESTION-ROW-2026-11-25.md).
 - Which build is installed — version name and version file name their commit (2026-11-28, owner:
   "the version has always been the same"): [`BUILD-STAMP.md`](BUILD-STAMP.md).
+- Key pitch, shift, popups, space bar and the number-row switch (2026-11-28, the sweep the owner
+  asked for after the one-row fixes): [`KEY-SURFACE-AUDIT-2026-11-28.md`](KEY-SURFACE-AUDIT-2026-11-28.md).
 - Agent conventions, including the layout and theme rules: [`../AGENTS.md`](../AGENTS.md).
 - CI storage limits: [`CI-STORAGE.md`](CI-STORAGE.md).

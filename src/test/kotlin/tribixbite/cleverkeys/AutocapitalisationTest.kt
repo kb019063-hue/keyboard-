@@ -101,7 +101,7 @@ class AutocapitalisationTest {
     // =========================================================================
 
     @Test
-    fun `started with autocap disabled does not enable`() {
+    fun `started with autocap disabled publishes shift off`() {
         mockConfig.autocapitalisation = false
         every { mockConfig.autocapEffective } returns false
 
@@ -111,8 +111,9 @@ class AutocapitalisationTest {
         )
         autocap.started(info, mockIc)
 
-        // When disabled, started() returns early without calling callback
-        verify(exactly = 0) { mockCallback.update_shift_state(any(), any()) }
+        // It cannot capitalise, but it must still say so: returning without a callback left the
+        // shift state of the PREVIOUS field standing, so a new field opened shifted.
+        verify(exactly = 1) { mockCallback.update_shift_state(false, true, false) }
     }
 
     @Test
@@ -124,8 +125,9 @@ class AutocapitalisationTest {
         )
         autocap.started(info, mockIc)
 
-        // When capsMode is 0, started() returns early without calling callback
-        verify(exactly = 0) { mockCallback.update_shift_state(any(), any()) }
+        // A field with no caps mode gets an explicitly unshifted keyboard — the same decision,
+        // published, rather than "leave whatever the last field left".
+        verify(exactly = 1) { mockCallback.update_shift_state(false, true, false) }
     }
 
     @Test
@@ -140,7 +142,7 @@ class AutocapitalisationTest {
 
         // initialCapsMode != 0 → shouldEnableShift = true
         // callback_now runs delayed_callback synchronously
-        verify { mockCallback.update_shift_state(true, any()) }
+        verify { mockCallback.update_shift_state(true, any(), any()) }
     }
 
     // =========================================================================
@@ -183,7 +185,7 @@ class AutocapitalisationTest {
         runCapturedCallback()
 
         // The last callback should have shouldEnableShift = false
-        verify(atLeast = 1) { mockCallback.update_shift_state(false, any()) }
+        verify(atLeast = 1) { mockCallback.update_shift_state(false, any(), any()) }
     }
 
     // =========================================================================
@@ -232,7 +234,7 @@ class AutocapitalisationTest {
         runCapturedCallback()
 
         // Callback runs via postDelayed — shouldEnableShift was cleared by meta != 0
-        verify { mockCallback.update_shift_state(false, any()) }
+        verify { mockCallback.update_shift_state(false, any(), any()) }
     }
 
     @Test
@@ -251,7 +253,7 @@ class AutocapitalisationTest {
         // The decision must reach the keyboard now, not on the next unmodified key: shift off,
         // and no re-arm (a modified key is not a sentence boundary, so the caps mode must not be
         // consulted again here).
-        verify { mockCallback.update_shift_state(false, true) }
+        verify { mockCallback.update_shift_state(false, true, any()) }
         verify(exactly = 0) { mockIc.getCursorCapsMode(any()) }
     }
 
@@ -282,7 +284,7 @@ class AutocapitalisationTest {
         // unpause calls callback_now → delayed_callback runs immediately
         // shouldUpdateCapsMode is set true → getCursorCapsMode is called
         verify(atLeast = 1) { mockIc.getCursorCapsMode(any()) }
-        verify(atLeast = 1) { mockCallback.update_shift_state(true, any()) }
+        verify(atLeast = 1) { mockCallback.update_shift_state(true, any(), any()) }
     }
 
     // =========================================================================
@@ -290,22 +292,70 @@ class AutocapitalisationTest {
     // =========================================================================
 
     @Test
-    fun `selection_updated with cursor movement clears shift`() {
+    fun `a caret move to a sentence start arms shift again`() {
         enableAutocap()
 
-        // Set shift via trigger char
-        every { mockIc.getCursorCapsMode(any()) } returns InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-        autocap.typed(".")
+        // Mid-sentence: the editor says no capital.
+        every { mockIc.getCursorCapsMode(any()) } returns 0
+        autocap.typed("x")
         runCapturedCallback()
-
         clearMocks(mockCallback, answers = false)
 
-        // Move cursor to a different position (not matching internal cursor)
+        // The user taps after a full stop; the editor now asks for a capital.
+        every { mockIc.getCursorCapsMode(any()) } returns InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
         autocap.selection_updated(1, 5)
         runCapturedCallback()
 
-        // Cursor movement clears shouldEnableShift
-        verify { mockCallback.update_shift_state(false, any()) }
+        // The caret move must re-ask the editor (it used to answer from a stale state, so shift
+        // stayed off and the next letter after the full stop was lowercase).
+        verify(atLeast = 1) { mockIc.getCursorCapsMode(any()) }
+        verify { mockCallback.update_shift_state(true, true, false) }
+    }
+
+    @Test
+    fun `a caret move into lower case text leaves shift off`() {
+        enableAutocap()
+
+        every { mockIc.getCursorCapsMode(any()) } returns 0
+        autocap.selection_updated(4, 1)
+        runCapturedCallback()
+
+        verify { mockCallback.update_shift_state(false, true, false) }
+    }
+
+    @Test
+    fun `a field that asks for all caps opens in caps lock`() {
+        every { mockIc.getCursorCapsMode(any()) } returns 0
+
+        val info = createEditorInfo(
+            inputType = InputType.TYPE_CLASS_TEXT or
+                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
+                InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS,
+            initialCapsMode = 0
+        )
+        autocap.started(info, mockIc)
+
+        // CAP_CHARACTERS is a request for CAPS LOCK, not for sentence capitals (and not for
+        // lowercase, which is what the keyboard used to open such a field with).
+        verify { mockCallback.update_shift_state(true, any(), true) }
+    }
+
+    @Test
+    fun `typing into an all caps field keeps the lock`() {
+        every { mockIc.getCursorCapsMode(any()) } returns 0
+
+        val info = createEditorInfo(
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS,
+            initialCapsMode = 0
+        )
+        autocap.started(info, mockIc)
+        clearMocks(mockCallback, answers = false)
+
+        autocap.typed("a")
+        runCapturedCallback()
+
+        // A letter typed into an all-caps field must not drop the lock.
+        verify { mockCallback.update_shift_state(true, true, true) }
     }
 
     // =========================================================================

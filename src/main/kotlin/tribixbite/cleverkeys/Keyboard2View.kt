@@ -1950,7 +1950,10 @@ class Keyboard2View @JvmOverloads constructor(
                 // The main label's drawn width bounds the W/E sublabel slots (SubLabelSizing).
                 val mainLabelW = if (k.keys[0] != null)
                     if (isSpaceKey(k.keys[0]!!))
-                        drawSpaceLanguageLabel(canvas, x, y, keyW, keyH, tc_key, snap.primary_language)
+                        drawSpaceLanguageLabel(
+                            canvas, x, y, keyW, keyH, tc_key,
+                            snap.primary_language, snap.active_secondary_language
+                        )
                     else
                         drawLabel(canvas, k.keys[0]!!, keyW / 2f + x, y, keyH, isKeyDown, tc_key)
                 else 0f
@@ -2195,10 +2198,15 @@ class Keyboard2View @JvmOverloads constructor(
         kv != null && kv.getKind() == KeyValue.Kind.Char && kv.getChar() == ' '
 
     /**
-     * Gboard's space bar is not blank: it prints the language it is typing — "English" — in the
-     * sub-label grey. Ours drew nothing at all, which read as a missing key in the owner's
-     * screenshots (2026-11-04). The name is cached per language tag because this runs every
-     * frame and `Locale.getDisplayLanguage` walks CLDR data.
+     * Gboard's space bar prints the language it is typing — "English" — in the sub-label grey, but
+     * only while MORE THAN ONE language is in play; with a single language its space bar is blank.
+     *
+     * That distinction is the whole of two owner reports that looked contradictory: the label was
+     * added because a blank bar read as a missing key in a multilingual screenshot (2026-11-04),
+     * and the owner later said the word "English" was not wanted on his space bar — his keyboard
+     * types one language. So the label follows the languages, not the layout: with nothing to
+     * disambiguate there is nothing to print. The name is cached per language tag because this
+     * runs every frame and `Locale.getDisplayLanguage` walks CLDR data.
      */
     private fun drawSpaceLanguageLabel(
         canvas: Canvas,
@@ -2208,8 +2216,11 @@ class Keyboard2View @JvmOverloads constructor(
         keyH: Float,
         tc: Theme.Computed.Key,
         /** The frame's captured language — never live `Config` (ARC-072). */
-        languageTag: String
+        languageTag: String,
+        /** The frame's second language, null unless multi-language typing is on. */
+        secondLanguageTag: String?
     ): Float {
+        if (secondLanguageTag == null) return 0f
         val tag = languageTag
         if (tag != _spaceLabelTag) {
             _spaceLabelTag = tag

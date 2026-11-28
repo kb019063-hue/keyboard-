@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<row height="0.75">
+<!-- Same pitch as a letter row, as on Gboard: a compact (0.75-row) digit strip reads as
+     a different keyboard above the letter keys. -->
+<row>
   <key key0="1"/>
   <key key0="2"/>
   <key key0="3"/>

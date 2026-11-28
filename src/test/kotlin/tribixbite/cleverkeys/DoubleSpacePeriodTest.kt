@@ -3,6 +3,7 @@ package tribixbite.cleverkeys
 import android.os.Handler
 import android.util.Log
 import android.view.inputmethod.InputConnection
+import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
 import io.mockk.every
 import io.mockk.mockk
@@ -116,6 +117,28 @@ class DoubleSpacePeriodTest {
 
         assertWithMessage("the intended double-space-to-period behavior must survive the guard")
             .that(text.toString()).isEqualTo("hix. ")
+    }
+
+    @Test
+    fun aFieldSwitchForgetsThePreviousFieldsSpace() {
+        // Field A: the user types a word and a space, then taps straight into field B.
+        text.append("note")
+        type(' ')
+        assertThat(text.toString()).isEqualTo("note ")
+
+        // Field B already holds text ending in a space; editing starts there.
+        text.setLength(0)
+        text.append("note ")
+        val info: android.view.inputmethod.EditorInfo = recv.getCurrentEditorInfo()!!
+        handler.started(info)
+
+        // ONE space typed in field B. Paired with field A's space it used to fire the period
+        // rule, so a single space became ". " in the new field.
+        type(' ')
+
+        assertWithMessage(
+            "a keystroke may only be paired with a space typed in the SAME field"
+        ).that(text.toString()).isEqualTo("note  ")
     }
 
     @Test

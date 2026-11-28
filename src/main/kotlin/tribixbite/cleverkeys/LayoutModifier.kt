@@ -98,23 +98,45 @@ object LayoutModifier {
             remove_keys.addAll(added_number_row.getKeys(0).keys)
         }
 
+        // The number-row preference decides BOTH ways (2026-11-28).
+        //
+        // It used to be consulted only to ADD a row, so a layout that carries its digits inside
+        // itself kept them however the preference was set: the switch worked on the layouts that
+        // borrow `res/xml/number_row.xml` and was silently dead on the Gboard-style layout, which
+        // ships its own digit row (`embedded_number_row="true"`) — i.e. dead on the one layout the
+        // keyboard uses by default. Turning the number row off now removes that row, and
+        // [KeyboardData.withoutRow] recomputes the layout's height, so the keyboard gets shorter
+        // by exactly the row that went away.
+        val strippedKw = if (!globalConfig.show_numpad && !globalConfig.add_number_row &&
+            kw.embedded_number_row
+        ) {
+            val embedded = kw.embeddedNumberRowIndex()
+            if (embedded >= 0) kw.withoutRow(embedded) else kw
+        } else {
+            kw
+        }
+
         // Add the bottom row before computing the extra keys
-        var newKw = if (kw.bottom_row) kw.insert_row(bottom_row, kw.rows.size) else kw
+        var newKw = if (strippedKw.bottom_row) {
+            strippedKw.insert_row(bottom_row, strippedKw.rows.size)
+        } else {
+            strippedKw
+        }
 
         // Compose keys to add to the layout
         // 'extra_keys_keyset' reflects changes made to 'extra_keys'
         val extra_keys_keyset = extra_keys.keys
         // 'kw_keys' contains the keys present on the layout without any extra keys
-        val kw_keys = kw.getKeys().keys
+        val kw_keys = strippedKw.getKeys().keys
 
         val extraKeysSubtype = globalConfig.extra_keys_subtype
-        if (extraKeysSubtype != null && kw.locale_extra_keys) {
+        if (extraKeysSubtype != null && strippedKw.locale_extra_keys) {
             val present = mutableSetOf<KeyValue>()
             present.addAll(kw_keys)
             present.addAll(extra_keys_keyset)
             extraKeysSubtype.compute(
                 extra_keys,
-                ExtraKeys.Query(kw.script, present)
+                ExtraKeys.Query(strippedKw.script, present)
             )
         }
 
