@@ -27,10 +27,13 @@ class KeyRowPitchTest {
     }
 
     /** Every `<row …>` open tag in [xml], without the comments (which mention heights). */
-    private fun rowTags(xml: String): List<String> =
-        Regex("<row\\b[^>]*>").findAll(xml.replace(Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL)))
-            .map { it.value }
-            .toList()
+    private fun rowTags(xml: String): List<String> {
+        val withoutComments = xml.replace(
+            Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL),
+            ""
+        )
+        return Regex("<row\\b[^>]*>").findAll(withoutComments).map { it.value }.toList()
+    }
 
     @Test
     fun theGboardLayoutGivesEveryRowTheSameHeight() {
