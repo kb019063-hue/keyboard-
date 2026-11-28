@@ -329,7 +329,9 @@ class StyleLayoutsTest {
         assertWithMessage("Gboard-style embeds its number row").that(kw.embedded_number_row).isTrue()
         assertThat(kw.rows[0].keys.map { it.getKeyValue(0)?.getString() })
             .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "0").inOrder()
-        assertThat(kw.rows[0].height).isEqualTo(0.75f)
+        // One pitch for every row (2026-11-28): Gboard's digit row is the height of a letter row,
+        // not HeliBoard's compact 0.75. See docs/KEY-SURFACE-AUDIT-2026-11-28.md.
+        assertThat(kw.rows[0].height).isEqualTo(1f)
         // No symbol hints beside the digits: Gboard prints none, and the ?123 pane has them.
         for (k in kw.rows[0].keys) assertThat(visibleCorners(k)).isEmpty()
 

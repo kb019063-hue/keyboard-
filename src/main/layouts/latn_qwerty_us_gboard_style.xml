@@ -45,7 +45,12 @@ embedded_number_row="true" tells LayoutModifier not to add the optional number r
 time, so turning that preference on cannot produce two rows of digits on this layout.
 -->
 <keyboard name="QWERTY (Gboard-style)" script="latin" bottom_row="false" embedded_number_row="true">
-  <row height="0.75">
+  <!-- One pitch for every row, as on Gboard: the digit row is the same height as a letter row.
+       It was 0.75 rows here (HeliBoard's compact digit row), which made the digits read as a
+       squashed strip above a normal keyboard — the one thing on this layout that did not match
+       the Gboard screenshots it was built from. The keyboard is one quarter of a row taller for
+       it, the same way Gboard is taller with its number row switched on. -->
+  <row>
     <key c="1"/>
     <key c="2"/>
     <key c="3"/>
@@ -100,7 +105,7 @@ time, so turning that preference on cannot produce two rows of digits on this la
        was exactly the cost of hiding it on a corner. It carries no corner hints, also like
        Gboard: a value may appear only once in a whole layout (Key.getKeys is keyed by value), so
        corners here would either duplicate the comma's own commands or shadow them. -->
-  <row height="0.95">
+  <row>
     <key width="1.5" c="?123:switch_numeric" nw="ctrl" ne="fn" sw="loc switch_greekmath" se="loc meta" w="loc config" n="loc alt" s="loc compose"/>
     <key c="," nw="loc change_method" sw="loc switch_clipboard" se="switch_gif" s="switch_back_clipboard"/>
     <key c="switch_emoji"/>

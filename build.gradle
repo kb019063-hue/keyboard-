@@ -769,7 +769,13 @@ tasks.register('runPureTests', JavaExec) {
     'tribixbite.cleverkeys.customization.ShortSwipeMappingTest',
     // Subkey popover (2026-09-30, docs/specs/subkey-popover.md): neutral zone + sector
     // hit-testing, grid clamping and arming; slot resolution mirrors the short-swipe path.
-    'tribixbite.cleverkeys.popover.SubkeyPopoverGeometryTest',
+    // 2026-11-28: one pitch for every key row (Gboard's digit row and space-bar row are the
+    // same height as its letters) — the Gboard-style layout and the shared number rows.
+    'tribixbite.cleverkeys.KeyRowPitchTest',
+    // 2026-11-28: the space bar prints the language only while a second language is in use,
+    // which reconciles the two owner reports about the word "English" on the bar.
+    'tribixbite.cleverkeys.SpaceBarLanguageLabelTest',
+        'tribixbite.cleverkeys.popover.SubkeyPopoverGeometryTest',
     'tribixbite.cleverkeys.popover.SubkeyPopoverSlotsTest',
     // Roadmap §4.1 (2026-10-08): theme-editor keyboard preview scene plan (trail effect
     // fallback, sample words, static sample trail through the layout's letter keys).
@@ -1627,7 +1633,10 @@ tasks.register('runMockTests', JavaExec) {
     // B-2 (2026-09-06 audit): SwipePrunerTest deleted with the ADR-011-orphan SwipePruner.
     'tribixbite.cleverkeys.PrivacyManagerTest',
     'tribixbite.cleverkeys.DebugLoggingManagerTest',
-    'tribixbite.cleverkeys.AutocapitalisationTest',
+    // 2026-11-28: the number-row preference decides both ways, including for a layout that
+    // carries its own digit row (the Gboard-style default).
+    'tribixbite.cleverkeys.EmbeddedNumberRowTest',
+        'tribixbite.cleverkeys.AutocapitalisationTest',
     'tribixbite.cleverkeys.DirectBootManagerTest',
     'tribixbite.cleverkeys.DirectBootAwarePreferencesTest',
     'tribixbite.cleverkeys.DictionaryManagerTest',

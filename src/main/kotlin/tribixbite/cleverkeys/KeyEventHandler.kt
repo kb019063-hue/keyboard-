@@ -58,6 +58,13 @@ class KeyEventHandler(
     /** Editing just started. */
     fun started(info: EditorInfo) {
         editorEpoch++
+        // The double-space memory belongs to the field it was recorded in. Carried across a field
+        // switch it could pair the LAST space of the previous field with the FIRST space typed in
+        // the new one, and that single space then became a period: switch away from a message
+        // within half a second, tap a field whose text already ends in a space, type one space —
+        // "note " became "note. ". A new field starts with no space behind it.
+        lastTypedChar = '\u0000'
+        lastTypedTimestamp = 0L
         val conn = recv.getCurrentInputConnection()
         if (conn != null) {
             autocap.started(info, conn)
@@ -1729,9 +1736,11 @@ class KeyEventHandler(
     }
 
     private inner class AutocapitalisationCallback : Autocapitalisation.Callback {
-        override fun update_shift_state(shouldEnable: Boolean, shouldDisable: Boolean) {
+        override fun update_shift_state(shouldEnable: Boolean, shouldDisable: Boolean, lock: Boolean) {
             when {
-                shouldEnable -> recv.set_shift_state(true, false)
+                // `lock` is the field's own all-caps request (TYPE_TEXT_FLAG_CAP_CHARACTERS):
+                // caps lock, not one sentence's shift.
+                shouldEnable -> recv.set_shift_state(true, lock)
                 shouldDisable -> recv.set_shift_state(false, false)
             }
         }

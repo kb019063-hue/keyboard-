@@ -167,6 +167,39 @@ class KeyboardData private constructor(
         return KeyboardData(this, rows_)
     }
 
+    /**
+     * This keyboard without the row at [index]; [this] when the index is out of range.
+     * [keysHeight] is recomputed by the copy constructor, so the keyboard's own height stays the
+     * sum of the rows it still has.
+     */
+    fun withoutRow(index: Int): KeyboardData {
+        if (index !in rows.indices) return this
+        val rows_ = ArrayList(rows)
+        rows_.removeAt(index)
+        return KeyboardData(this, rows_)
+    }
+
+    /**
+     * Index of the row this layout already carries its digits in — the "embedded number row"
+     * ([embedded_number_row]) — or -1 when it has none.
+     *
+     * A row counts only when it is exactly the shape every embedded number row in the shipped
+     * layouts has: ten keys, each one unit wide and unshifted, whose labels are the ten digits
+     * (in any order, because a numpad-script layout may start at 0). Anything else — a four-row
+     * phone pad, a row of symbols with a digit or two mixed in, a row that spans more or less than
+     * ten units — is left alone: guessing wrong there would delete a row the user needs.
+     */
+    fun embeddedNumberRowIndex(): Int = rows.indexOfFirst { row ->
+        row.keys.size == 10 &&
+            row.keys.all { key ->
+                key.width == 1f && key.shift == 0f &&
+                    key.keys[0]?.let { kv ->
+                        kv.getKind() == KeyValue.Kind.Char && kv.getChar() in '0'..'9'
+                    } == true
+            } &&
+            row.keys.mapNotNull { it.keys[0]?.getChar() }.toSet() == DIGITS.toSet()
+    }
+
     fun findKeyWithValue(kv: KeyValue): Key? {
         val pos = getKeys()[kv] ?: return null
         if (pos.row >= rows.size) return null
@@ -597,6 +630,9 @@ class KeyboardData private constructor(
                 w = maxOf(w, r.keysWidth)
             return w
         }
+
+        /** The ten labels an embedded number row is made of, as a set. */
+        private val DIGITS = setOf('0', '1', '2', '3', '4', '5', '6', '7', '8', '9')
 
         /** Compute total keyboard height from rows. */
         private fun compute_total_height(rows: List<Row>): Float {
