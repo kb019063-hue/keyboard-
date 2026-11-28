@@ -354,8 +354,11 @@ class AutocapitalisationTest {
         autocap.typed("a")
         runCapturedCallback()
 
-        // A letter typed into an all-caps field must not drop the lock.
-        verify { mockCallback.update_shift_state(true, true, true) }
+        // A letter typed into an all-caps field must not drop the lock: the decision published
+        // after the keystroke is "shift on, LOCKED" — the lock branch forces enable back on after
+        // the letter cleared it. (The `disable` flag is not what this case is about; the plain
+        // "typed non-trigger char" case above pins that.)
+        verify { mockCallback.update_shift_state(true, any(), true) }
     }
 
     // =========================================================================

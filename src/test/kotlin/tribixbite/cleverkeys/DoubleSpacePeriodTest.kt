@@ -77,6 +77,9 @@ class DoubleSpacePeriodTest {
         // An ordinary text field: an unset inputType is 0 = TYPE_NULL, a blind-field signal since 2026-10-13.
         every { recv.getCurrentEditorInfo() } returns mockk<android.view.inputmethod.EditorInfo>(relaxed = true).apply {
             inputType = android.text.InputType.TYPE_CLASS_TEXT
+            // A real EditorInfo always carries one; KeyEventHandler.shouldMoveCursorForceFallback
+            // asks the package name, and a relaxed mock would hand it null.
+            packageName = "com.example.app"
         }
 
         handler = KeyEventHandler(recv)
