@@ -1271,9 +1271,9 @@ tasks.register('runPureTests', JavaExec) {
     // runs for real; the Compose gesture wiring is source-pinned (on-device half is
     // androidTest Issue94VersionCopyComposeTest).
     'tribixbite.cleverkeys.ui.settings.VersionCopyPayloadTest',
-    // 2026-11-28: "the version has always been the same, whether a new [build] or not" — a dev
-    // build now names its commit in the version name and in version_info.txt, and this pins the
-    // whole chain (workflow -> versionName -> version file -> settings card). Reads files only.
+    // 2026-11-28: the owner's report that the version never changed between builds — a dev build
+    // now names its commit in the version name and in version_info.txt, and this pins the whole
+    // chain (workflow → versionName → version file → settings card). Reads files only.
     'tribixbite.cleverkeys.BuildStampDriftTest',
     'tribixbite.cleverkeys.ReleasePackagingDriftTest',
     // 2026-09-09 hygiene: ModelLoader's dead .ort optimized-model write (written on every
