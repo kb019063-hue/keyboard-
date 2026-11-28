@@ -60,6 +60,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Which build is this? Every dev build used to ship as version `2.0.0`, so an installed APK
+      # could not be told from the one before it — and two reports of "still not fixed" were spent
+      # on APKs older than the fix (owner, 2026-11-28). Gradle reads this at configuration time:
+      # it puts `-dev.<sha>` on the version name (Android's App info shows it) and writes the
+      # commit and its date into `version_info.txt` (Settings → Version Information).
+      #
+      # Must run BEFORE `assembleDebug`. A local build never sets it, so release/F-Droid builds
+      # keep the plain `2.0.0` the recipe expects.
+      - name: Stamp the build
+        shell: bash
+        run: |
+          echo "CLEVERKEYS_DEV_BUILD_ID=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
@@ -222,6 +235,7 @@ jobs:
             --tests '*HapticsBehaviorDriftTest' \
             --tests '*DictationPolicyTest' \
             --tests '*ContractionBinaryPairingsTest' \
+            --tests '*BuildStampDriftTest' \
             2>&1 | tee unit-test-output.log
 
       # Reachable summary: per-class counts from the JUnit XML, plus any compiler diagnostic.
@@ -388,7 +402,12 @@ jobs:
             |---|---|
             | Branch | `${{ github.ref_name }}` |
             | Commit | `${{ steps.meta.outputs.sha }}` |
+            | App version | `2.0.0-dev.${{ steps.meta.outputs.sha }}` |
             | Built | ${{ github.event.head_commit.timestamp || 'manual dispatch' }} |
+
+            **Which build do I have?** The installed app names itself: Android's App info shows
+            `2.0.0-dev.<commit>`, and Settings → Version Information shows the commit and date.
+            Compare them with the two rows above to tell whether this file is already installed.
 
             **Which file?** `keyboard-arm64-v8a.apk` for essentially any phone from 2017 onward.
             `keyboard-armeabi-v7a.apk` for older 32-bit devices. `keyboard-x86_64.apk` for

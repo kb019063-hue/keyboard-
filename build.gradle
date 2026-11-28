@@ -171,6 +171,42 @@ if (ext.VERSION_MINOR >= 100 || ext.VERSION_PATCH >= 100) {
 }
 ext.versionNameStr = "${ext.VERSION_MAJOR}.${ext.VERSION_MINOR}.${ext.VERSION_PATCH}"
 
+// =============================================================================
+// WHICH BUILD IS ON THE PHONE? (owner report, 2026-11-28)
+// =============================================================================
+// The owner said it first: "the version has always been the same, whether a new [build] or not".
+// Every dev build shipped as `2.0.0` / versionCode 200002, so a screenshot could not prove which
+// APK was installed — and two rounds of "it still isn't fixed" were spent on APKs that were older
+// than the fix. A build now identifies itself in two places:
+//
+//   * versionName gets a `-dev.<short sha>` suffix for dev builds (Android's App info shows it),
+//   * `version_info.txt` carries `commit=` and `date=` beside `version=` (the settings Version
+//     Information card and the keyboard timings card both read them).
+//
+// CI sets CLEVERKEYS_DEV_BUILD_ID (see .github/workflows/build-apk.yml). Without it — a local
+// build, an F-Droid rebuild, or a source tarball — the version stays exactly `2.0.0`, which is
+// what the release recipe and the reproducibility guard expect.
+//
+// Deterministic on purpose: the commit hash and the commit's OWN date are fixed for a given tree,
+// unlike a wall-clock build time, so two builds of the same commit are still byte-identical.
+def gitValue = { List<String> cmd ->
+    try {
+        def process = new ProcessBuilder(cmd).directory(projectDir).redirectErrorStream(true).start()
+        def text = process.inputStream.getText('UTF-8').trim()
+        process.waitFor()
+        return process.exitValue() == 0 ? text : ''
+    } catch (Exception ignored) {
+        // No git (source tarball) is not an error: the fields simply stay empty.
+        return ''
+    }
+}
+ext.gitCommitShort = gitValue(['git', 'rev-parse', '--short', 'HEAD'])
+ext.gitCommitDate = gitValue(['git', 'show', '-s', '--format=%cs', 'HEAD'])
+ext.devBuildId = (System.getenv('CLEVERKEYS_DEV_BUILD_ID') ?: '').trim()
+// The suffix names the build; a checkout without git falls back to whatever CI passed in.
+ext.buildStamp = ext.devBuildId ? (ext.gitCommitShort ?: ext.devBuildId) : ''
+ext.versionNameFull = ext.buildStamp ? "${ext.versionNameStr}-dev.${ext.buildStamp}" : ext.versionNameStr
+
 // Per-ABI versionCode mapping for split APKs
 ext.abiCodes = ['armeabi-v7a': 1, 'arm64-v8a': 2, 'x86_64': 3]
 
@@ -228,9 +264,11 @@ android {
     minSdk 24
     targetSdkVersion 34
     
-    // References ext values - see VERSION_MAJOR/MINOR/PATCH at top of file
+    // References ext values - see VERSION_MAJOR/MINOR/PATCH at top of file.
+    // `versionNameFull` is `2.0.0` for a release and `2.0.0-dev.<sha>` for a CI dev build, so the
+    // version shown in Android's App info names the build that is actually installed.
     versionCode rootProject.ext.versionCode
-    versionName rootProject.ext.versionNameStr
+    versionName rootProject.ext.versionNameFull
     
     testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     multiDexEnabled true
@@ -1918,21 +1956,31 @@ tasks.register('generateBinaryContractions') {
   }
 }
 
-// REPRODUCIBILITY: Generate version info with deterministic values only
-// Removes commit_date as it changes with each commit and breaks reproducibility
+// REPRODUCIBILITY: deterministic values only.
+//
+// `commit` and `date` are the commit hash and the commit's own date — fixed for a given tree, so
+// two builds of the same commit still produce byte-identical files. A wall-clock build time would
+// not be; that is what used to be excluded here, and it stays excluded.
+//
+// The owner needs these fields (2026-11-28): they are what Settings -> Version Information and the
+// keyboard timings card print, so a screenshot can name the build it came from.
 tasks.register('generateVersionInfo') {
   def outDir = file("${buildDir}/generated/version/res/raw")
   outputs.dir(outDir)
 
   doLast {
-    // Use only the version string - no git info that could vary between builds
-    // Commit info is removed entirely to ensure byte-identical APKs
     outDir.mkdirs()
     def versionFile = new File(outDir, "version_info.txt")
-    versionFile.text = """\
-version=${project.ext.versionNameStr}
-"""
-    println "Generated version_info.txt in ${versionFile.absolutePath}: version=${project.ext.versionNameStr}"
+    def commit = project.ext.gitCommitShort ?: ''
+    def commitDate = project.ext.gitCommitDate ?: ''
+    // Properties format: one `key=value` per line. Empty values are omitted rather than written
+    // blank, so a tarball build reads exactly as it did before.
+    def lines = ["version=${project.ext.versionNameStr}"]
+    if (commit) lines << "commit=${commit}"
+    if (commitDate) lines << "date=${commitDate}"
+    versionFile.text = lines.join("\n") + "\n"
+    println "Generated version_info.txt in ${versionFile.absolutePath}: version=" +
+            "${project.ext.versionNameStr} commit=${commit ?: '-'} date=${commitDate ?: '-'}"
   }
 }
 

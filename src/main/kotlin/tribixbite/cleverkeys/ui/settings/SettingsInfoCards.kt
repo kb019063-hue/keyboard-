@@ -51,10 +51,17 @@ internal fun SettingsActivity.VersionInfoCard() {
     val context = LocalContext.current
     val versionInfo = loadVersionInfo()
     val title = stringResource(R.string.settings_version_title)
+    val unknown = stringResource(R.string.settings_version_unknown)
+    // Version + commit + date on the visible line, not just in the copy payload (owner,
+    // 2026-11-28: "the version has always been the same, whether a new [build] or not" — so this
+    // card is what names the build on the phone). The commit and date are absent from builds that
+    // have no git checkout, and then the line is exactly the version, as before.
+    val parts = listOf("version", "commit", "date")
+        .mapNotNull { versionInfo.getProperty(it)?.takeIf { value -> value.isNotBlank() } }
     // A missing/unreadable version_info.txt shows a localized "unknown" (never an English literal).
     val buildText = stringResource(
         R.string.settings_version_build,
-        versionInfo.getProperty("version") ?: stringResource(R.string.settings_version_unknown)
+        parts.joinToString(" · ").ifEmpty { unknown }
     )
     val toastCopied = stringResource(R.string.settings_version_copied)
     // Hoisted out of the semantics {} lambda (not a composable scope).
@@ -67,11 +74,14 @@ internal fun SettingsActivity.VersionInfoCard() {
             .combinedClickable(
                 onClick = {},
                 onLongClick = {
+                    // The build line already carries the commit and date (2026-11-28), so the
+                    // payload's own optional lines are left out — otherwise the copy would say
+                    // each of them twice.
                     val payload = buildVersionCopyPayload(
                         title = title,
                         buildText = buildText,
-                        commit = versionInfo.getProperty("commit"),
-                        date = versionInfo.getProperty("date"),
+                        commit = null,
+                        date = null,
                     )
                     // #94: a deliberate NORMAL system copy (setPrimaryClip), not the private
                     // no-history path — version info is not sensitive, and entering the

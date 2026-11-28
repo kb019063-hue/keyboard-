@@ -181,5 +181,7 @@ notice (`anr first-dialog`).
 - Suggestion strip spacing (2026-11-25): [`SUGGESTION-STRIP-2026-11-25.md`](SUGGESTION-STRIP-2026-11-25.md).
 - One row above the keys, no pill, dividers, circular mic (2026-11-25, owner's Gboard
   comparison): [`SUGGESTION-ROW-2026-11-25.md`](SUGGESTION-ROW-2026-11-25.md).
+- Which build is installed — version name and version file name their commit (2026-11-28, owner:
+  "the version has always been the same"): [`BUILD-STAMP.md`](BUILD-STAMP.md).
 - Agent conventions, including the layout and theme rules: [`../AGENTS.md`](../AGENTS.md).
 - CI storage limits: [`CI-STORAGE.md`](CI-STORAGE.md).
