@@ -365,6 +365,22 @@ jobs:
             printf '%-52s %6s MB\n' "$f" "$(du -m "$f" | cut -f1)"
           done
 
+      # Say out loud which build these APKs are. The runner log is not reachable from the
+      # development sandbox, so the answer is published as an ANNOTATION: the version file the
+      # APK ships (Settings → Version Information reads it) and the APK file names, which carry
+      # the version NAME. That is how "did the build actually get stamped?" is answered without
+      # downloading a 30 MB artifact, and how a report of "the version never changes" is checked
+      # against the build it came from.
+      - name: Report which build this is
+        if: always()
+        shell: bash
+        run: |
+          file=build/generated/version/res/raw/version_info.txt
+          stamp=$( [ -f "$file" ] && tr '\n' ' ' < "$file" || echo 'MISSING' )
+          apks=$(ls build/outputs/apk/debug/*.apk 2>/dev/null | xargs -r -n1 basename | tr '\n' ' ')
+          echo "::notice::build stamp: ${stamp}"
+          echo "::notice::APKs: ${apks:-none}"
+
       - name: Compute short SHA
         id: meta
         run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
