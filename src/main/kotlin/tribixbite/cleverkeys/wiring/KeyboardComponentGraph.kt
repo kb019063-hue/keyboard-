@@ -455,7 +455,7 @@ object SuggestionBarPane {
         val contentPaneContainer: FrameLayout,
         val scrollView: HorizontalScrollView,
         val topPane: FrameLayout,
-        /** One-tap command row, a sibling ABOVE topPane (see KeyboardToolbar). */
+        /** One-tap command row: the other occupant of topPane's band (see KeyboardToolbar). */
         val toolbar: KeyboardToolbar,
     )
 
@@ -528,9 +528,14 @@ object SuggestionBarPane {
 
         // Toolbar: a sibling ABOVE topPane, deliberately never inside it. topPane swaps its only
         // child between the suggestion strip and a content pane, so a toolbar inside it would be
-        // removed the moment the clipboard or emoji pane opens; and with prediction and swipe
-        // typing both off topPane is collapsed to height 0, which would hide the toolbar exactly
-        // when there is no suggestion strip to fall back on.
+        // removed the moment the clipboard or emoji pane opens.
+        //
+        // The two are the SAME 40 dp band, not two rows (owner's Gboard comparison, 2026-11-25):
+        // the strip takes the band whenever it has something to show, drawing the toolbar's first
+        // and last commands at its own ends, and the toolbar takes the band (with topPane
+        // collapsed to 0) when the field is empty. Exactly one of them is ever visible, so the
+        // keyboard's total height is identical in both states. See
+        // `CleverKeysService.applyStripHeight`.
         val toolbar = KeyboardToolbar(context, theme)
         toolbar.layoutParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,

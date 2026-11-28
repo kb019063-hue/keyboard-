@@ -36,11 +36,20 @@ class SuggestionBar : LinearLayout {
     // of removeAllViews() + new TextView per suggestion per keystroke, we keep this
     // pool sized to the current suggestion count, rebind text/typeface/color/click,
     // and add/remove only the delta. Children are laid out as
-    // [sug0, sug1, sug2, …]. Phase 4 part 6 removed the 1dp vertical rules between
-    // candidates; a suggestion is its own full row cell, as on Gboard.
+    // [sug0, divider, sug1, divider, sug2, …] — the 1dp vertical rules Gboard shows
+    // between words (owner's screenshots, 2026-11-25). Phase 4 part 6 had removed
+    // them; the owner's Gboard has them, so they are back.
     private val suggestionViews: MutableList<TextView> = mutableListOf()
+    private val dividerViews: MutableList<View> = mutableListOf()
     private var listener: OnSuggestionSelectedListener? = null
     private var inspectListener: OnSuggestionInspectedListener? = null
+
+    // One-row ends (2026-11-28): the toolbar's first/last buttons, shown in the same row
+    // as the words while typing, as on Gboard. Null until wired by the service; without
+    // them the strip is words-only (the old two-row look).
+    private var startEndButton: View? = null
+    private var endEndButton: View? = null
+    private var endButtonDispatcher: ((String) -> Unit)? = null
     private val currentSuggestions: MutableList<String> = mutableListOf()
     private val currentScores: MutableList<Int> = mutableListOf()
 
@@ -125,11 +134,30 @@ class SuggestionBar : LinearLayout {
         currentSuggestions.isNotEmpty(),
         isShowingTemporaryMessage,
         inlineAutofillView != null
-    )
+    ) || isPasswordMode || isInEmojiSearchMode
+
+    /**
+     * Whether the strip should take the 40 dp band above the keys at all.
+     *
+     * One-row layout (2026-11-25, owner's request): the toolbar and the strip are the same
+     * band. The strip takes it while it has content — suggestions, a message, the password
+     * toggle, the echoed word being typed — and hands it back to the toolbar when the field
+     * has nothing to say, so the keyboard never shows two stacked rows.
+     *
+     * The echoed word counts: it means typing is in progress, and letting the band flap
+     * between toolbar and strip on every keystroke that has no suggestion yet would read as
+     * flicker. Not part of [isOccupied] on purpose — the placeholder rebinds only while the
+     * bar is NOT occupied (see [setTextBeforeCaret]), so making it self-referential would
+     * freeze the echoed word at its first letter.
+     */
+    fun ownsRow(): Boolean = isOccupied() || placeholderIsWord
 
     private fun notifyOccupancy() {
         rebindPlaceholder()
-        onOccupancyChanged?.invoke(isOccupied())
+        // ownsRow(), not isOccupied(): the listener lays out the single band above the keys,
+        // and that band belongs to the strip while a word is being typed even before any
+        // suggestion exists (see [ownsRow]).
+        onOccupancyChanged?.invoke(ownsRow())
     }
 
     /**
@@ -147,6 +175,14 @@ class SuggestionBar : LinearLayout {
 
     /** The word the placeholder is currently showing, to skip needless re-binds. */
     private var placeholderWord: String? = null
+
+    /**
+     * Whether the placeholder is the word before the caret (as opposed to the "Swipe to type"
+     * hint). A word means typing is in progress, so the strip keeps the row even before any
+     * suggestion arrives; the hint means the field is empty, and the toolbar takes the row.
+     * See [ownsRow] and `KeyboardToolbar.setHiddenForStrip`.
+     */
+    private var placeholderIsWord = false
 
     /** What the row should show when it has no suggestions, message or chip. */
     private fun placeholder(): SuggestionStripBandPolicy.Placeholder =
@@ -172,12 +208,15 @@ class SuggestionBar : LinearLayout {
      * this: that is the whole point of the placeholder existing.
      */
     private fun rebindPlaceholder() {
+        val wasWord = placeholderIsWord
         if (isShowingTemporaryMessage || currentSuggestions.isNotEmpty() || isPasswordMode) {
             placeholderView?.let {
                 if (it.parent === this) removeView(it)
             }
             placeholderView = null
             placeholderWord = null
+            placeholderIsWord = false
+            notifyPlaceholderRowChange(wasWord)
             return
         }
         when (val p = placeholder()) {
@@ -185,12 +224,27 @@ class SuggestionBar : LinearLayout {
                 placeholderView?.let { if (it.parent === this) removeView(it) }
                 placeholderView = null
                 placeholderWord = null
+                placeholderIsWord = false
             }
-            is SuggestionStripBandPolicy.Placeholder.LastWord -> showPlaceholder(p.word, clickable = true)
-            is SuggestionStripBandPolicy.Placeholder.Hint -> showPlaceholder(
-                context.getString(R.string.suggestion_strip_hint_swipe), clickable = false
-            )
+            is SuggestionStripBandPolicy.Placeholder.LastWord -> {
+                placeholderIsWord = true
+                showPlaceholder(p.word, clickable = true)
+            }
+            is SuggestionStripBandPolicy.Placeholder.Hint -> {
+                placeholderIsWord = false
+                showPlaceholder(context.getString(R.string.suggestion_strip_hint_swipe), clickable = false)
+            }
         }
+        notifyPlaceholderRowChange(wasWord)
+    }
+
+    /**
+     * The placeholder changing between "a word is being typed" and "the field is empty" swaps
+     * which view owns the 40 dp band (strip vs toolbar), so the service has to re-lay out.
+     * Text-only changes do not: the row keeps its height either way.
+     */
+    private fun notifyPlaceholderRowChange(wasWord: Boolean) {
+        if (wasWord != placeholderIsWord) notifyOccupancy()
     }
 
     private fun showPlaceholder(text: String, clickable: Boolean) {
@@ -352,17 +406,14 @@ class SuggestionBar : LinearLayout {
      */
     private fun defaultSuggestionLayoutParams(): LayoutParams {
         val count = currentSuggestions.size
+        // No right margin: the 1 dp divider between words is the spacing, as on Gboard.
         return if (count in 1..MAX_EVENLY_SPACED_SUGGESTIONS) {
-            LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f).apply {
-                setMargins(0, 0, dpToPx(context, 2), 0)
-            }
+            LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
         } else {
             LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
-            ).apply {
-                setMargins(0, 0, dpToPx(context, 4), 0)
-            }
+            )
         }
     }
 
@@ -370,9 +421,9 @@ class SuggestionBar : LinearLayout {
      * R3: Reconcile the child views to the current [currentSuggestions] by
      * recycling pooled TextViews rather than reallocating them.
      *
-     * Layout order is `[sug0, sug1, …, sug(n-1)]`. Pool slot `i` is dedicated to suggestion `i` and
-     * its click listener (bound once in [createSuggestionView]) references
-     * `currentSuggestions[i]`, so reuse never changes click semantics.
+     * Layout order is `[sug0, divider, sug1, divider, sug2, …]`. Pool slot `i` is dedicated
+     * to suggestion `i` and its click listener (bound once in [createSuggestionView])
+     * references `currentSuggestions[i]`, so reuse never changes click semantics.
      *
      * Only the child-count delta touches the ViewGroup: already-attached pooled
      * views stay put (the keystroke→keystroke hot path), views are re-attached
@@ -386,20 +437,56 @@ class SuggestionBar : LinearLayout {
         while (suggestionViews.size < count) {
             suggestionViews.add(createSuggestionView(context, suggestionViews.size))
         }
-        // No dividers between word suggestions: Gboard's word strip has none. Each pooled
-        // TextView is bound in place below and the surplus views are detached by
-        // reconcileChildren.
+        // Dividers between words, as on Gboard (owner's screenshots). A single centered
+        // prompt ("Add to dictionary?") has no neighbours, so no dividers.
+        val needsDividers = count > 1
+        val dividerCount = if (needsDividers) count - 1 else 0
+        while (dividerViews.size < dividerCount) {
+            dividerViews.add(createDividerView())
+        }
 
-        // Build the desired ordered child sequence from the pools.
-        val desired = ArrayList<View>(count)
+        // Build the desired ordered child sequence from the pools: the one-row ends
+        // (toolbar's first/last) at the edges, words and dividers in the middle.
+        // A single centered prompt has no ends — it owns the row, as before.
+        val hasCenteredPrompt = count == 1 &&
+            Suggestion.parse(currentSuggestions[0]) is Suggestion.AddToDictionary
+        // Ends frame the words: no words, no ends (an empty strip hands the row back to the
+        // toolbar, which carries these same commands itself).
+        val showEnds = count > 0 && !hasCenteredPrompt &&
+            (startEndButton != null || endEndButton != null)
+        val desired = ArrayList<View>(count + dividerCount + 2)
+        if (showEnds) startEndButton?.let { desired.add(it) }
         for (i in 0 until count) {
             val suggestion = Suggestion.parse(currentSuggestions[i])
             val isCenteredPrompt = suggestion is Suggestion.AddToDictionary && count == 1
             bindSuggestionView(suggestionViews[i], i, suggestion, isCenteredPrompt)
             desired.add(suggestionViews[i])
+            if (needsDividers && i < count - 1) {
+                desired.add(dividerViews[i])
+            }
         }
+        if (showEnds) endEndButton?.let { desired.add(it) }
 
         reconcileChildren(desired)
+    }
+
+    /**
+     * One of Gboard's thin vertical rules between words: 1 dp wide, short and centred,
+     * in the strip's secondary ink. Pooled like the suggestion chips so a keystroke
+     * never allocates.
+     */
+    private fun createDividerView(): View {
+        return View(context).apply {
+            layoutParams = LayoutParams(
+                dpToPx(context, 1),
+                dpToPx(context, DIVIDER_HEIGHT_DP)
+            ).apply {
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val ink = theme?.suggestionSecondaryTextColor?.takeIf { it != 0 } ?: Color.GRAY
+            setBackgroundColor(ink)
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
     }
 
     /**
@@ -496,39 +583,18 @@ class SuggestionBar : LinearLayout {
                 view.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD_ITALIC)
                 view.setTextColor(theme?.suggestionSecondaryTextColor?.takeIf { it != 0 } ?: Color.LTGRAY)
             }
-            // Highlight the commit item with the high-confidence colour (audit H-4:
-            // the Theme-Creator's "High Confidence"; XML themes default it to the old
-            // activated colour). The first entry unless the caller chose another or none
-            // (tap typing: the word space commits — 2026-10-11).
+            // Gboard's strip (owner's screenshots, 2026-11-25): all three words are plain,
+            // same weight and same ink, with thin dividers between them — no pill, no bold.
+            // The commit index (first by default, or the tap-typing planner's choice) is
+            // still tracked for space-commit and accessibility, but it is not painted
+            // differently. The old blue pill (SuggestionPillPolicy, 2026-11-04) read as
+            // "doesn't look like Gboard" against the owner's phone, whose Gboard shows
+            // three identical words.
             index == currentHighlightIndex -> {
                 view.layoutParams = defaultSuggestionLayoutParams()
                 view.gravity = Gravity.CENTER
-                // Gboard's commit suggestion is BOLD, and on the Gboard themes it sits on a pill
-                // filled with the return-key accent in white. Tinting the text alone (the old
-                // behaviour) is invisible there: the borrowed highlight colour is the same ink
-                // as the other three words, which is exactly what the owner's screenshot shows.
-                view.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD)
-                val look = SuggestionPillPolicy.look(
-                    accent = theme?.colorKeyEnter ?: 0,
-                    barBackground = theme?.suggestionBackgroundColor ?: 0,
-                    fallbackText = theme?.suggestionHighConfidenceColor?.takeIf { it != 0 } ?: Color.CYAN,
-                    barText = theme?.suggestionTextColor?.takeIf { it != 0 } ?: Color.WHITE
-                )
-                if (look.drawPill) {
-                    view.background = GradientDrawable().apply {
-                        shape = GradientDrawable.RECTANGLE
-                        cornerRadius = dpToPx(context, PILL_RADIUS_DP).toFloat()
-                        setColor(look.fill)
-                    }
-                    // The pill owns the chip's height: Gboard insets it from the row edges.
-                    view.setPadding(
-                        dpToPx(context, 12),
-                        dpToPx(context, PILL_PADDING_V_DP),
-                        dpToPx(context, 12),
-                        dpToPx(context, PILL_PADDING_V_DP)
-                    )
-                }
-                view.setTextColor(look.text)
+                view.setTypeface(Typeface.DEFAULT, Typeface.NORMAL)
+                view.setTextColor(theme?.suggestionTextColor?.takeIf { it != 0 } ?: Color.WHITE)
             }
             else -> {
                 view.layoutParams = defaultSuggestionLayoutParams()
@@ -975,6 +1041,7 @@ class SuggestionBar : LinearLayout {
         // Clear and show single message
         removeAllViews()
         suggestionViews.clear()
+        dividerViews.clear()
         currentSuggestions.clear()
         currentScores.clear()
         currentMetas.clear()
@@ -1042,6 +1109,7 @@ class SuggestionBar : LinearLayout {
         // Clear and show single status message
         removeAllViews()
         suggestionViews.clear()
+        dividerViews.clear()
         currentSuggestions.clear()
         currentScores.clear()
         currentMetas.clear()
@@ -1058,6 +1126,7 @@ class SuggestionBar : LinearLayout {
             text = message
         }
         addView(statusView)
+        notifyOccupancy()
 
         if (BuildConfig.ENABLE_VERBOSE_LOGGING) Log.d(TAG, "showEmojiSearchStatus: '$message'")
     }
@@ -1074,12 +1143,14 @@ class SuggestionBar : LinearLayout {
         // Clear the display
         removeAllViews()
         suggestionViews.clear()
+        dividerViews.clear()
         currentSuggestions.clear()
         currentScores.clear()
         currentMetas.clear()
 
         // Show empty suggestions (maintains bar visibility if alwaysVisible)
         visibility = if (alwaysVisible) VISIBLE else GONE
+        notifyOccupancy()
 
         Log.d(TAG, "clearEmojiSearchStatus: exited emoji search mode")
     }
@@ -1115,6 +1186,7 @@ class SuggestionBar : LinearLayout {
         // Clear existing suggestions and views
         removeAllViews()
         suggestionViews.clear()
+        dividerViews.clear()
         currentSuggestions.clear()
         currentScores.clear()
         currentMetas.clear()
@@ -1168,6 +1240,83 @@ class SuggestionBar : LinearLayout {
     }
 
     /**
+     * Wire the one-row ends: the toolbar's first/last commands, shown at the edges of
+     * the word strip while typing. [dispatcher] receives the command name, exactly as
+     * the toolbar's own dispatcher does, so a tap here and a tap on the toolbar can
+     * never disagree about what a command does.
+     *
+     * The mic end (when [endName] is `voice_typing`) is drawn in Gboard's filled circle.
+     * A null name or zero icon hides that end.
+     */
+    fun setRowEnds(
+        startName: String?,
+        startIconRes: Int,
+        startLabel: String?,
+        endName: String?,
+        endIconRes: Int,
+        endLabel: String?,
+        dispatcher: (String) -> Unit
+    ) {
+        endButtonDispatcher = dispatcher
+        startEndButton = if (startName != null && startIconRes != 0) {
+            createEndButton(startIconRes, startLabel, isMic = false, name = startName)
+        } else null
+        endEndButton = if (endName != null && endIconRes != 0) {
+            createEndButton(endIconRes, endLabel, isMic = endName == "voice_typing", name = endName)
+        } else null
+        // If words are already on screen, put the ends in place now.
+        if (currentSuggestions.isNotEmpty()) rebindSuggestionViews()
+    }
+
+    private fun createEndButton(iconRes: Int, label: String?, isMic: Boolean, name: String): View {
+        val iconSize = dpToPx(context, if (isMic) 20 else 22)
+        val icon = ImageView(context).apply {
+            setImageResource(iconRes)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            isClickable = false
+            isFocusable = false
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            contentDescription = null
+        }
+        val wrapper = FrameLayout(context).apply {
+            tag = name
+            isClickable = true
+            isFocusable = true
+            minimumWidth = dpToPx(context, 40)
+            contentDescription = label
+            setOnClickListener { endButtonDispatcher?.invoke(name) }
+            if (isMic) {
+                // Gboard's mic sits in a filled circle: secondary ink as the fill,
+                // bar background as the glyph, so it reads on light and dark themes.
+                val fill = theme?.suggestionSecondaryTextColor?.takeIf { it != 0 } ?: Color.GRAY
+                val glyph = theme?.suggestionBackgroundColor?.takeIf { it != 0 } ?: Color.WHITE
+                icon.imageTintList = android.content.res.ColorStateList.valueOf(glyph)
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(fill)
+                }
+                // Inset the circle inside the 40 dp hit target, as Gboard does.
+                val inset = dpToPx(context, 4)
+                setPadding(inset, inset, inset, inset)
+            } else {
+                icon.imageTintList = android.content.res.ColorStateList.valueOf(
+                    theme?.suggestionTextColor?.takeIf { it != 0 } ?: Color.WHITE
+                )
+                val outValue = TypedValue()
+                if (context.theme.resolveAttribute(android.R.attr.selectableItemBackground, outValue, true)) {
+                    setBackgroundResource(outValue.resourceId)
+                }
+            }
+            addView(icon, FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER))
+        }
+        wrapper.layoutParams = LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.MATCH_PARENT
+        )
+        return wrapper
+    }
+
+    /**
      * Get the currently displayed suggestions
      */
     fun getCurrentSuggestions(): List<String> {
@@ -1216,11 +1365,8 @@ class SuggestionBar : LinearLayout {
     companion object {
         private const val TAG = "SuggestionBar"
 
-        /** Corner radius of the highlighted chip's pill, dp. Half of a ~34 dp chip = a pill. */
-        private const val PILL_RADIUS_DP = 18
-
-        /** Vertical padding inside that pill, dp: Gboard insets the fill from the row edges. */
-        private const val PILL_PADDING_V_DP = 4
+        /** Height of the vertical rule between words, dp. Short and centred, as on Gboard. */
+        private const val DIVIDER_HEIGHT_DP = 24
 
         /** Up to this many words share the strip width equally, as on Gboard. */
         private const val MAX_EVENLY_SPACED_SUGGESTIONS = 3
@@ -1288,6 +1434,8 @@ class SuggestionBar : LinearLayout {
         // The placeholder must follow the field: a password field may never show the word
         // being typed, so the row goes without one there (SuggestionStripBandPolicy).
         rebindPlaceholder()
+        // One-row: the password row owns the 40 dp band, so the toolbar must hide.
+        notifyOccupancy()
 
         Log.d(TAG, "Password mode ${if (enabled) "enabled" else "disabled"}")
     }
@@ -1356,6 +1504,7 @@ class SuggestionBar : LinearLayout {
         // Clear any existing suggestion views
         removeAllViews()
         suggestionViews.clear()
+        dividerViews.clear()
 
         // #109: Remove padding so password eye icon (36dp) and autofill chips
         // get the full 40dp bar height. Password views manage their own spacing.
@@ -1590,6 +1739,7 @@ class SuggestionBar : LinearLayout {
         // Clear all views - suggestions will be recreated as needed
         removeAllViews()
         suggestionViews.clear()
+        dividerViews.clear()
 
         // #109: Restore normal padding after leaving password/autofill mode
         val padding = dpToPx(context, 8)
