@@ -2108,25 +2108,15 @@ class CleverKeysService : InputMethodService(),
     }
 
     /**
-     * Give the strip the toolbar's two end commands, so the single row can show the same ends
-     * Gboard does (tools on the left, mic on the right) while the strip carries the words.
-     * Called whenever the toolbar's command list can have changed.
+     * Give the strip the two commands that bracket Gboard's suggestion row: the tools
+     * affordance on the left, the microphone on the right. Called whenever the toolbar's
+     * configuration can have changed, since the tools end exists only while the toolbar does.
      */
     private fun wireStripRowEnds() {
         val toolbar = _keyboardToolbar ?: return
         val bar = _suggestionBar ?: return
-        val ends = toolbar.rowEnds()
-        // One command (or none) has no "left and right": the strip then keeps its words alone.
-        if (ends.size < 2) {
-            bar.setRowEnds(null, 0, null, null, 0, null) { toolbar.dispatchCommand(it) }
-            return
-        }
-        val start = ends.first()
-        val end = ends.last()
-        bar.setRowEnds(
-            start.name, start.iconRes, start.label,
-            end.name, end.iconRes, end.label
-        ) { name -> toolbar.dispatchCommand(name) }
+        val (start, end) = toolbar.rowEnds()
+        bar.setRowEnds(start, end) { name -> toolbar.dispatchCommand(name) }
     }
 
     /**

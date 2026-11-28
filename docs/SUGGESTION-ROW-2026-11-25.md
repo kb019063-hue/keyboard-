@@ -25,9 +25,10 @@ Now the two views take turns owning that band:
   toolbar is the row — all the commands the user configured, exactly as in the owner's empty
   screenshot.
 - **Typing**: the strip takes the band and the toolbar goes `GONE`
-  (`KeyboardToolbar.setHiddenForStrip`). The strip draws the toolbar's **first and last
-  commands at its own ends** (`KeyboardToolbar.rowEnds` → `SuggestionBar.setRowEnds`), so the
-  row reads `☰ | H │ How │ Hello | 🎤`, which is Gboard's row.
+  (`KeyboardToolbar.setHiddenForStrip`). The strip draws the row's two ends itself
+  (`KeyboardToolbar.rowEnds` → `SuggestionBar.setRowEnds`): the tools affordance on the left and
+  the microphone on the right, so the row reads `☰ | H │ How │ Hello | 🎤`, which is Gboard's
+  row.
 
 Consequences that were checked:
 
@@ -39,9 +40,9 @@ Consequences that were checked:
   when a suggestion exists (`SuggestionBar.ownsRow` = occupied *or* the placeholder is the word
   before the caret). A keystroke with no suggestion yet therefore does not flash the full toolbar
   for a frame.
-- **The ends are the user's own ends.** Positions, not command names: a customised toolbar gets
-  its own first and last command in the strip. A toolbar switched off lends nothing to the strip
-  and the strip keeps the band, as before.
+- **The ends are Gboard's ends, not the toolbar's.** Tools on the left, microphone on the right,
+  by name. (First shipped as "the user's own first and last command" — see the correction below:
+  that put a ✕ where Gboard has a mic on the owner's phone.)
 - **Routing is shared.** A tap on the grid inside the strip calls
   `KeyboardToolbar.dispatchCommand`, the same path the toolbar's own buttons use, so the two can
   never disagree about what a command does.
@@ -65,12 +66,41 @@ Consequences that were checked:
   an empty strip has none.
 - Chip margins are gone: the divider is the spacing, as on Gboard.
 
-## 3. The mic is a filled circle
+## 3. The mic's circle was already there
 
-Gboard's mic sits in a filled circle rather than as a bare glyph. Both the toolbar's mic and the
-strip's mic end are drawn as an oval filled with the strip's secondary ink, with the bar's own
-background as the glyph colour (`micFillColor`/`micGlyphColor`), so the same code reads correctly
-on a light and a dark theme. The glyph is 20 dp inside the 40 dp hit target.
+`res/drawable/ic_tool_mic.xml` is Gboard's button as shipped: the Material Symbols mic knocked out
+of a filled disc, one path with `fillType="evenOdd"`. Nothing needed to be drawn around it — see
+the correction below for what happened when something was.
+
+## Corrections after the owner tested the first version (2026-11-28)
+
+The owner installed it and said *"you did half good"*. Four things were wrong, three of them mine
+in the first version:
+
+1. **A second circle around the microphone.** `ic_tool_mic` is already a disc with the mic knocked
+   out of it, so wrapping it in an oval background (with the glyph tinted the bar's colour) drew a
+   disc inside a disc: a donut, in both rows. Removed. Every glyph — the mic included — is tinted
+   with the row's ink, exactly as the toolbar did before this pass.
+2. **The row's ends followed the toolbar's order, so the mic was missing.** They were "first and
+   last of the configured list". The owner's saved toolbar ends with `close`, so the words were
+   bracketed by a grid and a ✕ and there was no microphone in the row at all — the most
+   recognisable thing about Gboard's. The ends are now the two commands themselves
+   (`KeyboardToolbar.MORE_TOOLS` on the left, `VOICE_TYPING` on the right). The empty-field toolbar
+   stays fully configurable; the suggestion row's two affordances do not.
+3. **A word being typed hid the whole row's commands.** The echoed word took the entire band and
+   the toolbar is GONE while the strip owns it, so for as long as a word had no suggestion the row
+   was one dimmed word with no tools and no microphone. It now takes the middle cell (weight 1)
+   between the two ends — which is also what Gboard shows for a word it has nothing to suggest.
+4. **With the always-visible preference off, the band went blank.** Visibility was "alwaysVisible,
+   else GONE when there are no suggestions", which is not the same question as "does this band
+   belong to the strip". A strip that owns the band is now drawn (`applyRowVisibility`), whatever
+   the preference says; the preference still keeps it drawn when the toolbar would otherwise take
+   the band.
+
+Two smaller ones fixed at the same time: an end command with no toolbar drawable now falls back to
+its text symbol instead of vanishing, and clearing the placeholder's row takes its two end buttons
+with it, so an emptied row can never leave two orphan icons behind (while the word row keeps its
+ends — the placeholder's teardown is split from the row's).
 
 ## What was not changed
 
@@ -82,8 +112,11 @@ on a light and a dark theme. The glyph is 20 dp inside the 40 dp hit target.
 
 ## Tests
 
-`SuggestionBarPaletteTest` gained four drift checks next to the existing strip-width one:
+`SuggestionBarPaletteTest` carries the pins, next to the existing strip-width one:
 `theStripPaintsNoPillAndSeparatesWordsWithThinRules`,
-`theStripCarriesTheToolbarsEndsInTheSameRow`, `theBandAboveTheKeysIsOneRowNotTwo` and
-`theToolbarsMicSitsInAFilledCircle`. They read the sources the way the existing strip test does,
-because a `View` cannot be instantiated in a JVM unit test.
+`theStripCarriesTheToolbarsEndsInTheSameRow`, `theBandAboveTheKeysIsOneRowNotTwo`,
+`theMicIsGboardsDiscFromItsOwnDrawableNotASecondCircle`,
+`theRowsEndsAreGboardsEndsNotTheToolbarsFirstAndLast`,
+`theStripIsDrawnWhileItOwnsTheRow` and
+`aWordBeingTypedSitsBetweenTheEndsInsteadOfSwallowingTheRow`. They read the sources the way the
+existing strip test does, because a `View` cannot be instantiated in a JVM unit test.

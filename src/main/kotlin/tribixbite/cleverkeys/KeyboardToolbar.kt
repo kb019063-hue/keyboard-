@@ -169,18 +169,10 @@ class KeyboardToolbar(
                 is TextView -> child.setTextColor(textColor())
                 is ImageView -> child.imageTintList = ColorStateList.valueOf(textColor())
                 // Icon buttons are an ImageView inside a FrameLayout wrapper (the wrapper owns
-                // the ripple and the click), so the tint lives one level down. The mic's circle
-                // is the wrapper's own background, and its glyph is the bar's background.
-                is FrameLayout -> {
-                    val glyph = child.getChildAt(0) as? ImageView
-                    if (child.tag == "voice_typing") {
-                        glyph?.imageTintList = ColorStateList.valueOf(micGlyphColor())
-                        (child.background as? android.graphics.drawable.GradientDrawable)
-                            ?.setColor(micFillColor())
-                    } else {
-                        glyph?.imageTintList = ColorStateList.valueOf(textColor())
-                    }
-                }
+                // the ripple and the click), so the tint lives one level down — the microphone
+                // included, whose disc is part of its own drawable.
+                is FrameLayout -> (child.getChildAt(0) as? ImageView)
+                    ?.imageTintList = ColorStateList.valueOf(textColor())
             }
         }
     }
@@ -224,27 +216,41 @@ class KeyboardToolbar(
     }
 
     /**
-     * The commands drawn at the strip's two ends while this toolbar is hidden: the first and
-     * last of the configured list, in order (positions, not names, exactly like
-     * [ToolbarCompactPolicy]). Empty when the toolbar is off or has a single command.
+     * The two commands drawn at the ends of the suggestion row while this toolbar is hidden.
+     *
+     * These are Gboard's ends, not the toolbar's: the tools affordance on the left and the
+     * microphone on the right, whatever order the user configured the toolbar in.
+     *
+     * That is the correction of a real defect (2026-11-28). "First and last of the configured
+     * list" looked right on paper and was wrong on the owner's phone: their saved toolbar ends
+     * with `close`, so the words were bracketed by tools ✔ and a ✕ — no microphone anywhere in
+     * the row, which is the most recognisable thing about Gboard's. The empty-field toolbar
+     * stays fully configurable; the suggestion row's two affordances do not, because nothing in
+     * the toolbar config says the user wanted Gboard's row to stop looking like Gboard.
+     *
+     * The tools end is offered only while the toolbar is enabled — with the toolbar switched
+     * off, the tools panel has no business appearing in the row either. The microphone is a
+     * keyboard feature of its own (`voice_typing`), so it stays.
      */
-    fun rowEnds(): List<RowEnd> {
-        // A toolbar the user switched off lends nothing to the strip either: its commands are
-        // meant to be gone from this keyboard.
-        if (!enabledRow || keys.isEmpty()) return emptyList()
-        val names = if (keys.size == 1) listOf(keys.first()) else listOf(keys.first(), keys.last())
-        return names.map { name ->
-            val command = CommandRegistry.getByName(name)
-            RowEnd(
-                name = name,
-                iconRes = toolbarIcon(name),
-                label = command?.nameRes?.let { context.getString(it) } ?: name
-            )
-        }
+    fun rowEnds(): Pair<SuggestionBar.RowEnd?, SuggestionBar.RowEnd?> {
+        val start = if (enabledRow) rowEnd(MORE_TOOLS) else null
+        return start to rowEnd(VOICE_TYPING)
     }
 
-    /** One command drawn at an edge of the suggestion row. */
-    data class RowEnd(val name: String, val iconRes: Int, val label: String)
+    /** One end, named whether or not the user happens to have it on the toolbar. */
+    private fun rowEnd(name: String): SuggestionBar.RowEnd? {
+        val command = CommandRegistry.getByName(name) ?: return null
+        val info = CommandRegistry.getDisplayInfo(name)
+        return SuggestionBar.RowEnd(
+            name = name,
+            iconRes = toolbarIcon(name),
+            label = context.getString(command.nameRes),
+            // A command with no toolbar drawable still gets an end: the toolbar draws its text
+            // symbol for exactly those, and the strip does the same rather than leaving a gap.
+            glyph = info.displayText,
+            useKeyFont = info.useKeyFont
+        )
+    }
 
     private fun rebuild() {
         row.removeAllViews()
@@ -318,12 +324,15 @@ class KeyboardToolbar(
      * horizontal padding inside a 22 dp box, leaving only 6 dp for the glyph itself.
      */
     private fun createIconButton(name: String, nameRes: Int, iconRes: Int): View {
-        val isMic = name == "voice_typing"
-        val size = dp(if (isMic) MIC_ICON_SIZE_DP else ICON_SIZE_DP)
+        val size = dp(ICON_SIZE_DP)
         val button = ImageView(context).apply {
             setImageResource(iconRes)
             scaleType = ImageView.ScaleType.FIT_CENTER
-            imageTintList = ColorStateList.valueOf(if (isMic) micGlyphColor() else textColor())
+            // Every glyph is tinted the same way, INCLUDING the microphone: `ic_tool_mic` is
+            // already Gboard's button — the mic knocked out of a filled disc (see the drawable's
+            // own comment). An earlier pass added a circle of its own here and produced a disc
+            // inside a disc, i.e. a donut. Do not draw a second circle around this icon.
+            imageTintList = ColorStateList.valueOf(textColor())
             // The wrapper is the interactive view. A clickable/focusable child would swallow
             // the tap and expose a duplicate, label-less node to TalkBack.
             isClickable = false
@@ -337,18 +346,7 @@ class KeyboardToolbar(
             isClickable = true
             isFocusable = true
             minimumWidth = dp(BUTTON_MIN_WIDTH_DP)
-            if (isMic) {
-                // Gboard's mic sits in a filled circle (owner's screenshots): secondary
-                // ink as the fill, bar background as the glyph.
-                background = android.graphics.drawable.GradientDrawable().apply {
-                    shape = android.graphics.drawable.GradientDrawable.OVAL
-                    setColor(micFillColor())
-                }
-                val inset = dp(4)
-                setPadding(inset, inset, inset, inset)
-            } else {
-                rippleBackground()
-            }
+            rippleBackground()
             addView(button, FrameLayout.LayoutParams(size, size, Gravity.CENTER))
             setOnClickListener { dispatch(name, CommandRegistry.getDisplayInfo(name)) }
             contentDescription = label
@@ -474,12 +472,6 @@ class KeyboardToolbar(
 
     private fun textColor(): Int = theme?.suggestionTextColor ?: 0xFF000000.toInt()
 
-    /** Fill of the mic's circle: the strip's secondary ink, as on Gboard. */
-    private fun micFillColor(): Int = theme?.suggestionSecondaryTextColor ?: 0xFF5F6368.toInt()
-
-    /** Glyph inside the mic's circle: the bar background, so it reads as a cut-out. */
-    private fun micGlyphColor(): Int = theme?.suggestionBackgroundColor ?: 0xFFFFFFFF.toInt()
-
     /**
      * Standard touch feedback, resolved from the platform theme so it follows light/dark.
      * Declared on View rather than TextView because icon buttons are ImageView inside a
@@ -499,7 +491,13 @@ class KeyboardToolbar(
     ).toInt()
 
     companion object {
-        /** Icon size on the 40 dp row: Gboard's 24 dp glyph box, with no internal padding. */
+        /**
+         * The two commands the suggestion row is bracketed with. Named once here so the ends
+         * cannot drift apart from the toolbar icons that draw them.
+         */
+        const val MORE_TOOLS = "more_tools"
+        const val VOICE_TYPING = "voice_typing"
+
         /**
          * Glyph box. Material Symbols is drawn for a 24 dp optical size, but Gboard places
          * its icons at ~22 dp inside the same row, so 24 dp of Symbols reads a shade heavier
@@ -507,12 +505,6 @@ class KeyboardToolbar(
          * screenshot shows.
          */
         private const val ICON_SIZE_DP = 22
-
-        /**
-         * Glyph size inside the mic's filled circle. The circle is 40 dp; the glyph sits a
-         * little smaller than a bare icon so the fill stays visible around it.
-         */
-        const val MIC_ICON_SIZE_DP = 20
 
         /**
          * Command name to drawable. A command with no entry keeps its font glyph, which is the
